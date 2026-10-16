@@ -32,6 +32,7 @@ import {
     type EndpointExecutionRequest,
     type EndpointExecutorDeps,
 } from './endpoint-executor.js';
+import { refuseUnexposedDataAction, type ActionExecutionDeps } from './action-execution.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -573,12 +574,30 @@ describe('a delegated failure maps onto the EXISTING envelope, class by class', 
         expect(expectConformantError(answer).message).toBe('Record not found');
     });
 
-    it('honours `statusCode` too — the shape callData’s exposure gate throws', async () => {
-        // `action-execution.callData` throws `{ statusCode, message }` for an
-        // object whose `apiEnabled`/`apiMethods` deny the operation (ADR-0049).
-        const answer = await failWith({ statusCode: 403, message: 'API access denied' });
+    it('honours `statusCode` too — the spelling `metadata-protocol` and the approval hooks throw', async () => {
+        // [#23528] This row used to name `callData`'s exposure gate as the
+        // producer of `{ statusCode, message }`. That gate now throws the data
+        // door's coded refusal (the row below); the spelling is still thrown
+        // elsewhere, so the resolver still reads it.
+        const answer = await failWith({ statusCode: 403, message: 'Approval step is locked' });
         expect(answer.status).toBe(403);
-        expect(expectConformantError(answer).message).toBe('API access denied');
+        expect(expectConformantError(answer).message).toBe('Approval step is locked');
+    });
+
+    it('[#23528] callData’s exposure refusal keeps its code: 404 OBJECT_API_DISABLED for an `apiEnabled: false` target', async () => {
+        // The REAL gate's throw, for the endpoint fixture's own target object.
+        const hidden = { name: 'showcase_task', enable: { apiEnabled: false } };
+        const gateDeps: ActionExecutionDeps = {
+            resolveService: (async (_ctx: unknown, name: string) => (name === 'metadata' ? { getObject: async () => hidden } : undefined)) as any,
+            getObjectQL: async () => null,
+        };
+        const thrown = await refuseUnexposedDataAction(gateDeps, { request: {} } as any, 'find', 'showcase_task', undefined, EC)
+            .then(() => undefined, (e: unknown) => e);
+        expect(thrown).toBeInstanceOf(Error);
+
+        const answer = await failWith(thrown);
+        expect(answer.status).toBe(404);
+        expect(expectConformantError(answer).code).toBe('OBJECT_API_DISABLED');
     });
 
     it('maps a record ValidationError to 400 with fields[] (#3918)', async () => {

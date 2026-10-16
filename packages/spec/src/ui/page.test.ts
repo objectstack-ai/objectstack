@@ -344,21 +344,22 @@ describe('PageSchema', () => {
     expect(issue.message).not.toContain('assignedProfiles');
   });
 
-  it('should accept page with custom template', () => {
+  it('should accept page with a registered template', () => {
     const page = PageSchema.parse({
       name: 'custom_layout_page',
       label: 'Custom Layout Page',
-      template: 'three-column-layout',
+      template: 'three-column',
       regions: [],
     });
 
-    expect(page.template).toBe('three-column-layout');
+    expect(page.template).toBe('three-column');
   });
 
-  it('should accept default page', () => {
+  it('should accept a default record page bound to an object', () => {
     const page = PageSchema.parse({
       name: 'default_page',
       label: 'Default Page',
+      object: 'account',
       isDefault: true,
       regions: [],
     });

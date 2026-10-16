@@ -307,6 +307,11 @@ describe('[ADR-0131 D6/D7] the ceremony boot\'s readers ignore a legacy organiza
     });
     expect((read as { lock?: unknown } | null)?.lock ?? 'none').not.toBe('full');
     expect((read as { editable?: unknown } | null)?.editable).not.toBe(false);
+    // The served CONTENT is not the organization's body either. The lock is
+    // selected apart from the content (`overlayLockLayerAt`), so the two
+    // assertions above stay green when only the content read
+    // (`findServedOverlayRow`) serves the organization's row; this one does not.
+    expect((read as { item?: { subject?: unknown } } | null)?.item?.subject).not.toBe('Org A locked');
     // The `_lock` gate runs BEFORE the write. It did not refuse over the
     // organization's lock: the save reached the store, where the re-keyed
     // unique index refuses an environment row beside the organization's row of

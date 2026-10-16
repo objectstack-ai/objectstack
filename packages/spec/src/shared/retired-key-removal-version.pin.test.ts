@@ -90,6 +90,8 @@ import { AdminScopeSchema } from '../security/permission.zod';
 import { SharingLevel } from '../security/sharing.zod';
 import { DatasourceSchema } from '../data/datasource.zod';
 import { PageSchema } from '../ui/page.zod';
+import { FlowSchema } from '../automation/flow.zod';
+import { JobSchema } from '../system/job.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
@@ -217,6 +219,15 @@ const ELEMENTS: readonly (readonly [unknown, string, readonly string[]])[] = [
   [ElementRepeaterPropsSchema, 'element:repeater', ['object', 'filter', 'sort', 'limit']],
 ];
 
+/** A parseable flow holding one `node` after its start node. */
+const flowWithNode = (node: Record<string, unknown>) => ({
+  name: 'settle',
+  label: 'Settle',
+  type: 'autolaunched',
+  edges: [],
+  nodes: [{ id: 'n1', type: 'start', label: 'Start' }, { id: 'n2', label: 'Step', ...node }],
+});
+
 /** A notify config that is valid on its own, so a retired key is its only issue. */
 const NOTIFY_BASE = { recipients: ['u1'], title: 'Hi' };
 
@@ -318,6 +329,47 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       "page kind 'jsx'",
       () => PageSchema.safeParse({ name: 'landing', label: 'Landing', kind: 'jsx', source: '<div>hi</div>' }),
       'kind',
+    ),
+  ],
+  // #23650: retired after 17.7.0, so the v18 train's major.
+  'page-header-show-star-removed': [tombstone(PageHeaderProps, 'page:header', 'showStar')],
+  // #23543 F3: a loose `config` key under a sibling-block node type, refused by
+  // the flow parse; the node's block is complete, so the key is the only issue.
+  'flow-node-wait-event-config-lift': [
+    refusal(
+      "a wait node's loose config.duration",
+      () => FlowSchema.safeParse(flowWithNode({
+        type: 'wait',
+        waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
+        config: { duration: 'PT9M' },
+      })),
+      'nodes',
+    ),
+  ],
+  'flow-node-connector-config-lift': [
+    refusal(
+      "a connector_action node's loose config.input",
+      () => FlowSchema.safeParse(flowWithNode({
+        type: 'connector_action',
+        connectorConfig: { connectorId: 'slack', actionId: 'chat.postMessage' },
+        config: { input: { text: 'Hi' } },
+      })),
+      'nodes',
+    ),
+  ],
+  // #23543 F2: a default flip made loud — a job's retry block with no
+  // attempts, refused by the job parse at the key; the job is otherwise
+  // complete, so the block is the only issue.
+  'retry-policy-converged': [
+    refusal(
+      'a job retryPolicy with maxRetries omitted',
+      () => JobSchema.safeParse({
+        name: 'nightly_sync',
+        schedule: { type: 'cron', expression: '0 0 * * *' },
+        handler: 'syncOrders',
+        retryPolicy: { backoffMs: 5000 },
+      }),
+      'retryPolicy',
     ),
   ],
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.

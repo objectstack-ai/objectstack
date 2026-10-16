@@ -96,10 +96,13 @@ const TASK = { name: 'task', label: 'Task', fields: FIELDS };
  * [#23574] Two objects whose declared API exposure refuses every verb below:
  * `locked` exposes `get` alone (`405` for `create`, `update` and `list`), and
  * `hidden` is not exposed at all (`404`).
+ *
+ * [#23528] With the data door's code for each: `RestServer` always answered
+ * these, and the dispatcher now does too.
  */
-const EXPOSURE_DENIED: ReadonlyArray<{ object: { name: string; label: string; fields: typeof FIELDS; enable: Record<string, unknown> }; status: number }> = [
-    { object: { name: 'locked', label: 'Locked', fields: FIELDS, enable: { apiMethods: ['get'] } }, status: 405 },
-    { object: { name: 'hidden', label: 'Hidden', fields: FIELDS, enable: { apiEnabled: false } }, status: 404 },
+const EXPOSURE_DENIED: ReadonlyArray<{ object: { name: string; label: string; fields: typeof FIELDS; enable: Record<string, unknown> }; status: number; code: string }> = [
+    { object: { name: 'locked', label: 'Locked', fields: FIELDS, enable: { apiMethods: ['get'] } }, status: 405, code: 'OBJECT_API_METHOD_NOT_ALLOWED' },
+    { object: { name: 'hidden', label: 'Hidden', fields: FIELDS, enable: { apiEnabled: false } }, status: 404, code: 'OBJECT_API_DISABLED' },
 ];
 const OBJECTS = [TASK, ...EXPOSURE_DENIED.map((d) => d.object)];
 
@@ -456,8 +459,12 @@ describe('[#23574] the two query doors answer each request alike', () => {
  * [#23574] Location 3: on an object whose API exposure denies the verb, every
  * body is answered the exposure refusal, a record or not: the request gate is
  * never what tells a caller the object refuses how its ingress reads a body.
- * Statuses only across doors: the two doors' exposure envelopes carry
- * different codes, which this card does not change.
+ *
+ * [#23528] Flipped from statuses only: the dispatcher's exposure refusal had no
+ * code of its own (`404 RESOURCE_NOT_FOUND` / `405 METHOD_NOT_ALLOWED`, derived
+ * from the status), where `RestServer` answered `OBJECT_API_DISABLED` /
+ * `OBJECT_API_METHOD_NOT_ALLOWED`. Both doors now answer the same code and
+ * status, asserted on each door and across them.
  */
 const EXPOSURE_BODIES: ReadonlyArray<readonly [string, unknown]> = [
     ...NOT_A_RECORD,
@@ -478,14 +485,14 @@ const EXPOSURE_CASES: ReadonlyArray<readonly [Verb, ReadonlyArray<readonly [stri
 
 for (const [doorName, boot] of DOORS) {
     describe(`[#23574] ${doorName}: an exposure-denied object is answered its exposure refusal before any request gate`, () => {
-        for (const { object, status } of EXPOSURE_DENIED) {
+        for (const { object, status, code } of EXPOSURE_DENIED) {
             for (const [verb, bodies, engineCalls] of EXPOSURE_CASES) {
-                it(`${verb} on \`${object.name}\`: ${status} for every body, the engine never asked, the row unchanged`, async () => {
+                it(`${verb} on \`${object.name}\`: ${status} ${code} for every body, the engine never asked, the row unchanged`, async () => {
                     const door = await boot();
                     const before = await door.state(object.name);
                     for (const [shape, body] of bodies) {
                         const answer = await door[verb](body, object.name);
-                        expect(answer.status, `${shape}: ${JSON.stringify(answer)}`).toBe(status);
+                        expect({ status: answer.status, code: answer.code }, `${shape}: ${JSON.stringify(answer)}`).toEqual({ status, code });
                     }
                     expect(engineCalls(door)).toBe(0);
                     expect(await door.state(object.name)).toEqual(before);
@@ -495,19 +502,22 @@ for (const [doorName, boot] of DOORS) {
     });
 }
 
-describe('[#23574] the two doors answer an exposure-denied object with the same status, whatever the body', () => {
+describe('[#23574] [#23528] the two doors answer an exposure-denied object with the same status and code, whatever the body', () => {
     for (const { object } of EXPOSURE_DENIED) {
         for (const [verb, bodies] of EXPOSURE_CASES) {
             it(`${verb} on \`${object.name}\``, async () => {
-                const statuses: number[][] = [];
+                const answers: Array<Array<{ status: number; code?: string }>> = [];
                 for (const [, boot] of DOORS) {
                     const door = await boot();
-                    const seen: number[] = [];
-                    for (const [, body] of bodies) seen.push((await door[verb](body, object.name)).status);
-                    statuses.push(seen);
+                    const seen: Array<{ status: number; code?: string }> = [];
+                    for (const [, body] of bodies) {
+                        const { status, code } = await door[verb](body, object.name);
+                        seen.push({ status, code });
+                    }
+                    answers.push(seen);
                 }
-                const [rest, catchAllStatuses] = statuses;
-                expect(catchAllStatuses).toEqual(rest);
+                const [rest, catchAll] = answers;
+                expect(catchAll).toEqual(rest);
             }, 60_000);
         }
     }

@@ -2,7 +2,14 @@
 
 import { resolveReadableParentIds, withoutOperationPrivateKeys } from '@objectstack/core';
 import type { StandardErrorCode } from '@objectstack/spec/api';
-import type { ISecurityService, ISharingService } from '@objectstack/spec/contracts';
+import type {
+  EngineSchemaRegistryView,
+  IDataEngine,
+  IObjectQLEngine,
+  ISecurityService,
+  ISharingService,
+} from '@objectstack/spec/contracts';
+import { ReadableIds } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
 
@@ -678,14 +685,61 @@ export function installAttachmentAccessHooks(
  * `{ id: '__deny_all__' }` read-filter deny). */
 const READ_DENY_ALL = { id: '__attachment_parent_denied__' } as const;
 
-/** Bound on the per-read candidate pre-scan. Beyond this the filter fails
- * CLOSED (excludes the un-scanned rows) rather than leaking them. */
+/** Bound on the bounded probe's per-read candidate pre-scan (ADR-0139 D5).
+ * Beyond it the probe fails CLOSED (the un-scanned rows are excluded, never
+ * leaked). The `ReadableIds` leaf has no bound. */
 const READ_SCAN_LIMIT = 2_000;
 
 const READ_OPS = new Set(['find', 'findOne', 'count', 'aggregate']);
 
+/** The gated object: never a parent of its own rows (see {@link attachmentParentOf}). */
+const ATTACHMENT_OBJECT = 'sys_attachment';
+
+/** Object machine-name shape (`ObjectSchema.name` in packages/spec). */
+const OBJECT_NAME_RE = /^[a-z_][a-z0-9_]*$/;
+
 /**
- * sys_attachment READ visibility inheritance (#2755 follow-up, #2970 item 1).
+ * Resolves, on every read, the security service whose object-level read
+ * admission (`canReadObject`, OPTIONAL on `ISecurityService`) decides whether
+ * this gate may write a `ReadableIds` leaf at all. The security plugin may
+ * register after this one, so a service captured at install time would pin
+ * "none" for the life of the process.
+ */
+type AttachmentReadAdmissionSource = () => Pick<ISecurityService, 'canReadObject'> | null | undefined;
+
+/**
+ * The engine the read gate reads through: the lifecycle seams' slice, plus the
+ * three questions that decide, per parent object, between a leaf and the probe
+ * (ADR-0139 D5). Each is optional on its contract; without all three the gate
+ * cannot tell a composable parent from a refused one.
+ */
+type AttachmentReadGateEngine = AttachmentLifecycleEngine & {
+  /** The registry the parent objects are enumerated from. */
+  registry?: Pick<EngineSchemaRegistryView, 'getAllObjects'>;
+} & Partial<Pick<IObjectQLEngine, 'hasObjectMiddleware'>> &
+  Partial<Pick<IDataEngine, 'resolveEffectiveDatasource'>>;
+
+/** Why the WHOLE read goes to the bounded probe, decided before any leaf. */
+type WholeReadProbe = 'delegated-caller' | 'engine-cannot-classify' | 'no-object-admission';
+
+/**
+ * How one read reaches its parents: the parent objects written as leaves and
+ * the ones the probe reads, each with its D5 class — or the one state that
+ * sends the whole read to the probe.
+ */
+type AttachmentReadPlan =
+  | { probeWholeRead: WholeReadProbe }
+  | {
+      probeWholeRead: null;
+      /** One `ReadableIds` leaf each, in name order. */
+      leaves: string[];
+      /** Read through the probe, each with its D5 class, in name order. */
+      probed: Map<string, 'object-middleware' | 'federated-parent'>;
+    };
+
+/**
+ * sys_attachment READ visibility inheritance (#2755 follow-up, #2970 item 1;
+ * ADR-0139 D4, D5).
  *
  * The create/delete hooks above gate writes, but a member could still LIST
  * `sys_attachment` rows (file_name, size, parent_id) pointing at records they
@@ -700,16 +754,80 @@ const READ_OPS = new Set(['find', 'findOne', 'count', 'aggregate']);
  * the returned rows — a beforeFind/afterFind hook would leave `count()`
  * unfiltered and leak the true row count via `total`.
  *
- * Mechanism (generalizes ADR-0055 `controlled_by_parent` to a polymorphic
- * parent): for each read, pre-scan the candidate `(parent_object, parent_id)`
- * pairs the query would touch (system context), resolve the visible parent
- * ids per `parent_object` through the caller-scoped engine (RLS/OWD/sharing
- * of the PARENT apply), and AND a `$or` of
- * `{ parent_object, parent_id: { $in: <visible> } }` into `ctx.ast.where`.
+ * ⛔ Nothing here derives readability: the engine and the security service
+ * answer "can this caller read that record", through one of two mechanisms
+ * chosen per parent object, up front.
+ *
+ * ## The leaf (ADR-0139 D4): one branch per parent object, no pre-scan
+ *
+ * The parent objects are every object the metadata registry holds, except
+ * `sys_attachment` itself. For each, one branch over the row's own pointer
+ * pair:
+ *
+ *     { parent_object: P, parent_id: { $in: ReadableIds.of(P) } }
+ *
+ * ORed together and ANDed into the read's `where`. The engine composes each
+ * leaf at its executor boundary from the security service's `canReadObject`
+ * and `getReadFilter` for P (D2), and the driver evaluates it as one subquery
+ * against P's table inside its own tenant wall (D3) — so a list, its `total`
+ * and a grouped count are one statement each, over every row the caller may
+ * read, on any table size. The gate reads no row for a leaf, and no parent as
+ * the caller: a parent object the caller may not read is answered `$in: []`
+ * by the engine's own admission, without a logged denial.
+ *
+ * Rows the leaf excludes, as the probe does: a row naming no parent, an object
+ * the registry does not hold, `sys_attachment` itself, or a parent record that
+ * no longer exists (the subquery finds no such id).
+ *
+ * ## The bounded probe (ADR-0139 D5): three classes, by name, chosen up front
+ *
+ * The engine refuses to compose a leaf for three classes (`INTERNAL_ERROR` /
+ * 500). This gate routes each to the bounded probe BEFORE any leaf is written
+ * — ⛔ never by catching that refusal:
+ *
+ *  1. **A delegated (on-behalf-of) caller** (ADR-0090 D10), by the engine's own
+ *     test (`onBehalfOf.userId`): the whole read is the probe.
+ *  2. **A parent an object-scoped read middleware narrows**
+ *     (`hasObjectMiddleware`): `sys_comment`, `sys_comment_reaction`, the
+ *     activity stream and the ledger among them. Their WHERE is built at read
+ *     time and is no part of their read scope, so a leaf would be wider than a
+ *     direct read.
+ *  3. **A federated parent**, bound to another datasource than
+ *     `sys_attachment` (`resolveEffectiveDatasource`): no driver evaluates a
+ *     subquery across two datasources.
+ *
+ * Two more states send the WHOLE read to the probe, up front, and the gate says
+ * so once for each: an engine that cannot answer those questions (no registry
+ * view, no `hasObjectMiddleware`, no `resolveEffectiveDatasource`), and a
+ * security service that answers no `canReadObject` — or none at all. The
+ * engine would then admit a leaf's parent by `explain`, which answers a SYSTEM
+ * context "not allowed" where `canReadObject` admits it, and with no service it
+ * answers every leaf `$in: []`, hiding every attachment from every caller. The
+ * probe's literal id lists mean the same thing under every context.
+ *
+ * The probe, for the parents it is given (or for every row, for a whole-read
+ * probe): pre-scan the candidate `(parent_object, parent_id)` pairs the query
+ * would touch (system context, bounded at {@link READ_SCAN_LIMIT}), resolve the
+ * visible parent ids per `parent_object` through the caller-scoped engine
+ * (RLS/OWD/sharing of the PARENT apply), and emit one
+ * `{ parent_object, parent_id: { $in: <visible> } }` branch per parent object.
+ * Past the bound it fails CLOSED and says so; a probe that throws denies the
+ * whole read, and says so. Restricted to the parents of classes 2 and 3, its
+ * window holds only the rows naming those parents.
+ *
+ * ## What the read's own refusal does (ADR-0139 D3)
+ *
+ * A leaf is composed AFTER this middleware hands the read on (`next()`), so a
+ * composition or driver refusal (`driver-mongodb` refuses every leaf until
+ * ADR-0139's O3 is measured) is the read's own failure: it reaches the caller
+ * and says why. ⛔ This middleware does not catch it into its deny-all
+ * sentinel, and it makes no engine call for a leaf branch, so nothing it does
+ * can meet one.
  */
 export function installAttachmentReadVisibility(
-  engine: AttachmentLifecycleEngine,
+  engine: AttachmentReadGateEngine,
   logger: AttachmentLifecycleLogger,
+  getAdmission?: AttachmentReadAdmissionSource,
 ): void {
   if (typeof engine.registerMiddleware !== 'function') return; // engine lacks the seam
   const andIn = (ctx: AttachmentReadMiddlewareCtx, filter: unknown) => {
@@ -724,65 +842,160 @@ export function installAttachmentReadVisibility(
       if (!READ_OPS.has(ctx.operation) || !ctx.ast || !ctx.context || ctx.context.isSystem) {
         return next();
       }
-      try {
-        const filter = await computeParentVisibilityFilter(engine, ctx, logger);
-        if (filter) andIn(ctx, filter);
-      } catch (err) {
-        // A filter-compute failure must never fall open into a leak.
-        logger.warn(
-          `[storage] attachment read visibility: filter failed, denying all (${(err as Error)?.message ?? err})`,
-        );
-        andIn(ctx, READ_DENY_ALL);
-      }
+      // [ADR-0139 D3] No catch: the probe's own failure is answered with the
+      // deny-all sentinel inside, and a `ReadableIds` leaf is composed by the
+      // engine after `next()`, so its refusal is this read's failure and
+      // reaches the caller saying why — ⛔ never turned into deny-all here.
+      andIn(ctx, await computeParentVisibilityFilter(engine, ctx, logger, getAdmission));
       return next();
     },
-    { object: 'sys_attachment' },
+    { object: ATTACHMENT_OBJECT },
   );
 }
 
 /**
- * Resolve the parent-visibility WHERE predicate for one sys_attachment read.
- * Returns `null` when the query matches no rows (nothing to narrow), a
- * `$or` of visible-parent clauses, or the deny-all sentinel.
+ * Whether `context` reads on behalf of another user (ADR-0090 D10) — the
+ * engine's own test for D5's first class, so the two agree by construction.
  */
-async function computeParentVisibilityFilter(
-  engine: AttachmentLifecycleEngine,
+function isDelegatedCaller(context: AttachmentReadMiddlewareCtx['context']): boolean {
+  return Boolean((context as { onBehalfOf?: { userId?: unknown } } | undefined)?.onBehalfOf?.userId);
+}
+
+/** Whether the security service `getAdmission` resolves answers `canReadObject`. */
+function hasObjectAdmission(getAdmission: AttachmentReadAdmissionSource | undefined): boolean {
+  try {
+    return typeof getAdmission?.()?.canReadObject === 'function';
+  } catch {
+    // `getService` throws on an empty slot: no security service is composed.
+    return false;
+  }
+}
+
+/**
+ * [ADR-0139 D4, D5] How one read of `sys_attachment` by `context` reaches its
+ * parents. Reads the context, whether a `canReadObject` is composed, the
+ * registry, the middleware registrations and the datasource bindings only — it
+ * asks the security service nothing and reads no row, so it decides the probe
+ * up front, never by catching a refusal.
+ */
+function planAttachmentParentReads(
+  engine: AttachmentReadGateEngine,
+  context: AttachmentReadMiddlewareCtx['context'],
+  objectAdmission: boolean,
+): AttachmentReadPlan {
+  if (isDelegatedCaller(context)) return { probeWholeRead: 'delegated-caller' };
+  if (!objectAdmission) return { probeWholeRead: 'no-object-admission' };
+  const getAllObjects = engine.registry?.getAllObjects;
+  const hasObjectMiddleware = engine.hasObjectMiddleware;
+  const datasourceOf = engine.resolveEffectiveDatasource;
+  if (typeof getAllObjects !== 'function' || typeof hasObjectMiddleware !== 'function' || typeof datasourceOf !== 'function') {
+    return { probeWholeRead: 'engine-cannot-classify' };
+  }
+  const parents = new Set<string>();
+  for (const schema of getAllObjects.call(engine.registry) ?? []) {
+    const name = (schema as { name?: unknown } | null | undefined)?.name;
+    if (typeof name !== 'string' || !OBJECT_NAME_RE.test(name) || name === ATTACHMENT_OBJECT) continue;
+    parents.add(name);
+  }
+  // `undefined` is "rides the default driver", for `sys_attachment` and a
+  // parent alike. An explicit binding to the default driver's own name reads
+  // as another datasource here, which sends that parent to the probe — the
+  // bound, never a refused read.
+  const outer = datasourceOf.call(engine, ATTACHMENT_OBJECT);
+  const leaves: string[] = [];
+  const probed = new Map<string, 'object-middleware' | 'federated-parent'>();
+  for (const parent of [...parents].sort()) {
+    if (hasObjectMiddleware.call(engine, parent)) probed.set(parent, 'object-middleware');
+    else if (datasourceOf.call(engine, parent) !== outer) probed.set(parent, 'federated-parent');
+    else leaves.push(parent);
+  }
+  return { probeWholeRead: null, leaves, probed };
+}
+
+/** The whole-read probe states already reported, per engine. */
+const wholeReadProbeReported = new WeakMap<object, Set<string>>();
+
+const WHOLE_READ_PROBE_WHY: Readonly<Record<'engine-cannot-classify' | 'no-object-admission', string>> = {
+  'engine-cannot-classify':
+    'the engine exposes no registry view, hasObjectMiddleware() or resolveEffectiveDatasource(), so it cannot ' +
+    'say which parent objects a ReadableIds leaf can be composed for',
+  'no-object-admission':
+    'the security service answers no canReadObject() (or none is registered), so a ReadableIds leaf would be ' +
+    'admitted by explain() or answered $in: [] for every caller',
+};
+
+function reportWholeReadProbeOnce(
+  engine: object,
+  logger: AttachmentLifecycleLogger,
+  why: 'engine-cannot-classify' | 'no-object-admission',
+): void {
+  let reported = wholeReadProbeReported.get(engine);
+  if (!reported) wholeReadProbeReported.set(engine, (reported = new Set()));
+  if (reported.has(why)) return;
+  reported.add(why);
+  logger.warn(
+    `[storage] attachment read visibility: ${WHOLE_READ_PROBE_WHY[why]}: every read is answered by the bounded ` +
+      `probe (at most ${READ_SCAN_LIMIT} candidate rows, fail-closed). Reported once for this engine.`,
+  );
+}
+
+/** "object-middleware: a, b; federated-parent: c" — how a restricted probe names itself. */
+function describeProbed(probed: ReadonlyMap<string, string>): string {
+  const byClass = new Map<string, string[]>();
+  for (const [parent, why] of probed) byClass.set(why, [...(byClass.get(why) ?? []), parent]);
+  return [...byClass].map(([why, parents]) => `${why}: ${parents.join(', ')}`).join('; ');
+}
+
+/**
+ * [ADR-0139 D5] The bounded probe's branches for one read: one `$in` of the
+ * visible parent ids per parent object, for the rows naming one of
+ * `restrictTo.parents` — or for every row when `restrictTo` is `null` (a
+ * whole-read probe).
+ */
+async function probeBranches(
+  engine: AttachmentReadGateEngine,
   ctx: AttachmentReadMiddlewareCtx,
   logger: AttachmentLifecycleLogger,
-): Promise<unknown | null> {
+  restrictTo: { parents: string[]; why: string } | null,
+): Promise<Array<Record<string, unknown>>> {
   // 1. Candidate (parent_object, parent_id) pairs the query would touch —
   //    read under SYSTEM context (the caller may not see the rows yet; that
   //    is exactly what we are deciding). Bypasses this middleware (isSystem).
-  const candidates = await engine.find('sys_attachment', {
-    where: (ctx.ast?.where as Record<string, unknown>) ?? {},
+  const callerWhere = ctx.ast?.where as Record<string, unknown> | undefined;
+  const onlyParents = restrictTo ? { parent_object: { $in: [...restrictTo.parents] } } : undefined;
+  const where = onlyParents ? (callerWhere ? { $and: [callerWhere, onlyParents] } : onlyParents) : (callerWhere ?? {});
+  const candidates = await engine.find(ATTACHMENT_OBJECT, {
+    where,
     fields: ['parent_object', 'parent_id'],
     limit: READ_SCAN_LIMIT,
     context: { ...SYSTEM_CTX },
   });
-  if (!candidates.length) return null;
+  if (!candidates.length) return [];
   if (candidates.length >= READ_SCAN_LIMIT) {
     // Not silent (fail-closed truncation): rows beyond the scan window are
-    // excluded from the visibility filter, so a very broad unscoped list may
-    // omit some rows the caller could see. The panel scopes to one parent so
-    // never hits this; a global list should paginate by parent_object.
+    // excluded from the visibility filter, so a very broad read may omit some
+    // rows the caller could see. The panel scopes to one parent so never hits
+    // this; a broad read past it should scope by parent_object.
     logger.warn(
-      `[storage] attachment read visibility: candidate pre-scan hit the ${READ_SCAN_LIMIT}-row cap; ` +
-        'the visibility filter for this broad read is fail-closed and may omit visible rows — scope the query by parent_object',
+      `[storage] attachment read visibility: the bounded probe's candidate pre-scan ` +
+        `(${restrictTo ? restrictTo.why : 'the whole read'}) hit the ${READ_SCAN_LIMIT}-row cap; the visibility ` +
+        'filter for these rows is fail-closed and may omit visible rows — scope the query by parent_object',
     );
   }
 
+  const allowed = restrictTo ? new Set(restrictTo.parents) : null;
   const byObject = new Map<string, Set<string>>();
   for (const row of candidates) {
     // Skip rows that name no readable parent — self-referential rows included
     // (no valid files-enabled target is sys_attachment), which also prevents
     // caller-scoped re-entry into this middleware during the probe below.
     const parent = attachmentParentOf(row);
-    if (!parent) continue;
+    if (!parent || (allowed && !allowed.has(parent.object))) continue;
     let ids = byObject.get(parent.object);
     if (!ids) byObject.set(parent.object, (ids = new Set()));
     ids.add(parent.id);
   }
-  if (byObject.size === 0) return READ_DENY_ALL;
+  if (byObject.size === 0) return [];
 
   // 2. Per parent_object, the visible id subset via the CALLER's context —
   //    the parent object's own RLS/OWD/sharing applies. The write gate's
@@ -793,14 +1006,65 @@ async function computeParentVisibilityFilter(
     ctx.context as Record<string, unknown> | undefined,
     byObject,
   );
-  const clauses: Array<Record<string, unknown>> = [];
+  const branches: Array<Record<string, unknown>> = [];
   for (const parentObject of byObject.keys()) {
     const visible = [...(visibleByObject.get(parentObject) ?? [])];
-    if (visible.length) {
-      clauses.push({ parent_object: parentObject, parent_id: { $in: visible } });
+    if (visible.length) branches.push({ parent_object: parentObject, parent_id: { $in: visible } });
+  }
+  return branches;
+}
+
+/**
+ * The parent-visibility WHERE for one sys_attachment read: one branch per
+ * enumerated parent object — a `ReadableIds` leaf, or the bounded probe's
+ * `$in` of visible ids for D5's classes — ORed; or the deny-all sentinel when
+ * no branch remains, or when the probe fails.
+ *
+ * Never throws for a fault of its probe: that is answered with the deny-all
+ * sentinel and said. A leaf is composed by the engine after this returns, so
+ * its refusal is the read's (ADR-0139 D3).
+ */
+async function computeParentVisibilityFilter(
+  engine: AttachmentReadGateEngine,
+  ctx: AttachmentReadMiddlewareCtx,
+  logger: AttachmentLifecycleLogger,
+  getAdmission: AttachmentReadAdmissionSource | undefined,
+): Promise<unknown> {
+  // 1. Leaf or probe, per parent object, before any branch is written.
+  const plan = planAttachmentParentReads(engine, ctx.context, hasObjectAdmission(getAdmission));
+  if (plan.probeWholeRead === 'engine-cannot-classify' || plan.probeWholeRead === 'no-object-admission') {
+    reportWholeReadProbeOnce(engine, logger, plan.probeWholeRead);
+  }
+
+  const branches: Array<Record<string, unknown>> = [];
+  // 2. One ReadableIds leaf per composable parent object (ADR-0139 D4).
+  if (plan.probeWholeRead === null) {
+    for (const parent of plan.leaves) {
+      branches.push({ parent_object: parent, parent_id: { $in: ReadableIds.of(parent) } });
     }
   }
 
-  if (clauses.length === 0) return READ_DENY_ALL;
-  return clauses.length === 1 ? clauses[0] : { $or: clauses };
+  // 3. The bounded probe for D5's classes (ADR-0139 D5), fail-closed.
+  const restrictTo =
+    plan.probeWholeRead !== null
+      ? null
+      : plan.probed.size > 0
+        ? { parents: [...plan.probed.keys()], why: describeProbed(plan.probed) }
+        : undefined;
+  if (restrictTo !== undefined) {
+    try {
+      branches.push(...(await probeBranches(engine, ctx, logger, restrictTo)));
+    } catch (err) {
+      // A probe failure must never fall open into a leak.
+      logger.warn(
+        `[storage] attachment read visibility: the bounded probe ` +
+          `(${restrictTo ? restrictTo.why : `the whole read: ${plan.probeWholeRead}`}) failed, denying all ` +
+          `(${(err as Error)?.message ?? err})`,
+      );
+      return READ_DENY_ALL;
+    }
+  }
+
+  if (branches.length === 0) return READ_DENY_ALL;
+  return branches.length === 1 ? branches[0] : { $or: branches };
 }

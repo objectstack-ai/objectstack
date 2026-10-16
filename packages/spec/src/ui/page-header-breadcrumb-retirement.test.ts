@@ -278,6 +278,8 @@ describe('page:header breadcrumb retirement — the ADR-0087 ledger row', () => 
     expect(all.filter((k) => k.startsWith('ui/PageHeaderProps:'))).toEqual([
       'ui/PageHeaderProps:icon',
       REGISTERED_KEY,
+      // #23650 retired the row's third key the same way.
+      'ui/PageHeaderProps:showStar',
     ]);
   });
 

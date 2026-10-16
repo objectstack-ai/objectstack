@@ -29,8 +29,9 @@
  * owns — `components.schemas`, `info`, `securitySchemes`.
  *
  * This module is the rest half. It reads the routes the server has actually
- * mounted and returns the `paths` section for them; `rest-server.ts` installs
- * it in place of whatever the static artifact carried, so the stale section
+ * mounted and returns the `paths` section for them; the OpenAPI document's
+ * handler (`discovery-routes.ts` since #23050 slice 7, `rest-server.ts` before)
+ * installs it in place of whatever the static artifact carried, so the stale section
  * cannot leak through even while the spec-side generation is still there
  * (leg 2 = #5744, blocked by this one). Discarding rather than merging is the
  * point: a serve-time merge with a wrong static section republishes the wrong
@@ -236,8 +237,9 @@ export interface BuiltinPathsResult {
 /**
  * Build the built-in section for one base path from the routes mounted under it.
  *
- * Pure: no clock, no I/O, no server. `rest-server.ts` hands it
- * `routeManager.getAll()` at request time; the tests hand it fixtures.
+ * Pure: no clock, no I/O, no server. The OpenAPI document's handler
+ * (`discovery-routes.ts` since #23050 slice 7, `rest-server.ts` before) hands
+ * it `routeManager.getAll()` at request time; the tests hand it fixtures.
  */
 export function buildBuiltinPaths(
   routes: readonly BuiltinRouteFact[],

@@ -1,5 +1,223 @@
 # @objectstack/core
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 0f05907: feat(spec,core,plugin-auth)!: an API key answers as its owner's session does when the ADR-0069 policy holds the account, the forced reset gets its own code and an explicit revocation switch
+  
+  Clause-②: yes (narrowing) — the published contract widens (the posture codes become a closed vocabulary with a declared scope, a new `PASSWORD_RESET_REQUIRED` code, a per-user posture member on the auth service contract, new `@objectstack/core` exports) and the API-key door narrows (a key whose owner holds an account-scope posture is refused where it was served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key admission seam plus one new error code, not a metadata change. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite. `ExecutionContext.authGate.code` narrows from a bare string to the closed posture vocabulary, but that field is server-constructed only and never authored; its one producer already wrote only members of it. What narrows is which API keys are served (a key whose owner owes MFA enrolment is refused with 403 MFA_REQUIRED), and the administrator-forced password change answers its own code. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key door, and a changed code for the administrator-forced password change), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287: posture codes are a closed vocabulary, and each code declares what it holds.
+  
+  - **The vocabulary and its scope (`@objectstack/spec/kernel`).** `AuthGateCodeSchema` is the closed set of codes an `authGate` may carry: `PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED` and `MFA_REQUIRED`. `AUTH_GATE_SCOPES` declares each code's scope once: `MFA_REQUIRED` holds the **account** (every credential of the user); `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` hold the **credential** (password sign-in alone). `ExecutionContext.authGate.code` is typed against the vocabulary, and `PASSWORD_RESET_REQUIRED` is registered for `@objectstack/plugin-auth` in the error-code ledger.
+  - **One per-user posture computation (`@objectstack/plugin-auth`, `IAuthService.resolveUserAuthGates`).** It answers every posture a user holds, most urgent first, keyed by user id and the organization the credential operates in. The session gate shows its first entry, as before.
+  - **One judgment at the shared key-admission seam (`@objectstack/core`).** `resolveApiKeyAdmission` asks that computation for the key's owner and holds the key on an account-scope posture (a new `held` outcome). `resolveAuthzContext` resolves a held key as a held principal: the owner, `credential: 'api_key'`, and the posture on `authGate`. Both new inputs are optional (`userAuthGates`), and `userAuthGateSourceOf(authService)` binds one from an auth service.
+  - **REST and the runtime dispatcher** judge a key-admitted request by the key's answer, and re-read the session cookie for the gate only when a session admitted the caller. The declared-endpoint fallback does the same.
+  - **The raw-host families** take the same answer through the shared seam: datasource admin, share links, settings, and the storage family's door. The webhook-redeliver door admits no API key at all, and still does not.
+  - **The forced reset (`POST /api/v1/auth/admin/set-user-password`, the `set_user_password` action).** `must_change_password` now answers `PASSWORD_RESET_REQUIRED` instead of reusing `PASSWORD_EXPIRED`. The act carries `revokeSessionsAndKeys`, **on by default**: it ends every live session of the user and revokes every API key they own, and the response reports what landed (`revoked: { sessions, apiKeys, failed, complete }`).
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED`, with the message the session gets, on every face that admits keys. It works again the moment the owner enrols, with nothing reissued: the refusal is not a revocation.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working. A session sent beside an API key no longer answers for the key.
+  - **A forced password change answers `PASSWORD_RESET_REQUIRED`.** A client that recognises `PASSWORD_EXPIRED` to show its change-password flow should recognise `PASSWORD_RESET_REQUIRED` the same way.
+  - **An administrator's password reset now signs the user out everywhere and revokes their API keys by default.** For a routine reset, pass `revokeSessionsAndKeys: false` (or clear the switch in the Set Password dialog). Revoked keys stay revoked after the password change; an administrator can restore a key a routine reset revoked with the Restore API Key action, or the owner mints a replacement.
+  - **Hosts calling `resolveAuthzContext` or `resolveApiKeyAdmission` directly** pass `userAuthGates: userAuthGateSourceOf(authService)` to have the key's owner asked. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `held` outcome.
+- 086fa46: feat(cli,plugin-dev): an app under `os serve` or `DevPlugin` that declares its own `sys_organization` default record page boots, and its page is the only default
+  
+  Clause-②: yes (widening)
+  
+  A deployment holds at most one `isDefault: true` record page per object, and a second one is refused at registration with `DEFAULT_RECORD_PAGE_CONFLICT`. `plugin-auth` registers `sys_organization_detail` as the default record page of `sys_organization` unless it is constructed with `registerOrganizationRecordPage: false`. `os serve` and `DevPlugin` construct `AuthPlugin` themselves and never passed that option, so an app served by either one that shipped its own default page for `sys_organization` was refused at boot, with no switch to set.
+  
+  - **What changes.** Both roots now read the app's own pages before they construct `AuthPlugin`. When the app declares an `isDefault: true` record page for `sys_organization`, they pass `registerOrganizationRecordPage: false`, and the app's page is the only default. When it does not, `plugin-auth`'s page registers as before. There is no new configuration key: the page the author already wrote is the switch. Plugin order and precedence rules play no part.
+  - **One rule for both roots.** The reading is `stackDeclaresOrganizationRecordPage(stack, plugins?)`, a new export of `@objectstack/core`. It reads the stack's `pages` (or each package body's, for a multi-package stack) and the bundle of each app plugin already in `plugins`, and judges each page with `defaultRecordPageObject` from `@objectstack/spec/ui`, the reading the registration refusal uses.
+  - **The refusal's remedy (`@objectstack/objectql`).** `DEFAULT_RECORD_PAGE_CONFLICT`'s message now says to set `isDefault: false` on one of the two pages, "or compose the deployment without the other package's page". It said to compose the deployment without the other package, which a host cannot do when that package is the platform's auth plugin. The code, the `422` status and the named pages are unchanged.
+  - **Nothing to adopt.** An app that ships its own `sys_organization` default record page boots under `os serve` and `DevPlugin` with no further change. A deployment that composes its own kernel still sets `registerOrganizationRecordPage: false` on `AuthPlugin` itself.
+- 1d79556: feat(spec,core,runtime,plugin-auth)!: API keys get a lifecycle: a 90-day default expiry, a one-year ceiling, a 90-day inactivity expiry, a one-year grace for keys created with none, and distinct refusal codes
+  
+  Clause-②: yes (narrowing) — the published contract widens (four `auth` settings keys, the `IAuthService.resolveApiKeyLifecyclePolicy` member and its `ApiKeyLifecyclePolicy` type, four registered error codes, new `@objectstack/core` exports) and the API-key doors narrow (a signing past the ceiling is refused; an inactive key, a key past its grace, and a revoked or expired key sent beside a session are refused where they were served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key signing door and the shared key-admission seam, not a metadata change. No authorable spec key, stored shape or metadata surface is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite: the four new `auth` settings keys are additive and defaulted, `sys_api_key` gains no column (its existing `expires_at` and `last_used_at` are written by the platform), and `ResolveAuthzInput.apiKeyLifecycle` / the sixth parameter of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal` are server-side wiring no author writes. What narrows is which API keys are served and which signings are accepted; the remedy is a new key or a nearer date, never a rewrite of a package source or a stored row. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key doors), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling A on #23367: the key store stays `sys_api_key`, and the policy is auth configuration.
+  
+  - **The policy (`@objectstack/plugin-auth`, `IAuthService.resolveApiKeyLifecyclePolicy`).** Three `auth` settings keys, bound by `bindAuthSettings`: `api_key_default_expiry_days` (90), `api_key_max_expiry_days` (365) and `api_key_inactivity_days` (90; `0` turns it off). A fourth, `api_key_policy_started_at`, is recorded once — on the first boot that runs the policy, at `kernel:bootstrapped` — and anchors the two clocks below; it survives restarts and is never overwritten by the platform.
+  - **The signing door (`POST /api/v1/keys`).** A signing that names no `expires_at` gets the default life and the response echoes it. An `expires_at` further away than the ceiling is refused `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date allowed; exactly the ceiling is accepted. A kernel with no auth service signs as before.
+  - **The key-admission seam (`resolveApiKeyAdmission`, `@objectstack/core`).** A real key its own state refuses is a new outcome, `lifecycle`, with one of three distinct codes: `API_KEY_REVOKED`, `API_KEY_EXPIRED` (past `expires_at`, or past the grace of a key created with none) or `API_KEY_INACTIVE` (no recorded use for longer than the window). `resolveAuthzContext` raises it as the branded `ApiKeyLifecycleRefusalError` (`403`, a located message naming the key's prefix, the date and the remedy). An unknown key is still `none`.
+  - **`last_used_at` is written.** Its description promised "Automatically updated on each API call", and nothing wrote it. The seam now stamps it on an admitted (or held) call, at most once an hour per key, and the inactivity judgment reads the value as it was BEFORE that call's stamp, so a key's own use cannot revive it. A stamp that fails never fails the request; it is said once, at `error`.
+  - **Keys created before the policy.** A key with no expiry gets one year from `api_key_policy_started_at`; the date is stamped onto its `expires_at` the first time it is admitted, so the keys page shows it, and the refusal after it names it. A key with no recorded use counts its inactivity from the same anchor (or from its own creation, when later) — never from an earlier `created_at`, since no use was ever recorded before the policy.
+  - **Every face that admits keys** passes the policy source (`apiKeyLifecyclePolicySourceOf(authService)`, a required input beside `userAuthGates`). Every one of them answers the refusal's `403` and code: the runtime dispatcher (the MCP HTTP endpoint among its routes), the REST data API, the settings routes, the storage download routes, the datasource admin routes, the share-link routes, the marketplace install-local routes and the MCP stdio transport. Each relays the refusal by its brand, so every other identity fault at those doors keeps its existing answer.
+  - **`OS_CLOUD_API_KEY` is untouched.** It is the runtime's outbound credential to the control plane, never admitted by this seam.
+  
+  What changes for you:
+  
+  - **A key created without an expiry now expires.** It used to live until revoked; it now lives 90 days (or the configured default). Pass `expires_at` to choose, and create a new key before it ends.
+  - **A signing asking for more than a year is refused** `400 API_KEY_EXPIRY_TOO_LONG`, where it used to be accepted. Ask for the date the message names, or an earlier one.
+  - **A key unused for 90 days is refused** `403 API_KEY_INACTIVE`, where it used to be served. It is not revoked; the remedy is a new key.
+  - **A key that already existed with no expiry keeps working for one year** from the date the policy took effect on your deployment (`auth.api_key_policy_started_at`), then answers `403 API_KEY_EXPIRED` naming that date. Replace such keys within the year.
+  - **A revoked or expired key answers its own code** (`403 API_KEY_REVOKED` / `API_KEY_EXPIRED`) on every face that accepts a key, where it used to answer the generic `401`; and a session cookie sent beside such a key no longer answers for it.
+  - **Hosts calling `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** pass `apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService)` (or the sixth argument), or an explicit `undefined` where no auth service exists. A caller of `resolveAuthzContext` that wants the located answer re-raises `ApiKeyLifecycleRefusalError` (`isApiKeyLifecycleRefusalError`) the way it re-raises the store outage. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `lifecycle` outcome.
+- daafae6: fix(core,cloud-connection,mcp)!: every API-key admission names its owner-posture source, so a held owner's key is refused at the marketplace install-local doors and on every MCP stdio call
+  
+  Clause-②: no (narrowing) — no published accept-set widens; two more seams refuse a key whose owner holds an account-scope posture, the owner-posture input of the shared key-admission seam becomes required, and `resolveApiKeyPrincipal` no longer answers a held owner's key with a principal.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolveAuthzInput) An authentication-policy change at runtime TypeScript call sites, not a metadata change. No authorable spec key, stored shape or metadata surface moves, so `objectstack migrate meta` has nothing to rewrite. The input that becomes required lives on a runtime interface and on two runtime functions of `@objectstack/core` (`resolveApiKeyAdmission`, `resolveApiKeyPrincipal`), none of them a metadata surface; the affected party is a TypeScript caller, and the compiler names its call site. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at two API-key doors, and a required input on the shared key-admission seam), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287, item 1: "a held user's API key is refused at every seam with the same code". Item 4: "The refusal is not a revocation: the key resumes the moment the user enrols (or the account posture clears)". `AUTH_GATE_SCOPES` decides which posture holds a key: `MFA_REQUIRED` (scope `account`) holds it; `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` (scope `credential`) do not.
+  
+  - **The marketplace install-local doors (`@objectstack/cloud-connection`).** The resolver behind all five doors now hands the shared resolver the auth service's per-user posture computation and refuses on the posture it decided for whichever credential admitted the caller. A key whose owner holds `MFA_REQUIRED` gets `403 MFA_REQUIRED` with the session's message, before any effect. It used to be served there.
+  - **The MCP stdio transport (`@objectstack/mcp`).** `OS_MCP_STDIO_API_KEY` is resolved with the owner's posture on every call of a live session, and a held owner's call is refused before any read or write with the envelope REST answers (`code` `MFA_REQUIRED`, `status` 403, the session's remediation message). A data tool's error and the record resource carry that message, as they carry every other refusal on this transport. A held key still starts the transport and says so once in a warning: the key is valid, and the next call after the owner enrols is served with no restart.
+  - **The owner-posture input is required (`@objectstack/core`).** `ResolveAuthzInput.userAuthGates`, and the `tenancyPosture` and `userAuthGates` parameters of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal`, are now required; `undefined` is a value passed on purpose. A seam that forgets the source no longer compiles, which is how the two seams above were missed. `@objectstack/runtime` re-exports these, so its importers see the same change.
+  - **`resolveApiKeyPrincipal` collapses a held owner's key to no principal.** A principal-or-nothing answer cannot carry the posture's code, so a host that answers requests should read `resolveApiKeyAdmission` and refuse its `held` outcome with `gate.code`.
+  - **The storage download authorizer (`@objectstack/service-storage`)** names the same source. The storage family's door already refused a held owner's key on the same request, so nothing changes on the wire.
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED` at the install-local doors, and every principal-bound MCP stdio call it makes is refused with the same code and message. It works again the moment the owner enrols, with nothing reissued.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working on both.
+  - **Code that calls `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** now passes the owner-posture source explicitly: `userAuthGates: userAuthGateSourceOf(authService)` wherever the kernel's `auth` service is reachable, or `undefined` on a kernel composed without `plugin-auth`. The two positional functions also take `tenancyPosture` explicitly (`undefined` when no `tenancy` service is registered).
+- 462dff3: feat(drivers): the five drivers compile the composed `ReadableIds` leaf or refuse it with one envelope, and the leaf's conformance case-set lands with the suites that run it (ADR-0139 D3)
+  
+  Clause-②: yes
+  
+  The engine already composes every `ReadableIds` leaf at its executor boundary (ADR-0139 D2). Until now no driver evaluated the composed leaf; each driver now either compiles it or refuses it.
+  
+  - **`@objectstack/driver-sql`** compiles `{ field: { $in: <composed leaf> } }` to `field IN (SELECT id FROM <parent table> WHERE <scope> AND <tenant wall>)`. The subquery's tenant wall is `applyTenantScope` on the parent table with the outer read's own options. `find`, `count`, `aggregate` and the other read doors issue one statement, so they agree. The statement binds only the scope's own values and the two walls, never one parameter per readable parent: a reader with more than 2,000 readable parents gets every row they may see. `applyFilters` and `applyFilterCondition` (both `protected`) take the read's `DriverOptions` as a new optional last parameter, which the subquery needs.
+  - **`@objectstack/driver-sqlite-wasm`** and the local face of **`@objectstack/driver-turso`** inherit that compile. **Turso's remote face** has a compiler of its own. `TursoDriver` resolves the leaf into the parent's remote table, its scope and its tenant wall, using the same chokepoint, and `RemoteTransport` compiles the same semi-join.
+  - **`@objectstack/driver-memory`** evaluates the leaf in process. It reads the parent under the composed scope, then tests membership. It owes no tenant wall, because it refuses every tenant-scoped call.
+  - **`@objectstack/driver-mongodb`** refuses the leaf, composed or not, until a pipeline form is measured (ADR-0139 open item O3).
+  - **The refusal is the same on every driver**: `INTERNAL_ERROR` / 500, never `INVALID_FILTER`. A driver gives it for an uncomposed leaf at any position (the direct driver call that bypassed the engine), a composed leaf outside a `$in` comparand, and every leaf on `driver-mongodb`. The message names the driver, the leaf and the remedy. It is logged at `error` once per driver. No `DriverCapabilities` bit is added.
+  - **`@objectstack/core`** exports the shared pieces: `findMisplacedReadableIds`, `replaceComposedReadableIds`, `readableIdsDriverRefusal`, `refuseReadableIdsOnce` and the `MisplacedReadableIds`, `ReadableIdsDriverRefusalError` and `ReadableIdsRefusalLog` types.
+  - **`@objectstack/spec`** exports the leaf's driver conformance case-set from `@objectstack/spec/data`: `READABLE_IDS_CASES`, the fixture (`READABLE_IDS_PARENT_OBJECT`, `READABLE_IDS_CHILD_OBJECT`, `READABLE_IDS_PARENT_ROWS`, `READABLE_IDS_CHILD_ROWS`), the refusal envelope `READABLE_IDS_REFUSAL`, and their types. Every driver package runs the case-set, and the driver conformance gate records that with no ledger rows.
+
+### Patch Changes
+
+- 0d3ea29: fix(plugin-security): the data-door write gates of the retired catalog row objects are removed, the boot report names positions that bind a permission set nobody serves, and the texts that still named the retired objects and modules are corrected (ADR-0131 D3/D4, C3 stage 8-post)
+  
+  Clause-②: no
+  
+  Stage 8 retired the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` row objects, so no write to them reaches the engine. This change removes what only guarded those writes. No export of any package's entry changes, and no request that reaches the server is answered differently.
+  
+  - **`@objectstack/plugin-security`.**
+    - Three of the security middleware's gates on those objects are gone: the package-provenance gate on `sys_permission_set`, the platform/package row gate on `sys_position` and `sys_capability`, and the curated capability-name gate on `sys_capability`. The delegated-administration gate no longer judges `sys_position_permission_set` bindings or `sys_permission_set` authoring; it still governs `sys_user_position` assignments, `sys_user_permission_set` grants and `sys_member`. The rules those gates carried still hold where the catalog now lives: `everyone` and `guest` are code-declared positions an environment cannot overlay, and a capability cannot be created or overlaid through the metadata door at all.
+    - The walled data-door refusal for those objects is deleted. Stage 8 already left it unwired, and no composition registers the objects it judged; the metadata door's walled refusal is unchanged.
+    - The internal duplicate-name refusal class that only the retired permission-set data door raised is removed.
+    - The packaged-permission-set lock's refusal no longer has a "choose a different name" variant: only the retired data door's create raised it. The metadata door's refusal text is unchanged, and the published signatures keep their `operation` parameter.
+    - The boot's catalog reference report lists one more finding, per position: a position definition whose `permissionSets` names a set the security catalog does not resolve, usually because the package that declared the set is uninstalled or disabled. A holder of such a position is granted nothing through that name. The line clears by itself at the next boot after the package is installed again. It is logged at `error` once per boot, like the report's other lines.
+  - **`@objectstack/platform-objects`** and **`@objectstack/plugin-security`** object metadata: the descriptions of `sys_invitation.positions`, `sys_user_position` (object and `position`), and `sys_audience_binding_suggestion`'s permission-set name no longer name the retired objects. The translated texts follow.
+  - **`@objectstack/spec`**: the `projectionApplied` and `materializeApplied` descriptions on the metadata save, publish and batch-publish responses give a current example (`datasource`, `flow`) instead of `permission` → `sys_permission_set`. `EvalUser.positions` describes the positions assigned through `sys_user_position`. `PermissionSet.description`'s doc comment no longer names the deleted projection. The `name` describes of `PositionSchema` and `PermissionSetSchema` say a name is unique within the security catalog the environment serves (ADR-0131 D3: there is no organization-level catalog), replacing "unique per organization", which read the retired rows' index. The error-code ledger drops `@objectstack/plugin-security`'s `UNIQUE_VIOLATION` row, which named the removed refusal; `UNIQUE_VIOLATION` stays registered by its other emitters.
+  - **`@objectstack/core`**: the doc comments of `positionDefinitionFromRow` and `permissionSetDefinitionFromRow` no longer describe the deleted boot backfills as current.
+  - **`@objectstack/metadata-protocol`**: the doc comments of the publish materializer, mutation projector and uninstall cleanup registries give current examples (`flow`, `datasource`, the grant revocation) instead of `permission` → `sys_permission_set`.
+- be48c5e: feat(spec)!: retire the delegated-admin scope's `manageBindings` and `authorEnvironmentSets` — rights no door honoured (#23488)
+  
+  **BREAKING** — `manageBindings` and `authorEnvironmentSets` on a permission set's `adminScope` (`AdminScopeSchema`, ADR-0090 D12) are now refused at parse. They named the right to bind sets to positions and the right to author environment permission sets, and they gated the `sys_position_permission_set` and `sys_permission_set` rows, which ADR-0131 D3 retired. A position's sets are part of its definition and a permission set is a definition; both are written through the metadata door, which admits a `manage_metadata` holder and reads no `adminScope`. So a delegate who "may bind" or "may author" was granted nothing. Delete both keys: a delegate's scope is placement, assignment and the allowlist.
+  
+  Clause-②: yes (narrowing)
+  
+  Measured before removal, at `cdc42eb49`: no production author set either key to `true` (the showcase wrote the default `false`; the control key `manageAssignments: true` has four production authors), and no door that writes a position or a permission set consulted either key. Their one reader was the delegated-admin gate's strict-containment comparison, which changes below.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `adminScope: { …, manageBindings: true \| false }` | nothing — delete the key |
+  | `adminScope: { …, authorEnvironmentSets: true \| false }` | nothing — delete the key |
+  | a delegate who re-composes what a position distributes, or authors a set's body | a `manage_metadata` holder writes the position or set definition through the metadata door (ADR-0131 D3); the delegate assigns people to positions and grants allowlisted sets inside its subtree |
+  | reading `scopes[].manageBindings` / `scopes[].authorEnvironmentSets` from `GET /api/v1/security/my-delegable-scope` (`DelegableAdminScope`) | nothing — the report carries `manageAssignments` as the scope's one action right |
+  
+  **The one-line fix:** delete `manageBindings` and `authorEnvironmentSets` from every `adminScope`.
+  
+  **What an author who still writes either sees.** `tsc` fails at the authoring site (`AdminScope` types both keys as retired), and the parse — `definePermissionSet()`, `defineStack({ permissions })`, `PUT /api/v1/meta/permission/:name` — refuses it at its own path with the prescription:
+  
+  > `permission.adminScope.manageBindings` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0090 D12) — nothing honoured it once the position-to-permission-set binding rows it gated were retired: a position's sets are part of its definition (ADR-0131 D3), and that definition is written through the metadata door, which admits a `manage_metadata` holder and reads no adminScope. Delete the key; a delegate's scope is placement, assignment and the allowlist — `businessUnit` with `includeSubtree`, `manageAssignments`, and `assignablePermissionSets`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  ## The containment change (`@objectstack/plugin-security`)
+  
+  The delegated-admin gate judges a delegate who hands out a set that itself carries an `adminScope` — a `sys_user_position` assignment of a position that distributes it, or a direct `sys_user_permission_set` grant — by **strict containment**. That comparison read both retired flags. It now reads `includeSubtree`, `manageAssignments` and the allowlist only:
+  
+  - a delegate whose own scope set either flag `true` can **no longer** hand out a scope otherwise EQUAL to its own — the inert flag used to count as the strictly-larger axis and let that lateral copy through the equal-scope refusal. It is refused `403 PERMISSION_DENIED` (`… would hand out an adminScope not strictly contained by yours`);
+  - a granted scope that set either flag `true` no longer counts as out-reaching a delegate that did not.
+  
+  `DelegatedAdminGate.describeDelegableScope()` (and so `GET /api/v1/security/my-delegable-scope`) no longer reports either flag.
+  
+  ## The retirement kit
+  
+  - **Two `retiredKey()` tombstones** on `AdminScopeSchema`, a `strictObject` — so each refusal carries its prescription and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `security/AdminScope:manageBindings`, `security/AdminScope:authorEnvironmentSets`. `DelegableAdminScope` (`@objectstack/spec/contracts`) drops both fields.
+  - **The D2 conversion `permission-admin-scope-binding-authoring-removed`** (protocol 18, retired from the load path) deletes both keys from every `permissions[].adminScope`, one notice per key, whatever they hold. Both keys carried the default `false`, so a 17.x parse materialized them in every declared scope; the rehydration seams replay this conversion over stored `permission` rows and built artifacts, and `os migrate meta --stored` lists the rows that carry them before the upgrade.
+  - **The D3 entry `permission-admin-scope-binding-authoring-retired`** records the containment change above: the judgement the strip cannot make for the upgrader.
+  - **`@objectstack/core`:** `permissionSetDefinitionFromRow` — the mapping `os migrate`'s legacy-row ceremony saves a `sys_permission_set` row through — drops both keys from the row's `admin_scope`. That save goes through `saveMetaItem`, which replays no conversion: measured, a 17.x row's body answered `422 INVALID_METADATA` at `adminScope.manageBindings`, and the same body without the keys saved.
+  - **`@objectstack/platform-objects`:** the permission-set form's `adminScope` help text (all four locales) names the scope's live keys only.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for. Studio's two switches for these keys retire in an objectui follow-up.
+  
+  <!-- adr-0087: registered permission-admin-scope-binding-authoring-removed, permission-admin-scope-binding-authoring-retired -->
+- 8044f4d: fix(core): a bootstrap that fails after every plugin started rolls them back too, so a driver connected in `start()` is disconnected
+  
+  Clause-②: no
+  
+  `ObjectKernel.bootstrap()` rolled back started plugins only when a plugin's `start()` failed. A boot refused later (the system-requirement check, or a `kernel:ready`, `kernel:bootstrapped` or `kernel:listening` handler that throws) left the kernel `stopped` with every plugin still holding what its `start()` took: a datasource driver stayed connected, because `shutdown()` on a stopped kernel is a no-op and nothing else ran any `destroy()`.
+  
+  - **What changes.** A boot that fails after the last `start()` now destroys the plugins that started, in reverse start order, through the same rollback a failing `start()` already ran. One teardown answers a failed boot at whatever phase it fails. A kernel built with `rollbackOnFailure: false` keeps opting out of both.
+  - **What does not change.**
+    - A readiness or hook failure still rejects with its own error, unwrapped; a failing `start()` still rejects with the error naming the plugin.
+    - A `destroy()` that throws during the rollback is logged at `error` and does not replace the boot error; the plugins started before it are still destroyed.
+    - A plugin whose `start()` failed or never ran is not destroyed.
+    - A failed `start()` still rolls back exactly once.
+    - `shutdown()` after any failed boot is still a no-op, so nothing is destroyed twice.
+  - **Ownership of the teardown.** While the rollback runs the kernel reads `stopping`, so a `shutdown()` or a signal that arrives meanwhile is absorbed. A `shutdown()` that already began mid-boot owns the destroys, and the failed boot adds none.
+  - **Who is affected.** In-process hosts that await a boot which can be refused after connect: `Runtime.start()`, `bootStack`, tests. `os serve` exits on a refused boot and is not.
+  - **What to check in a plugin.** A `destroy()` may now run on a plugin whose `kernel:ready` handler never ran, the same tolerance `bootPhaseHooks: false` already asks for. A host that closed such a resource by hand after a refused boot now closes it a second time, so that close should tolerate an already-closed resource.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

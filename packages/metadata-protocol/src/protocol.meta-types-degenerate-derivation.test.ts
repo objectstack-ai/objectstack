@@ -312,14 +312,16 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * deadline and when it is settled), 77 → 78 when it gained
      * `conditionalFormatting` (#22228, a field's cell formatting rules), and
      * 78 → 79 when it gained `mailAssociation` (#22870, the inbound-mail
-     * correspondent flag on an email field).
+     * correspondent flag on an email field), and 79 → 80 when it gained
+     * `referenceDeletedWhen` (#23735, a polymorphic pointer's platform-deleted
+     * predicate).
      * `dashboard` moved 21 → 22 the same way when it gained
      * `requiredPermissions` (#22611, the audience gate). `position` moved
      * 12 → 13 the same way when it gained `permissionSets` (ADR-0131 D3/D4,
      * the sets a position distributes).
      */
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
-        agent: 26, app: 30, dashboard: 22, dataset: 16, field: 79, flow: 23,
+        agent: 26, app: 30, dashboard: 22, dataset: 16, field: 80, flow: 23,
         hook: 22, object: 45, page: 25, position: 13, report: 21, skill: 17, tool: 14,
     };
 

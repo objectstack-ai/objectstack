@@ -5,17 +5,18 @@ import type { SemanticMigration } from '../../types.js';
 // #21464 — the `object-grid` page block's `columns` was `z.array(z.unknown())`
 // although the grid reads it with one shape, so a column keyed `accessorKey` /
 // `header` / `name`, a column with no `field`, a mixed list or a key the grid
-// never reads off a column passed the component-props gate, and the grid drew no
-// column or ignored the key, in silence. Stage 2 held it because the grid's group
-// headers drew a column's `options`, which the list view's column entry does not
-// declare; objectui retired that read (the group-header labels come from the
-// object field's `options` only), so the member takes the list view's own
-// `columns` by reference — the reference it was held from. D3 only:
-// page-component `properties` is not parsed on the metadata save or load path, so
-// a stored page is never refused at load; a refused column has no rewrite that both keeps
-// what the grid draws today and honours what the author wrote; and the authored
-// census found no authored value to respell — every refused value is a fixture
-// whose refused key the grid does not draw.
+// never reads off a column passed the component-props gate, and the grid drew
+// no column or ignored the key, in silence. Stage 2 held it because the grid's
+// group headers drew a column's `options`, which the list view's column entry
+// does not declare; objectui retired that read (the group-header labels come
+// from the object field's `options` only), so the member takes the list view's
+// own `columns` by reference — the reference it was held from. D3 only:
+// page-component `properties` is not parsed on the metadata load path, so a
+// stored page is never refused at load (its next save meets the component-props
+// gate at the metadata save door); a refused column has no rewrite that both
+// keeps what the grid draws today and honours what the author wrote; and the
+// authored census found no authored value to respell — every refused value is a
+// fixture whose refused key the grid does not draw.
 export const entry: SemanticMigration = {
   id: 'ui-object-grid-columns-typed',
   surface: 'page `object-grid` components — `properties.columns` (whose entries used to accept any value)',

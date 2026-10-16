@@ -751,7 +751,10 @@ export const ManifestSchema = strictObject({
    * `drivers`, `fieldTypes`, `functions`, `commands` — and `routes` at
    * commit bc56e1881, its own enforce-or-remove fork, maintainer-ruled Option B
    * 2026-08-22 (remove; author-facing materials redirect to the imperative
-   * `http.server` mount) once the cloud census closed clean (2026-08-24). The
+   * `http.server` mount — narrowed by ruling record 6142279866: that mount is the
+   * platform's own primitive, and an app declares `defineStack({ apis })`,
+   * computes in a flow, and registers code as a stack function or a connector)
+   * once the cloud census closed clean (2026-08-24). The
    * census behind them (recorded in commit be21955ba, re-verified at claim time, three repos with
    * control probes) measured exactly ONE non-test read of
    * `manifest.contributes` in the entire monorepo —
@@ -880,16 +883,18 @@ export const ManifestSchema = strictObject({
       '`engine.registerFunction`.',
     ),
 
-    /** REMOVED (commit bc56e1881) — mount code-handler routes on the `http.server` service; declarative endpoints are `defineStack({ apis })`. */
+    /** REMOVED (commit bc56e1881) — an app declares `defineStack({ apis })`, computes in a flow, and registers code as a stack function or a connector; it does not mount routes on `http.server` (the platform's own door-building primitive). */
     routes: retiredKey(
       '`manifest.contributes.routes` was removed in @objectstack/spec 17 (' +
       'ADR-0049 enforce-or-remove) — nothing ever read it: the HttpDispatcher never ' +
       'registered a prefix from the declaration, so an entry here parsed cleanly and ' +
       'served nothing while published material kept recommending it. Delete the key. ' +
-      'A route that needs real handler CODE is mounted imperatively: resolve the ' +
-      '`http.server` service from the plugin context and register the handler on ' +
-      '`kernel:ready`. A declarative endpoint over a pipeline the platform already ' +
-      'runs (query/return records, trigger a flow) is `defineStack({ apis })`.',
+      'An app does not mount routes on `http.server` — that service is the platform\'s ' +
+      'own door-building primitive, and a code-mounted route gets no caller identity, ' +
+      'auth gate, rate limit, namespace carve-out or OpenAPI entry. Declare the endpoint ' +
+      'under `defineStack({ apis })` (`type: \'object_operation\'` or `\'flow\'`, ADR-0121), ' +
+      'compute in a flow, and register code as a stack function ' +
+      '(`defineStack({ functions })`) or a connector.',
     ),
 
     /**

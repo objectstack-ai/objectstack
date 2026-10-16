@@ -136,7 +136,7 @@
         "retryDelayMs": {
           "status": "dead",
           "verifiedAt": "2026-08-04",
-          "note": "RENAMED to `backoffMs` 2026-08-04 (#4964) — the flow-level retry keys converged onto the shared `RetryPolicySchema`, whose tombstone this key now is (it arrives here via `retryPolicyShape()`, so authoring it is a tsc error and a parse error carrying the rename). Rewritten on the load path by the `retry-policy-converged` conversion. The row stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). Note this key was LIVE right up to the rename — `retryExecution` read it — so `dead` here means retired, not never-read."
+          "note": "RENAMED to `backoffMs` 2026-08-04 (#4964) — the flow-level retry keys converged onto the shared `RetryPolicySchema`, whose tombstone this key now is (it arrives here via `retryPolicyShape()`, so authoring it is a tsc error and a parse error carrying the rename). Rewritten by the `retry-policy-converged` conversion wherever stored documents are replayed; it left the load path at 18 (#23543 F2). The row stays because retiredKey keeps the key in the walked shape (the rls.priority precedent). Note this key was LIVE right up to the rename — `retryExecution` read it — so `dead` here means retired, not never-read."
         },
         "backoffMultiplier": {
           "status": "live",

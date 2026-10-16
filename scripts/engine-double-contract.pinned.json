@@ -827,6 +827,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.legacy-organization-read-seam.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.legacy-organization-read-seam.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.legacy-organization-read-seam.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.legacy-overlay-delete.test.ts",
       "verb": "delete",
       "pinned": 2
@@ -887,7 +902,7 @@
       "pinned": 1
     },
     {
-      "file": "packages/metadata-protocol/src/protocol.lock-one-resolution.test.ts",
+      "file": "packages/metadata-protocol/src/protocol.lock-one-resolution.kit.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -2129,6 +2144,11 @@
     {
       "file": "packages/metadata/src/loaders/database-loader-update-id-fold-wins.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata/src/loaders/database-loader.legacy-organization-count.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {

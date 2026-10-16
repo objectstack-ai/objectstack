@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 70 — spawns the real producer once per single-cause fixture: the reverse-verification case runs the real schema generator (build-schemas.ts) once, on a sandbox copy of src carrying the one re-declared def key, and every other case is a pure unit; slowest CI reading 51.3 s (hourly run 38798542648) x 1.25, rounded up
 
 /**
  * Pins the def-key collision guard (#5832).

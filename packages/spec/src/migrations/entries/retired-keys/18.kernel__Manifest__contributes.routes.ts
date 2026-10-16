@@ -8,7 +8,10 @@
 // them — taught it as working machinery. Maintainer ruled Option B 2026-08-22
 // (「接受所有」 on the decision batch carrying the four-axis analysis): remove
 // the key; author-facing materials redirect to the imperative `http.server`
-// mount, the form that actually works. The ruling's cloud precondition was
+// mount, the form that actually works. Ruling record 6142279866 later narrowed
+// that redirect: the mount is the platform's own door-building primitive, and an
+// app declares `defineStack({ apis })`, computes in a flow, and registers code
+// as a stack function or a connector. The ruling's cloud precondition was
 // discharged 2026-08-24 (the cloud census: cloud @ 5b5925a, zero `manifest.contributes`
 // reads, controls green), completing commit be21955ba's three-repo census at exactly
 // one live read (engine.ts, member `kinds` — now the block's sole survivor).

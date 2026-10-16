@@ -7,7 +7,8 @@ import type { SemanticMigration } from '../../types.js';
 // with a fixed shape, so an off-shape value passed every door and the grid
 // substituted a default or dropped it in silence. The row now takes the shape
 // each read point takes. D3 only: page-component `properties` is not parsed on
-// the metadata save or load path, so a stored page is never refused at load and there is
+// the metadata load path, so a stored page is never refused at load (its next
+// save meets the component-props gate at the metadata save door) and there is
 // no load-path refusal for a conversion to pre-empt; an off-shape value has no
 // rewrite that says what the author meant; and the authored census found
 // nothing in either repository's corpora to respell.

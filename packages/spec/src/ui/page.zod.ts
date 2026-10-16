@@ -23,7 +23,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { ruleArrayFilterError } from './filter-rule-array';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
-import { PAGE_TYPE_DEFAULT } from './default-record-page';
+import { PAGE_TYPE_DEFAULT, misplacedDefaultPageRefusal } from './default-record-page';
 
 /**
  * Shared history for this file (#4001).
@@ -46,7 +46,7 @@ export const PageRegionSchema = lazySchema(() => strictObject({
   history: PAGE_HISTORY,
   aliases: { id: 'name', region: 'name', children: 'components', items: 'components', content: 'components', size: 'width', span: 'width' },
 }, {
-  name: z.string().describe('Region name (e.g. "sidebar", "main", "header")').meta({ title: 'Region' }),
+  name: z.string().describe("Region name — a slot the page's `template` places: header, sidebar, main, aside or footer on 'default' and 'three-column'; header, sidebar or main on 'header-sidebar-main'; any name on 'dashboard' (header and footer span it, every other region is a grid cell). One region per slot. A name the template does not place, and a second region filling a slot already filled, are refused.").meta({ title: 'Region' }),
   width: z.enum(['small', 'medium', 'large', 'full']).optional().meta({ title: 'Width' }),
   components: z.array(z.lazy(() => PageComponentSchema)).describe('Components in this region').meta({ title: 'Components' })
 }));
@@ -203,6 +203,12 @@ export const PageComponentType = z.enum([
   // every record page of an `enable.files` object. Each has a
   // `ComponentPropsMap` row measured from its renderer's read points.
   'record:approvals', 'record:attachments',
+  // #23745 (the spec half of face 4 of the objectui#12438 ruling, letter C):
+  // one key of the bound record drawn as indented JSON behind a REQUIRED,
+  // fail-closed `requiredPermissions` gate. Declared spec first, as
+  // `record:approval_decision` above was: objectui registers the renderer and
+  // plugin-approvals places it after this declaration exists.
+  'record:json',
   // Navigation
   'app:launcher', 'nav:menu', 'nav:breadcrumb',
   // Utility — `user:profile` REMOVED (#14159): shell chrome, refused by name
@@ -782,12 +788,22 @@ export const PageVariableSchema = lazySchema(() => strictObject({
  * - `record` vs `record_detail`: `record` is a component-based layout page (FlexiPage style with regions),
  *   `record_detail` is a field-display page showing all fields of a single record (Airtable style).
  *   Use `record` for custom record pages with regions/components, `record_detail` for auto-generated detail views.
- * - `home` vs `overview`: `home` is the platform-level landing page (tab landing),
- *   `overview` is an interface-level navigation hub with links/instructions.
- *   Use `home` for app-level landing, `overview` for in-interface navigation hubs.
- * - `app` vs `utility` vs `blank`: `app` is an app-level page with navigation context,
- *   `utility` is a floating utility panel (e.g. notes, phone), `blank` is a free-form canvas
- *   for custom composition. They serve distinct layout purposes.
+ * - `home`, `app` and `utility` render alike — the page's regions, laid out by
+ *   its `template` — and differ only in the content width the console gives
+ *   them: `home` the widest, then `app`, then `utility` (objectui
+ *   `packages/components/src/renderers/layout/page.tsx`, `getPageMaxWidth`).
+ * - `home` is a wide region page. It is NOT a landing declaration: an app opens
+ *   on its first navigation item (by `order`; `HOME_PAGE_ID_RETIRED`,
+ *   `app.zod.ts`), and the root landing follows the APP's `isDefault`. To land
+ *   on a `home` page, put its navigation entry first. `isDefault` on it is
+ *   refused ({@link checkPageDefaultPlacement}).
+ * - `utility` is an ordinary inline page in the main column, the narrowest of
+ *   the three. The console has no floating or docked shell slot for it — no
+ *   utility bar, no panel beside the page a user is on — and none is declared.
+ *   The type stays because two readers branch on it: the print door
+ *   ({@link PRINT_PAGE_TYPES} leaves it out) and the page-type width.
+ * - `record` binds one record of its `object`; `list` draws a record list
+ *   through `interfaceConfig`.
  *
  * **Liveness (ADR-0049 enforce-or-remove):** only types with a dedicated
  * renderer are authorizable. `record`, `home`, `app`, `utility`, and `list` are
@@ -803,9 +819,9 @@ export const PageVariableSchema = lazySchema(() => strictObject({
 export const PageTypeSchema = lazySchema(() => z.enum([
   // Platform page types (Salesforce FlexiPage style) — region/component composition
   'record',         // Component-based record layout page with regions
-  'home',           // Platform-level home/landing page
-  'app',            // App-level page with navigation context
-  'utility',        // Floating utility panel (e.g. notes, phone dialer)
+  'home',           // Wide region page — NOT the landing: an app opens on its first navigation item
+  'app',            // Region page at app width
+  'utility',        // Narrow inline region page — no floating or docked shell slot exists
   // Interface page type (Airtable parity). NOTE: grid/kanban/calendar/gallery/
   // timeline are NOT page types — they are visualizations of a `list` page
   // (interfaceConfig.appearance.allowedVisualizations).
@@ -1160,15 +1176,15 @@ const PAGE_AUDIENCE_WRONG_LAYER =
 // page numbering, and page-break hints, each mapped to print CSS. A printable
 // block subset is defined beside it and enforced at the authoring doors.
 //
-// What this card does NOT ship, and why the declaration is honest anyway: the
-// browser print mapping, the printable rendering of each block and the record
-// page's print action are card ② (objectui), the headless-Chromium render
-// service and the archive are card ③, and the record-page "generate PDF"
-// action is card ④. Until ② lands, nothing reads `print`. The key is therefore
-// declared with its consumer named in every `.describe()` and carried in the
-// liveness ledger as `planned` with `authorWarn` (`liveness/page.json`), so an
-// author who writes it is told the layout is validated but not yet applied.
-// The REFUSALS are live from this card: the parse refuses a print declaration
+// What this card did NOT ship: the browser print mapping, the printable
+// rendering of each block and the record page's print action are card ②
+// (objectui), the headless-Chromium render service and the archive are card ③,
+// and the record-page "generate PDF" action is card ④. Card ② has landed: the
+// console's `PageRenderer` mounts the print stylesheet objectui's
+// `buildPagePrintStylesheet` builds from every key below, so the liveness
+// ledger carries `print` and its keys as `live` (`liveness/page.json`), citing
+// that reader at the `.objectui-sha` pin. Cards ③ and ④ are still to come.
+// The REFUSALS are live from card ①: the parse refuses a print declaration
 // on a page that does not print its own authored blocks
 // ({@link checkPagePrintComposition}), and `os validate` / `os build` /
 // `os lint` and the metadata save door refuse a block outside the subset
@@ -1265,6 +1281,7 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
   ['record:approval_decision', 'is the decision panel of an approval request: action controls that differ by viewer, beside a progress tally each decision changes, with nothing to print'],
   ['record:approvals', 'is the record\'s live approval timeline, with a remind control only the submitter sees, so what prints would depend on who prints it'],
   ['record:attachments', 'is a list of attached files with upload, download and delete controls, and the files themselves never reach paper'],
+  ['record:json', 'is a panel that starts collapsed behind a per-viewer capability gate, so what prints would depend on who prints it and whether they opened it'],
   ['element:button', 'is an action control, with nothing to print'],
   ['element:record_picker', 'is an input control, with nothing to print'],
   ['element:text_input', 'is an input control, with nothing to print'],
@@ -1294,9 +1311,10 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
  *
  * Minimal by ruling: paper size and orientation, margins, the running header
  * and footer, page numbering and the page-break hints, and nothing else. Every
- * key names its print-CSS mapping and its consumer. Until the console's print
- * rendering lands (card ② of the ruling), nothing reads any of them — the
- * liveness ledger carries each as `planned`.
+ * key names its print-CSS mapping and its consumer. The console's browser print
+ * rendering (card ② of the ruling) applies every one of them — the liveness
+ * ledger carries each as `live`; the server-side PDF renderer (card ③) is to
+ * follow.
  */
 export const PagePrintSchema = lazySchema(() => strictObject({
   surface: 'this print declaration',
@@ -1316,9 +1334,9 @@ export const PagePrintSchema = lazySchema(() => strictObject({
   },
 }, {
   paperSize: z.enum(['A4', 'A5', 'Letter', 'Legal']).optional()
-    .describe("Paper size — the size keyword of the print CSS `@page { size }` rule (A4 when omitted). Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, nothing applies it."),
+    .describe("Paper size — the size keyword of the print CSS `@page { size }` rule (A4 when omitted). Applied by the console's browser print rendering; the server-side PDF renderer is to follow."),
   orientation: z.enum(['portrait', 'landscape']).optional()
-    .describe("Sheet orientation — the orientation keyword of the `@page { size }` rule (portrait when omitted). Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, nothing applies it."),
+    .describe("Sheet orientation — the orientation keyword of the `@page { size }` rule (portrait when omitted). Applied by the console's browser print rendering; the server-side PDF renderer is to follow."),
   margins: strictObject({
     surface: 'these print margins',
     history: 'A side these margins do not declare would otherwise be dropped in silence, and the sheet would print with the default margin there.',
@@ -1329,17 +1347,17 @@ export const PagePrintSchema = lazySchema(() => strictObject({
     bottom: z.number().min(0).optional().describe('Bottom margin, in millimetres'),
     left: z.number().min(0).optional().describe('Left margin, in millimetres'),
   }).optional()
-    .describe("Sheet margins in MILLIMETRES, one number per side — the `@page { margin }` rule; a side left out takes the renderer's default. Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, nothing applies it."),
+    .describe("Sheet margins in MILLIMETRES, one number per side — the `@page { margin }` rule; a side left out takes the renderer's default. Applied by the console's browser print rendering; the server-side PDF renderer is to follow."),
   repeatHeader: z.boolean().optional()
-    .describe("Repeat the page's `header` region (its `regions` entry named `header`) at the top of every printed sheet — the running header. The parse refuses it on a page with no `header` region. Off when omitted: the region prints once, at the top of the first sheet. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Repeat the page's `header` region (its `regions` entry named `header`) at the top of every printed sheet — the running header. The parse refuses it on a page with no `header` region. Off when omitted: the region prints once, at the top of the first sheet. Applied by the console's browser print rendering."),
   repeatFooter: z.boolean().optional()
-    .describe("Repeat the page's `footer` region (its `regions` entry named `footer`) at the bottom of every printed sheet — the running footer. The parse refuses it on a page with no `footer` region. Off when omitted: the region prints once, after the body. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Repeat the page's `footer` region (its `regions` entry named `footer`) at the bottom of every printed sheet — the running footer. The parse refuses it on a page with no `footer` region. Off when omitted: the region prints once, after the body. Applied by the console's browser print rendering."),
   pageNumbers: z.boolean().optional()
-    .describe("Print the sheet number and the sheet count in the bottom margin of every sheet — the `@page` margin box with `counter(page)` and `counter(pages)`. Off when omitted. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Print the sheet number and the sheet count in the bottom margin of every sheet — the `@page` margin box with `counter(page)` and `counter(pages)`. Off when omitted. Applied by the console's browser print rendering."),
   repeatTableHeaders: z.boolean().optional()
-    .describe("Page-break hint: repeat a table's column headings at the top of every sheet the table runs onto (`thead { display: table-header-group }`). On when omitted. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Page-break hint: repeat a table's column headings at the top of every sheet the table runs onto (`thead { display: table-header-group }`). On when omitted. Applied by the console's browser print rendering."),
   avoidBreakInside: z.boolean().optional()
-    .describe("Page-break hint: keep each block whole on one sheet when it fits, moving it to the next sheet instead of splitting it (`break-inside: avoid` on every block). Off when omitted. Consumer: the console's browser print rendering; until it ships, nothing applies it."),
+    .describe("Page-break hint: keep each block whole on one sheet when it fits, moving it to the next sheet instead of splitting it (`break-inside: avoid` on every block). Off when omitted. Applied by the console's browser print rendering."),
 }).describe('Print declaration: paper size, orientation, margins, the running header and footer, page numbering and page-break hints. Its presence makes the page a print page, whose blocks must come from the printable block subset.'));
 
 /** The page kinds a print page may take: the one that prints its authored `regions` and nothing else. */
@@ -1349,7 +1367,8 @@ const PRINT_PAGE_KINDS: readonly string[] = ['full'];
  * The page types a print page may take — a record page (the document bound to
  * one record: an invoice, a delivery order) and a home or app page (a document
  * bound to no single record: a letter, a monthly report). `list` draws a paged
- * grid and `utility` is a floating panel; neither is a document.
+ * grid, and `utility` is the narrow page for a tool beside the work (notes, a
+ * phone dialer); neither is a document.
  */
 const PRINT_PAGE_TYPES: readonly string[] = ['record', 'home', 'app'];
 
@@ -1370,7 +1389,7 @@ const PRINT_PAGE_TYPES_PHRASE = "of `type: 'record'`, `'home'` or `'app'` with i
  *    judge;
  *  - `print` on a `list` page — it draws its records through `interfaceConfig`
  *    as a paged grid; the list's own print control is `allowPrinting`;
- *  - `print` on a `utility` page — a floating panel, not a document (the
+ *  - `print` on a `utility` page — a tool page, not a document (the
  *    admitted types are {@link PRINT_PAGE_TYPES});
  *  - `print` on a `full` page with no `regions` — it draws the synthesized
  *    default layout instead;
@@ -1417,7 +1436,7 @@ export function checkPagePrintComposition(
   const type = page.type ?? 'record';
   if (!PRINT_PAGE_TYPES.includes(type)) {
     const why = type === 'utility'
-      ? 'a utility page is a floating panel beside the page a user is on (notes, a phone dialer), not a document'
+      ? 'a utility page holds a tool (notes, a phone dialer), not a document'
       : `a \`${type}\` page is not a document page`;
     ctx.addIssue({
       code: 'custom',
@@ -1454,6 +1473,168 @@ export function checkPagePrintComposition(
         + `holding the ${region === 'header' ? 'letterhead' : 'footer'} blocks, or delete \`${key}\`.`,
     });
   }
+}
+
+/**
+ * The page layout templates the console registers, and the regions each one
+ * places — the layout vocabulary, declared here so an author and `os validate`
+ * can see it (maintainer ruling A on objectstack#23610, record 6190536588).
+ *
+ * Measured against the renderer, objectui
+ * `packages/components/src/renderers/layout/page.tsx` (`TEMPLATE_REGISTRY` and
+ * each template's `findRegion` calls; region names match case-insensitively):
+ *
+ *  - `default` — header / sidebar / main / aside / footer (sidebar and aside
+ *    beside main, header and footer spanning it);
+ *  - `header-sidebar-main` — header / sidebar / main;
+ *  - `three-column` — the same five as `default`;
+ *  - `dashboard` — header / footer, and an OPEN GRID: every other region,
+ *    whatever its name, is a grid cell. By design it places any name.
+ *
+ * A region a template does not place is not dropped by the renderer — it is
+ * stacked under `main` at full width with its declared `width` ignored, which
+ * is the silent mis-layout this table exists to refuse
+ * ({@link checkPageRegionPlacement}). `full-width` is retired: it was a second
+ * name for `default` (the same component) — {@link PAGE_TEMPLATE_RETIRED_GUIDANCE}.
+ */
+export const PAGE_TEMPLATE_SLOTS = {
+  default: ['header', 'sidebar', 'main', 'aside', 'footer'],
+  'header-sidebar-main': ['header', 'sidebar', 'main'],
+  'three-column': ['header', 'sidebar', 'main', 'aside', 'footer'],
+  dashboard: ['header', 'footer'],
+} as const satisfies Readonly<Record<string, readonly string[]>>;
+
+/** The templates whose every other region is a grid cell — they place any region name. */
+export const PAGE_TEMPLATE_OPEN_GRID: readonly PageTemplate[] = ['dashboard'];
+
+/** A page layout template name — a key of {@link PAGE_TEMPLATE_SLOTS}. */
+export type PageTemplate = keyof typeof PAGE_TEMPLATE_SLOTS;
+
+// Retired template names → the prescription (an enum-value narrowing: no
+// tombstone, the enum's own error map carries it). `//`, not JSDoc, on
+// purpose — build-docs takes a file's first JSDoc per exported symbol.
+const PAGE_TEMPLATE_RETIRED_GUIDANCE = {
+  'full-width':
+    "Page `template: 'full-width'` was removed in @objectstack/spec 18 — it was a second name for "
+    + "`'default'`, drawn by the same layout. Use `template: 'default'` (or leave `template` out: it is "
+    + 'the default); the page renders exactly as before.',
+} as const;
+
+/**
+ * Page Template Schema — the closed set of layout templates the console
+ * registers ({@link PAGE_TEMPLATE_SLOTS}). An unregistered name used to fall
+ * back to the page-type layout in silence; it is refused at the parse now.
+ */
+export const PageTemplateSchema = lazySchema(() => enumWithRetiredValues(
+  Object.keys(PAGE_TEMPLATE_SLOTS) as [PageTemplate, ...PageTemplate[]],
+  PAGE_TEMPLATE_RETIRED_GUIDANCE,
+).describe("Page layout template — one the console registers: 'default' (header, sidebar, main, aside, footer), 'header-sidebar-main' (header, sidebar, main), 'three-column' (header, sidebar, main, aside, footer) or 'dashboard' (header, footer, and every other region a grid cell)."));
+
+/**
+ * The `isDefault` placement check attached to {@link PageSchema} (maintainer
+ * ruling A on objectstack#23610, record 6190536588): `isDefault: true` is
+ * refused on a page {@link defaultRecordPageObject} does not place — any page
+ * that is not a record page bound to an `object`.
+ *
+ * `isDefault` has one meaning, the default record page of an object, and on
+ * every other page nothing read it: an app opens on its first navigation item
+ * and the root landing follows the APP's `isDefault`, so a `home` page marked
+ * `isDefault: true` validated, saved and was served while it decided nothing.
+ * The sentence is {@link misplacedDefaultPageRefusal}'s, the one the registry
+ * door prints for a page a package registers without a parse.
+ *
+ * Exported for the reason {@link checkPageSourceCompleteness} is, and
+ * attached by identifier — pinned in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPageDefaultPlacement(
+  page: { isDefault?: unknown; type?: unknown; object?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  const refusal = misplacedDefaultPageRefusal(page);
+  if (refusal === undefined) return;
+  ctx.addIssue({ code: 'custom', path: ['isDefault'], message: refusal });
+}
+
+/**
+ * Role names an author reaches for, and the slot that plays the role — named
+ * in the refusal when the page's template places that slot.
+ */
+const REGION_NAME_HINTS: Readonly<Record<string, string>> = {
+  left_sidebar: 'sidebar', leftsidebar: 'sidebar', left: 'sidebar', nav: 'sidebar',
+  right_sidebar: 'aside', rightsidebar: 'aside', right: 'aside', rail: 'aside',
+  content: 'main', body: 'main', center: 'main',
+  top: 'header', bottom: 'footer',
+};
+
+/**
+ * The region placement check attached to {@link PageSchema} (maintainer ruling
+ * A on objectstack#23610, record 6190536588): on a page whose `regions` its
+ * template lays out, a region whose name the template does not place
+ * ({@link PAGE_TEMPLATE_SLOTS}) is refused at that region's `name`, naming the
+ * template's slots.
+ *
+ * The renderer never dropped such a region: it stacked it under `main` at full
+ * width and ignored its `width`, so a `left_sidebar` or `right_sidebar` on a
+ * `three-column` page drew as one column while every door reported success.
+ * Names match case-insensitively, as the renderer's do. A SECOND region
+ * filling a slot an earlier one already fills is refused too: the renderer
+ * draws the first (`findRegion`) and excludes every region of that name from
+ * the rest (`getRemainingRegions`), so the second is not drawn at all. A
+ * `dashboard` page places every other name (its open grid) — two `kpis`
+ * regions are two cells — but not a second `header` or `footer`. Judged on `kind: 'full'` pages only —
+ * the kind whose regions the template lays out: a `slotted` page renders its
+ * `slots`, and an `html` / `react` page its `source`. A template the enum
+ * refuses is that refusal's, not this check's.
+ *
+ * Exported for the reason {@link checkPageSourceCompleteness} is, and
+ * attached by identifier — pinned in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPageRegionPlacement(
+  page: { kind?: unknown; template?: unknown; regions?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if ((page.kind ?? 'full') !== 'full' || !Array.isArray(page.regions)) return;
+  const template = page.template ?? 'default';
+  if (typeof template !== 'string' || !Object.prototype.hasOwnProperty.call(PAGE_TEMPLATE_SLOTS, template)) return;
+  const slots: readonly string[] = PAGE_TEMPLATE_SLOTS[template as PageTemplate];
+  const openGrid = (PAGE_TEMPLATE_OPEN_GRID as readonly string[]).includes(template);
+  const slotList = slots.map((slot) => `\`${slot}\``).join(', ');
+  // slot → the index of the region that fills it (the renderer's `findRegion`
+  // takes the FIRST match, case-insensitively, and drops every later one).
+  const filled = new Map<string, number>();
+  page.regions.forEach((region, index) => {
+    const name = region && typeof region === 'object' ? (region as { name?: unknown }).name : undefined;
+    if (typeof name !== 'string') return;
+    const slot = name.toLowerCase();
+    if (slots.includes(slot)) {
+      const first = filled.get(slot);
+      if (first === undefined) {
+        filled.set(slot, index);
+        return;
+      }
+      ctx.addIssue({
+        code: 'custom',
+        path: ['regions', index, 'name'],
+        message: `Region \`${name}\` is refused on a \`template: '${template}'\` page: \`regions[${first}]\` already fills `
+          + `its \`${slot}\` slot, and the template places one region per slot (${slotList}), so a second one is not `
+          + `drawn at all. Move its components into \`regions[${first}]\`, or name it for an unfilled slot.`,
+      });
+      return;
+    }
+    // An open-grid template draws every other region, whatever its name.
+    if (openGrid) return;
+    const hint = REGION_NAME_HINTS[slot];
+    const rename = hint !== undefined && slots.includes(hint)
+      ? `Rename it \`${hint}\`, `
+      : 'Rename it to one of those slots, ';
+    ctx.addIssue({
+      code: 'custom',
+      path: ['regions', index, 'name'],
+      message: `Region \`${name}\` is refused on a \`template: '${template}'\` page: that template places only `
+        + `${slotList}, and a region it does not place is stacked under \`main\` at full width with its \`width\` `
+        + `ignored. ${rename}or choose a template that places it (\`dashboard\` lays every other region out as a grid cell).`,
+    });
+  });
 }
 
 export const PageSchema = lazySchema(() => strictObject({
@@ -1551,7 +1732,7 @@ export const PageSchema = lazySchema(() => strictObject({
   // objectui dropped all references in objectui#1949.
 
   /** Layout Template */
-  template: z.string().default('default').describe('Layout template name (e.g. "header-sidebar-main")'),
+  template: PageTemplateSchema.default('default').describe("Layout template — 'default', 'header-sidebar-main', 'three-column' or 'dashboard'. Each places its own regions (PAGE_TEMPLATE_SLOTS); a region the template does not place, or a second region filling the same slot, is refused at the region's name."),
   
   /** Regions & Content */
   // Optional with an empty-array default. Not every page authors regions:
@@ -1585,12 +1766,16 @@ export const PageSchema = lazySchema(() => strictObject({
    * compose the deployment without the package that ships the other. Shipping
    * a second default is not an override path.
    *
-   * `isDefault` on a page that is not a record page bound to an object is
-   * outside this rule. The one reading every door uses is
-   * `defaultRecordPageObject` (`default-record-page.ts`).
+   * `isDefault: true` on a page that is not a record page bound to an object
+   * is REFUSED, at the same doors (maintainer ruling A on objectstack#23610,
+   * record 6190536588): nothing reads it there. A page does not choose where
+   * an app opens — the app's first navigation item is its landing, and the
+   * root landing follows the APP's `isDefault`. The one reading every door
+   * uses is `defaultRecordPageObject` (`default-record-page.ts`), and the one
+   * refusal `misplacedDefaultPageRefusal` ({@link checkPageDefaultPlacement}).
    */
   isDefault: z.boolean().default(false)
-    .describe('Whether this record page is the default record page of its `object` — the page the record view opens. At most one `isDefault: true` record page may exist for an object in a deployment: a second is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Saving a page under the existing default\'s own name is that page, not a second default. Outside this rule for a page that is not a record page bound to an object.'),
+    .describe('Whether this record page is the default record page of its `object` — the page the record view opens. At most one `isDefault: true` record page may exist for an object in a deployment: a second is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Saving a page under the existing default\'s own name is that page, not a second default. Refused on any other page — a page that is not a record page bound to an object: nothing reads it there. An app opens on its first navigation item, and the root landing follows the app\'s own isDefault.'),
   // `assignedProfiles` REMOVED (ADR-0090 D2 / ADR-0049) — it named the concept
   // D2 deleted and nothing anywhere enforced it, so a page that "assigned
   // profiles" was open to everyone who could reach it. Page audience is the
@@ -1615,11 +1800,11 @@ export const PageSchema = lazySchema(() => strictObject({
    * authored in the page's own blocks. See {@link PagePrintSchema} for the
    * keys and their print-CSS mapping, {@link PRINTABLE_PAGE_COMPONENT_TYPES}
    * for the blocks a print page may hold, and {@link checkPagePrintComposition}
-   * for the pages that may carry it. `planned` in the liveness ledger until the
-   * console's print rendering (card ②) reads it.
+   * for the pages that may carry it. `live` in the liveness ledger: the
+   * console's print rendering (card ②) applies it.
    */
   print: PagePrintSchema.optional()
-    .describe("Print declaration — makes this page a print page, a document authored in the page's own blocks: paper size and orientation, margins in millimetres, the running header and footer (the page's own `header` / `footer` regions), page numbers and page-break hints, each mapped to print CSS. A print page is a `kind: 'full'` page of `type: 'record'`, `'home'` or `'app'` with its blocks in `regions`, and every block in it must come from the printable block subset: containers that draw every child (`page:section`, `page:card`, `page:footer`), field blocks (`record:details`, `record:highlights`), the child-record table `record:line_items`, `element:text`, `element:image`, `element:divider`, `element:definition-list`, `element:repeater`, `element:number` and `object-metric`; `os validate` / `os build` / `os lint` and the metadata save door refuse any other block inside it. Consumer: the console's browser print rendering, and later the server-side PDF renderer; until it ships, the declaration is validated but nothing applies it. A list view's print button is `allowPrinting`, not this."),
+    .describe("Print declaration — makes this page a print page, a document authored in the page's own blocks: paper size and orientation, margins in millimetres, the running header and footer (the page's own `header` / `footer` regions), page numbers and page-break hints, each mapped to print CSS. A print page is a `kind: 'full'` page of `type: 'record'`, `'home'` or `'app'` with its blocks in `regions`, and every block in it must come from the printable block subset: containers that draw every child (`page:section`, `page:card`, `page:footer`), field blocks (`record:details`, `record:highlights`), the child-record table `record:line_items`, `element:text`, `element:image`, `element:divider`, `element:definition-list`, `element:repeater`, `element:number` and `object-metric`; `os validate` / `os build` / `os lint` and the metadata save door refuse any other block inside it. Applied by the console's browser print rendering, which prints the page through the browser's own print dialog (where it can be saved as PDF); the server-side PDF renderer is to follow. A list view's print button is `allowPrinting`, not this."),
 
   /**
    * Override semantics for record pages.
@@ -1748,13 +1933,20 @@ export const PageSchema = lazySchema(() => strictObject({
   // #22568: `slots.details` beside `slots.tabs` never renders — the `tabs`
   // slot replaces the strip the Details tab lives in. Attached by identifier
   // for the same reason as the checks above.
-  .superRefine(checkPageSlotPair));
-// PageSchema's cross-field rules are the four checks above: the
+  .superRefine(checkPageSlotPair)
+  // #23610 (ruling A, record 6190536588): `isDefault: true` on a page that is
+  // not a record page bound to an object, and a region the page's template
+  // does not place, are refused. Attached by identifier for the same reason
+  // as the checks above.
+  .superRefine(checkPageDefaultPlacement)
+  .superRefine(checkPageRegionPlacement));
+// PageSchema's cross-field rules are the six checks above: the
 // ADR-0080/0081 source completeness check, the compiled-kind `requires`
-// check, the print-page composition check and the `details` + `tabs` slot
-// pair check. A component's `properties` bag is judged by none of them: it
-// is `@objectstack/lint`'s `validateComponentProps`, at the CLI doors and
-// the runtime save door alike. It once also required
+// check, the print-page composition check, the `details` + `tabs` slot
+// pair check, the `isDefault` placement check and the region placement
+// check. A component's `properties` bag is judged by none of them: it is
+// `@objectstack/lint`'s `validateComponentProps`, at the CLI doors and the
+// runtime save door alike. It once also required
 // `recordReview`/`blankLayout` and `slots` (all removed — unrendered roadmap /
 // "required-but-unauthorable" Studio traps).
 

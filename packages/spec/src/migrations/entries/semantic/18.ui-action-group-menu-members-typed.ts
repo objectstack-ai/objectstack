@@ -9,10 +9,11 @@ import type { SemanticMigration } from '../../types.js';
 // with the rows' prescriptions; `outcomeMessages`, a member `className` and
 // `properties.params` refused; `outcomeMessages` undeclared on all four action
 // blocks. D3 only: page-component `properties` is not parsed on the metadata
-// save or load path, so a stored page is never refused at load; and the authored census
+// load path, so a stored page is never refused at load (its next save meets the
+// component-props gate at the metadata save door); and the authored census
 // found no working member to respell — the refused values are objectui's probes
-// of the very reads the ruling refuses (a member `className`, `outcomeMessages`,
-// `properties.params`) and of the host's `autoTrigger` flag.
+// of the very reads the ruling refuses (a member `className`,
+// `outcomeMessages`, `properties.params`) and of the host's `autoTrigger` flag.
 export const entry: SemanticMigration = {
   id: 'ui-action-group-menu-members-typed',
   surface: 'page `action:group` and `action:menu` components — each member of `properties.actions` (whose keys '

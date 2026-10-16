@@ -43,12 +43,17 @@ describe('inferDriverTypeFromUrl', () => {
     expect(inferDriverTypeFromUrl('mongodb+srv://cluster/db')).toBe('mongodb');
     expect(inferDriverTypeFromUrl('postgres://u:p@h/db')).toBe('postgres');
     expect(inferDriverTypeFromUrl('postgresql://u:p@h/db')).toBe('postgres');
+    // The runtime host's third postgres spelling (`detectDriverFromUrl`).
+    expect(inferDriverTypeFromUrl('pg://u:p@h/db')).toBe('postgres');
+    expect(inferDriverTypeFromUrl('PG://u:p@h/db')).toBe('postgres');
     expect(inferDriverTypeFromUrl('mysql://u:p@h/db')).toBe('mysql');
     expect(inferDriverTypeFromUrl('mysql2://u:p@h/db')).toBe('mysql');
     expect(inferDriverTypeFromUrl('libsql://x.turso.io')).toBe('turso');
     expect(inferDriverTypeFromUrl('https://x.turso.io')).toBe('turso');
     expect(inferDriverTypeFromUrl('wasm-sqlite://data.db')).toBe('sqlite-wasm');
     expect(inferDriverTypeFromUrl('./local.wasm.db')).toBe('sqlite-wasm');
+    expect(inferDriverTypeFromUrl('file:./local.wasm.db')).toBe('sqlite-wasm');
+    expect(inferDriverTypeFromUrl('sqlite:./local.wasm.db')).toBe('sqlite-wasm');
     expect(inferDriverTypeFromUrl('file:./app.db')).toBe('sqlite');
     expect(inferDriverTypeFromUrl('sqlite:./app.db')).toBe('sqlite');
     expect(inferDriverTypeFromUrl('./app.sqlite')).toBe('sqlite');
@@ -82,10 +87,71 @@ describe('inferDriverTypeFromUrl', () => {
     expect(inferDriverTypeFromUrl(':memory:')).toBe('sqlite');
   });
 
-  it('returns "" for an absent or unrecognized URL', () => {
+  // A value with no scheme is a SQLite file path whatever its name — the runtime
+  // host's arm. These used to answer '' (dev booted `:memory:`). A one-letter
+  // drive and a `:` is a drive, not a scheme.
+  it.each(['./data/app', 'data/app', '/var/lib/objectstack/app', 'C:\\data\\app', 'C:/data/app', './backup:2026.db'])(
+    'classifies the scheme-less path %s as a sqlite file',
+    (url) => {
+      expect(inferDriverTypeFromUrl(url)).toBe('sqlite');
+    },
+  );
+
+  it('returns "" only for an absent or blank URL', () => {
     expect(inferDriverTypeFromUrl(undefined)).toBe('');
     expect(inferDriverTypeFromUrl('')).toBe('');
-    expect(inferDriverTypeFromUrl('redis://localhost')).toBe('');
+    // Blank is absent — never a sqlite file named by whitespace.
+    expect(inferDriverTypeFromUrl('   ')).toBe('');
+  });
+
+  // An unrecognised `<scheme>://` is REFUSED at inference, as `memory://` is: it
+  // used to answer '', and `serve --dev` booted `:memory:` over the database the
+  // operator named. Asserted on the error's TYPE and on what it names (the
+  // variable, the scheme, recognised schemes), never on its prose.
+  it.each([
+    ['redis://127.0.0.1:6399/0', 'redis://'],
+    ['REDIS://h/0', 'REDIS://'],
+    ['https://db.example.com/app', 'https://'],
+    ['mssql://h/db', 'mssql://'],
+    // A `.db` name does not rescue a scheme nothing recognises.
+    ['redis://h/app.db', 'redis://'],
+    // An OPAQUE scheme (two or more characters and a `:`, no `//`) is refused
+    // too, rather than opened as a file at a path made of the URL.
+    ['jdbc:postgresql://localhost:5432/db', 'jdbc:'],
+    ['redis:cache', 'redis:'],
+    // Nor does a `.wasm.db` name: it selects the WASM engine for a FILE only.
+    ['redis://h/app.wasm.db', 'redis://'],
+    ['jdbc:x/app.wasm.db', 'jdbc:'],
+  ])('refuses %s at inference, naming the scheme and the recognised ones', (url, scheme) => {
+    let err: unknown;
+    try {
+      inferDriverTypeFromUrl(url);
+    } catch (e) {
+      err = e;
+    }
+    expect(err, `inferDriverTypeFromUrl accepted ${url}`).toBeInstanceOf(UnsupportedDriverError);
+    const refusal = err as UnsupportedDriverError;
+    expect(refusal.recognized).toBe(false);
+    expect(refusal.driverType).toBe(scheme);
+    expect(refusal.message).toContain(`"${scheme}"`);
+    expect(refusal.message).toContain('OS_DATABASE_URL');
+    for (const named of ['postgres://', 'pg://', 'mysql://', 'mongodb://', 'libsql://', 'file:', ':memory:']) {
+      expect(refusal.message, `the refusal does not name ${named}`).toContain(named);
+    }
+  });
+
+  // The refusal is printed on the way out, and the URL is where credentials ride.
+  it('names the scheme of a refused URL, never the URL and its credentials', () => {
+    const url = 'redis://admin:pw-not-a-real-secret@127.0.0.1:6399/0';
+    let message = '';
+    try {
+      inferDriverTypeFromUrl(url);
+    } catch (e) {
+      message = (e as Error).message;
+    }
+    expect(message, `${url} was not refused`).toContain('"redis://"');
+    expect(message).not.toContain('pw-not-a-real-secret');
+    expect(message).not.toContain('127.0.0.1');
   });
 });
 
@@ -102,6 +168,14 @@ describe('resolveDriverType', () => {
     expect(resolveDriverType('   ', undefined)).toBe('');
     // …and inference's refusal reaches the caller through this function too.
     expect(() => resolveDriverType('', 'memory://')).toThrow(UnsupportedDriverError);
+    expect(() => resolveDriverType(undefined, 'redis://h/0')).toThrow(UnsupportedDriverError);
+  });
+
+  // An explicit driver still wins: the URL is not classified at all, so an
+  // unrecognised scheme beside OS_DATABASE_DRIVER is not refused here.
+  it('lets an explicit driver win over a URL whose scheme it does not recognise', () => {
+    expect(resolveDriverType('postgres', 'redis://h/0')).toBe('postgres');
+    expect(resolveDriverType('sqlite', 'redis://h/0')).toBe('sqlite');
   });
 });
 
@@ -190,6 +264,30 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
     expect(r!.driverId).toBe('sqlite');
     expect(r!.config.filename).toBe('./app.db');
     expect(r!.sqliteFilePath).toBe('./app.db');
+  });
+
+  // `sqlite:` / `sqlite://` are aliases of `file:` (the runtime host's
+  // `normalizeDatabaseUrl`): `sqlite://x.db` is `x.db`, never `//x.db`, which
+  // is the filesystem root. The cross-host equality is pinned in
+  // `driver-vocabulary-parity.test.ts`.
+  it.each([
+    ['sqlite://x.db', 'x.db'],
+    ['sqlite:x.db', 'x.db'],
+    ['sqlite:///var/lib/objectstack/x.db', '/var/lib/objectstack/x.db'],
+    ['SQLITE://x.db', 'x.db'],
+  ])('reads %s as the sqlite file %s', (url, file) => {
+    const r = resolveStorageDefinition(resolveDriverType(undefined, url), { databaseUrl: url, isDev: false });
+    expect(r!.config.filename).toBe(file);
+    expect(r!.sqliteFilePath).toBe(file);
+    // The banner keeps what the operator typed.
+    expect(r!.displayUrl).toBe(url);
+  });
+
+  it('reads sqlite://x.wasm.db as the WASM engine on the file x.wasm.db, by the same alias rule', () => {
+    const url = 'sqlite://x.wasm.db';
+    const r = resolveStorageDefinition(resolveDriverType(undefined, url), { databaseUrl: url, isDev: false });
+    expect(r!.driverId).toBe('sqlite-wasm');
+    expect(r!.config.filename).toBe('x.wasm.db');
   });
 
   it('dev default (no driver) declares sqlite :memory: with NO telemetry sibling', () => {

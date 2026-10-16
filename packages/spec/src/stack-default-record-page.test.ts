@@ -122,9 +122,17 @@ describe('defineStack — two default record pages for one object in one stack',
     ).not.toThrow();
   });
 
-  it('control: an isDefault page that is not a record page is outside the rule', () => {
-    expect(() =>
+  it('an isDefault page that is not a record page is no second default — the page parse refuses its flag (#23610)', () => {
+    const err = refusalOf(() =>
       defineStack(stack([recordPage('task_a', 'drp_task', true), { name: 'task_home', label: 'Home', type: 'home', isDefault: true }])),
+    );
+    expect({ code: err?.code, status: err?.status }).toEqual({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+    expect((err as { issues?: Array<{ path: unknown[] }> })!.issues!.map((i) => i.path.join('.'))).toEqual(['pages.1.isDefault']);
+  });
+
+  it('control: the same home page without the flag sits beside the default record page', () => {
+    expect(() =>
+      defineStack(stack([recordPage('task_a', 'drp_task', true), { name: 'task_home', label: 'Home', type: 'home' }])),
     ).not.toThrow();
   });
 

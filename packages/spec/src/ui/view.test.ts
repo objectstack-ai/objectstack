@@ -54,6 +54,14 @@ import {
   originOf,
 } from '../../scripts/lib/export-origins-testkit';
 
+// The three published entries the dual-source pins below compare. Loaded
+// here, at module top, and not by an `await import()` inside a case: a clocked
+// window measures behaviour, never loading, and these three loads were most
+// of this file's test time.
+import * as sharedEntry from '../shared/index';
+import * as uiEntry from '../ui/index';
+import * as apiEntry from '../api/index';
+
 // [#16577] The door that carries the `type: '<layout>'` axis these view
 // schemas deliberately leave open — imported so the two-door split is asserted
 // from the side that can see both.
@@ -625,7 +633,17 @@ describe('FormSectionSchema', () => {
     const result = FormSectionSchema.parse(section);
     expect(result.collapsible).toBe(false);
     expect(result.collapsed).toBe(false);
-    expect(result.columns).toBe(1);
+    // An undeclared density is the renderer's (by available width): the parse
+    // adds no `columns`, so "said nothing" stays distinguishable from `1`.
+    expect('columns' in result).toBe(false);
+  });
+
+  it('keeps a declared `columns` as the author\'s ceiling — string spellings parse to the number, out-of-range is refused', () => {
+    expect(FormSectionSchema.parse({ fields: ['name'], columns: 1 }).columns).toBe(1);
+    expect(FormSectionSchema.parse({ fields: ['name'], columns: '2' }).columns).toBe(2);
+    expect(FormSectionSchema.parse({ fields: ['name'], columns: 4 }).columns).toBe(4);
+    expect(FormSectionSchema.safeParse({ fields: ['name'], columns: 5 }).success).toBe(false);
+    expect(FormSectionSchema.safeParse({ fields: ['name'], columns: '0' }).success).toBe(false);
   });
 
   it('should accept form section with all properties', () => {
@@ -4040,20 +4058,14 @@ describe('HttpMethodSubsetSchema/HttpRequestSchema backward compat', () => {
 // re-exports `./shared`'s const — so the only thing that ever split was the type
 // alias, which is exactly the part runtime cannot see. Hence two layers.
 describe('HttpRequest is single-source across ./shared and ./ui', () => {
-  it('both entry points expose the very same schema declaration at runtime', async () => {
-    const sharedEntry = await import('../shared/index');
-    const uiEntry = await import('../ui/index');
-
+  it('both entry points expose the very same schema declaration at runtime', () => {
     // Identity, not shape: `lazySchema` returns one Proxy per declaration site,
     // so two declarations could never be `toBe`-equal however alike they look.
     // A re-introduced local `HttpRequestSchema` in view.zod.ts fails here.
     expect(uiEntry.HttpRequestSchema).toBe(sharedEntry.HttpRequestSchema);
   });
 
-  it('the shared declaration validates identically on both entries', async () => {
-    const sharedEntry = await import('../shared/index');
-    const uiEntry = await import('../ui/index');
-
+  it('the shared declaration validates identically on both entries', () => {
     for (const [entry, schema] of [
       ['./shared', sharedEntry.HttpRequestSchema],
       ['./ui', uiEntry.HttpRequestSchema],
@@ -4144,10 +4156,7 @@ describe('`HttpMethod` is not exported from ./ui', () => {
     expect(originFileOf('./shared', 'HttpMethod')).toBe('src/shared/http.zod.ts');
   });
 
-  it('keeps the two value ranges distinct: 7 for `HttpMethod`, 5 for `HttpMethodSubsetSchema`', async () => {
-    const sharedEntry = await import('../shared/index');
-    const apiEntry = await import('../api/index');
-
+  it('keeps the two value ranges distinct: 7 for `HttpMethod`, 5 for `HttpMethodSubsetSchema`', () => {
     // `./api` re-exports the const, so this is one object seen twice.
     expect(apiEntry.HttpMethod).toBe(sharedEntry.HttpMethod);
 
@@ -4163,9 +4172,7 @@ describe('`HttpMethod` is not exported from ./ui', () => {
     expect(sharedEntry.HttpMethodSubsetSchema.options).not.toContain('HEAD');
   });
 
-  it('rejects `HEAD` at the parse layer — the runtime the ./ui type must not out-promise', async () => {
-    const uiEntry = await import('../ui/index');
-
+  it('rejects `HEAD` at the parse layer — the runtime the ./ui type must not out-promise', () => {
     expect(() => uiEntry.HttpMethodSubsetSchema.parse('HEAD')).toThrow();
     expect(() => uiEntry.HttpMethodSubsetSchema.parse('OPTIONS')).toThrow();
     expect(() => uiEntry.HttpRequestSchema.parse({ url: '/api/data', method: 'HEAD' })).toThrow();

@@ -1,0 +1,9 @@
+{
+  "file": "packages/rest/src/discovery-routes.ts",
+  "adrs": [
+    "ADR-0076",
+    "ADR-0056",
+    "ADR-0138"
+  ],
+  "invariant": "The API-description REST doors, moved here whole from `rest-server.ts` (#23050 slice 7): the discovery document (`GET {base}` and `GET {base}/discovery`) and the OpenAPI pair (`GET {base}/openapi.json` and its `GET {base}/docs` viewer), each mounted once per base. ADR-0076 — `/discovery` advertises only what this server actually mounted, and mounts what it advertises (its D12): each `routes.*` entry is rewritten to the mounted path, the direct-mount and email entries are projections of the recorded mounts, `services.*.route` is a projection of the finished `routes` map, and `transactionalBatch` and `search` are the conjunction of the protocol's capability and this server's own mount flag; and this package is the SOLE owner of `/openapi.json`, whose built-in section is produced from this server's own route table rather than inherited from the static artifact. ADR-0056 — both API-description doors are default-deny: each handler's first act refuses an anonymous caller with the shared anonymous-deny 401 (its D2), and ADR-0138's closed list of anonymous doors names neither (its D2). An advertised route that is not mounted, a second owner of the OpenAPI document, or an API-description door that answers before the anonymous refusal is the drift these records forbid; the bodies' own comments carry each citation."
+}

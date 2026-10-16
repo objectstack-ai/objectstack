@@ -200,7 +200,8 @@ describe('controls — byte-identical parse output (measured on origin/main ce70
     });
     expect(branch).toBe('formOverlay');
     expect(JSON.stringify(data)).toBe(
-      '{"type":"simple","sections":[{"label":"Main","collapsible":false,"collapsed":false,"columns":1,"fields":["name"]}],'
+      // No `columns`: a section's undeclared density is the renderer's, and the parse adds no default.
+      '{"type":"simple","sections":[{"label":"Main","collapsible":false,"collapsed":false,"fields":["name"]}],'
       + '"name":"acct.f","object":"account","viewKind":"form"}',
     );
   });

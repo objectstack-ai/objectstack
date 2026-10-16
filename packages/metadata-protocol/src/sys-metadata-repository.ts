@@ -1632,11 +1632,22 @@ export class SysMetadataRepository implements MetadataRepository {
     };
     if (filter.type) where.type = filter.type;
     // [#21908] The explicit system opt-in, as `get` carries — see its note.
-    const rows = await this.withoutLegacyOrganizationRows(await this.engine.find('sys_metadata', {
-      where,
-      limit: filter.limit,
-      context: { isSystem: true },
-    }));
+    const query = { where, limit: filter.limit, context: { isSystem: true } };
+    let rows: any[] = (await this.engine.find('sys_metadata', query)) ?? [];
+    if (filter.limit === undefined) {
+      rows = await this.withoutLegacyOrganizationRows(rows);
+    } else if (rows.length > 0) {
+      // [#23609] The legacy rows are left out BEFORE `limit` cuts the page:
+      // filtered after, a page they sat in came back short. Only when the page
+      // holds one is it re-read with them excluded in the query itself.
+      const legacy = await this.legacyOrganizationRowIds(query.context);
+      if (rows.some((row) => legacy.has(String(row?.id)))) {
+        rows = (await this.engine.find('sys_metadata', {
+          ...query,
+          where: { $and: [where, { id: { $nin: [...legacy] } }] },
+        })) ?? [];
+      }
+    }
     for (const row of rows) {
       if (filter.nameContains && !String(row.name).includes(filter.nameContains)) continue;
       const item = this.rowToItem(

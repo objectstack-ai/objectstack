@@ -218,6 +218,9 @@ export const SysApprovalRequest = ObjectSchema.create({
       // dropped-deferral error, and `success: false` — and since commit 1cba33f16 the
       // loader also WARNS at load time, before the engine rejects the row.
       referenceVia: 'object_name',
+      // A `cancelled` request whose `cancel_reason` is `record_deleted` names a
+      // record the platform deleted: a renderer draws that option's label, not a link.
+      referenceDeletedWhen: { field: 'cancel_reason', value: 'record_deleted' },
     }),
 
     submitter_id: Field.lookup('sys_user', {

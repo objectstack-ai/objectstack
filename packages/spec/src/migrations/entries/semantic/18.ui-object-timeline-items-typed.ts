@@ -2,17 +2,18 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// #21464 — the `object-timeline` page block's `items` was `z.array(z.unknown())`:
-// each entry is objectui's authored timeline element (`TimelineFeedItem` /
-// `TimelineGanttItem`, ruled on objectui#6356), which the spec did not declare,
-// and the arm an entry must be is chosen by the row's `variant`. The maintainer
-// ruled on #21704 (fork 4, letter B): both arms closed, a feed entry's `content`
-// opaque, a row refinement pairing each entry with the arm `variant` selects,
-// and a gantt bar's dates a string or a number. D3 only: page-component
-// `properties` is not parsed on the metadata save or load path, so a stored page
-// is never refused at load; and the authored census found no drawn entry to respell —
-// the refused values are objectui's probes of its render-time gantt date
-// diagnostic.
+// #21464 — the `object-timeline` page block's `items` was
+// `z.array(z.unknown())`: each entry is objectui's authored timeline element
+// (`TimelineFeedItem` / `TimelineGanttItem`, ruled on objectui#6356), which the
+// spec did not declare, and the arm an entry must be is chosen by the row's
+// `variant`. The maintainer ruled on #21704 (fork 4, letter B): both arms
+// closed, a feed entry's `content` opaque, a row refinement pairing each entry
+// with the arm `variant` selects, and a gantt bar's dates a string or a number.
+// D3 only: page-component `properties` is not parsed on the metadata load path,
+// so a stored page is never refused at load (its next save meets the
+// component-props gate at the metadata save door); and the authored census
+// found no drawn entry to respell — the refused values are objectui's probes of
+// its render-time gantt date diagnostic.
 export const entry: SemanticMigration = {
   id: 'ui-object-timeline-items-typed',
   surface: 'page `object-timeline` components — `properties.items` (whose entries used to accept any value)',

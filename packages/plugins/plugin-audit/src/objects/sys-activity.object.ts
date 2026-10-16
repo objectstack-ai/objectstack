@@ -277,6 +277,36 @@ export const SysActivity = ObjectSchema.create({
       description: 'JSON-serialized additional context',
       group: 'Context',
     }),
+
+    // ── Writer-stamped read-rule columns (ADR-0139 D4, E6) ───────────
+    // Stamped at write time by ONE derivation (`activity-changed-fields.ts`):
+    // the CRUD mirror, a before-insert hook for every other writer, and the
+    // stored-row backfill (`os migrate activity-changed-fields`). The
+    // withheld-row rule (`activity-field-redaction.ts`) is a predicate over
+    // them; a row with `changed_fields` NULL is unstamped and is withheld from
+    // every non-system reader until the backfill stamps it.
+    changed_fields: {
+      type: 'tags',
+      label: 'Changed Fields',
+      required: false,
+      readonly: true,
+      description:
+        'The key set of the recorded change: for an update, every field its recorded old/new values name; '
+        + 'empty for every other row. Stamped by the platform at write time; served narrowed to the fields the '
+        + 'reader is served. NULL means the row is not stamped yet (run `os migrate activity-changed-fields`).',
+      group: 'Context',
+    },
+
+    milestone_key: Field.text({
+      label: 'Milestone Key',
+      required: false,
+      readonly: true,
+      description:
+        'For a fired activity milestone, one sorted, comma-joined key of every field the object\'s '
+        + 'activityMilestones declaration watched when it fired; NULL for every other row. Stamped by the '
+        + 'platform at write time and never served: the read rule compares it with the current declaration.',
+      group: 'Context',
+    }),
   },
 
   indexes: [

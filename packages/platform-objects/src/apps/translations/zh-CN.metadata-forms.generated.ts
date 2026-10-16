@@ -632,6 +632,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "多态指针伴随字段",
         helpText: "把该文本字段声明为多态指针的 id 半边：此处填写同一对象上保存目标对象名的另一个字段，目标逐行决定（ADR-0052 §5）。使用 snake_case；仅限文本字段，且与 `reference` 互斥。"
       },
+      referenceDeletedWhen: {
+        label: "多态指针目标已删除条件",
+        helpText: "仅与 referenceVia 同用：当同一对象上某个选择（select）字段取其某个选项值时，表示该指针指向的记录已被平台删除，指针以该选项的标签显示为已删除标记。未设置：不会把任何行标记为已删除。"
+      },
+      "referenceDeletedWhen.field": {
+        label: "字段",
+        helpText: "本对象上的同级选择字段（snake_case），例如 cancel_reason。必须是声明了内联选项的单选字段。"
+      },
+      "referenceDeletedWhen.value": {
+        label: "取值",
+        helpText: "该选择字段中表示目标已被删除的选项值，例如 record_deleted。必须是其已声明的选项值之一。"
+      },
       mailAssociation: {
         label: "匹配入站邮件",
         helpText: "把入站邮件关联到本对象中该字段值与邮件发件人或某位收件人地址相同的记录（不区分大小写；不含邮箱自身的地址）。仅限邮箱字段。只在配置了邮箱服务的环境中生效。"
@@ -2190,7 +2202,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API 端点",
-    description: "声明式 HTTP 端点——在既有管道之上提供稳定的 URL 与策略层（ADR-0121）"
+    description: "其他系统调用的稳定 HTTP URL，用于运行流程或操作应用中的记录"
   },
   translation: {
     label: "翻译"
@@ -2270,11 +2282,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "文档",
-    description: "软件包文档——扁平的 Markdown 文档项（ADR-0046）"
+    description: "以 Markdown 编写的帮助页面，可由软件包随附，也可自行编写"
   },
   book: {
     label: "文档手册",
-    description: "文档导航主干——有序分组，成员由派生确定（ADR-0046 §6）"
+    description: "将帮助页面按顺序分节组织的目录"
   },
   permission: {
     label: "权限集",
@@ -2378,7 +2390,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   capability: {
     label: "能力",
-    description: "软件包声明的授权能力——ADR-0066 D1 的定义侧（授予在权限集上；要求在资源上）"
+    description: "软件包定义的一项权限；通过权限集授予"
   },
   agent: {
     label: "AI 代理",

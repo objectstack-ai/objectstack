@@ -20,9 +20,11 @@ export const entry: SemanticMigration = {
     + 'beside `operation: \'update\'`: a row with an `api` or `script` executor, the write and a hop parsed, while '
     + 'the same action was refused. The rows now declare `ActionSchema`\'s own `operation` enum and refuse the '
     + 'pairing with the action\'s own text: the hop would follow the write, which runs no handler and no executor, '
-    + 'so its success carries no result `${result.*}` could read. A page\'s `properties` is not parsed on the '
-    + 'metadata save or load path; `os validate`\'s props gate parses it against these same rows and reports the '
-    + 'refusal at the row\'s `operation` or `onSuccess`. Measured producers: none in this repository; none in '
+    + 'so its success carries no result `${result.*}` could read. The component-props gate parses a page\'s '
+    + '`properties` against these same rows and reports the refusal at the row\'s `operation` or `onSuccess` on '
+    + '`os validate`, `os build` and `os lint`. A stored page still loads, because a page component\'s '
+    + '`properties` is not parsed on the metadata load path, and the next save of the page meets the '
+    + 'component-props gate at the metadata save door. Measured producers: none in this repository; none in '
     + 'objectui\'s action rows at its pin or main.',
   acceptanceCriteria:
     'Every page action row\'s `operation` is absent or `\'update\'`, and no row with `operation: \'update\'` carries '

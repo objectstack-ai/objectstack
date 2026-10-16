@@ -394,16 +394,22 @@ type ClassifiedServiceLookup =
  * as `message` and `code`.
  *
  * The arm must AGREE with the envelope already decided, as at the Hono doors:
- * its status must be the thrown one and its code `UNIQUE_VIOLATION`, so it can
+ * its status must be the thrown one and its code the envelope's, so it can
  * only add context, never change the answer. Disagreeing, it adds nothing.
+ * The envelope's code for this class is itself read off the same arm
+ * (`HttpDispatcher.errorFromThrown`, #23714), so this function spells no copy
+ * of it either.
  *
  * ⛔ Deliberately not every arm. The dispatcher's other 409s
  * (`CONCURRENT_UPDATE`, `DELETE_RESTRICTED`) keep the body they have; widening
  * the context this door carries for them is a change of its own.
  */
-function duplicateArmContext(thrown: unknown, status: number): Record<string, unknown> | undefined {
+function duplicateArmContext(
+    thrown: unknown,
+    envelope: { status: number; code: string },
+): Record<string, unknown> | undefined {
     const arm = structuredCodeAnswer(thrown);
-    if (arm === undefined || arm.status !== status || arm.body.code !== 'UNIQUE_VIOLATION') return undefined;
+    if (arm === undefined || arm.status !== envelope.status || arm.body.code !== envelope.code) return undefined;
     const context = Object.fromEntries(
         Object.entries(arm.body).filter(([key]) => key !== 'error' && key !== 'code'),
     );
@@ -1210,9 +1216,11 @@ export class HttpDispatcher {
      * So this method decides the code for that class before writing it, keyed
      * exactly as those doors key it: the registered code AND the class name
      * ({@link isEngineDuplicateRecordEnvelope}, `@objectstack/types`), never
-     * message text. A producer that merely SPEAKS `DUPLICATE_RECORD` (a
-     * handler or hook throwing the registered code without being the
-     * engine's class) keeps its own code and its own body. Beside the code,
+     * message text. The code itself is read off `RestServer`'s arm
+     * (`structuredCodeAnswer`, #23714), never spelled here. A producer that
+     * merely SPEAKS `DUPLICATE_RECORD` (a handler or hook throwing the
+     * registered code without being the engine's class) keeps its own code
+     * and its own body. Beside the code,
      * the envelope's `details` carries what `RestServer`'s arm carries beside
      * its own, read off that one classification ({@link duplicateArmContext})
      * rather than listed here: `developerMessage`, `object`, and `field` when
@@ -1231,9 +1239,17 @@ export class HttpDispatcher {
         // [#23686] The code this envelope carries: the resolver's, except the
         // engine's unique-constraint envelope, which crosses HTTP as the one
         // ruled wire spelling (see "One wire spelling" above).
+        //
+        // [#23714] That wire code is read off the shared classification's arm
+        // for the class (`structuredCodeAnswer`, the arm `RestServer` answers
+        // with), so this package spells no copy of it: the stamp stays where
+        // the error-code ledger lists it, under `@objectstack/types`. The
+        // resolver's code is kept only if that arm ever answered no string
+        // code for the class.
         const engineDuplicate = isEngineDuplicateRecordEnvelope(e);
-        const code = engineDuplicate ? 'UNIQUE_VIOLATION' : thrown.code;
-        const armContext = engineDuplicate ? duplicateArmContext(e, thrown.status) : undefined;
+        const duplicateArmCode = engineDuplicate ? structuredCodeAnswer(e)?.body.code : undefined;
+        const code = typeof duplicateArmCode === 'string' ? duplicateArmCode : thrown.code;
+        const armContext = engineDuplicate ? duplicateArmContext(e, { status: thrown.status, code }) : undefined;
         const details = armContext ? { ...thrown.details, ...armContext } : thrown.details;
         // [#9106] `code`, the NARROWED spelling — the same one the REST door
         // has served since #8016, so the two doors now agree on `error.code`

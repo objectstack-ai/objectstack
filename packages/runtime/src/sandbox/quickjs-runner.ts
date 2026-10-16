@@ -65,6 +65,11 @@ const DEFAULT_MEMORY_MB = 32;
 // interrupt handler can't fire while no VM code runs — so a separate, generous
 // wall ceiling cuts it off. 30s matches the spec cap on `ScriptBody.timeoutMs`.
 const DEFAULT_WALL_CEILING_MS = 30_000;
+// [#23723] What the wrapper's reject handler records for a rejection no read
+// can flatten (see REJECT_HANDLER), so the run still ends at once on the
+// "threw" path instead of at the wall ceiling. A fixed sentence: it names no
+// host detail and no stack, because there is nothing readable to name.
+const UNREADABLE_REJECTION_SENTENCE = 'the script threw a value that could not be read';
 
 export interface QuickJSScriptRunnerOptions {
   /** Default per-invocation **CPU-time** budget for hooks (ms). */
@@ -325,6 +330,18 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // business message. `code` and the rest still ride `__errorInfo`. An
       // `Error`, a primitive, and a value whose reads throw keep the
       // flattening below unchanged.
+      //
+      // [#23723] …and every rejection is RECORDED, even one no read can
+      // flatten. The pump loop ends the run only when `__error` is a
+      // non-empty string; a `message` getter that throws, a null-prototype
+      // object whose `String()` throws, or a read that yields `''`
+      // (`throw ''`) used to leave it unset or empty, so the run waited out
+      // the wall-clock ceiling and every door answered a `500` naming no
+      // refusal. Such a value is recorded as the fixed
+      // {@link UNREADABLE_REJECTION_SENTENCE} instead, through the same
+      // "threw" path as any other rejection. It names no host detail and no
+      // stack. Every value a read can flatten keeps its flattening byte for
+      // byte: the fallback expression is unchanged, only guarded.
       const REJECT_HANDLER =
         `function(e){
               var flat;
@@ -338,7 +355,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
                   }
                 }
               } catch (_) { flat = undefined; }
-              globalThis.__error = flat !== undefined ? flat : ((e && e.message) ? (e.name + ': ' + e.message) : String(e));
+              try {
+                if (flat === undefined) flat = (e && e.message) ? (e.name + ': ' + e.message) : String(e);
+              } catch (_) { flat = undefined; }
+              globalThis.__error = (typeof flat === 'string' && flat !== '') ? flat : ${JSON.stringify(`Error: ${UNREADABLE_REJECTION_SENTENCE}`)};
               try {
                 globalThis.__errorInfo = (e && (e.code || e.fields || e.status || e.userMessage || e['${SANDBOX_FAULT_PROP}']))
                   ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })

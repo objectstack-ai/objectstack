@@ -527,6 +527,41 @@ export type ArtifactPackageEntry = z.input<typeof ArtifactPackageEntrySchema>;
 export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySchema>;
 
 /**
+ * The datasource name the HOST owns (#3826, #23634): the runtime declares and
+ * connects `default` itself (`DefaultDatasourcePlugin`, from `OS_DATABASE_URL`
+ * or the dev fallback), and `AppPlugin` refuses a stack that declares it in
+ * every boot posture — with a URL, with `--dev`, and on the standalone path.
+ * The comparison is the runtime's: the entry's `name` equals `default` exactly
+ * (the map form arrives here already normalized, key → `name`; every other
+ * spelling of the word is already refused by `DatasourceSchema.name`'s
+ * snake_case pattern).
+ *
+ * The refusal lives on the STACK's collection, ⛔ never on
+ * {@link DatasourceSchema}: that schema also documents the host's own
+ * `default` row (the registry, the admin list, the metadata door), which must
+ * keep parsing. Saying it here moves the runtime's refusal to the authoring
+ * doors — `defineStack`, `os validate` and publish — with the same sentence
+ * and the remedy, instead of after the boot's earlier plugins have started.
+ */
+const HOST_RESERVED_DATASOURCE_NAME = 'default';
+
+function refuseHostReservedDatasourceName(datasources: readonly { name?: unknown }[], ctx: z.RefinementCtx): void {
+  datasources.forEach((datasource, index) => {
+    if (datasource?.name !== HOST_RESERVED_DATASOURCE_NAME) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: [index, 'name'],
+      message:
+        `This stack declares a datasource named '${HOST_RESERVED_DATASOURCE_NAME}' — that name is reserved for ` +
+        `the host's primary datasource, and every boot refuses a stack that declares it. To give the project ` +
+        `its own primary database, set OS_DATABASE_URL and omit this entry. To add a datasource of the stack's ` +
+        `own, declare it under another name (e.g. 'app_primary') and route objects to it explicitly (an ` +
+        `object's \`datasource\`, or a \`datasourceMapping\` rule).`,
+    });
+  });
+}
+
+/**
  * Every metadata COLLECTION `ObjectStackDefinitionSchema` declares, as one
  * named shape.
  *
@@ -560,7 +595,10 @@ export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySche
  * @internal
  */
 const STACK_DEFINITION_COLLECTIONS_SHAPE = {
-  datasources: z.array(DatasourceSchema).optional().describe('External Data Connections'),
+  datasources: z.array(DatasourceSchema)
+    .superRefine(refuseHostReservedDatasourceName)
+    .optional()
+    .describe('External Data Connections'),
 
   /**
    * Datasource Mapping Configuration

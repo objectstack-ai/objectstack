@@ -181,6 +181,14 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       metadata: {
         label: "元数据",
         help: "附加上下文的 JSON 序列化内容"
+      },
+      changed_fields: {
+        label: "变更字段",
+        help: "所记录变更的字段键集合:对于更新,为其记录的旧值/新值涉及的每个字段;其他行为空。由平台在写入时标记;仅返回读者有权查看的字段。NULL 表示该行尚未标记(请运行 `os migrate activity-changed-fields`)。"
+      },
+      milestone_key: {
+        label: "里程碑键",
+        help: "对于已触发的活动里程碑,为该对象 activityMilestones 声明在触发时所监视的全部字段的排序、逗号连接的键;其他行为 NULL。由平台在写入时标记且从不返回:读取规则会将其与当前声明进行比较。"
       }
     }
   },

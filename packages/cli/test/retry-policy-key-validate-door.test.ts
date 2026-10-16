@@ -92,10 +92,12 @@ const FIXTURES = {
   /** The measured slip, `maxRetry` for `maxRetries`, under a `try_catch` node's `retry` AND on a job's `retryPolicy`. */
   slip: stackOf({ maxRetry: 2 }, { ...DECLARED_POLICY, maxRetry: 3 }),
   /**
-   * Every declared key on the job, and on the flow the pre-17 `retryDelayMs`
-   * alone, which the conversion renames before the judge sees it.
+   * Every declared key on the job and on the flow. (The flow spelled its base
+   * delay with the pre-17 `retryDelayMs` until #23543 F2 retired
+   * `retry-policy-converged` from the load path; an authored `retryDelayMs` now
+   * meets its tombstone at this door, so the fixture writes `backoffMs`.)
    */
-  declared: stackOf({ maxRetries: 2, retryDelayMs: 500, backoffMultiplier: 2, maxRetryDelayMs: 10000, jitter: true }, DECLARED_POLICY),
+  declared: stackOf({ maxRetries: 2, backoffMs: 500, backoffMultiplier: 2, maxRetryDelayMs: 10000, jitter: true }, DECLARED_POLICY),
 } as const;
 
 interface Run {

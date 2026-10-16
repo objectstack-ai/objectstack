@@ -1,5 +1,70 @@
 # @objectstack/plugin-email
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- fc1a55a: feat(plugin-email): a built-in `auth.account_invitation` email template, for an account an administrator created, in four locales
+  
+  Clause-②: yes (widening)
+  
+  A new built-in template, `auth.account_invitation`, ships in `en-US`, `zh-CN`, `ja-JP` and `es-ES`. It is registered like the other built-in auth templates, so it is listed and resolved the same way, and a Studio save overrides it for an environment.
+  
+  - **When it is sent.** `@objectstack/plugin-auth` sends it when an administrator creates an account for someone and emails them a link to set their first password. Today that is the identity import (Setup › Users › Import, `POST /api/v1/auth/admin/import-users`).
+  - **What an imported user receives, FROM → TO.** FROM the password-reset email ("We received a request to reset the password … If you didn't request this, ignore this email"). TO an invitation that names who created the account, the account's address, a "Set your password" link and when that link expires.
+  - **Its variables.** `user.name` (optional), `user.email`, `inviter.name`, `inviter.email`, `setPasswordUrl`, `expiresInMinutes`, and `appName` (optional). Every one except the two optional ones is required, so a send without one is refused with `MISSING_VARIABLES` rather than half-rendered. It names no organization and no role: an imported user may have neither.
+  - **Exports.** `AUTH_ACCOUNT_INVITATION_TEMPLATE`, its three locale rows (`_ZH_CN`, `_JA_JP`, `_ES_ES`) and the list `AUTH_ACCOUNT_INVITATION_TEMPLATES`. `BUILTIN_AUTH_TEMPLATES` grows from 24 rows to 28.
+  - **Unchanged.** `auth.invitation` (an invitation into an organization) and `auth.password_reset` render byte for byte as before, in every locale.
+
+### Patch Changes
+
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes

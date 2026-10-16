@@ -632,6 +632,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Referencia mediante",
         helpText: "Convierte este campo de texto en la mitad de id de un puntero polimórfico: nombra el campo HERMANO del mismo objeto que guarda, fila a fila, el nombre del objeto destino (ADR-0052 §5). En snake_case; solo campos de texto y excluyente con `reference`."
       },
+      referenceDeletedWhen: {
+        label: "Referencia eliminada cuando",
+        helpText: "Solo junto a referenceVia: en las filas donde un campo de selección hermano tiene una de sus opciones, el registro al que apunta este puntero fue eliminado por la plataforma, y el puntero se muestra como eliminado con la etiqueta de esa opción. Sin definir: ninguna fila se marca como eliminada."
+      },
+      "referenceDeletedWhen.field": {
+        label: "Campo",
+        helpText: "El campo de selección hermano de este objeto (snake_case), p. ej. cancel_reason. Debe ser una selección de un solo valor que declare opciones en línea."
+      },
+      "referenceDeletedWhen.value": {
+        label: "Valor",
+        helpText: "El valor de opción de ese campo de selección que indica que el destino fue eliminado, p. ej. record_deleted. Debe ser uno de sus valores de opción declarados."
+      },
       mailAssociation: {
         label: "Asociar correo entrante",
         helpText: "Vincula el correo entrante a los registros de este objeto cuyo valor en este campo coincide con el remitente o con algún destinatario del mensaje (sin distinguir mayúsculas; se excluye la dirección del propio buzón). Solo campos de email. Solo surte efecto donde hay un servicio de buzón configurado."
@@ -2190,7 +2202,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "Endpoint API",
-    description: "Endpoint HTTP declarativo — una URL estable y una capa de política sobre un pipeline existente (ADR-0121)"
+    description: "URL HTTP estable a la que llaman otros sistemas para ejecutar un flujo o trabajar con los registros de la aplicación"
   },
   translation: {
     label: "Traducción"
@@ -2270,11 +2282,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "Documentación",
-    description: "Documentación del paquete — elementos Markdown planos (ADR-0046)"
+    description: "Página de ayuda en Markdown, incluida en un paquete o redactada directamente"
   },
   book: {
     label: "Libro de documentación",
-    description: "Columna vertebral de navegación de la documentación — grupos ordenados con pertenencia derivada (ADR-0046 §6)"
+    description: "Índice que organiza las páginas de ayuda en secciones ordenadas"
   },
   permission: {
     label: "Conjunto de permisos",
@@ -2378,7 +2390,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   capability: {
     label: "Capacidad",
-    description: "Capacidad de autorización declarada por el paquete — el lado de la DEFINICIÓN de ADR-0066 D1 (las concesiones residen en los conjuntos de permisos; los requisitos, en los recursos)"
+    description: "Permiso que define un paquete; se concede mediante conjuntos de permisos"
   },
   agent: {
     label: "Agente de IA",

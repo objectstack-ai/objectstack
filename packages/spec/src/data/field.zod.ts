@@ -1473,6 +1473,46 @@ export const FieldSchema = lazySchema(() => {
     + 'loudly instead of stored verbatim. Adds no referential integrity or $expand behavior.'
   ),
   /**
+   * Platform-deleted target predicate for a polymorphic pointer (objectui#12489
+   * ruling `6203737086`, letter A). Rides beside {@link referenceVia}.
+   *
+   * Declares that, on a row whose sibling `select` field `field` holds the
+   * option value `value`, the record this pointer names was DELETED — by the
+   * platform's own assertion, not a guess from a failed read. A renderer draws
+   * the tombstone from that option's own label, reads nothing and links
+   * nothing. `sys_approval_request.record_id` with
+   * `{ field: 'cancel_reason', value: 'record_deleted' }` is the producer the
+   * ruling names.
+   *
+   * Refused at parse unless the declaration is honest:
+   * - on a field that declares no `referenceVia` (this schema's superRefine) —
+   *   there is no per-row pointer for the predicate to qualify;
+   * - when `field` is not a declared single-value `select` with inline
+   *   `options` on the same object, or `value` is not one of those options
+   *   (`ObjectSchema`'s superRefine — only the object holds the sibling map).
+   */
+  referenceDeletedWhen: strictObject({
+    surface: "this field's `referenceDeletedWhen` predicate",
+    history:
+      'This shape was closed from the day it was declared — an unknown key here was never accepted, so a '
+      + 'misspelled predicate cannot parse and silently never mark a target deleted.',
+    aliases: { option: 'value', equals: 'value', sibling: 'field' },
+  }, {
+    field: z.string().regex(/^[a-z_][a-z0-9_]*$/).describe(
+      'The SIBLING `select` field on the same object whose value marks the target as deleted (snake_case).',
+    ),
+    value: z.string().describe(
+      'The option value of that `select` field that means "the referenced record was deleted by the platform".',
+    ),
+  }).optional().describe(
+    'Marks the record a `referenceVia` pointer names as PLATFORM-DELETED on rows where a sibling `select` '
+    + "field holds one declared option — e.g. `record_id` with `{ field: 'cancel_reason', value: "
+    + "'record_deleted' }`. A renderer then draws a tombstone from that option's own label, reads nothing "
+    + 'and links nothing. Valid only beside `referenceVia`; `field` must be a single-value `select` on the '
+    + 'same object declaring inline `options`, and `value` one of its option values — any other shape is '
+    + 'refused at parse.'
+  ),
+  /**
    * Inbound mail association — `email` fields only (#22870; ruling
    * `6116489638`, Q1 → A, under the inbound-mail design record on #8998).
    *
@@ -2243,6 +2283,24 @@ export const FieldSchema = lazySchema(() => {
         'sibling column, the other a single static target object — both cannot be honest about where ' +
         'this field points. Keep `referenceVia` for a polymorphic pointer, or `reference` (on a ' +
         'lookup/master_detail field) for a fixed relationship.',
+    });
+  }
+  // [objectui#12489 ruling 6203737086, letter A] `referenceDeletedWhen`
+  // qualifies a polymorphic pointer: it says WHEN the record the pointer names
+  // was deleted by the platform. Without `referenceVia` there is no pointer to
+  // qualify, so the predicate would parse and mark nothing. The sibling half
+  // (a declared `select` and one of its options) needs the object's field map
+  // and is judged in `ObjectSchema`'s superRefine.
+  if (field.referenceDeletedWhen !== undefined && field.referenceVia === undefined) {
+    ctx.addIssue({
+      code: 'custom',
+      path: ['referenceDeletedWhen'],
+      message:
+        '`referenceDeletedWhen` is only valid beside `referenceVia`: it marks the record a polymorphic ' +
+        `pointer names as platform-deleted when the sibling \`select\` field \`${field.referenceDeletedWhen.field}\` ` +
+        `holds \`${field.referenceDeletedWhen.value}\`, and this field declares no pointer. Add ` +
+        '`referenceVia` (naming the sibling that holds the target object name) if this field is the id ' +
+        'half of a pointer pair, or drop the key.',
     });
   }
   // [#22870] `mailAssociation` marks a field as holding a correspondent's

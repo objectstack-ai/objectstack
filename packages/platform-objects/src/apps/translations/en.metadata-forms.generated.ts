@@ -632,6 +632,18 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Reference Via",
         helpText: "Makes this text field the id half of a polymorphic pointer: names the SIBLING field on the same object that holds the target object name, per row (ADR-0052 §5). snake_case; text fields only, and mutually exclusive with `reference`."
       },
+      referenceDeletedWhen: {
+        label: "Reference Deleted When",
+        helpText: "Only beside referenceVia: on rows where a sibling select field holds one of its options, the record this pointer names was deleted by the platform, and the pointer is shown as a tombstone labelled by that option. Unset: no row is marked deleted."
+      },
+      "referenceDeletedWhen.field": {
+        label: "Field",
+        helpText: "The sibling select field on this object (snake_case), e.g. cancel_reason. It must be a single-value select declaring inline options."
+      },
+      "referenceDeletedWhen.value": {
+        label: "Value",
+        helpText: "The option value of that select field meaning the target was deleted, e.g. record_deleted. It must be one of its declared option values."
+      },
       mailAssociation: {
         label: "Match Inbound Mail",
         helpText: "Links inbound mail to records of this object whose value in this field matches the message's sender or a recipient (case-insensitive; the mailbox's own address excluded). Email fields only. Takes effect only where a mailbox service is set up."
@@ -2190,7 +2202,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   api: {
     label: "API Endpoint",
-    description: "Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)"
+    description: "A stable HTTP URL that other systems call to run a flow or work with records in the app"
   },
   translation: {
     label: "Translation"
@@ -2270,11 +2282,11 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   doc: {
     label: "Documentation",
-    description: "Package documentation — flat Markdown items (ADR-0046)"
+    description: "A help page written in Markdown that a package ships or you write yourself"
   },
   book: {
     label: "Documentation Book",
-    description: "Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)"
+    description: "A table of contents that groups help pages into ordered sections"
   },
   permission: {
     label: "Permission Set",
@@ -2378,7 +2390,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
   },
   capability: {
     label: "Capability",
-    description: "Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)"
+    description: "A permission a package defines; you grant it through permission sets"
   },
   agent: {
     label: "AI Agent",
