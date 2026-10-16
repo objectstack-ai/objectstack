@@ -15,6 +15,8 @@
 // `--skip-install` keeps every run here fast and offline: `detectPackageManager()`
 // is a read-only `<pm> --version` probe, so its result — and therefore what
 // "Next steps" prints — does not depend on an install actually following it.
+// The install-outcome legs at the foot of the file run without it, against a
+// stub `pnpm` that answers `install` itself, so they stay offline too.
 //
 // ─── WHY EVERY LEG STUBS pnpm, INCLUDING THE ONE WHERE pnpm WORKS ───────────
 //
@@ -146,13 +148,56 @@ function nextStepsSection(stdout: string): string {
   return stdout.split('Next steps:')[1] ?? '';
 }
 
-/** Run the real CLI with --skip-install --skip-skills under `bin`'s PATH. */
-function runScaffold(bin: string): string {
+/**
+ * Only the "Next steps:" command list — the lines up to the blank line that
+ * ends it. Narrower again than `nextStepsSection`: the "AI Skills" block that
+ * follows says "After `<pm> install`:" under `--skip-install`, so an install
+ * assertion against the whole section would pass without the list naming it.
+ */
+function nextStepsList(stdout: string): string {
+  return nextStepsSection(stdout).split(/\n\s*\n/)[0] ?? '';
+}
+
+/**
+ * `node` + `npm` reachable and a stub `pnpm` whose `--version` succeeds and
+ * whose `install` exits with `installExit`. Every call's argv is appended to
+ * `calls.log` beside it, so a leg can prove the install was (or was not)
+ * attempted from the record rather than from the wording of a warning.
+ */
+function makeInstallStubPnpmBin(installExit: number): string {
+  const dir = makeBin();
+  const script =
+    '#!/bin/sh\n' +
+    `echo "$*" >> "${path.join(dir, 'calls.log')}"\n` +
+    'case "$1" in\n' +
+    '  --version) echo "10.31.0"; exit 0 ;;\n' +
+    `  install) exit ${installExit} ;;\n` +
+    'esac\n' +
+    'exit 64\n';
+  fs.writeFileSync(path.join(dir, 'pnpm'), script, { mode: 0o755 });
+  return dir;
+}
+
+/** The argv of every stub `pnpm` call a leg made, one entry per call. */
+function stubPnpmCalls(bin: string): string[] {
+  const log = path.join(bin, 'calls.log');
+  return fs.existsSync(log) ? fs.readFileSync(log, 'utf8').split('\n').filter(Boolean) : [];
+}
+
+/** Run the real CLI with --skip-skills (and, by default, --skip-install) under `bin`'s PATH. */
+function runScaffold(bin: string, { skipInstall = true }: { skipInstall?: boolean } = {}): string {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'create-objectstack-nextsteps-'));
   try {
     return execFileSync(
       TSX,
-      [INDEX_TS, 'my-app', '--template', 'blank', '--skip-install', '--skip-skills'],
+      [
+        INDEX_TS,
+        'my-app',
+        '--template',
+        'blank',
+        ...(skipInstall ? ['--skip-install'] : []),
+        '--skip-skills',
+      ],
       { cwd: tmp, env: { ...process.env, PATH: childPath(bin) }, encoding: 'utf8' },
     );
   } finally {
@@ -256,6 +301,64 @@ describe('a failed pnpm probe is reported as a fallback, not as a choice', () =>
   it('a succeeding probe never claims a fallback', () => {
     withBin(() => makeStubPnpmBin(0), (bin) => {
       expect(runScaffold(bin)).not.toContain('using npm as a fallback');
+    });
+  }, 20_000);
+});
+
+// ─── A failed install leaves the same empty node_modules as a skipped one ───
+//
+// "Next steps" used to print `<pm> install` only under `--skip-install`, so a
+// run whose install was ATTEMPTED and FAILED (a network error, a registry
+// outage, an engine mismatch, an npm crash) printed the same list as a
+// successful one, and the next command it named ran against an empty
+// node_modules. The condition is now "the install did not complete". The
+// install's outcome is the stub's exit status, never the network, for the
+// reason the header gives; the stub's call log proves each leg took the path
+// it claims.
+
+/** The index of the first line of `list` matching `re`, or -1. */
+function lineIndex(list: string, re: RegExp): number {
+  return list.split('\n').findIndex((line) => re.test(line));
+}
+
+describe('a failed install still lists the install step in "Next steps" (#23865)', () => {
+  it('install attempted and failed: the list names `pnpm install`, before the run commands', () => {
+    withBin(() => makeInstallStubPnpmBin(1), (bin) => {
+      expectPnpmResolvesToStub(bin);
+
+      const list = nextStepsList(runScaffold(bin, { skipInstall: false }));
+
+      // Attempted, and the stub answered it with exit 1.
+      expect(stubPnpmCalls(bin)).toContain('install');
+      const install = lineIndex(list, /\bpnpm install\b/);
+      expect(install).toBeGreaterThanOrEqual(0);
+      expect(lineIndex(list, /\bpnpm run dev\b/)).toBeGreaterThan(install);
+    });
+  }, 20_000);
+
+  it('CONTROL: install attempted and succeeded, so no install step in the list', () => {
+    withBin(() => makeInstallStubPnpmBin(0), (bin) => {
+      expectPnpmResolvesToStub(bin);
+
+      const list = nextStepsList(runScaffold(bin, { skipInstall: false }));
+
+      expect(stubPnpmCalls(bin)).toContain('install');
+      expect(list).toMatch(/\bpnpm run dev\b/);
+      expect(list).not.toMatch(/\bpnpm install\b/);
+    });
+  }, 20_000);
+
+  it('CONTROL: `--skip-install` still names `pnpm install` before the run commands', () => {
+    withBin(() => makeInstallStubPnpmBin(0), (bin) => {
+      expectPnpmResolvesToStub(bin);
+
+      const list = nextStepsList(runScaffold(bin));
+
+      // Skipped, not attempted: the only call the stub saw is the probe.
+      expect(stubPnpmCalls(bin)).toEqual(['--version']);
+      const install = lineIndex(list, /\bpnpm install\b/);
+      expect(install).toBeGreaterThanOrEqual(0);
+      expect(lineIndex(list, /\bpnpm run dev\b/)).toBeGreaterThan(install);
     });
   }, 20_000);
 });

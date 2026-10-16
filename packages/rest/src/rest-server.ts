@@ -341,6 +341,8 @@ import {
 } from './discovery-routes.js';
 // [#23050 slice 8] The email route's body moved to its own module — see its header.
 import { registerEmailEndpoints, type EmailRouteHost } from './email-routes.js';
+// [#23050 slice 9] The global search route's body moved to its own module — see its header.
+import { registerSearchEndpoints, type SearchRouteHost } from './search-routes.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -8995,71 +8997,17 @@ export class RestServer {
      * GET {basePath}/search?q=acme&objects=lead,account&limit=20&perObject=5
      */
     private registerSearchEndpoints(basePath: string): void {
-        const isScoped = basePath.includes('/environments/:environmentId');
-        this.routeManager.register({
-            method: 'GET',
-            path: `${basePath}/search`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const p = await this.resolveProtocol(environmentId, req);
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-                    const searchAll = (p as any).searchAll;
-                    if (typeof searchAll !== 'function') {
-                        res.status(501).json({ code: 'NOT_IMPLEMENTED', message: 'Search not supported by this protocol' });
-                        return;
-                    }
-                    // [#6877] `String(['a','b'])` searched for the literal
-                    // term `'a,b'`. `objects` is NOT listed: the next line reads
-                    // its array arm deliberately — a cross-object search over a
-                    // LIST of objects is the whole point of the parameter.
-                    // [#7606] Recognition before arity, same order and same
-                    // envelope as the export route — see `query-allowlist.ts`.
-                    // A dropped `?objects=` is the widening case at its worst:
-                    // the term fans out across every searchable object while the
-                    // caller believes they scoped it to one.
-                    if (refuseUnknownQueryParams(req, res, GLOBAL_SEARCH_PARAMS)) return;
-                    if (refuseRepeatedQueryParams(req, res, ['q', 'query', 'limit', 'perObject'])) return;
-                    const q = String(req.query?.q ?? req.query?.query ?? '');
-                    const objectsParam = req.query?.objects;
-                    const objects = typeof objectsParam === 'string'
-                        ? objectsParam.split(',').map((s: string) => s.trim()).filter(Boolean)
-                        : Array.isArray(objectsParam) ? objectsParam : undefined;
-                    // [#20062] Read, not coerced: `?limit=abc` used to reach
-                    // `searchAll` as `NaN`, and `hits.length >= NaN` is never true,
-                    // so the overall cap was silently gone. No request schema is
-                    // declared for this door, so the reading is "a whole number";
-                    // `searchAll`'s own `[1, 100]` clamp is unchanged, and an empty
-                    // `?limit=` stays absent as the old falsy guard had it.
-                    const limit = readDeclaredQueryNumber(req.query, 'limit',
-                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
-                    // [#20139] `perObject`, the same way: `?perObject=abc` reached
-                    // `searchAll` as `NaN`, its `Math.max(1, Math.min(25, NaN))` is
-                    // `NaN`, and the per-object cap was silently gone. Whole number;
-                    // the `[1, 25]` clamp stays `searchAll`'s own, and an empty
-                    // `?perObject=` stays absent as the old falsy guard had it.
-                    const perObject = readDeclaredQueryNumber(req.query, 'perObject',
-                        UNDECLARED_WHOLE_NUMBER_PARAM, { emptyIsAbsent: true });
-                    const result = await searchAll.call(p, {
-                        q,
-                        objects,
-                        limit,
-                        perObject,
-                        ...(context ? { context } : {}),
-                    });
-                    res.json(result);
-                } catch (error: any) {
-                    const mapped = mapDataError(error);
-                    logUnexpectedRouteError(error, mapped);
-                    res.status(mapped.status).json(mapped.body);
-                }
-            },
-            metadata: {
-                summary: 'Global cross-object search',
-                tags: ['search'],
-            },
-        });
+        // [#23050 slice 9] The body moved to `search-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `SearchRouteHost`, and that module's header for why no
+        // member is a getter).
+        const host: SearchRouteHost = {
+            routeManager: this.routeManager,
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+        };
+        registerSearchEndpoints.call(host, basePath);
     }
 
     /**
