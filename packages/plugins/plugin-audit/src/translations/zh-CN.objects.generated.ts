@@ -202,7 +202,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       thread_id: {
         label: "线程",
-        help: "线程标识——约定格式为 `{object}:{record_id}`（例如 `sys_user:abc123`）"
+        help: "线程标识——约定格式为 `{object}:{record_id}`（例如 `account:9001`）"
       },
       parent_id: {
         label: "父评论",

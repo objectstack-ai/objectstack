@@ -106,6 +106,15 @@ import { RestServer } from './rest-server.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 const PLUGIN = readFileSync(resolve(HERE, 'rest-api-plugin.ts'), 'utf8');
+/**
+ * [#23050 slice 8] The SIBLING slot's one consumer, the email send door:
+ * `RestServer#registerEmailEndpoints`' body moved, unedited, to
+ * `email-routes.ts`. §1's controls read `emailServiceProvider` there — its
+ * known-present read, and the negative for the window predicate — because that
+ * is where its two reads and its one call now are. It holds no
+ * `objectQLProvider` site, so it is not on `SLOT_FILES`.
+ */
+const EMAIL_SOURCE = readFileSync(resolve(HERE, 'email-routes.ts'), 'utf8');
 
 /**
  * [#23050 slice 2] The files this census reads. `RestServer#registerBatchEndpoints`'
@@ -161,7 +170,7 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // sibling `emailServiceProvider` field is read too. If either came back
         // empty the scanner would be reporting silence, not absence.
         expect(invocationSites(SOURCE, 'objectQLProvider').length).toBeGreaterThan(0);
-        expect(readSites(SOURCE, 'emailServiceProvider').length).toBeGreaterThan(0);
+        expect(readSites(EMAIL_SOURCE, 'emailServiceProvider').length).toBeGreaterThan(0);
         // Negative: a field that does not exist must read ZERO. This is what
         // makes a future zero mean "gone" rather than "the regex stopped
         // matching" — the failure mode that produced the two-consumer sentence
@@ -185,7 +194,6 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
 
     it('⭐ [#18559] ALL THREE consumers now reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
         const sites = censusInvocationSites('objectQLProvider');
-        const lines = SOURCE.split('\n');
         const viaSeam = sites.filter((s) => {
             // The helper is named on the line that OPENS the call, two lines up
             // from the invocation in all three spellings — read in the site's
@@ -203,10 +211,12 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // WINDOW of source text, so "3 of 3" is only a reading if the same
         // predicate can also say something else. `emailServiceProvider` is the
         // sibling slot whose one call site #15405 routed through the SWALLOWING
-        // helper instead, so it is the natural negative:
+        // helper instead, so it is the natural negative. [#23050 slice 8] Read
+        // in that slot's consumer's own file, `email-routes.ts` (`EMAIL_SOURCE`).
+        const emailLines = EMAIL_SOURCE.split('\n');
         const wrappedIn = (field: string, helper: string) =>
-            invocationSites(SOURCE, field).filter((s) =>
-                lines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes(helper));
+            invocationSites(EMAIL_SOURCE, field).filter((s) =>
+                emailLines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes(helper));
         //   - the predicate must NOT claim that slot for `wiredEngineOrLoud`…
         expect(wrappedIn('emailServiceProvider', 'wiredEngineOrLoud(')).toHaveLength(0);
         //   - …and it must still FIRE for the helper that slot really uses, so
