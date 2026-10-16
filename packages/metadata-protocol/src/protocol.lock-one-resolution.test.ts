@@ -110,16 +110,25 @@
  * The real `SchemaRegistry`'s enumeration is pinned beside it
  * (`packages/objectql/src/protocol-lock-artifact-package-axis.test.ts`).
  *
- * ## [#23182] What the table costs, and what it shares
+ * ## [#23182] Where the table lives, what it costs, and what it shares
+ *
+ * The table, the oracle, the engine and registry doubles, the door and the
+ * reads are in `protocol.lock-one-resolution.kit.test.ts`, which this file and
+ * four shard files (`protocol.lock-one-resolution.shard-N.test.ts`) import. The
+ * generated rows run in the shard files, a quarter of them each, under this
+ * describe's title (`PIN_1_TITLE`); this file keeps the named pins and the
+ * table's completeness checks, and the kit pins that the shard set is the whole
+ * table.
  *
  * The table is 16 320 rows, 28 848 runs of (reads, then a door) once each row's
- * two store orders and two registration orders are counted, so the file's wall
- * is the protocol's own cost times that count. The two reads take no
- * organization and no verb, so the rows that differ only in those two (four of
- * them) share one instance and one pair of reads (`readScenario`); each row
- * still asserts, for itself, that the reads report the rule's lock and that
- * its own door answers the rule. Nothing the table enumerates is dropped: the
- * same 16 360 tests run, in the same order, under the same titles.
+ * two store orders and two registration orders are counted, so a file's wall
+ * is the protocol's own cost times the count of runs it holds. The two reads
+ * take no organization and no verb, so the rows that differ only in those two
+ * (four of them) share one instance and one pair of reads (`readScenario`),
+ * and the shards keep those four together; each row still asserts, for itself,
+ * that the reads report the rule's lock and that its own door answers the
+ * rule. Nothing the table enumerates is dropped: the 16 360 tests that ran as
+ * one file run under the same titles, and the kit adds two tests of its own.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
