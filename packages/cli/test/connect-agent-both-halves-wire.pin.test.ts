@@ -254,8 +254,12 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
             .toContain('nav_connect_agent');
         // The Setup tree the platform admin is served: 9 authored groups less
         // `group_approvals`, which nothing contributes into and the filter
-        // collapses, plus 25 contributed entries plus the MCP one.
-        expect(allowedIds).toHaveLength(34);
+        // collapses, plus 23 contributed entries plus the MCP one.
+        expect(allowedIds).toHaveLength(32);
+        // The two per-user stores are reached from the User record page, not
+        // from Setup's menu (#23803).
+        expect(allowedIds).not.toContain('nav_accounts');
+        expect(allowedIds).not.toContain('nav_user_preferences');
     });
 
     it('the Account half widened NOTHING on Setup — the admin tree is unchanged', async () => {
@@ -273,7 +277,7 @@ describe('#17647 — Connect-an-Agent visibility: BOTH halves, over the wire', (
         expect(withAccountHalf.statusCode).toBe(200);
         expect(withoutAccountHalf.statusCode).toBe(200);
         expect(navIds(withAccountHalf.body?.item)).toEqual(navIds(withoutAccountHalf.body?.item));
-        expect(navIds(withAccountHalf.body?.item)).toHaveLength(34);
+        expect(navIds(withAccountHalf.body?.item)).toHaveLength(32);
 
         // The mechanism behind the invariance, asserted rather than assumed:
         // the bundle aims exactly one contribution at `setup` and one at
