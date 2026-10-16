@@ -251,8 +251,10 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // length 6 → 7. [#23050 slice 7] Nor do the discovery and OpenAPI bodies
         // (`discovery-routes.ts`): 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0, length 7 → 8.
         // [#23050 slice 8] Nor does the email send body (`email-routes.ts`):
-        // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0, length 8 → 9.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(9);
+        // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0, length 8 → 9. [#23050 slice 9]
+        // Nor does the global search body (`search-routes.ts`):
+        // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0, length 9 → 10.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(10);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });

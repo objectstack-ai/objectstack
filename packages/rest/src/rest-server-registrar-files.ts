@@ -45,6 +45,8 @@ export const REST_SERVER_REGISTRAR_FILES = [
     'discovery-routes.ts',
     // [#23050 slice 8] `registerEmailEndpoints`' body.
     'email-routes.ts',
+    // [#23050 slice 9] `registerSearchEndpoints`' body.
+    'search-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */

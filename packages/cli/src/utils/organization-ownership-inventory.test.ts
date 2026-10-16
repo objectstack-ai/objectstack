@@ -2,8 +2,9 @@
 
 /**
  * The ADR-0131 D10 inventory's enumeration pin: every object of both #13564
- * censuses, of the platform registry as it stands, and of the cloud supplement
- * carries exactly one fate and a citation. A platform object that lands
+ * censuses, of the platform registry as it stands, of the objects retired
+ * before either census, and of the cloud supplement carries exactly one fate
+ * and a citation. A platform object that lands
  * without an inventory row turns this red by name — the plan would refuse its
  * table on a real database, and this says so before any database does.
  */
@@ -18,6 +19,7 @@ import {
   PLATFORM_OBJECTS_BY_PACKAGE,
   type OrganizationOwnershipSupplementEntry,
 } from '@objectstack/spec/system';
+import { MIGRATIONS_BY_MAJOR } from '@objectstack/spec/migrations';
 import { securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import {
   HostFateSupplementRefusal,
@@ -82,6 +84,15 @@ const CENSUS_2026_08_31_EXAMPLES = [
 ] as const;
 
 /**
+ * Platform objects retired from the tree before the first census was
+ * measured: neither census counted them and the registry no longer names
+ * them, yet a database that booted an earlier release still holds the table,
+ * `organization_id` included. Frozen: a record of what was retired, keyed to
+ * the ADR-0087 entry each row's citation names.
+ */
+const RETIRED_BEFORE_CENSUS = { sys_scim_provider: 'scim-provider-object-retired' } as const;
+
+/**
  * #14570 and #15086, read in: each population's table has its own fate, citing
  * the record that read it in (a runtime string carries no tracker number).
  */
@@ -105,6 +116,31 @@ describe('ADR-0131 D10 inventory — every censused object has one fate and a ci
     // (The four retired catalog row objects left the registry with C3 stage 8.)
     expect(registered.length).toBeGreaterThan(75);
     expect(unlisted(registered)).toEqual([]);
+  });
+
+  it('retired before either census: listed with fate 4, citing its ADR-0087 entry and no tracker number', () => {
+    const retired = Object.keys(RETIRED_BEFORE_CENSUS);
+    const counted = [...CENSUS_2026_08_31_PLATFORM_WITH_COLUMN, ...CENSUS_2026_08_31_PLATFORM_WITHOUT_COLUMN] as readonly string[];
+    const registered = new Set(Object.values(PLATFORM_OBJECTS_BY_PACKAGE).flat());
+    expect(unlisted(retired)).toEqual([]);
+    for (const [object, adr0087Entry] of Object.entries(RETIRED_BEFORE_CENSUS)) {
+      // The population's premise: no census counted it and the tree no longer declares it.
+      expect(counted, object).not.toContain(object);
+      expect(registered.has(object), object).toBe(false);
+      // The entry the citation names exists, and its ruling is what licenses fate 4: the table stays untouched.
+      const semantic = Object.values(MIGRATIONS_BY_MAJOR).flatMap((step) => step.semantic).find((s) => s.id === adr0087Entry);
+      expect(semantic?.acceptanceCriteria, adr0087Entry).toContain('left in place untouched');
+      const entry = inventoryEntryFor(object)!;
+      expect(entry, object).toMatchObject({ census: ['retired-before-census'], fate: 'report' });
+      expect(entry.citation, object).toContain(adr0087Entry);
+      // A runtime string carries no tracker number.
+      expect(entry.citation, object).not.toMatch(/#\d/);
+      expect(entry.notNullExempt, object).toBeTruthy();
+    }
+    // Control: no other row claims the population.
+    expect(
+      ORGANIZATION_OWNERSHIP_INVENTORY.filter((e) => e.census.includes('retired-before-census')).map((e) => e.object).sort(),
+    ).toEqual([...retired].sort());
   });
 
   it('the cloud supplement: listed as cloud-carried, fate 4, never a guessed fate', () => {
