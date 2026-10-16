@@ -25,7 +25,8 @@ export const entry: SemanticMigration = {
     + 'spelled as the row spells it), and take `ActionSchema`\'s own `patch` record by reference. A page\'s '
     + '`properties` is not parsed by the page schema; the component-props gate parses it against these same rows, '
     + 'at `os validate`, `os build`, `os lint` and the metadata save door, and reports each refusal at the row\'s '
-    + 'own key; the load path runs no such gate, so a stored page still loads. Measured producers: none in this '
+    + 'own key; the load path runs no such gate, so a stored page still loads and its next save meets the '
+    + 'component-props gate at the metadata save door. Measured producers: none in this '
     + 'repository\'s examples, CLI corpus or tests outside these rows\' own pins; in objectui, at its pin and '
     + 'main, one renderer-test control mounts an `action:button` with `patch` and no `operation` to show nothing '
     + 'is written, and no spec parse judges it.',

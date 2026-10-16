@@ -1,6 +1,5 @@
 ---
 '@objectstack/spec': minor
-'@objectstack/lint': patch
 ---
 
 feat(spec)!: `checkPageComponentViewData` is deleted; a page component's `data` prop naming the retired view-level `api` source is refused by the component-props rule alone, at the CLI doors and the metadata save door (#23447)
@@ -30,6 +29,6 @@ What narrows: the published export leaves `@objectstack/spec/ui`. What `PageSche
 | boot (`loadMetaFromDb`) | `invalid: 1`, registered under `[metadata_spec_invalid]` | `invalid: 0`, registered, no warning |
 | read (`getMetaItem`) | served, `_diagnostics.valid: false` with the refusal | served as stored, `_diagnostics.valid: true` |
 
-**A page already stored with such a component** still loads and is served as stored, and no longer carries a read diagnostic for the binding; its next save is refused with 422 by the props rule. `os migrate meta --stored` still lists it under the step-18 entry `view-data-api-provider-retired`, and that entry's fate text now says so. The `@objectstack/lint` change is text only: the props rule's header named the runtime publish door as a door it does not run on.
+**A page already stored with such a component** still loads and is served as stored, and no longer carries a read diagnostic for the binding; its next save is refused with 422 by the props rule. `os migrate meta --stored` still lists it under the step-18 entry `view-data-api-provider-retired`, and that entry's fate text now says so.
 
 <!-- adr-0087: not-required (already-registered view-data-api-provider-retired) the retirement this check enforced is that step-18 entry; this change deletes the second implementation of its page-component half, and the entry's acceptance criteria now name the component-props gate at the CLI doors and the save door as the one judge -->
