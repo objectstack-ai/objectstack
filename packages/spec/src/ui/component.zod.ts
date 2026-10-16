@@ -715,8 +715,9 @@ export const PageHeaderProps = strictObject({
    * Which of the two page-header layouts the renderer builds (#6776).
    *
    * ON (the default) the header carries the **record chrome**: the title
-   * renders as a record chip with the follow star and the copy-record-id
-   * button beside it. OFF it falls back to a bare heading — one title line and
+   * renders as a record chip with the copy-record-id button beside it (the
+   * follow star draws there only where a host wires a favorites toggle; the
+   * reference console's favorites entry is the header's ⋯ menu). OFF it falls back to a bare heading — one title line and
    * nothing record-shaped — which is what a dashboard or a landing page wants,
    * since there is no record for the chip to describe.
    *
@@ -730,20 +731,38 @@ export const PageHeaderProps = strictObject({
    * authorities disagreeing about one key (#5435).
    */
   recordChrome: z.boolean().default(true).describe(
-    'Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout.',
+    'Render the record chrome — the title as a record chip with its copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout.',
   ),
   /**
-   * Follow (favourite) star beside the record title — `RecordTitleChip
-   * showStar` (#6776). Part of the record chrome, so it has no effect when
-   * `recordChrome` is false. Read by the header renderer and consumed by the
-   * record chip (read points recorded in `liveness/page.json`, row `regions`).
+   * REMOVED (#23650, ADR-0049 enforce-or-remove through the ADR-0087 D2 route,
+   * the way `breadcrumb` above left this row; ruling record 6203775759,
+   * letter A).
+   *
+   * A switch for a star the reference console no longer draws. Since
+   * objectui#12427 the record chip draws the follow star only where the HOST
+   * wires a favorites toggle into the record context (`onToggleFavorite`),
+   * and no reference host does: the record's favorites entry is the header's
+   * ⋯ overflow menu. So `showStar: true` (the default) drew nothing and
+   * `showStar: false` hid nothing. No example app, skill or doc authored it.
+   *
+   * The host hook stays: objectui's `RecordContextValue.onToggleFavorite` is a
+   * host opt-in of the published component library, untouched by this
+   * retirement — what leaves is the metadata switch over it.
+   *
+   * Stored and built pages that carry the key (`true` or `false`) are stripped
+   * by the D2 conversion `page-header-show-star-removed`, with a notice.
    */
-  showStar: z.boolean().default(true).describe(
-    'Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false.',
+  showStar: retiredKey(
+    '`page:header` property `showStar` was removed in @objectstack/spec 18 (ADR-0087 D2) — '
+    + 'the reference console draws no star beside the record title, so the key switched nothing: '
+    + 'the record\'s favorites entry is the header\'s ⋯ menu, and metadata does not control it. '
+    + 'Delete the key, whether it was `true` or `false`; the ⋯ menu\'s favorites entry is unchanged. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
    * Copy-record-id button beside the record title — `RecordTitleChip
-   * showCopyId` (#6776). Same record-chrome scoping as `showStar`. Read by the
+   * showCopyId` (#6776). Part of the record chrome, so it has no effect when
+   * `recordChrome` is false. Read by the
    * header renderer and consumed by the record chip (read points recorded in `liveness/page.json`, row `regions`).
    */
   showCopyId: z.boolean().default(true).describe(

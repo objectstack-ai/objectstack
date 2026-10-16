@@ -76,7 +76,6 @@
     "ui/PageComponent:properties = {}",
     "ui/PageHeaderProps:recordChrome = true",
     "ui/PageHeaderProps:showCopyId = true",
-    "ui/PageHeaderProps:showStar = true",
     "ui/PageTabsProps:position = \"top\"",
     "ui/PageTabsProps:tabStyle = \"line\"",
     "ui/PageVariable:type = \"string\"",

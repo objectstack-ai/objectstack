@@ -320,6 +320,8 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       'kind',
     ),
   ],
+  // #23650: retired after 17.7.0, so the v18 train's major.
+  'page-header-show-star-removed': [tombstone(PageHeaderProps, 'page:header', 'showStar')],
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.
   'page-header-breadcrumb-removed': [tombstone(PageHeaderProps, 'page:header', 'breadcrumb')],
   'object-grid-default-sort-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'defaultSort')],

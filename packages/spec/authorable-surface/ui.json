@@ -1108,7 +1108,7 @@
     "ui/PageHeaderProps:mobileMaxVisible",
     "ui/PageHeaderProps:recordChrome",
     "ui/PageHeaderProps:showCopyId",
-    "ui/PageHeaderProps:showStar",
+    "ui/PageHeaderProps:showStar [RETIRED]",
     "ui/PageHeaderProps:subtitle",
     "ui/PageHeaderProps:title",
     "ui/PageNavItem:badge",
