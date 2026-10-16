@@ -10,9 +10,10 @@ import type { SemanticMigration } from '../../types.js';
 // key, and #21704's fork 5 A refused the member's `properties.params`, so a
 // member has no static-values spelling and the container drops a non-array
 // `params` on any other type at run time. D3 only: page-component `properties`
-// is not parsed on the metadata save or load path, so a stored page is never
-// refused at load; there is no D2 conversion, because the only home for static values
-// is a different node (an `action:button`), which no rewrite can build in the
+// is not parsed on the metadata load path, so a stored page is never refused at
+// load (its next save meets the component-props gate at the metadata save
+// door); there is no D2 conversion, because the only home for static values is
+// a different node (an `action:button`), which no rewrite can build in the
 // author's place; and the census found no writer to respell.
 export const entry: SemanticMigration = {
   id: 'ui-action-group-menu-member-params-array-only',

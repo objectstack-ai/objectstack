@@ -7,9 +7,10 @@ import type { SemanticMigration } from '../../types.js';
 // while the other two carriers — a relationship field's `inlineColumns` and a
 // form view's `subforms[].columns` (#20901) — were the strict
 // `InlineGridColumnSchema`; the entry is now a strict shape of the twelve keys
-// objectui's `MasterDetailForm` reads, and its `columns` REFERENCES that schema.
-// D3 only: page-component `properties` is not parsed on the metadata save or
-// load path, so a stored page is never refused at load and there is no load-path
+// objectui's `MasterDetailForm` reads, and its `columns` REFERENCES that
+// schema. D3 only: page-component `properties` is not parsed on the metadata
+// load path, so a stored page is never refused at load (its next save meets the
+// component-props gate at the metadata save door) and there is no load-path
 // refusal for a conversion to pre-empt; the authored census found no `field`
 // spelling to respell. `defineStack`'s identity-only check reaches this carrier
 // too, the reach `inline-grid-column-identity-only-currency-scale-refused`

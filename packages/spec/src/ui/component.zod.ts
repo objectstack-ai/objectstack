@@ -5225,10 +5225,11 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * own retirement text) and a key the block does not declare.
    *
    * No conversion lifts the array: it never worked on this surface. Read by the
-   * component-props gate (refused as an error); a stored page still saves and
-   * loads, because page-component `properties` is not parsed on the metadata
-   * save or load path (the `ui-object-grid-export-options-closed` semantic
-   * entry).
+   * component-props gate (refused as an error) on `os validate`, `os build`
+   * and `os lint` and at the metadata save door. A stored page still loads,
+   * because page-component `properties` is not parsed on the metadata load
+   * path, and its next save meets the component-props gate at the save door
+   * (the `ui-object-grid-export-options-closed` semantic entry).
    */
   exportOptions: ListViewExportOptionsSchema.optional()
     .describe("Export config — the object `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`, the same block a list view's `exportOptions` declares, with `formats` drawn from `csv`, `xlsx` and `json`. A bare format array is refused: the grid reads `exportOptions.formats`, so write `{ formats: ['csv', 'xlsx'] }`"),
