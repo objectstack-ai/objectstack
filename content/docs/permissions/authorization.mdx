@@ -72,10 +72,10 @@ accepting a package's `isDefault` suggestion answers `403 PERMISSION_DENIED`;
 every derivation of the anchor's definition (boot, accept, revoke, uninstall,
 package publish) leaves out a baseline, accepted or host-declared set that
 carries a forbidden bit and logs it; and the author-time rule
-`security-anchor-high-privilege` rejects such an `isDefault` set in
-`os validate`, `os build` and `os lint` and at the metadata door's publish
-(`422`). No door binds a set to `guest` until ADR-0138 D3 item 5's bind door is
-built ([Permission sets](/docs/permissions/permission-sets#package-suggestion--isdefault-adr-0090-d5)).
+`security-anchor-high-privilege` reports such an `isDefault` set as an error in
+`os validate`, `os build` and `os lint`, and the metadata door refuses to
+publish it (`422`). No door binds a set to `guest` until ADR-0138 D3 item 5's
+bind door is built ([Permission sets](/docs/permissions/permission-sets#package-suggestion--isdefault-adr-0090-d5)).
 
 ### The MCP execution surface (ADR-0096 / ADR-0101)
 
