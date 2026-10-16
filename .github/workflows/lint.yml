@@ -3328,6 +3328,28 @@ jobs:
         continue-on-error: true
         run: node scripts/release-pending-publish.mjs --self-test
 
+      # The merge-queue guard on the same release path (#23818). A Version
+      # Packages PR cut from a base that main has since passed by a changeset
+      # lands a version commit whose CHANGELOG leaves that changeset out, and
+      # the merge-queue build is the one CI run that sees the tree it lands.
+      # So `queue-guard` judges it here, and exits 1 when a version commit in
+      # the group's base..head would land a changeset it did not consume.
+      # On any other event it prints "not a merge-queue build" and exits 0,
+      # and a build that moves no version is never judged, so no ordinary PR
+      # depends on it. Base and head are the payload's full shas, never a ref
+      # guess, and they render empty on every other event. The checkout's
+      # `fetch-depth: 0` is what makes the base resolvable; the guard refuses a
+      # shallow clone outright rather than answering from a graft boundary.
+      # Rationale: `scripts/release-pending-publish.mjs` header, `queue-guard`.
+      - name: Version Packages PR lands no changeset behind main
+        id: version-packages-pr-lands-no-changeset-behind-main
+        continue-on-error: true
+        env:
+          OS_GATE_EVENT_NAME: ${{ github.event_name }}
+          OS_GATE_MERGE_GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          OS_GATE_MERGE_GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: node scripts/release-pending-publish.mjs queue-guard --event "$OS_GATE_EVENT_NAME" --base "$OS_GATE_MERGE_GROUP_BASE_SHA" --head "$OS_GATE_MERGE_GROUP_HEAD_SHA"
+
       # #3825 Node-version drift guard: a runtime pin is 18 separate string
       # literals across .github/workflows, so a split is invisible until someone
       # greps for it. One did open — every PR gate sat on Node 20 (EOL

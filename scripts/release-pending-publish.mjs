@@ -13,7 +13,7 @@
  *   node scripts/release-pending-publish.mjs npm-state VERSION
  *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --version VERSION
  *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --json
- *   node scripts/release-pending-publish.mjs queue-guard --event EVENT --base SHA [--head REV]
+ *   node scripts/release-pending-publish.mjs queue-guard --event EVENT --base SHA --head SHA
  *   node scripts/release-pending-publish.mjs sweep --workflow release.yml [--dry-run]
  *   node scripts/release-pending-publish.mjs in-flight --version VERSION --version-commit SHA --head SHA --workflow release.yml
  *   node scripts/release-pending-publish.mjs --self-test
@@ -125,8 +125,10 @@
  * and none of its steps read changesets.
  *
  * So this mode judges a merge-queue build. It reads the first-parent commits of
- * `base..head` (`base` = the group's `merge_group.base_sha`, which already
- * carries every entry ahead of this one) and finds each version commit there,
+ * `base..head` -- `base` and `head` are the group's `merge_group.base_sha`
+ * and `merge_group.head_sha`, full shas from the event payload and never a ref
+ * guess; the base already carries every entry ahead of this one -- and finds
+ * each version commit there,
  * as `select` defines one. For each it takes the `unconsumed` measurement AT
  * that commit -- not at the group's head, so a later entry's own changeset in
  * the same batch is the next release's, never this one's -- and REFUSES (exit
@@ -135,8 +137,8 @@
  * remedy it prints is the refresh stroke `release.yml` already offers. A group
  * that moves no version is never judged, so no ordinary PR depends on it. An
  * event that is not `merge_group` is answered "nothing to judge"; a
- * `merge_group` with no base, a base off the head's history or a shallow clone
- * is refused rather than answered.
+ * `merge_group` with no full base or head sha, a base off the head's history or
+ * a shallow clone is refused rather than answered.
  *
  * `npm-state` -- present / absent / unknown for one version, from `npm view`'s
  * exit status and its `E404`. The caller decides what `unknown` means: the
@@ -518,15 +520,21 @@ export function versionCommitsInRange({ cwd, base, head }) {
  * leaves a changeset unconsumed; `current` when every one consumed its whole
  * tree; `no-version-commit` when the build moves no version; `not-a-merge-group`
  * for any other event. Throws -- never answers -- on a `merge_group` without a
- * readable base, on a base that is not an ancestor of the head, and (through
- * the readers it calls) on a shallow clone.
+ * full base and head sha, on a base that is not an ancestor of the head, and on
+ * a shallow clone.
  */
-export function queueGuard({ cwd, event, base, head = 'HEAD' }) {
+export function queueGuard({ cwd, event, base, head }) {
   if (event !== QUEUE_EVENT) return { verdict: 'not-a-merge-group', event, base: base || null, head, versionCommits: [] };
   if (!base || !FULL_SHA.test(base)) {
     throw new Error(
       `a ${QUEUE_EVENT} build needs --base, the group's full base sha (got ${JSON.stringify(base ?? '')}): without it the ` +
         'commits this build lands cannot be told apart from main, so nothing can be judged.',
+    );
+  }
+  if (!head || !FULL_SHA.test(head)) {
+    throw new Error(
+      `a ${QUEUE_EVENT} build needs --head, the group's full head sha (got ${JSON.stringify(head ?? '')}): the checked-out ` +
+        'ref is a guess at what the queue built, and the payload names it exactly.',
     );
   }
   if (gitOk(cwd, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') {
@@ -1161,7 +1169,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the merge-queue guard -> a build that moves no version is never judged': 2,
   'the merge-queue guard -> a batch is judged at its version commit, never at the batch head': 2,
   'the merge-queue guard -> outside pre mode, where the version pass deletes what it consumes, a stale cut is refused too': 1,
-  'the merge-queue guard -> another event, a missing or foreign base, a shallow clone: answered or refused, never guessed': 6,
+  'the merge-queue guard -> another event, a missing or foreign base, a shallow clone: answered or refused, never guessed': 8,
 });
 const SELF_TEST_BATTERY_FLOOR = 28;
 
@@ -1594,9 +1602,15 @@ async function selfTest() {
     dirs.push(shallowQueue);
     gitOk(tmpdir(), ['clone', '-q', '--depth', '1', '--branch', 'queue-build', `file://${q.dir}`, shallowQueue]);
     check(
-      throws(() => queueGuard({ cwd: shallowQueue, event: QUEUE_EVENT, base: qLanded, head: 'HEAD' }), /shallow clone/),
+      throws(() => queueGuard({ cwd: shallowQueue, event: QUEUE_EVENT, base: qLanded, head: qLanded }), /shallow clone/),
       'a shallow clone is refused before any range is read',
     );
+    check(
+      throws(() => guard(groupBase, ''), /needs --head/) && throws(() => guard(groupBase, 'HEAD'), /needs --head/),
+      'a merge_group build with an empty head, or a ref name in place of the payload sha, is refused, never read off the checkout',
+    );
+    const noHeadCli = cli(q.dir, '--event', QUEUE_EVENT, '--base', groupBase, '--head', '');
+    check(noHeadCli.status === 1 && /needs --head/.test(noHeadCli.stderr), 'and the CLI exits 1 on an empty merge_group head, saying why');
     const emptyCli = cli(q.dir, '--event', QUEUE_EVENT, '--base', '', '--head', qLanded);
     check(emptyCli.status === 1 && /needs --base/.test(emptyCli.stderr), 'and the CLI exits 1 on an empty merge_group base, saying why');
   } finally {
@@ -2151,7 +2165,7 @@ async function main(argv) {
     if (!event) throw new Error('queue-guard needs --event (the build event, e.g. merge_group)');
     // An empty `--base ""` is what the workflow expression renders on every
     // event that is not `merge_group`; `queueGuard` refuses it on one that is.
-    const result = queueGuard({ cwd: process.cwd(), event, base: flag(rest, '--base') || '', head: flag(rest, '--head') || 'HEAD' });
+    const result = queueGuard({ cwd: process.cwd(), event, base: flag(rest, '--base') || '', head: flag(rest, '--head') || '' });
     const { refused, log, summary } = describeQueueGuard(result);
     console.log(log.join('\n'));
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
