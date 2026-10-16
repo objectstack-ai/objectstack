@@ -51,7 +51,11 @@ const SCHEMAS: Record<string, unknown> = {
 const HIDDEN = { code: 'OBJECT_API_DISABLED', status: 404, object: 'ax_hidden', allowed: undefined };
 const HIDDEN_MESSAGE = 'object is not exposed via the API';
 
-/** The protocol and engine `callData` would reach, each verb a spy, so a refusal is shown to ask neither. */
+/**
+ * The protocol and engine `callData` would reach, each verb a spy, so a refusal
+ * is shown to ask neither. With the protocol present it serves every verb but
+ * `aggregate`, which takes the engine; so the engine carries only the reads.
+ */
 function makeHarness() {
     const protocol = {
         createData: vi.fn(async (req: any) => ({ object: req.object, id: 'n1', record: req.data })),
@@ -63,9 +67,6 @@ function makeHarness() {
     const engine = {
         registry: { getObject: (n: string) => SCHEMAS[n] },
         find: vi.fn(async () => []),
-        insert: vi.fn(async () => ({ id: 'n1' })),
-        update: vi.fn(async () => ({})),
-        delete: vi.fn(async () => ({})),
         aggregate: vi.fn(async () => []),
     };
     const services: Record<string, unknown> = {
@@ -77,7 +78,7 @@ function makeHarness() {
         resolveService: (async (_ctx: HttpProtocolContext, name: string) => services[name]) as any,
         getObjectQL: async () => engine as any,
     };
-    const asked = () => [...Object.values(protocol), engine.find, engine.insert, engine.update, engine.delete, engine.aggregate]
+    const asked = () => [...Object.values(protocol), engine.find, engine.aggregate]
         .reduce((n, spy) => n + spy.mock.calls.length, 0);
     return { deps, protocol, asked };
 }
