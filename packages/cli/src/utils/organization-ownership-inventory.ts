@@ -509,6 +509,8 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     fate: 'attribution',
     citation: `${D3_ORG_ROWS} (sharing rules an organization authors); ${D10_SINGLE}`,
     anchors: [],
+    // Advisory, not blocking, while this release's boot still seeds these rows:
+    // DECLARED_SHARING_RULE_SEEDER_RUNS below.
     departures: [
       {
         id: 'declared-rule-mirrors',
@@ -610,6 +612,68 @@ const BY_OBJECT: ReadonlyMap<string, InventoryEntry> = new Map(
 /** The inventory row for `object`, or `undefined`. */
 export function inventoryEntryFor(object: string): InventoryEntry | undefined {
   return BY_OBJECT.get(object);
+}
+
+// ── A departure this release cannot perform: the declared sharing-rule mirrors ─
+
+/**
+ * Does a served boot of this release still write the package-declared sharing
+ * rules into `sys_sharing_rule`?
+ *
+ * It does: `@objectstack/plugin-sharing`'s `start()` runs
+ * `bootstrapDeclaredSharingRules` on every `os serve` / `os dev` boot, and
+ * under `single` it writes each declared rule organization-less, as
+ * `managed_by 'package'`, uncustomized — exactly the population the
+ * `declared-rule-mirrors` departure on `sys_sharing_rule` names. That includes
+ * the first v18 boot, the one the organization-ownership refusal stops: its
+ * plugins start before `kernel:ready`, so it seeds before the ceremony has run.
+ * (The ceremony's own boot does not: it composes the sharing plugin for its
+ * declarations, its `start()` suppressed.)
+ *
+ * So on this release that departure cannot happen: the step that removes the
+ * mirrors is ADR-0131 D2's retirement of that seeder, and the boot keeps
+ * re-creating them until then. The ceremony therefore reports those rows as
+ * advisory — named, counted, never deleted, and still NULL, so their table
+ * does not receive NOT NULL — and does not hold its certification on them
+ * ({@link advisoryDepartureReason}). That is the ordering ruled for ADR-0131
+ * C3: the D13/D14 zero-NULL gate is read as satisfied by a D10 report whose
+ * only remaining NULL rows are these mirrors, and any other NULL row keeps
+ * blocking.
+ *
+ * ⛔ Set it to `false` in the change that retires that seeder, and in no other:
+ * a release that seeds the rows must not hold certification on them, and a
+ * release that has stopped seeding them must hold it again until its ceremony
+ * deletes them. `commands/migrate/organization-ownership.declared-rule-mirrors.integration.test.ts`
+ * boots a served stack declaring one sharing rule and fails, naming this
+ * constant, while what that boot writes disagrees with it.
+ */
+export const DECLARED_SHARING_RULE_SEEDER_RUNS: boolean = true;
+
+/** The one departure {@link DECLARED_SHARING_RULE_SEEDER_RUNS} decides, by its table and its id. */
+const DECLARED_RULE_MIRRORS = { object: 'sys_sharing_rule', departure: 'declared-rule-mirrors' } as const;
+
+/**
+ * Why the rows of `departureId` on `object` stay on this release without
+ * holding the ceremony's certification, or `null` when they hold it — every
+ * departure but the declared sharing-rule mirrors, and those too once their
+ * seeder retires ({@link DECLARED_SHARING_RULE_SEEDER_RUNS}).
+ *
+ * Keyed on the table AND the id: a host fate supplement can declare a
+ * departure under any id on its own table, and that departure's rows block
+ * like every other. The answer is the ceremony's verdict rule, not inventory
+ * data, so it is not part of the plan's `inventoryDigest`: a plan reviewed
+ * under it executes the same writes either way.
+ */
+export function advisoryDepartureReason(
+  object: string,
+  departureId: string,
+  seederRuns: boolean = DECLARED_SHARING_RULE_SEEDER_RUNS,
+): string | null {
+  if (!seederRuns || object !== DECLARED_RULE_MIRRORS.object || departureId !== DECLARED_RULE_MIRRORS.departure) return null;
+  return (
+    'this release\'s own boot still writes them (the declared-sharing-rule seeder runs on every served boot), so no ' +
+    'step of this release can remove them; the release that retires that seeder (ADR-0131 D2) deletes them'
+  );
 }
 
 // ── The host fate supplement ──────────────────────────────────────────────────
