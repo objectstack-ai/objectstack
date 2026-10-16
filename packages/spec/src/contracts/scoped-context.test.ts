@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — compiles the package type graph once: every probe (the hook JSDoc calls through IScopedContext, the undeclared members it must reject by name, and the harness control) is compiled in one ts.createProgram over the spec entry barrels it imports, the first read pays that program's type-graph resolution and every later probe reads the same program; slowest of 9 executed hourly CI readings on 2026-10-16, 17.1 s (run 38865071010), x 1.25, rounded up
 
 import { describe, it, expect } from 'vitest';
 import ts from 'typescript';

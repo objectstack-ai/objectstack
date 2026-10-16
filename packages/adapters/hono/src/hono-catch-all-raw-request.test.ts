@@ -20,7 +20,11 @@
  *
  *  1. PRESERVATION — the `body` argument is the value the old line produced, for
  *     every input: each case is checked against a reference Hono app that runs
- *     that exact line, and against the literal value written out.
+ *     that exact line, and against the literal value written out. One input
+ *     left this table on purpose (#23914): a declared `application/json` body
+ *     that does not parse is handed on as a body whose READ is refused with a
+ *     400 (`hono-body-refusal.test.ts`); the request beside it still arrives
+ *     unread, every byte readable.
  *  2. THE FIX — at dispatch the request is unread (`bodyUsed === false`) and
  *     reads back the exact bytes the client sent, JSON included.
  *
@@ -95,7 +99,11 @@ const CASES: ReadonlyArray<readonly [string, string | undefined, string, unknown
   ['JSON string', 'application/json', '"hi"', 'hi'],
   ['JSON behind a byte-order mark', 'application/json', '\uFEFF{"bom":true}', { bom: true }],
   ['JSON sent as text/plain (the Content-Type was never read)', 'text/plain', '{"a":1}', { a: 1 }],
-  ['invalid JSON', 'application/json', '{ not json', {}],
+  // [#23914] Not here any more: a body declared `application/json` that does
+  // not parse is no longer handed on as `{}` but as a body whose READ is
+  // refused — pinned in `hono-body-refusal.test.ts`. The undeclared garbage
+  // rows below are unchanged.
+  ['invalid JSON that does not declare JSON', 'text/plain', '{ not json', {}],
   ['empty body', 'application/json', '', {}],
   ['a form body', 'application/x-www-form-urlencoded', 'token=abc&token=def&x=1', {}],
   ['plain text', 'text/plain', 'hello', {}],
@@ -180,5 +188,21 @@ describe('[#22576] the /auth/* legacy fallback reads its body the same way', () 
     });
     expect(mockDispatcher.handleAuth).toHaveBeenCalledTimes(1);
     expect(seen).toEqual([{ body: { email: 'a@b.c' }, bodyUsed: false, text }]);
+  });
+});
+
+describe('[#23914] a declared JSON body that does not parse: the request still arrives unread', () => {
+  it('a domain that forwards the request reads every byte the client sent, and is not refused for it', async () => {
+    const app = createHonoApp({ kernel, prefix: PREFIX, cors: false });
+    const text = '{ not json';
+    const res = await app.request(`http://hosted.test${PATH}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: text,
+    });
+    // The fixture domain records the body without reading it and forwards
+    // nothing of it, so nothing refuses: the answer is the domain's.
+    expect(res.status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.bodyUsed).toBe(false);
+    expect(seen[0]!.text).toBe(text);
   });
 });

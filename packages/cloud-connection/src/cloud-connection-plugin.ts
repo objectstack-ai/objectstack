@@ -84,6 +84,7 @@ import { evaluateAuthGate, type AuthGate } from '@objectstack/core';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
+import { readJsonRequestBody } from './request-json-body.js';
 
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
 
@@ -315,8 +316,11 @@ export class CloudConnectionPlugin implements Plugin {
             // code, returns them to the Setup UI, and the operator approves in
             // the cloud console.
             rawApp.post(`${CLOUD_CONNECTION_PREFIX}/bind/start`, async (c: any) => {
-                let body: any = {};
-                try { body = await c.req.json(); } catch { body = {}; }
+                // [#23914] A declared JSON body that does not parse is refused 400,
+                // never read as no body (`./request-json-body.ts`).
+                const read = await readJsonRequestBody(c);
+                if (!read.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: read.message } }, 400);
+                const body: any = read.body;
                 // Self-hosted (single-env) runtimes need NO environment id —
                 // registration happens cloud-side at approval (ADR
                 // runtime-identity-binding). An explicit environment_id in the
@@ -375,8 +379,11 @@ export class CloudConnectionPlugin implements Plugin {
             // the operator token for a persisted sys_cloud_connection via the
             // control plane's /bind.
             rawApp.post(`${CLOUD_CONNECTION_PREFIX}/bind/poll`, async (c: any) => {
-                let body: any = {};
-                try { body = await c.req.json(); } catch { body = {}; }
+                // [#23914] A declared JSON body that does not parse is refused 400,
+                // never read as no body (`./request-json-body.ts`).
+                const read = await readJsonRequestBody(c);
+                if (!read.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: read.message } }, 400);
+                const body: any = read.body;
                 let environmentId = await resolveEnvironmentId(c);
                 if (!environmentId && this.cfg.singleEnvironment) {
                     environmentId = String(body?.environment_id ?? body?.environmentId ?? '').trim() || undefined;
@@ -542,8 +549,11 @@ export class CloudConnectionPlugin implements Plugin {
                     return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'This runtime is not connected to a cloud account; install is unavailable.' } }, 503);
                 }
 
-                let body: any = {};
-                try { body = await c.req.json(); } catch { body = {}; }
+                // [#23914] A declared JSON body that does not parse is refused 400,
+                // never read as no body (`./request-json-body.ts`).
+                const read = await readJsonRequestBody(c);
+                if (!read.ok) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: read.message } }, 400);
+                const body: any = read.body;
                 const packageId = String(body?.package_id ?? body?.packageId ?? '').trim();
                 if (!packageId) return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'package_id is required' } }, 400);
                 const seedSampleData = body?.seed_sample_data === true || body?.seedSampleData === true;
