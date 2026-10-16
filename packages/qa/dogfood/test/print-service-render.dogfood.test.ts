@@ -31,7 +31,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { accessSync, constants, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { VerifyStack } from '@objectstack/verify';
 import { StorageServicePlugin } from '@objectstack/service-storage';
@@ -45,7 +45,9 @@ import type { IPrintService } from '../../../services/service-print/src/print-se
 const SYS = { isSystem: true } as const;
 const PAGE = 'showcase_invoice_document';
 const APP = 'com.example.showcase';
-const CONSOLE_DIST = fileURLToPath(new URL('../../../console/dist', import.meta.url));
+/** The Console bundle's entry: its presence is what this file runs on. */
+const CONSOLE_INDEX = fileURLToPath(new URL('../../../console/dist/index.html', import.meta.url));
+const CONSOLE_DIST = dirname(CONSOLE_INDEX);
 
 function chromiumUnderTest(): string | undefined {
   const candidates = [
@@ -65,7 +67,7 @@ function chromiumUnderTest(): string | undefined {
 }
 
 const CHROMIUM = chromiumUnderTest();
-const CONSOLE_BUILT = existsSync(join(CONSOLE_DIST, 'index.html'));
+const CONSOLE_BUILT = existsSync(CONSOLE_INDEX);
 if (!CHROMIUM || !CONSOLE_BUILT) {
   console.warn(
     `[dogfood] print-service-render.dogfood.test.ts SKIPPED: ${!CONSOLE_BUILT ? 'no built Console (packages/console/dist; pnpm objectui:build)' : ''}` +

@@ -1209,6 +1209,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // change that reopens the #9084 blind spot, so it must re-run this test.
       'content/docs/protocol/kernel/realtime-protocol.mdx',
     ],
+    heldBy: {
+      // The render pin runs only where the Console bundle is built, and reads it
+      // by its entry file. Where no bundle is built (this suite's CI job) the
+      // path names nothing on disk, so the roster cannot hold the glob; this
+      // test is what holds it.
+      'packages/console/dist/index.html': ['packages/qa/dogfood/test/print-service-render.dogfood.test.ts'],
+    },
   },
   '@objectstack/vitest-filter-preflight': {
     // test/config-wiring-sweep.test.ts is the anti-phantom sweep for the ONE
