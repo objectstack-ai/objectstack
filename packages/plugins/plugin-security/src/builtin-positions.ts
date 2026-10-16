@@ -77,19 +77,29 @@ export interface BuiltinPositionDeclaration {
 /**
  * [ADR-0090 D5/D9] The display text of the two audience anchors. `everyone` —
  * implicit for every authenticated member; its bindings are the tenant's
- * default grants. `guest` — implicit for unauthenticated principals. Both are
- * system-managed and undeletable like the identity rows.
+ * default grants, and a high-privilege set is refused there (ADR-0090 D5).
+ * `guest` — implicit for unauthenticated principals; its bindings face the
+ * strictest checks: named objects only, read-mostly, never a wildcard
+ * (ADR-0090 D9). Both are system-managed and undeletable like the identity rows.
+ *
+ * The `label` and `description` are admin copy: Setup's Positions page lists
+ * them. The decision ids stay here in the docblock, never in the strings
+ * (`objects/admin-copy-vocabulary.test.ts` holds every built-in position to
+ * that). A `sys_position` row a retired seeder stamped with the older text
+ * keeps it until the upgrade ceremony deletes it as a seeded mirror (module
+ * doc); no reader shows a row's description — the page lists these
+ * declarations (`builtin-positions.boot.test.ts`, existing-database scenarios).
  */
 const AUDIENCE_ANCHOR_METADATA: Readonly<Record<(typeof AUDIENCE_ANCHOR_POSITIONS)[number], { label: string; description: string }>> = {
   [EVERYONE_POSITION]: {
     label: 'Everyone',
     description:
-      'Built-in audience anchor: every authenticated member holds this position implicitly. Permission sets bound to it are the default grants for the tenant (ADR-0090 D5). High-privilege sets cannot be bound here.',
+      'Built-in audience anchor: every authenticated member holds this position implicitly. Permission sets bound to it are the default grants for the tenant. High-privilege sets cannot be bound here.',
   },
   [GUEST_POSITION]: {
     label: 'Guest',
     description:
-      'Built-in audience anchor: unauthenticated principals hold this position implicitly and exclusively. Bindings face the strictest checks — named objects only, read-mostly, never a wildcard (ADR-0090 D9).',
+      'Built-in audience anchor: unauthenticated principals hold this position implicitly and exclusively. Bindings face the strictest checks — named objects only, read-mostly, never a wildcard.',
   },
 };
 

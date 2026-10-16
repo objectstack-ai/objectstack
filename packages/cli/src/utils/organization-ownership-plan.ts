@@ -9,6 +9,7 @@ import {
   LEGACY_SHIPPED_SET_SEEDS,
   LEGACY_SHIPPED_SET_SEEDS_CATEGORY,
   ORGANIZATION_OWNERSHIP_INVENTORY,
+  advisoryDepartureReason,
   type Anchor,
   type InventoryCategory,
   type InventoryEntry,
@@ -163,6 +164,15 @@ export interface PlannedDeparture {
   as: 'mirror-deletion' | 'moved';
   /** NULL-organization rows this departure takes out of attribution. */
   rows: number;
+  /**
+   * Present when no step of this release can carry these rows out, because its
+   * own boot re-creates them: why, and what removes them
+   * ({@link advisoryDepartureReason}). Such rows stay NULL — their table does
+   * not receive NOT NULL — and are reported as advisory, never held against
+   * the ceremony's certification. Absent, the rows leave by a ceremony step,
+   * and count as remaining until they have.
+   */
+  advisory?: string;
 }
 
 export interface TablePlan {
@@ -980,7 +990,10 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
     organizationColumn: hasOrg ? 'present' : 'absent',
     rows: { total: 0, organizationNull: 0, stamped: 0 },
     fateCounts: {},
-    departures: (entry.departures ?? []).map((d) => ({ id: d.id, label: d.label, citation: d.citation, as: d.as, rows: 0 })),
+    departures: (entry.departures ?? []).map((d) => {
+      const advisory = advisoryDepartureReason(entry.object, d.id);
+      return { id: d.id, label: d.label, citation: d.citation, as: d.as, rows: 0, ...(advisory ? { advisory } : {}) };
+    }),
     categories: [],
     unattributable: [],
     notNull: { willReceive: false, reason: '' },
@@ -1048,6 +1061,9 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
 
   const rows = plan.rows!;
   const departing = plan.departures.reduce((n, d) => n + d.rows, 0);
+  // NULL rows no step of this release removes, beside the unattributable
+  // ones: they stay NULL, so the column stays nullable on this release.
+  const held = heldNullReason(plan);
   switch (entry.fate) {
     case 'column-drop':
       plan.fateCounts = { columnPresent: hasOrg, rowsLosingTheirStamp: rows.stamped, rowsWithNullOrganization: rows.organizationNull };
@@ -1061,25 +1077,48 @@ async function planPresentTable(ctx: PlanContext, entry: InventoryEntry, source:
       const attributed = Object.values(derived).reduce((n, v) => n + v, 0);
       plan.attribution = derived;
       plan.fateCounts = { rowsToAttribute: attributed, departingRows: departing, unattributableRows: plan.unattributable.length };
+      const staying = [
+        ...(plan.unattributable.length > 0 ? [`${plan.unattributable.length} row(s) whose owner cannot be derived stay NULL and are reported`] : []),
+        ...(held ? [held] : []),
+      ];
       plan.notNull = !hasOrg
         ? { willReceive: false, reason: 'the table carries no organization_id column' }
-        : plan.unattributable.length === 0
+        : staying.length === 0
           ? { willReceive: true, reason: 'every NULL row is attributed or departs' }
-          : { willReceive: false, reason: `${plan.unattributable.length} row(s) whose owner cannot be derived stay NULL and are reported` };
+          : { willReceive: false, reason: staying.join('; ') };
       break;
     }
-    case 'report':
+    case 'report': {
       plan.fateCounts = { reportedRows: plan.unattributable.length, departingRows: departing };
+      const staying = [
+        ...(plan.unattributable.length > 0 ? [`${plan.unattributable.length} reported row(s) stay NULL`] : []),
+        ...(held ? [held] : []),
+      ];
       plan.notNull = entry.notNullExempt
         ? { willReceive: false, reason: entry.notNullExempt }
         : !hasOrg
           ? { willReceive: false, reason: 'the table carries no organization_id column' }
-          : plan.unattributable.length === 0
+          : staying.length === 0
             ? { willReceive: true, reason: 'no NULL row remains' }
-            : { willReceive: false, reason: `${plan.unattributable.length} reported row(s) stay NULL` };
+            : { willReceive: false, reason: staying.join('; ') };
       break;
+    }
   }
   return plan;
+}
+
+/**
+ * The NOT NULL reading's clause for a table's advisory departures — rows no
+ * step of this release carries out ({@link PlannedDeparture.advisory}), which
+ * therefore stay NULL — or `null` when it holds none.
+ */
+function heldNullReason(plan: TablePlan): string | null {
+  const held = plan.departures.filter((d) => d.advisory && d.rows > 0);
+  if (held.length === 0) return null;
+  return (
+    `${held.reduce((n, d) => n + d.rows, 0)} row(s) stay NULL on this release, reported as advisory: ` +
+    held.map((d) => d.label).join('; ')
+  );
 }
 
 /** Keyset-walk the NULL-organization rows of one physical table and classify each. */
@@ -1332,6 +1371,18 @@ export async function buildOrganizationOwnershipPlan(opts: {
         'nothing reads it. The ceremony neither attributes nor drops it; drop it yourself once its rows are no ' +
         'longer needed.',
     );
+  }
+  // Certifying with NULL rows standing is decided on the operator's behalf, so
+  // it is said before the first write, once per departure that holds rows.
+  for (const table of tables) {
+    for (const departure of table.departures) {
+      if (!departure.advisory || departure.rows === 0) continue;
+      warnings.push(
+        `${table.object} holds ${departure.rows} organization-less row(s) of ${departure.label}, which stay: ` +
+          `${departure.advisory}. The ceremony reports them as advisory and does not hold its ` +
+          `certification on them; they keep organization_id NULL, so ${table.object} does not receive NOT NULL on this release.`,
+      );
+    }
   }
 
   const byFate = { 'column-drop': 0, 'mirror-deletion': 0, attribution: 0, report: 0 } as Record<OrganizationOwnershipFate, number>;

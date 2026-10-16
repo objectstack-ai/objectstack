@@ -882,7 +882,7 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 6 }]);
   });
 
-  it('does not certify a ceremony whose departures have not left: the declared sharing-rule mirrors keep verified_at null', async () => {
+  it('certifies a ceremony whose only remaining NULL rows are the declared sharing-rule mirrors this release still seeds: advisory, named, kept', async () => {
     db.exec(`
       CREATE TABLE sys_sharing_rule (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT, customized INTEGER);
       INSERT INTO sys_sharing_rule VALUES ('rule_declared', NULL, 'share_deals', 'package', 0), ('rule_org', 'org_b', 'mine', 'admin', 0);
@@ -890,17 +890,29 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     const l = ledger();
     const report = await apply(catalog(), l);
 
-    // Every step ran, and the moved settings rung reads zero; the rule mirror
-    // is D2's to remove, so it still counts and is named.
+    // Every step ran, and the moved settings rung reads zero. The rule mirror
+    // is D2's to remove, and this release's own boot keeps seeding it, so it
+    // is advisory: named and counted beside the unattributable rows, never a
+    // discrepancy (the restore and the negative legs:
+    // `organization-ownership-apply.declared-rule-mirrors.test.ts`).
+    const unattributable = report.tables.reduce((n, t) => n + t.unattributable.length, 0);
     expect(report.complete).toBe(true);
-    expect(report.blocking).toBe(1);
-    expect(l.verdicts.at(-1)).toMatchObject({ complete: true, blocking: 1 });
+    expect(report.blocking).toBe(0);
+    expect(report.advisory).toBe(unattributable + 1);
+    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: unattributable + 1 });
     expect(tableOf(report, 'sys_setting').departures).toEqual([]);
     const rule = tableOf(report, 'sys_sharing_rule');
-    expect(rule.remaining).toBe(1);
-    expect(rule.departures).toEqual([expect.objectContaining({ id: 'declared-rule-mirrors', as: 'mirror-deletion', rows: 1 })]);
-    expect(rule.notNull.willReceive).toBe(false);
-    expect(rows(`SELECT id FROM sys_sharing_rule ORDER BY id`).map((r) => r.id)).toEqual(['rule_declared', 'rule_org']);
+    expect(rule.remaining).toBe(0);
+    expect(rule.departures).toEqual([
+      { id: 'declared-rule-mirrors', label: expect.any(String), as: 'mirror-deletion', rows: 1, advisory: expect.stringMatching(/own boot still writes them/) },
+    ]);
+    // Still NULL, so the column takes no NOT NULL; the operator was told before the first write.
+    expect(rule.notNull).toEqual({ willReceive: false, reason: expect.stringMatching(/^1 row\(s\) stay NULL on this release, reported as advisory: /) });
+    expect(report.warnings.filter((w) => w.startsWith('sys_sharing_rule holds 1 organization-less row(s) of '))).toHaveLength(1);
+    expect(rows(`SELECT id, organization_id FROM sys_sharing_rule ORDER BY id`)).toEqual([
+      { id: 'rule_declared', organization_id: null },
+      { id: 'rule_org', organization_id: 'org_b' },
+    ]);
   });
 
   it('promotes under a wall too: a template with no conflict ends verified, its seeded mirror and its row gone', async () => {

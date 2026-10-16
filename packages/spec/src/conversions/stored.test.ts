@@ -196,19 +196,36 @@ describe('applyConversionsToStoredItem (stored sys_metadata rows)', () => {
     });
   });
 
-  it('threads the conflict guard context through (flow callers that own a registry)', () => {
+  // [#23543 F5-http] A stored flow row written with a retired callout name
+  // still loads, as `http`: the rename left the authoring funnel, not this
+  // seam. Until 18 a caller's `reservedNodeTypes` naming the old token made it
+  // a refused conflict instead (ADR-0078's guard); the engine now refuses an
+  // executor under a reserved name, so the guard is gone and the rewrite is
+  // unconditional.
+  it('rewrites a stored flow\'s retired callout node type to http, unconditionally', () => {
     const flow = {
       name: 'notify_flow',
-      nodes: [{ id: 'n1', type: 'webhook', config: { url: 'https://hooks.example.com' } }],
+      nodes: [
+        { id: 'n1', type: 'webhook', config: { url: 'https://hooks.example.com' } },
+        { id: 'n2', type: 'http_request', config: { url: 'https://example.com' } },
+        { id: 'n3', type: 'http_call', config: { url: 'https://example.com' } },
+      ],
     };
     const conflicts: string[] = [];
+    const notices: ConversionNotice[] = [];
     const out = applyConversionsToStoredItem('flow', flow, {
       reservedNodeTypes: new Set(['webhook']),
       onConflict: (c) => conflicts.push(c.token),
+      onNotice: (n) => notices.push(n),
     }) as typeof flow;
-    // A live executor owns 'webhook' → the rename is refused and reported.
-    expect(out.nodes[0]!.type).toBe('webhook');
-    expect(conflicts).toEqual(['webhook']);
+    expect(out.nodes.map((n) => n.type)).toEqual(['http', 'http', 'http']);
+    expect(out.nodes.map((n) => n.config)).toEqual(flow.nodes.map((n) => n.config));
+    expect(notices.map((n) => [n.conversionId, n.from, n.to])).toEqual([
+      ['flow-node-http-callout-rename', 'webhook', 'http'],
+      ['flow-node-http-callout-rename', 'http_request', 'http'],
+      ['flow-node-http-callout-rename', 'http_call', 'http'],
+    ]);
+    expect(conflicts).toEqual([]);
   });
 
   // [#17321] The TODO lane rides through the stored seam the way the conflict

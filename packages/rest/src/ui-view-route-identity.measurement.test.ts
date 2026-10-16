@@ -88,6 +88,10 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 // reverse checks pin the list's length.
 const REGISTRAR_SOURCES = REST_SERVER_REGISTRAR_FILES
     .map((file) => (file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'))).join('\n');
+// [#23050 slice 10] `registerUiEndpoints`' BODY moved to `ui-routes.ts`; the
+// class keeps the private method as a host literal that forwards members and
+// calls none of them in a route. The sliced reading below reads the body there.
+const UI_SOURCE = readFileSync(resolve(HERE, 'ui-routes.ts'), 'utf8');
 
 const BASE = '/api/v1';
 const UI_ROUTE = `GET ${BASE}/ui/view/:object/:type`;
@@ -329,11 +333,18 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         // in this file 52 times over, and `registerUiEndpoints` sits directly
         // above `registerCrudEndpoints`, whose handlers all carry it — so a
         // file-wide grep would have read as a pass before the repair too.
-        const start = SOURCE.indexOf('private registerUiEndpoints(');
-        const end = SOURCE.indexOf('private registerCrudEndpoints(');
+        //
+        // [#23050 slice 10] The body moved to `ui-routes.ts`, so it is sliced
+        // there: from the moved function's signature to its own closing brace
+        // (the first column-0 brace after it), so neither the module header nor
+        // a later declaration can satisfy it. Sliced in `rest-server.ts`, the
+        // private method is now a host literal whose forwarders spell three of
+        // the terms below while calling none of them in a route.
+        const start = UI_SOURCE.indexOf('export function registerUiEndpoints(');
+        const end = UI_SOURCE.indexOf('\n}\n', start);
         expect(start).toBeGreaterThan(0);
         expect(end).toBeGreaterThan(start);
-        const body = SOURCE.slice(start, end);
+        const body = UI_SOURCE.slice(start, end);
 
         expect(body).toContain('this.resolveProtocol(');
         expect(body).toContain('p.getUiView(');
@@ -355,7 +366,10 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         // that slice's forwarder.
         // [#23050 slice 9] 9 → 10 (`search-routes.ts`): 58 and 73, +1 each for
         // that slice's forwarder.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(10);
+        // [#23050 slice 10] 10 → 11 (`ui-routes.ts`): 59 and 74, +1 each for
+        // that slice's forwarder (the two call sites moved with the body and are
+        // counted in both readings).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
     });

@@ -154,6 +154,11 @@ interface CensusEntry {
  * body (`search-routes.ts`) builds no `query:` literal either — it hands
  * `searchAll` a `q` / `objects` / `limit` / `perObject` request read off
  * `req.query`, never a `query:` slot.
+ *
+ * [#23050 slice 10] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0: the UI view
+ * body (`ui-routes.ts`) builds no `query:` literal either — it hands
+ * `getUiView` an `{ object, type }` request read off the path, never a
+ * `query:` slot.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 1,
@@ -166,6 +171,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'discovery-routes.ts': 0,
     'email-routes.ts': 0,
     'search-routes.ts': 0,
+    'ui-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -359,7 +365,8 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#23050 slice 7] Length 7 → 8, the sum unchanged.
         // [#23050 slice 8] Length 8 → 9, the sum unchanged.
         // [#23050 slice 9] Length 9 → 10, the sum unchanged.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(10);
+        // [#23050 slice 10] Length 10 → 11, the sum unchanged.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

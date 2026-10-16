@@ -45,56 +45,60 @@ import {
   type ViewFilterOperator,
 } from '../ui/view.zod.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY } from '../ui/assembled-views.zod.js';
+import { misplacedDefaultPageRefusal } from '../ui/default-record-page.js';
 import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
 import { CONNECTOR_CONFIG_LOOSE_KEYS, WAIT_EVENT_CONFIG_LOOSE_KEYS } from '../automation/flow-sibling-block-loose-keys.js';
+import { FLOW_RESERVED_NODE_TYPES } from '../automation/flow-reserved-node-types.js';
 
 /**
- * Flow callout node type rename (protocol 11.0).
+ * Flow callout node type rename (protocol 11.0; retired from the load path at
+ * 18, #23543 F5-http).
  *
  * The divergent `http_request` / `http_call` / `webhook` node types were
  * unified to the single canonical `http` node (see
  * `services/service-automation/src/builtin/http-nodes.ts`). A pure enum
  * re-spelling — losslessly convertible.
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `flow.node.type`
- * is an open namespace (ADR-0018), so no door refuses `http_request` /
- * `http_call` / `webhook`: retired, this entry would leave an authored node
- * silently carrying a type no builtin executor owns, where today it converts
- * with a notice. It can retire once the authoring doors refuse those three
- * reserved names with the rename to `http`, which is a decision about
- * reserving retired official names inside an open namespace.
+ * ## Retired from the load path at 18 (#23543, ruling F5-http A)
+ *
+ * Through 17 it stayed live because `flow.node.type` is an open namespace
+ * (ADR-0018) and no door refused the three names, so retired alone it would
+ * have left an authored node silently carrying a type no builtin executor owns
+ * (the verdict #23487 recorded). The ruling reserved the names inside the open
+ * namespace: the flow parse refuses each one as a node `type` with the
+ * prescription naming `http`, and the automation engine refuses to register a
+ * node executor under one (`FLOW_RESERVED_NODE_TYPES`,
+ * `automation/flow-reserved-node-types.ts`, the table this entry reads too). So
+ * the authoring funnel (`defineStack`, `os validate` / `os build`) no longer
+ * replays this entry, and an author is taught the canonical type instead of
+ * being rewritten. Stored flows are the `includeRetired` seams: the automation
+ * engine's flow rehydration and stored-row rehydration
+ * (`applyConversionsToStoredItem`) still rewrite a `sys_metadata` flow row
+ * written with an old name before anything parses it, and so does the
+ * artifact-ingestion door inside its window. `os migrate meta` does not reach
+ * it: protocol 11 is below `MIGRATION_SUPPORT_FLOOR`. The family's D3 entry,
+ * `flow-node-http-callout-types-reserved`, states the edit for authored sources.
+ *
+ * The rewrite is unconditional. Until 18 it skipped a node whose old name a
+ * live executor owned and reported a conflict instead (ADR-0078's guard,
+ * through `ConversionContext.reservedNodeTypes`); the engine now refuses that
+ * registration, so no live executor can own a reserved name and the guard had
+ * no case left to judge.
  */
 const flowNodeHttpRename: MetadataConversion = {
   id: 'flow-node-http-callout-rename',
   toMajor: 11,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.type',
   summary: "flow callout node types 'http_request' / 'http_call' / 'webhook' → 'http'",
-  apply(stack, emit, context) {
-    const aliases = new Set(['http_request', 'http_call', 'webhook']);
+  apply(stack, emit) {
     return mapFlowNodes(stack, (node, path) => {
       const type = node.type;
-      if (typeof type !== 'string' || !aliases.has(type)) return node;
-      // `flow.node.type` is an OPEN namespace (ADR-0018 removed the enum gate),
-      // so a retired official name could be re-registered by a third party. If a
-      // live executor owns this token in this environment, refuse the rewrite —
-      // clobbering it would silently break that node — and report a loud,
-      // actionable conflict instead (ADR-0078). On the pure build/validate seam
-      // `context` is absent, so the historical alias converts as normal.
-      if (context?.reservedNodeTypes?.has(type)) {
-        context.reportConflict?.({
-          token: type,
-          path: `${path}.type`,
-          reason:
-            `'${type}' is a protocol-11 retired official flow-node type, but a live ` +
-            `executor is registered under that exact name in this environment. The ` +
-            `conversion to 'http' was skipped to avoid breaking it. Rename your ` +
-            `custom node to a non-reserved type (the reserved names are ` +
-            `'http_request' / 'http_call' / 'webhook', all superseded by 'http').`,
-        });
-        return node;
-      }
-      emit({ from: type, to: 'http', path: `${path}.type` });
-      return { ...node, type: 'http' };
+      if (typeof type !== 'string' || !Object.prototype.hasOwnProperty.call(FLOW_RESERVED_NODE_TYPES, type)) return node;
+      const canonical = FLOW_RESERVED_NODE_TYPES[type]!;
+      emit({ from: type, to: canonical, path: `${path}.type` });
+      return { ...node, type: canonical };
     });
   },
   fixture: {
@@ -11192,6 +11196,84 @@ const pageHeaderShowStarRemoved: MetadataConversion = {
 };
 
 /**
+ * `page.isDefault` removed from a page that is not a record page bound to an
+ * object (protocol 18). The #23610 ruling (A on Q1, record 6190536588) refused
+ * the flag there at every door; this entry is the data-at-rest half the P0 that
+ * followed it added: an installed or stored page still carrying the flag
+ * converts at load instead of stopping the environment's kernel build.
+ *
+ * `isDefault` has one meaning — the default record page of the object a record
+ * page binds — and on every other page nothing read it: the console opens an
+ * app on its first navigation item and the root landing follows the app's own
+ * `isDefault`. Deleting the flag from a `home`, `app`, `utility` or `list`
+ * page, or from a record page with no `object`, therefore changes nothing a
+ * page does — a pure lossless delete. The ONE judge of "misplaced" is the
+ * parse's own, `misplacedDefaultPageRefusal` (`ui/default-record-page.ts`), so
+ * this conversion strips exactly the pages `checkPageDefaultPlacement` and the
+ * registry door refuse, and nothing else: a default record page bound to an
+ * object keeps its flag.
+ *
+ * **Retired from the authoring surface from the day it lands.** A live author
+ * meets the parse's refusal, which names where a landing is really set (the
+ * app's navigation) — that decision is the author's, and the refusal is how
+ * they are taught it. Data at rest has no author to teach: `sys_metadata` rows
+ * replay this on read, a compiled artifact replays it inside the window its
+ * manifest opens, and the kernel's package registration door
+ * (`ObjectQL.registerApp`, `@objectstack/objectql`) replays it for a package
+ * body that declares its protocol range — the seam a hosted environment's
+ * installed packages reach without a parse. The paired D3 entry is
+ * `page-is-default-off-record-page-refused`.
+ *
+ * ⚠️ Coverage boundary: this walks `stack.pages[]` ({@link mapPages}), the
+ * collection every door reads a package's pages from. A nested `plugins[]`
+ * entry's pages are code (`ObjectQL.registerPlugin`), never data at rest, and
+ * keep meeting the registry's refusal.
+ */
+const pageIsDefaultOffRecordPageRemoved: MetadataConversion = {
+  id: 'page-is-default-off-record-page-removed',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.isDefault',
+  summary:
+    "page key 'isDefault' removed from a page that is not a record page bound to an object (a "
+    + 'home, app, utility or list page, or a record page with no object): it marks the default '
+    + 'record page of an object and nothing read it on any other page — an app opens on its first '
+    + 'navigation item, so the flag decided nothing',
+  apply(stack, emit) {
+    return mapPages(stack, (page, path) => {
+      if (page.isDefault !== true || misplacedDefaultPageRefusal(page) === undefined) return page;
+      return stripKeys(page, ['isDefault'], emit, path);
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        // The shipped shape: a home page marked as a landing that never landed.
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', isDefault: true, regions: [] },
+        // A record page bound to no object — the flag places nothing here either.
+        { name: 'draft_record', label: 'Draft', type: 'record', isDefault: true },
+        // A default record page bound to an object keeps its flag: that is the
+        // one meaning the key has.
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', isDefault: true },
+        // `isDefault: false` says nothing and is left as authored.
+        { name: 'team_home', label: 'Team Home', type: 'home', isDefault: false },
+      ],
+    },
+    after: {
+      pages: [
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', regions: [] },
+        { name: 'draft_record', label: 'Draft', type: 'record' },
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', isDefault: true },
+        { name: 'team_home', label: 'Team Home', type: 'home', isDefault: false },
+      ],
+    },
+    // One notice per stripped flag: the home page and the unbound record page.
+    expectedNotices: 2,
+  },
+};
+
+/**
  * `page.requires` removed from the page kinds whose source is never compiled at
  * save — `react`, `full` and `slotted`, a page that omits `kind` included
  * (protocol 18, #21459; ruling record 5964312254, letter A).
@@ -11259,6 +11341,67 @@ const pageRequiresNonCompiledKindRemoved: MetadataConversion = {
     // One per stripped key: the react, slotted and kind-less pages. The html
     // page emits none.
     expectedNotices: 3,
+  },
+};
+
+/**
+ * `page.template: 'full-width'` → `'default'` (protocol 18). The #23610 ruling
+ * (A on Q2, record 6190536588) closed the template set and retired `full-width`
+ * by name; this entry is the data-at-rest half the P0 that followed it added.
+ *
+ * `full-width` was a second name for `default`: the console's template
+ * registry mapped both names to the one `FullWidthTemplate` component
+ * (objectui `renderers/layout/page.tsx`, read at the `.objectui-sha` pin), so
+ * the re-spelling draws the page exactly as before — the enum re-spelling D2
+ * was written for. The parse refuses the retired name with that prescription
+ * (`PageTemplateSchema`); an installed or stored page still carrying it
+ * converts here on read instead of failing the strict parse at an artifact
+ * door or on a stored-row read.
+ *
+ * **Retired from the authoring surface from the day it lands**, like its
+ * sibling `page-is-default-off-record-page-removed`: the authoring door keeps
+ * the one-word refusal, data at rest replays this. Only the retired SPELLING
+ * converts — an unregistered template name (`centered`, `two-column`) is not a
+ * shape this entry positively recognizes and stays with the parse, and a
+ * region a template does not place has no lossless rewrite at all (the D3
+ * entry `page-template-closed-region-unplaced-refused` names the hand edit).
+ *
+ * ⚠️ Coverage boundary: this walks `stack.pages[]` ({@link mapPages}).
+ * `template` is a top-level `PageSchema` key with no nested spelling.
+ */
+const pageTemplateFullWidthToDefault: MetadataConversion = {
+  id: 'page-template-full-width-to-default',
+  toMajor: 18,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
+  surface: 'page.template',
+  summary:
+    "page template 'full-width' → 'default' (a second name for the same layout: the console drew "
+    + 'both with one template component, so the page renders exactly as before)',
+  apply(stack, emit) {
+    return mapPages(stack, (page, path) => {
+      if (page.template !== 'full-width') return page;
+      emit({ from: 'full-width', to: 'default', path: `${path}.template` });
+      return { ...page, template: 'default' };
+    });
+  },
+  fixture: {
+    before: {
+      pages: [
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width', regions: [] },
+        // A registered template is left as authored; so is a page with none.
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', template: 'three-column', regions: [] },
+        { name: 'team_home', label: 'Team Home', type: 'home' },
+      ],
+    },
+    after: {
+      pages: [
+        { name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'default', regions: [] },
+        { name: 'sales_home_page', label: 'Sales Home', type: 'home', template: 'three-column', regions: [] },
+        { name: 'team_home', label: 'Team Home', type: 'home' },
+      ],
+    },
+    expectedNotices: 1,
   },
 };
 
@@ -13971,13 +14114,13 @@ const pageAssignedProfilesRemoved: MetadataConversion = {
         // The authored shape: a page whose author believed the list gated it.
         { name: 'deal_desk', label: 'Deal Desk', assignedProfiles: ['admin', 'sales_manager'] },
         // A page with nothing to strip keeps its identity (copy-on-write).
-        { name: 'team_home', label: 'Team Home', isDefault: true },
+        { name: 'team_home', label: 'Team Home' },
       ],
     },
     after: {
       pages: [
         { name: 'deal_desk', label: 'Deal Desk' },
-        { name: 'team_home', label: 'Team Home', isDefault: true },
+        { name: 'team_home', label: 'Team Home' },
       ],
     },
     expectedNotices: 1,
@@ -16832,7 +16975,9 @@ const MAJOR_18_CONVERSIONS: readonly OrderedConversion[] = [
   { conversion: pageComponentResponsiveRemoved, order: 13 },
   { conversion: pageHeaderBreadcrumbRemoved, order: 49 },
   { conversion: pageHeaderShowStarRemoved, order: 66 },
+  { conversion: pageIsDefaultOffRecordPageRemoved, order: 67 },
   { conversion: pageRequiresNonCompiledKindRemoved, order: 58 },
+  { conversion: pageTemplateFullWidthToDefault, order: 67 },
   { conversion: permissionAdminScopeBindingAuthoringRemoved, order: 65 },
   { conversion: permissionAllowRestorePurgeRemoved, order: 16 },
   { conversion: permissionRlsTagsRemoved, order: 42 },
