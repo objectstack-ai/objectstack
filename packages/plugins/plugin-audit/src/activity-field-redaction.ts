@@ -97,57 +97,80 @@
  *    redaction would leave its change empty. A reader the service gives no
  *    answer for is narrowed by neither. ⛔ No object or field is named here.
  *
- * It is a WHERE, not a post-read drop, built the way the read gate builds its
- * own and on the same four reads (`find`, `findOne`, `count`, `aggregate`). A
- * pre-scan of the rows the query would touch, under SYSTEM context and in the
- * caller's order, judges each one, and the ids it withholds are ANDed out of
- * the query (`{ id: { $nin: WITHHELD } }`). So a list's `total`, its pages, a
- * by-id read and a grouped count all agree with the rows served; a count that
- * kept the row would leak the same timing. A pre-scan that reaches its bound
- * fails CLOSED, as the read gate's does: the rows beyond the window cannot be
- * judged, so the read is answered from the judged rows alone
- * (`{ id: { $in: KEPT } }`), and a warn says so.
- *
  * ## A fired milestone is withheld as a row from a reader not served its watched fields (#22786)
  *
  * A fired milestone's row speaks about its watched fields in columns the
  * key-by-key narrowing does not reach: its `type` is the declaration's, and
  * its summary is the declaration's sentence. Both say that a watched field
- * entered its declared value. So the same pre-scan, by the same answer,
- * withholds that row as a ROW from a reader not served every field a declared
- * milestone watches — the list the mirror declares the row's `metadata.kind`
- * from ({@link ActivityTextSources.kind}). One judgement per row
- * (`isWithheldRow`), one pre-scan, one WHERE:
+ * entered its declared value. So such a row is withheld as a ROW from a reader
+ * not served every field the object's milestones watch, and the redaction
+ * drops its kind from any row that reader is still served.
  *
- *  - The row is withheld exactly when the redaction would drop its kind. A
- *    reader served every watched field is served the row with its kind; a
- *    reader withheld only fields no milestone watches is served it too.
- *  - A declaration with no readable list is of unknown provenance and is judged
- *    as the text precedent judges one: served only to a reader not restricted
- *    on the parent.
- *  - A `kind` on a row the mirror did not write is the author's: not judged.
- *  - Rows written before the mirror declared the list carry no kind, so nothing
- *    on them says a milestone fired; they are judged by the rules above them,
- *    and age out with the object's retention, like the earlier shape's text.
+ * ## Both rules are one predicate over writer-stamped columns (ADR-0139 D4, E6)
+ *
+ * Each row carries, stamped at write time by one derivation
+ * (`activity-changed-fields.ts`: the CRUD mirror, a before-insert hook for any
+ * other writer, and the stored-row backfill `os migrate
+ * activity-changed-fields`), the key set of its recorded change
+ * (`changed_fields`) and, for a fired milestone, one sorted key of the fields
+ * its declaration watched (`milestone_key`). The rule is a WHERE over them,
+ * one branch per parent object ({@link keptRowsOfParent}), ANDed into the same
+ * four reads (`find`, `findOne`, `count`, `aggregate`), so a list's `total`,
+ * its pages, a by-id read and a grouped count all agree with the rows served:
+ *
+ *  - an update row whose `changed_fields` is non-empty and holds no field this
+ *    reader is served is withheld; a create, a delete, a note, and an update
+ *    empty for everyone (it touched only `internal` fields, which the writer
+ *    omits) are stamped `[]` and kept;
+ *  - a milestone row is served only when its key equals the key of the parent's
+ *    CURRENT `activityMilestones` declaration and this reader is served every
+ *    field that declaration watches (ruled letter B). A row written under an
+ *    earlier declaration, or naming a since-removed field, is withheld from
+ *    every non-exempt reader until retention ages it out;
+ *  - an UNSTAMPED row — at rest from before the columns existed and not yet
+ *    backfilled, or one the planner could not judge — is withheld from every
+ *    non-system reader the service answers for (ADR-0139 D4: an unjudged row
+ *    fails closed).
+ *
+ * No row is read to build it — no SYSTEM pre-scan and no window — and no
+ * `ReadableIds` leaf is composed by it. Both columns are value-bearing:
+ * `changed_fields` is served narrowed to the fields this reader is served,
+ * `milestone_key` is never served, and the query guard
+ * (`parent-field-query-guard.ts`) refuses a predicate on either to a reader
+ * withheld a parent field, as it does for `metadata`.
  *
  * ## Fail closed
  *
  * An unexpected failure strips every value-bearing column from the rows of the
  * read rather than serving them unredacted — the sibling read gate's rule. A
- * withheld-update pre-scan that fails denies the read, as the read gate does.
+ * withheld-row rule that cannot be built denies the read, as the read gate does.
  * The
  * security service's own "no answer" (no service wired, or an unresolvable
  * read projection) passes rows through, exactly as the approval snapshot and
  * the data plane itself do; a reader the service cannot answer MASKING for is
  * served no field (the contract's obligation, see {@link resolveServedFields}).
  *
- * System-context reads (the audit writer, the gate's own pre-scan) and
+ * System-context reads (the audit writer, the backfill, a gate's bounded probe) and
  * context-less programmatic calls are not redacted, as for the read gate.
  */
 
-import type { CommentAccessEngine } from './comment-access-hooks.js';
-import { parseActivityParentObject, type ActivityMiddlewareEngine } from './activity-read-visibility.js';
-import { PARENT_GATE_READ_OPS, PARENT_GATE_SCAN_LIMIT, andIntoWhere } from './parent-record-read-gate.js';
+import {
+  ACTIVITY_CHANGED_FIELDS_COLUMN,
+  ACTIVITY_KIND_KEY,
+  ACTIVITY_MILESTONE_KEY_COLUMN,
+  ACTIVITY_MILESTONE_KIND,
+  ACTIVITY_TEXT_SOURCES_KEY,
+  declaredMilestoneWatchedFields,
+  milestoneKeyOf,
+} from './activity-changed-fields.js';
+import { ACTIVITY_GATE, parseActivityParentObject, type ActivityMiddlewareEngine } from './activity-read-visibility.js';
+import { pinnedParentObject } from './parent-field-query-guard.js';
+import {
+  PARENT_GATE_READ_OPS,
+  andIntoWhere,
+  enumerateParentObjects,
+  type ParentRecordGateEngine,
+} from './parent-record-read-gate.js';
 import {
   dropUnservedKeys,
   ensureJudgedColumnsProjected,
@@ -168,25 +191,12 @@ const ACTIVITY_OBJECT = 'sys_activity';
 const SYSTEM_CTX = { isSystem: true } as const;
 
 /**
- * The `metadata` key under which the CRUD mirror declares which PARENT fields
- * each text column was composed from: `{ summary: string[], record_label:
- * string[] }`. Written by `audit-writers.ts`, read (and stripped) here — one
- * name, imported by both halves.
+ * The `metadata` keys the CRUD mirror declares a row's text provenance and its
+ * domain kind under, and the milestone kind — defined beside the stamp planner
+ * (`activity-changed-fields.ts`), re-exported here so this seam's public names
+ * are unchanged.
  */
-export const ACTIVITY_TEXT_SOURCES_KEY = 'text_sources';
-
-/**
- * [#22771] The `metadata` key a row's DOMAIN kind rides in. ADR-0052 §5: "`type`
- * stays domain-NEUTRAL … Domain kind rides in `metadata.kind`." So a fired
- * milestone keeps the `type` its declaration names (`completed`, or `updated`
- * when it names none) and says what it is here, which is how a reader tells a
- * "Case resolved" milestone from a finished task. Written by `audit-writers.ts`,
- * judged here: one name, imported by both halves.
- */
-export const ACTIVITY_KIND_KEY = 'kind';
-
-/** [#22771] The kind the CRUD mirror stamps on a row a declared `activityMilestones` entry fired (ADR-0052 §5b.2). */
-export const ACTIVITY_MILESTONE_KIND = 'milestone';
+export { ACTIVITY_KIND_KEY, ACTIVITY_MILESTONE_KIND, ACTIVITY_TEXT_SOURCES_KEY };
 
 /** The declaration's shape. */
 export interface ActivityTextSources {
@@ -205,8 +215,18 @@ export interface ActivityTextSources {
 const TEXT_COLUMNS = ['summary', 'record_label'] as const;
 type TextColumn = (typeof TEXT_COLUMNS)[number];
 
-/** The columns that can carry a parent field value. */
-const VALUE_BEARING_COLUMNS = ['summary', 'record_label', 'metadata'] as const;
+/**
+ * The columns that can carry a parent field value — [ADR-0139 E6] the two
+ * writer-stamped columns included: `changed_fields` names which fields of the
+ * parent changed, and `milestone_key` which fields its declaration watched.
+ */
+const VALUE_BEARING_COLUMNS = [
+  'summary',
+  'record_label',
+  'metadata',
+  ACTIVITY_CHANGED_FIELDS_COLUMN,
+  ACTIVITY_MILESTONE_KEY_COLUMN,
+] as const;
 
 /** The slice of the security contract this seam asks — the REAL interface. */
 export type ActivityFieldVisibilitySource = FieldVisibilitySource;
@@ -319,141 +339,138 @@ async function sourcesServed(
   return sources === 'unknown' ? !(await restricted()) : sources.every((f) => served.has(f));
 }
 
-/** The engine slice the withheld-update rule's pre-scan needs. */
-export type ActivityRedactionEngine = ActivityMiddlewareEngine & Pick<CommentAccessEngine, 'find'>;
-
-/** The columns the withheld-update pre-scan reads: the row, its parent object
- * and its stored change (with, [#22786], a milestone's kind and its declaration). */
-const WITHHELD_SCAN_COLUMNS = ['id', 'object_name', 'metadata'] as const;
-
-/** No real row matches it: the withheld-update rule's fail-closed answer. */
-const WITHHELD_DENY_ALL = { id: '__activity_withheld_update_denied__' } as const;
-
 /**
- * [#21388] Whether an activity row's STORED change is an update every one of
- * whose keys a reader served `served` is withheld. False for a create or a
- * delete (one side is not a record), for a change empty on both sides (empty
- * for every reader), and for anything that is not a recorded change.
- * Exported for direct testing.
+ * The engine slice the withheld-row rule needs: the registry its parent objects
+ * are enumerated from, and each object's registered definition (its CURRENT
+ * `activityMilestones` declaration). No row is read.
  */
-export function isWithheldOnlyUpdate(metadata: Record<string, unknown> | null, served: ReadonlySet<string>): boolean {
-  if (!metadata) return false;
-  const before = metadata.old;
-  const after = metadata.new;
-  if (!isRecord(before) || !isRecord(after)) return false;
-  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
-  if (keys.size === 0) return false;
-  for (const key of keys) if (served.has(key)) return false;
-  return true;
+export type ActivityRedactionEngine = ActivityMiddlewareEngine &
+  Pick<ParentRecordGateEngine, 'registry'> & {
+    getSchema?(object: string): unknown;
+  };
+
+/** No real row matches it: the withheld-row rule's fail-closed answer. */
+const WITHHELD_DENY_ALL = { id: '__activity_withheld_row_denied__' } as const;
+
+/** The withheld-row rule's states an engine has already reported, per engine. */
+const withheldRuleReported = new WeakMap<object, Set<string>>();
+
+function reportOnce(engine: object, logger: ActivityRedactionLogger, key: string, message: string): void {
+  let reported = withheldRuleReported.get(engine);
+  if (!reported) withheldRuleReported.set(engine, (reported = new Set()));
+  if (reported.has(key)) return;
+  reported.add(key);
+  logger.warn(message);
+}
+
+/** The CURRENT `activityMilestones` declaration of `object`: its watched fields, or `[]`. */
+function currentMilestoneWatched(engine: ActivityRedactionEngine, object: string): string[] {
+  try {
+    return declaredMilestoneWatchedFields(typeof engine.getSchema === 'function' ? engine.getSchema(object) : undefined);
+  } catch {
+    return [];
+  }
 }
 
 /**
- * [#22786] Whether an activity row is a fired milestone, as the CRUD mirror
- * declared it, whose watched fields are not all served to this reader. The
- * watched fields are the list the mirror declares the row's
- * `metadata.kind` from ({@link kindProvenance}), judged by the same answer
- * the redaction serves that kind by, so the row is withheld exactly when the
- * redaction would drop its kind. False for a row with no milestone kind and
- * for a kind on a row the mirror did not write (the author's, served as
- * written). `restricted` answers for a declaration with no readable list.
+ * [ADR-0139 D4, E6] The rows of ONE parent object `P` a reader served
+ * `served` keeps, as a predicate over the two writer-stamped columns
+ * (`activity-changed-fields.ts`):
+ *
+ *  - **stamped** — `changed_fields` is not null. An unstamped row (written
+ *    before the column existed and not yet backfilled, or one the planner
+ *    could not judge) is withheld: ADR-0139 D4's answer for an unjudged row.
+ *  - **the update half** (#21388) — `changed_fields` is empty, or it contains
+ *    a field this reader is served: one `$contains` per served field. So an
+ *    update whose every recorded key is withheld is withheld, and a create, a
+ *    delete, a note, and an update that touched only `internal` fields (empty
+ *    for everyone) are kept.
+ *  - **the milestone half** (#22786, ruled letter B) — `milestone_key` is null
+ *    (no milestone fired), or it EQUALS the key of P's current
+ *    `activityMilestones` declaration AND this reader is served every field
+ *    that declaration watches. A milestone row written under an earlier
+ *    declaration, or naming a since-removed field, is withheld from every
+ *    non-exempt reader until retention ages it out.
+ *
  * Exported for direct testing.
  */
-export async function isWithheldMilestone(
-  metadata: Record<string, unknown> | null,
-  served: ReadonlySet<string>,
-  restricted: () => Promise<boolean>,
-): Promise<boolean> {
-  if (!metadata || metadata[ACTIVITY_KIND_KEY] !== ACTIVITY_MILESTONE_KIND) return false;
-  const watched = kindProvenance(metadata);
-  if (watched === null) return false;
-  return !(await sourcesServed(watched, served, restricted));
+export function keptRowsOfParent(
+  parent: string,
+  served: readonly string[],
+  watched: readonly string[],
+): Record<string, unknown> {
+  const servedSet = new Set(served);
+  const members = [...servedSet].sort();
+  const key = milestoneKeyOf(watched);
+  const milestoneServed = key !== null && watched.every((f) => servedSet.has(f));
+  return {
+    $and: [
+      { object_name: parent },
+      { [ACTIVITY_CHANGED_FIELDS_COLUMN]: { $null: false } },
+      {
+        $or: [
+          { [ACTIVITY_CHANGED_FIELDS_COLUMN]: { $empty: true } },
+          ...members.map((f) => ({ [ACTIVITY_CHANGED_FIELDS_COLUMN]: { $contains: f } })),
+        ],
+      },
+      milestoneServed
+        ? { $or: [{ [ACTIVITY_MILESTONE_KEY_COLUMN]: { $null: true } }, { [ACTIVITY_MILESTONE_KEY_COLUMN]: key }] }
+        : { [ACTIVITY_MILESTONE_KEY_COLUMN]: { $null: true } },
+    ],
+  };
 }
 
 /**
- * [#21388, #22786] The ONE withheld-row judgement the pre-scan makes: a row
- * whose very presence speaks about a field this reader is not served, which
- * narrowing its columns cannot take back. Either an update whose every
- * recorded change is withheld ({@link isWithheldOnlyUpdate}), or a fired
- * milestone whose watched fields are not all served
- * ({@link isWithheldMilestone}). Exported for direct testing.
- */
-export async function isWithheldRow(
-  metadata: Record<string, unknown> | null,
-  served: ReadonlySet<string>,
-  restricted: () => Promise<boolean>,
-): Promise<boolean> {
-  return isWithheldOnlyUpdate(metadata, served) || (await isWithheldMilestone(metadata, served, restricted));
-}
-
-/** No full answer is the closed answer: see {@link RestrictedFor}. */
-const RESTRICTED_CLOSED: RestrictedFor = async () => true;
-
-/**
- * [#21388] The WHERE that withholds, from one read, every row
- * {@link isWithheldRow} withholds from the reader `servedFor` answers for:
- * `null` when the read withholds nothing, `{ id: { $nin: WITHHELD } }` when the
- * pre-scan saw every row the read can touch, and `{ id: { $in: KEPT } }` when
- * it reached its bound (fail closed: an unjudged row is never served).
- * [#22786] `restrictedFor` is the read's answer for a declaration of unknown
- * provenance; without one, such a row is judged restricted (closed).
+ * [ADR-0139 D4, E6] The WHERE that withholds, from one read, every row the
+ * withheld-row rule withholds from the reader `servedFor` answers for: one
+ * {@link keptRowsOfParent} branch per parent object, ORed — or `null` when the
+ * service gives no answer for any of them (nothing is narrowed).
+ *
+ * The parents are the read gate's own enumeration (`enumerateParentObjects`,
+ * every registered object the CRUD mirror can write about), narrowed to the
+ * ONE parent the read pins by equality on `object_name` when it pins one
+ * (`pinnedParentObject`, the query guard's reading): no row of any other parent
+ * can match such a read. A parent the service gives no answer for is kept
+ * whole (`{ object_name: P }`), as the redaction serves it.
+ *
+ * It reads no row, as no context: no SYSTEM pre-scan, no window, and no leaf
+ * composed for anyone (the security service's own field answers are its only
+ * input). An engine with no registry view cannot say which parents exist, so
+ * nothing can be judged: the read is denied, and that is said once.
  * Exported for direct testing.
  */
-export async function computeWithheldUpdateFilter(
-  engine: Pick<CommentAccessEngine, 'find'>,
+export async function computeWithheldRowFilter(
+  engine: ActivityRedactionEngine,
   ast: Record<string, unknown>,
   servedFor: ServedFor,
   logger: ActivityRedactionLogger,
-  restrictedFor: RestrictedFor = RESTRICTED_CLOSED,
 ): Promise<unknown | null> {
-  // The rows the read would touch, under SYSTEM context (the reader may not be
-  // served their change; that is what is being decided). The caller's own
-  // order rides along, so a bounded window is the one the caller pages through.
-  const orderBy = ast.orderBy;
-  const candidates = await engine.find(ACTIVITY_OBJECT, {
-    where: (ast.where as Record<string, unknown> | undefined) ?? {},
-    fields: [...WITHHELD_SCAN_COLUMNS],
-    ...(Array.isArray(orderBy) && orderBy.length > 0 ? { orderBy } : {}),
-    limit: PARENT_GATE_SCAN_LIMIT,
-    context: { ...SYSTEM_CTX },
-  });
-  if (!candidates.length) return null;
-
-  const servedSets = new Map<string, Set<string> | undefined>();
-  const withheld: unknown[] = [];
-  const kept: unknown[] = [];
-  for (const row of candidates) {
-    let isWithheld = false;
-    const object = parseActivityParentObject(row);
-    if (object) {
-      if (!servedSets.has(object)) {
-        const answer = await servedFor(object);
-        servedSets.set(object, answer === undefined ? undefined : new Set(answer.map(String)));
-      }
-      const served = servedSets.get(object);
-      isWithheld =
-        served !== undefined &&
-        (await isWithheldRow(parseMetadata(row.metadata), served, () => restrictedFor(object, served)));
-    }
-    const id = row.id;
-    const usable = (typeof id === 'string' || typeof id === 'number') && String(id) !== '';
-    // A row is excluded by its stored id, so a withheld row without one
-    // cannot be excluded at all: deny the read rather than serve it.
-    if (!usable) {
-      if (isWithheld) return WITHHELD_DENY_ALL;
+  const pinned = pinnedParentObject(ast.where, ACTIVITY_OBJECT);
+  const parents = pinned !== null ? [pinned] : enumerateParentObjects(engine, ACTIVITY_GATE);
+  if (parents === null) {
+    reportOnce(
+      engine,
+      logger,
+      'no-registry',
+      `[audit] ${REDACTION_SEAM}: the engine exposes no registry view, so the parent objects of the activity ` +
+        'stream cannot be enumerated and no row can be judged: every non-system read that names no one parent ' +
+        'object is denied (fail-closed). Reported once for this engine.',
+    );
+    return WITHHELD_DENY_ALL;
+  }
+  const branches: Array<Record<string, unknown>> = [];
+  let narrowed = false;
+  for (const parent of parents) {
+    const served = await servedFor(parent);
+    if (served === undefined) {
+      branches.push({ object_name: parent });
       continue;
     }
-    (isWithheld ? withheld : kept).push(id);
+    narrowed = true;
+    branches.push(keptRowsOfParent(parent, served.map(String), currentMilestoneWatched(engine, parent)));
   }
-
-  if (candidates.length >= PARENT_GATE_SCAN_LIMIT) {
-    logger.warn(
-      `[audit] ${REDACTION_SEAM}: the withheld-update pre-scan hit the ${PARENT_GATE_SCAN_LIMIT}-row cap; ` +
-        'this broad read is answered from the rows it judged (fail-closed) and may omit visible rows — ' +
-        'scope the query by object_name and record_id',
-    );
-    return kept.length ? { id: { $in: kept } } : WITHHELD_DENY_ALL;
-  }
-  return withheld.length ? { id: { $nin: withheld } } : null;
+  if (!narrowed) return null;
+  return branches.length === 1 ? branches[0] : { $or: branches };
 }
 
 /**
@@ -483,6 +500,8 @@ export async function redactActivityRows(
     if (!isRecord(item)) continue;
     const row = item;
     if (!VALUE_BEARING_COLUMNS.some((col) => col in row)) continue;
+    // [ADR-0139 E6] The milestone key is bookkeeping for the read rule: never served.
+    delete row[ACTIVITY_MILESTONE_KEY_COLUMN];
     const object = parseActivityParentObject(row);
     // The read gate serves no row without a parent; a row that reaches here
     // without one has nothing to be judged against.
@@ -493,6 +512,16 @@ export async function redactActivityRows(
     const answer = await servedFor(object);
     if (answer === undefined) continue;
     const servedSet = new Set(answer.map(String));
+
+    // [ADR-0139 E6] The recorded change's key set, narrowed to the served
+    // members, as `metadata.old` / `metadata.new` are narrowed key by key.
+    const changedFields = row[ACTIVITY_CHANGED_FIELDS_COLUMN];
+    if (Array.isArray(changedFields)) {
+      row[ACTIVITY_CHANGED_FIELDS_COLUMN] = changedFields.filter((f) => servedSet.has(String(f)));
+    } else if (changedFields !== undefined && changedFields !== null) {
+      // Not the stored shape: nothing here can narrow it, so it is not served.
+      delete row[ACTIVITY_CHANGED_FIELDS_COLUMN];
+    }
 
     const metadata = 'metadata' in row ? parseMetadata(row.metadata) : null;
     const provenance = textProvenance(metadata);
@@ -538,12 +567,10 @@ const JUDGED_BY = ['object_name', 'metadata'] as const;
  * resolved on every read: the security plugin may register after this one.
  * Inert on an engine without the middleware seam; `AuditPlugin` says so.
  *
- * [#21388] Before the read runs, the same middleware withholds every update row
- * whose stored change is withheld whole from this reader, and [#22786] every
- * fired milestone row whose watched fields it is not all served, as a WHERE on
- * all four reads (`computeWithheldUpdateFilter`). `AuditPlugin` registers it after
- * the read gate, so the gate's parent filter is already in the WHERE its
- * pre-scan reads.
+ * [#21388, #22786] Before the read runs, the same middleware ANDs the
+ * withheld-row predicate into the WHERE of all four reads
+ * (`computeWithheldRowFilter`, ADR-0139 E6). `AuditPlugin` registers it after
+ * the read gate; the two are independent conjuncts.
  */
 export function installActivityFieldRedaction(
   engine: ActivityRedactionEngine,
@@ -560,12 +587,12 @@ export function installActivityFieldRedaction(
       const restrictedFor = restrictedPerRead(security);
       if (security && ctx.ast && PARENT_GATE_READ_OPS.has(ctx.operation)) {
         try {
-          const filter = await computeWithheldUpdateFilter(engine, ctx.ast, servedFor, logger, restrictedFor);
+          const filter = await computeWithheldRowFilter(engine, ctx.ast, servedFor, logger);
           if (filter) andIntoWhere(ctx, filter);
         } catch (err) {
-          // A pre-scan failure must never fall open into the timing leak.
+          // A failure to build the rule must never fall open into the timing leak.
           logger.warn(
-            `[audit] ${REDACTION_SEAM}: the withheld-update pre-scan failed, denying all ` +
+            `[audit] ${REDACTION_SEAM}: the withheld-row rule could not be built, denying all ` +
               `(${(err as Error)?.message ?? err})`,
           );
           andIntoWhere(ctx, WITHHELD_DENY_ALL);

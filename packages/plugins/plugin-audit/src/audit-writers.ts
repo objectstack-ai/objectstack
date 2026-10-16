@@ -85,6 +85,13 @@ import {
   type ActivityTextSources,
 } from './activity-field-redaction.js';
 import type { LedgerRecordWriteAction } from './audit-log-field-redaction.js';
+// [ADR-0139 E6] The ONE derivation of the two writer-stamped columns the
+// withheld-row rule reads, shared with the before-insert hook and the backfill.
+import {
+  declaredMilestoneWatchedFields,
+  installActivityStampHook,
+  planActivityStamp,
+} from './activity-changed-fields.js';
 
 /**
  * Minimal structural view of `NotificationService.emit` (ADR-0030). Declared
@@ -835,7 +842,9 @@ function matchMilestone(
       return {
         template: m.summary,
         type: typeof m.type === 'string' ? m.type : undefined,
-        watched: [...new Set<string>(milestones.filter(asked).map((w: any) => w.field))],
+        // [ADR-0139 E6] The same list the read rule keys the CURRENT
+        // declaration by, from the same function.
+        watched: declaredMilestoneWatchedFields(objectDef),
       };
     }
   }
@@ -2089,6 +2098,12 @@ export function installAuditWriters(
     const actor: ActorSnapshot =
       mirrorsActivity && userId ? await resolveActorSnapshot(api, userId) : NO_ACTOR_SNAPSHOT;
 
+    const activityMetadata = {
+      old: oldValue,
+      new: newValue,
+      ...(kind ? { [ACTIVITY_KIND_KEY]: kind.value } : {}),
+      [ACTIVITY_TEXT_SOURCES_KEY]: textSources,
+    };
     const activityRow: Record<string, any> = {
       type: activityType,
       // Explicit ISO timestamp — `defaultValue: 'NOW()'` on the column
@@ -2109,12 +2124,11 @@ export function installAuditWriters(
       // came from. The read side strips the declaration before serving.
       // [#22771] A fired milestone's kind rides beside them, judged on read
       // against the fields the declaration names for it.
-      metadata: safeStringify({
-        old: oldValue,
-        new: newValue,
-        ...(kind ? { [ACTIVITY_KIND_KEY]: kind.value } : {}),
-        [ACTIVITY_TEXT_SOURCES_KEY]: textSources,
-      }),
+      metadata: safeStringify(activityMetadata),
+      // [ADR-0139 E6] The two writer-stamped columns the withheld-row rule is
+      // a predicate over, from the metadata this row records (the
+      // before-insert hook re-derives them by the same planner).
+      ...(planActivityStamp(activityMetadata) ?? { changed_fields: null, milestone_key: null }),
     };
     // Same rationale as auditRow: stamp the tenant column so RLS matches the
     // recipient's organization on read — but only when the (auto-injected)
@@ -2161,6 +2175,9 @@ export function installAuditWriters(
   // `afterDelete` are the two the bulk gates (#5038) read, and `afterUpdate` is
   // the one #5284's single-id gate reads.
   engine.registerHook('afterInsert', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
+  // [ADR-0139 E6, Q2 = b] Every `sys_activity` insert, whoever writes it, is
+  // stamped by the one planner — the mirror's own rows included.
+  installActivityStampHook(engine as any, packageId);
   engine.registerHook('afterUpdate', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
   engine.registerHook('afterDelete', writeAudit, { excludeObjects: AUDIT_EXCLUDED_OBJECTS, packageId });
 

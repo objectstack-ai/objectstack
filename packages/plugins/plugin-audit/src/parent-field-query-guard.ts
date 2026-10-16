@@ -15,7 +15,8 @@
  * values of that record's fields in a few columns, written once, as the system:
  *
  *  - `sys_activity` — `summary`, `record_label` and `metadata` (the field
- *    redaction's columns, `activity-field-redaction.ts`, #21081);
+ *    redaction's columns, `activity-field-redaction.ts`, #21081), and the two
+ *    writer-stamped columns `changed_fields` and `milestone_key` (ADR-0139 E6);
  *  - `sys_audit_log` — `old_value` and `new_value`, the before/after snapshots.
  *
  * A read-time redaction narrows those values on the rows a reader is SERVED,
@@ -109,6 +110,7 @@
  */
 
 import { FieldReferenceSchema } from '@objectstack/spec/data';
+import { ACTIVITY_STAMPED_COLUMNS } from './activity-changed-fields.js';
 import { resolveServedFields, type FieldRedactionLogger, type FieldVisibilitySource } from './served-fields.js';
 import { parseActivityParentObject, type ActivityMiddlewareEngine } from './activity-read-visibility.js';
 
@@ -141,7 +143,9 @@ const remedy = (what: string) =>
  */
 export const ACTIVITY_QUERY_GUARD: ParentFieldQueryGuard = Object.freeze({
   object: 'sys_activity',
-  columns: Object.freeze(['summary', 'record_label', 'metadata']),
+  // [ADR-0139 E6] The two writer-stamped columns too: a membership probe on
+  // `changed_fields` over a served row would count changes to a withheld field.
+  columns: Object.freeze(['summary', 'record_label', 'metadata', ...ACTIVITY_STAMPED_COLUMNS]),
   remedy: remedy('An activity column'),
 });
 

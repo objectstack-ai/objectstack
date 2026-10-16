@@ -52,6 +52,21 @@ export type {
   StoredMetadataBodyMigrationEngine,
   StoredMetadataBodyMigrationReport,
 } from './stored-metadata-body-migration.js';
+// [ADR-0139 E6] The stored-row backfill of `sys_activity`'s two writer-stamped
+// read-rule columns, and the one planner it, the CRUD mirror and the
+// before-insert hook stamp by. The CLI command
+// (`os migrate activity-changed-fields`) drives it.
+export { backfillActivityChangedFields, ACTIVITY_BACKFILL_PAGE_SIZE } from './activity-changed-fields-backfill.js';
+export type {
+  ActivityChangedFieldsBackfillEngine,
+  ActivityChangedFieldsBackfillReport,
+} from './activity-changed-fields-backfill.js';
+export {
+  ACTIVITY_CHANGED_FIELDS_COLUMN,
+  ACTIVITY_MILESTONE_KEY_COLUMN,
+  planActivityStamp,
+} from './activity-changed-fields.js';
+export type { ActivityStamp } from './activity-changed-fields.js';
 export type {
   CommentAccessEngine,
   CommentAccessLogger,
