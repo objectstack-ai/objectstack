@@ -6613,7 +6613,7 @@ export class ObjectStackProtocolImplementation implements
      */
     private async flowSaveReplaysRetired(request: {
         name: string;
-        item: unknown;
+        item?: unknown;
         packageId?: string | null;
         source?: string;
         writeFace?: MetadataWriteFace;

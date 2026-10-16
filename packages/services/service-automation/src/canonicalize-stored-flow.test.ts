@@ -419,3 +419,92 @@ describe('canonicalizeStoredFlow — every site registerFlow refuses after the p
         expect(warn).toHaveBeenCalled();
     });
 });
+
+/**
+ * [#23775, ruling B] `canonicalizeStoredFlow`'s `includeRetired` option: the
+ * metadata save door closes the retired window for a flow with no stored row,
+ * so an authored retired spelling meets the parse refusal instead of being
+ * lifted. Every other caller passes nothing and keeps the full chain, and
+ * `registerFlow` (the rehydration seam) is not changed by the option at all.
+ *
+ * The spelling is the card's own example: a `wait` node's loose
+ * `config.duration`, lifted to `waitEventConfig.timerDuration` by the entry
+ * retired from the load path at 18 (`flow-node-wait-event-config-lift`).
+ */
+describe('[#23775] canonicalizeStoredFlow — the authoring posture is an option, the rehydration is unchanged', () => {
+    const waitFlow = (wait: Record<string, unknown>) => ({
+        name: 'settle_order',
+        label: 'Settle Order',
+        type: 'autolaunched',
+        status: 'active',
+        nodes: [
+            { id: 'start', type: 'start', label: 'Start' },
+            { id: 'hold', type: 'wait', label: 'Hold', ...wait },
+            { id: 'end', type: 'end', label: 'End' },
+        ],
+        edges: [
+            { id: 'e1', source: 'start', target: 'hold' },
+            { id: 'e2', source: 'hold', target: 'end' },
+        ],
+    });
+    const legacyWait = () => waitFlow({ config: { duration: 'PT1M' } });
+
+    /** The parse's refusal, read as data: the ZodError's issues, or a failure. */
+    const refusalOf = (fn: () => unknown): Array<{ path: PropertyKey[]; message: string }> => {
+        try {
+            fn();
+        } catch (err) {
+            return ((err as { issues?: Array<{ path: PropertyKey[]; message: string }> }).issues ?? []);
+        }
+        throw new Error('expected the canonicalization to be refused');
+    };
+
+    it('with no option, the retired spelling is lifted: the full chain, as every at-rest caller gets it', () => {
+        const { storable } = new AutomationEngine(silentLogger).canonicalizeStoredFlow('settle_order', legacyWait());
+        const hold = (storable as any).nodes[1];
+        expect(hold.waitEventConfig).toEqual({ timerDuration: 'PT1M', eventType: 'timer' });
+        expect(hold.config).toEqual({});
+    });
+
+    it('`includeRetired: false` leaves it in place, and the parse refuses it where it is written, naming the new key', () => {
+        // Beside a declared block the loose key is the only finding: the full
+        // chain would delete it (the block shadows it), the authoring posture
+        // refuses it at `config.duration`.
+        const flow = waitFlow({ waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' }, config: { duration: 'PT9M' } });
+        const issues = refusalOf(() => new AutomationEngine(silentLogger)
+            .canonicalizeStoredFlow('settle_order', flow, { includeRetired: false }));
+        expect(issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.config.duration']);
+        expect(issues[0]!.message).toContain('waitEventConfig.timerDuration');
+    });
+
+    it('`includeRetired: false` on the bare loose key: refused at the block the lift would have written, naming it', () => {
+        // The card's literal shape. Without the lift the node has no
+        // `waitEventConfig` at all, and the node's own rule answers first —
+        // exactly what the authoring funnel answers for the same body.
+        const issues = refusalOf(() => new AutomationEngine(silentLogger)
+            .canonicalizeStoredFlow('settle_order', legacyWait(), { includeRetired: false }));
+        expect(issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.waitEventConfig']);
+        expect(issues[0]!.message).toContain('timerDuration');
+    });
+
+    it('`includeRetired: false` changes nothing for a body already in the canonical spelling', () => {
+        const engine = new AutomationEngine(silentLogger);
+        const canonical = waitFlow({ waitEventConfig: { eventType: 'timer', timerDuration: 'PT1M' } });
+        const closed = engine.canonicalizeStoredFlow('settle_order', canonical, { includeRetired: false });
+        const open = engine.canonicalizeStoredFlow('settle_order', canonical);
+        expect(closed.storable).toEqual(open.storable);
+        expect(closed.storable).toBe(canonical);
+    });
+
+    it('`includeRetired: true` is the default spelled out', () => {
+        const engine = new AutomationEngine(silentLogger);
+        expect(engine.canonicalizeStoredFlow('settle_order', legacyWait(), { includeRetired: true }).storable)
+            .toEqual(engine.canonicalizeStoredFlow('settle_order', legacyWait()).storable);
+    });
+
+    it('registerFlow, the rehydration seam, still registers the stored legacy spelling', () => {
+        const parsed = new AutomationEngine(silentLogger).registerFlow('settle_order', legacyWait()) as any;
+        const hold = parsed.nodes.find((n: { id: string }) => n.id === 'hold');
+        expect(hold.waitEventConfig).toMatchObject({ timerDuration: 'PT1M', eventType: 'timer' });
+    });
+});
