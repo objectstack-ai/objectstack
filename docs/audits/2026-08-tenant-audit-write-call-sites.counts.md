@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 225 |
-| Object name statically decidable | 154 |
+| Write call sites | 226 |
+| Object name statically decidable | 155 |
 | Object name chosen at run time | 71 |
-| Against a tenancy-enabled object | 153 |
+| Against a tenancy-enabled object | 154 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 164 |
+| Threading a tenant context | 165 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 121 |
+| Threading a decidably elevated context | 122 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 96 |
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-14 at `95898bba1`.
+Measured on 2026-10-16 at `c53c594e7`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 649 |
-| engine-shaped types recognised | 75 |
+| tracked non-test sources scanned | 654 |
+| engine-shaped types recognised | 77 |
 | declared objects in the registry | 116 |
-| same-named calls subtracted as non-engine | 164 |
+| same-named calls subtracted as non-engine | 165 |
 
 ## Every site
 
@@ -115,6 +115,7 @@ Measured on 2026-10-14 at `95898bba1`.
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `insert` | `sys_approval_token` | enabled | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/approval-service.ts` | `update` | `sys_approval_token` | enabled | elevated | 1 |
 | `packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.ts` | `update` | `objectPlan.object` | undecidable | context, elevation undecidable | 1 |
+| `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/read-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/stored-metadata-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
