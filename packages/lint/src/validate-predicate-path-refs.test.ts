@@ -674,7 +674,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `<form>::<field>::<source>`, 87 → 88, adds exactly
     // `field :: mailAssociation :: data.type == 'email'` and removes none. It
     // does reach the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(88);
+    // It is 89 today, an ADDITION of ONE: #23735 offered the field form's
+    // `referenceDeletedWhen` composite row, gated like `referenceVia` on
+    // `data.type == 'text'`. It reaches the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(89);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -783,7 +786,9 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // two more single-quoted literal comparisons.
     // It is 65 today: #22870's `field :: mailAssociation` row is gated on
     // `data.type == 'email'`, a single-quoted literal comparison.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(65);
+    // It is 66 today: #23735's `field :: referenceDeletedWhen` row is gated on
+    // `data.type == 'text'`, a single-quoted literal comparison.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(66);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

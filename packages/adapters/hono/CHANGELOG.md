@@ -1,5 +1,144 @@
 # @objectstack/hono
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- cb9841a: fix(hono,runtime)!: `createHonoApp` hands the dispatcher a repeated query name as an array, so the dispatcher's arity rules refuse it instead of answering its last value; `/packages` refuses a repeated `keepData` or `overwrite`
+  
+  `@objectstack/hono`'s `createHonoApp` catch-all built the dispatcher's query by copying `URLSearchParams` into an object, so a name sent twice reached `HttpDispatcher.dispatch()` as its LAST value and the first was dropped without a word. Every arity rule the dispatcher declares was therefore unreachable on a `createHonoApp` host: `GET /meta/app/crm?package=a&package=b` was answered `200` for package `b`, where the same request through `@objectstack/plugin-hono-server` is refused. The catch-all now reads the query the way `@objectstack/plugin-hono-server` does: a name sent once is the string it always was, a repeated name is the array of its values, and the object is built without dynamic property writes, so a `__proto__` name is an ordinary own key.
+  
+  Two `/packages` write flags read a repeat as absent, and are now refused before the registry or the protocol is touched, as `enabled` and `version` already are. `DELETE /packages/:id?keepData=true&keepData=true` dropped the package's object tables, because the protocol keeps storage only for `keepData === true`, and was answered `200`. `POST /packages?overwrite=true&overwrite=true` answered `409` "already exists" for a package one `overwrite=true` replaces. Both doors were reached that way through `@objectstack/plugin-hono-server`, whose adapter already keeps repeats, and would have been through `createHonoApp` from this change.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is added, removed or narrowed (the adapter's query reader and the domain's flag guard are both module-private). No stored row or package source changes, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a query accept set: on a `createHonoApp` host every dispatcher read point that refuses a repeated single-valued name now sees the repeat and refuses it, and on every host `DELETE /packages/:id` and `POST /packages` refuse a repeated `keepData` and `overwrite`. One malformed input widens: on a `createHonoApp` host, a query pair with an empty name is no longer refused, matching `@objectstack/plugin-hono-server`. The remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you: send each single-valued query name once. On a `createHonoApp` host, a request that repeats one is now refused `400` in the dispatcher's envelope, `{ success: false, error: { code, message } }`, with the code and sentence the same request gets through `@objectstack/plugin-hono-server` (`VALIDATION_ERROR`, "The "NAME" query parameter was supplied N times…"; `INVALID_FILTER` on the `/data` filter slot), where it used to be answered with the last value. On every host, `DELETE /packages/:id` refuses a repeated `keepData` and `POST /packages` a repeated `overwrite`, with that same `VALIDATION_ERROR` and sentence. A name sent once is answered as before; genuinely multi-valued names such as `select` and `expand` now reach the dispatcher as the array they are. One malformed input moves the other way, to match `@objectstack/plugin-hono-server`: a query pair with an EMPTY name (`?=x`) is no longer handed to the dispatcher, so a door with a closed parameter set reads it as absent where it used to refuse it as an unknown parameter `""`. The `@objectstack/client` SDK sends each single-valued name once, and the Console's package delete sends `keepData` once.
+- e1cefa5: fix(hono): `createHonoApp` answers an escaped throw that declares an ADR-0112 envelope as that envelope, not as `500 INTERNAL_ERROR` (#23365)
+  
+  `@objectstack/hono`'s `createHonoApp` has two catch arms: the auth mount's, and
+  the `${prefix}/*` catch-all's around `HttpDispatcher.dispatch()`. Both answered
+  an escaped throw from its `statusCode` alone, so a producer that declared
+  `status` and a registered `code` lost both on this host. A `GET`, `PATCH` or
+  `DELETE` of `/data/:object/:id` for an id that names no row answered
+  `500 INTERNAL_ERROR` where the standalone REST server answers
+  `404 RECORD_NOT_FOUND`. The `/data` version refusals answered `500` too (a stale
+  `If-Match`'s `409 CONCURRENT_UPDATE`, and `If-Match: ""`'s
+  `400 VALIDATION_FAILED`), and so did an authorization-store outage
+  (`AuthzStoreUnavailableError`, `503 SERVICE_UNAVAILABLE`).
+  
+  **What changed.** Both arms now answer a throw that carries **both** a declared
+  ADR-0112 status (a key of `HttpStatusErrorCodeMap`) **and** a code registered in
+  `ErrorCode` as that envelope. The recognition is `declaredEnvelopeForThrow`, the
+  rule `@objectstack/plugin-hono-server`'s direct-mount routes have used since
+  #16545, so the two Hono doors answer one throw alike by construction: the same
+  two conditions, the same 5xx disclosure filter (`looksLikeInternalErrorLeak`),
+  and `details` and `userMessage` forwarded only when the producer declared them.
+  
+  The rule's other limbs come with it, as they did on the direct-mount door. A
+  validation-shaped throw answers `400 VALIDATION_FAILED` with its `fields[]`. A
+  driver fault the engine has already classified keeps its `500` and now carries
+  the code it declared instead of `INTERNAL_ERROR`. Measured: `GET /data/:object`
+  over an object whose table is missing answers `500 DATABASE_ERROR`, with the
+  same message as before.
+  
+  **What did NOT change**, pinned in the same PR through a real `createHonoApp`
+  over the real dispatcher and protocol (`packages/qa/http-conformance`):
+  
+  - a throw that is **not** such an envelope answers what it answered before. A
+    bare `Error` is still `500 INTERNAL_ERROR` carrying `code` and `message`, with
+    no `cause` in the body, and a throw that declares `statusCode` with no
+    registered code keeps that status;
+  - ⛔ no error code is minted and no ledger row is added.
+  
+  `@objectstack/plugin-hono-server` gains one export, `declaredEnvelopeForThrow`,
+  which was module-private. `createHonoApp` imports it rather than restating the
+  rule. Its behaviour is unchanged.
+  
+  Earlier entries say a `createHonoApp` host still renders the `/data` version
+  refusals as `500`. This change ends that: they are answered `409` and `400` as
+  declared.
+  
+  The `409 CONCURRENT_UPDATE` this host now answers carries `currentVersion` and
+  `currentRecord` in `error.details`, the two fields the standalone REST server's
+  `409` carries; `currentRecord` is the row as the caller reads it.
+  
+  Clause-②: yes (widening)
+
+### Patch Changes
+
+- 19c554d: fix(plugin-hono-server): a `409 CONCURRENT_UPDATE` answered by either Hono door carries `currentVersion`, as the standalone REST server's does (#23531)
+  
+  A stale `If-Match` (or `expectedVersion`) on `PATCH` or `DELETE /data/:object/:id` is refused by the protocol with `409 CONCURRENT_UPDATE`. The standalone REST server's answer carries the server's `currentVersion`, which `wire-format.mdx` documents and a conflict dialog needs: it is the token "Overwrite anyway" sends back as the next `If-Match`. The two Hono doors answered the same refusal without it. They are `@objectstack/hono`'s `createHonoApp`, which answered it `500 INTERNAL_ERROR` (the `@objectstack/hono` entry for #23365 makes it a `409`), and a route mounted on `@objectstack/plugin-hono-server`'s `HonoHttpServer`, which answered it with `code` and `message` only.
+  
+  - FROM `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…"}}` on a `HonoHttpServer` route, and `500` `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"…"}}` on `createHonoApp`
+  - TO `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…","details":{"currentVersion":"…","currentRecord":{…}}}}`
+  
+  The field rides `error.details`, the wrapped envelope's declared context slot. `@objectstack/client` reads a wrapped body's context from there, so `err.details.currentVersion` now carries it on these hosts too. It is read from the classification the REST server applies (`structuredCodeAnswer` in `@objectstack/types`), so it appears only when the conflict stated it. On a `HonoHttpServer` route, status, `code` and `message` are unchanged; on `createHonoApp` they are the `409` the `@objectstack/hono` entry for #23365 states. No other answer changes.
+  
+  `currentRecord` rides beside it, as on the REST server: the row as the caller reads it, which the protocol re-reads under the caller's own context on a version mismatch (#23586).
+  
+  Nothing changes in `@objectstack/hono`'s own code: `createHonoApp` renders through `declaredEnvelopeForThrow` from `@objectstack/plugin-hono-server`.
+  
+  Clause-②: no
+- 5bb9a83: fix(plugin-hono-server): a `409 CONCURRENT_UPDATE` answered by either Hono door carries `currentRecord` as well, the caller's own read of the row, as the standalone REST server's does (#23531)
+  
+  The two Hono doors are `@objectstack/hono`'s `createHonoApp` and a route mounted on `@objectstack/plugin-hono-server`'s `HonoHttpServer`. Their answer to a stale `If-Match` (or `expectedVersion`) on `PATCH` or `DELETE /data/:object/:id` carried neither field: the route answered it with `code` and `message` only, and `createHonoApp` answered it `500 INTERNAL_ERROR`, which the `@objectstack/hono` entry for #23365 makes a `409`. On a version mismatch the protocol now re-reads the row under the caller's own context (#23586), so the record holds only what the caller may read, and these doors forward it beside the server's `currentVersion`.
+  
+  - FROM `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…"}}` on a `HonoHttpServer` route, and `500` `{"success":false,"error":{"code":"INTERNAL_ERROR","message":"…"}}` on `createHonoApp`
+  - TO `{"success":false,"error":{"code":"CONCURRENT_UPDATE","message":"…","details":{"currentVersion":"…","currentRecord":{…}}}}`
+  
+  `currentRecord` is the row as the caller reads it. A field the caller's field-level rules hide is absent from it, and a row the caller's row-level rules hide answers `404 RECORD_NOT_FOUND` with neither field, as the REST server answers. It is read from the classification the REST server applies (`structuredCodeAnswer` in `@objectstack/types`), so it appears only when the conflict stated it, and `@objectstack/client` reads it as `err.details.currentRecord` on these hosts. On a `HonoHttpServer` route, status, `code` and `message` are unchanged; on `createHonoApp` they are the `409` the `@objectstack/hono` entry for #23365 states. No other answer changes.
+  
+  Nothing changes in `@objectstack/hono`'s own code: `createHonoApp` renders through `declaredEnvelopeForThrow` from `@objectstack/plugin-hono-server`.
+  
+  Clause-②: no
+- fa6a608: fix(hono): `createHonoApp`'s catch arms withhold a driver diagnostic from an undeclared `500` instead of shipping it to the client (#23532)
+  
+  Clause-②: no
+  
+  `@objectstack/hono`'s `createHonoApp` has two catch arms: the auth mount's, and the `${prefix}/*` catch-all's around `HttpDispatcher.dispatch()`. A throw that does not declare an ADR-0112 envelope is answered from its own `message`, and that message was shipped unread. A driver diagnostic therefore reached the client verbatim: on a host whose object `ghost` was registered but whose table was never synced, `POST /api/v1/data/ghost` answered `500 INTERNAL_ERROR` with the message `insert into [statement and bound values redacted] - no such table: ghost`, naming the SQLite error and the physical table.
+  
+  **What changed.** Before it ships that message, the arm now asks `looksLikeInternalErrorLeak` (`@objectstack/types`), as every other door that emits a thrown message already does: `HttpDispatcher.error`, the REST registrars, `@objectstack/plugin-hono-server`'s direct-mount routes and this adapter's own `/auth/config` arm. When the answer is a `5xx` and the message looks like a driver or SQL dump, the message is replaced by the same text those doors use, `Internal server error`. The status and the `code` are unchanged.
+  
+  **What did NOT change:**
+  
+  - a `5xx` whose message does not look like a dump keeps it: a bare `new Error('boom')` is still `500 INTERNAL_ERROR` with the message `boom`;
+  - a `4xx` keeps its message, as on the other doors, because a `4xx` message is an answer meant for the caller;
+  - a throw that declares an ADR-0112 envelope is answered as declared, as before.
+- Updated dependencies [cb9841a]
+- Updated dependencies [584e737]
+- Updated dependencies [3d231ba]
+- Updated dependencies [0f05907]
+- Updated dependencies [b1e9280]
+- Updated dependencies [e1cefa5]
+- Updated dependencies [1d79556]
+- Updated dependencies [c980d11]
+- Updated dependencies [0ecac96]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [daafae6]
+- Updated dependencies [650933e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [70d4c06]
+- Updated dependencies [19c554d]
+- Updated dependencies [5bb9a83]
+- Updated dependencies [c263588]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [f7cd580]
+- Updated dependencies [c9810dd]
+- Updated dependencies [cd86e41]
+- Updated dependencies [395ca21]
+- Updated dependencies [9e0945c]
+- Updated dependencies [6ee483c]
+  - @objectstack/runtime@18.0.0-next.2
+  - @objectstack/plugin-hono-server@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes

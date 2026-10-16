@@ -261,12 +261,15 @@ describe('#7134 what the save path must NOT change', () => {
     it('[#20051] a form authored with canonical `sections` is stored as authored — no section default, no `sharing.enabled`, no undeclared key', async () => {
         // Re-judged at stage (iv): was "stored byte-identical", with an
         // `isPinned` the form member does not declare riding along. The parse
-        // adds `collapsible` / `collapsed` / `columns` to the section and
-        // `enabled: false` to `sharing`; ruling B stores none of them (ADR-0087's
-        // `storable` rule), and the undeclared `isPinned` is dropped.
+        // adds `collapsible` / `collapsed` to the section and `enabled: false`
+        // to `sharing`; ruling B stores none of them (ADR-0087's `storable`
+        // rule), and the undeclared `isPinned` is dropped. A section's `columns`
+        // has no default: undeclared, the parse adds no key (the renderer picks
+        // the density by available width).
         const authored = flatForm({ sections: [SECTION], isPinned: true });
         const parsed = (ViewMetadataSchema as any).parse(authored);
-        expect(parsed.sections[0]).toMatchObject({ collapsible: false, collapsed: false, columns: 1 });
+        expect(parsed.sections[0]).toMatchObject({ collapsible: false, collapsed: false });
+        expect('columns' in parsed.sections[0]).toBe(false);
         expect(parsed.sharing.enabled).toBe(false);
         const body = await storedViewBody('contact_us', authored);
         const { isPinned: _dropped, ...declared } = authored as Record<string, unknown>;

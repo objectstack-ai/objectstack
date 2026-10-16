@@ -1,5 +1,157 @@
 # Changelog
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 0f05907: feat(spec,core,plugin-auth)!: an API key answers as its owner's session does when the ADR-0069 policy holds the account, the forced reset gets its own code and an explicit revocation switch
+  
+  Clause-②: yes (narrowing) — the published contract widens (the posture codes become a closed vocabulary with a declared scope, a new `PASSWORD_RESET_REQUIRED` code, a per-user posture member on the auth service contract, new `@objectstack/core` exports) and the API-key door narrows (a key whose owner holds an account-scope posture is refused where it was served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key admission seam plus one new error code, not a metadata change. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite. `ExecutionContext.authGate.code` narrows from a bare string to the closed posture vocabulary, but that field is server-constructed only and never authored; its one producer already wrote only members of it. What narrows is which API keys are served (a key whose owner owes MFA enrolment is refused with 403 MFA_REQUIRED), and the administrator-forced password change answers its own code. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key door, and a changed code for the administrator-forced password change), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287: posture codes are a closed vocabulary, and each code declares what it holds.
+  
+  - **The vocabulary and its scope (`@objectstack/spec/kernel`).** `AuthGateCodeSchema` is the closed set of codes an `authGate` may carry: `PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED` and `MFA_REQUIRED`. `AUTH_GATE_SCOPES` declares each code's scope once: `MFA_REQUIRED` holds the **account** (every credential of the user); `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` hold the **credential** (password sign-in alone). `ExecutionContext.authGate.code` is typed against the vocabulary, and `PASSWORD_RESET_REQUIRED` is registered for `@objectstack/plugin-auth` in the error-code ledger.
+  - **One per-user posture computation (`@objectstack/plugin-auth`, `IAuthService.resolveUserAuthGates`).** It answers every posture a user holds, most urgent first, keyed by user id and the organization the credential operates in. The session gate shows its first entry, as before.
+  - **One judgment at the shared key-admission seam (`@objectstack/core`).** `resolveApiKeyAdmission` asks that computation for the key's owner and holds the key on an account-scope posture (a new `held` outcome). `resolveAuthzContext` resolves a held key as a held principal: the owner, `credential: 'api_key'`, and the posture on `authGate`. Both new inputs are optional (`userAuthGates`), and `userAuthGateSourceOf(authService)` binds one from an auth service.
+  - **REST and the runtime dispatcher** judge a key-admitted request by the key's answer, and re-read the session cookie for the gate only when a session admitted the caller. The declared-endpoint fallback does the same.
+  - **The raw-host families** take the same answer through the shared seam: datasource admin, share links, settings, and the storage family's door. The webhook-redeliver door admits no API key at all, and still does not.
+  - **The forced reset (`POST /api/v1/auth/admin/set-user-password`, the `set_user_password` action).** `must_change_password` now answers `PASSWORD_RESET_REQUIRED` instead of reusing `PASSWORD_EXPIRED`. The act carries `revokeSessionsAndKeys`, **on by default**: it ends every live session of the user and revokes every API key they own, and the response reports what landed (`revoked: { sessions, apiKeys, failed, complete }`).
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED`, with the message the session gets, on every face that admits keys. It works again the moment the owner enrols, with nothing reissued: the refusal is not a revocation.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working. A session sent beside an API key no longer answers for the key.
+  - **A forced password change answers `PASSWORD_RESET_REQUIRED`.** A client that recognises `PASSWORD_EXPIRED` to show its change-password flow should recognise `PASSWORD_RESET_REQUIRED` the same way.
+  - **An administrator's password reset now signs the user out everywhere and revokes their API keys by default.** For a routine reset, pass `revokeSessionsAndKeys: false` (or clear the switch in the Set Password dialog). Revoked keys stay revoked after the password change; an administrator can restore a key a routine reset revoked with the Restore API Key action, or the owner mints a replacement.
+  - **Hosts calling `resolveAuthzContext` or `resolveApiKeyAdmission` directly** pass `userAuthGates: userAuthGateSourceOf(authService)` to have the key's owner asked. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `held` outcome.
+- 0be162c: fix(plugin-auth)!: impersonation, SSO-provider administration and the admin plugin's role-scalar actions refuse a caller the ADR-0069 authentication policy holds
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime authentication narrowing at three doors better-auth serves inside plugin-auth (the re-authorized impersonation endpoint, SSO-provider registration, update and delete, and the admin plugin's own role-scalar actions), not a metadata change. No spec key, option, config field, response field or stored shape is removed, renamed or re-shaped, and a caller the policy does not hold receives the same answers as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which callers these doors serve: a user who holds an ADR-0069 posture (an expired or administrator-forced password, or enforced MFA not yet enrolled, globally or by the organization the session operates in) is now refused with the session gate's 403 before the door acts. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers these doors and this diff adds none (not registered / already-registered); the one added export is an addition, so nothing published is retired or re-typed (not runtime-interface-only / type-surface-only / runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0069 D3 holds a signed-in user out of every protected resource while their password has expired (or an administrator has forced a change) or while enforced MFA is not yet enrolled, until they remediate. REST, the runtime dispatcher and the platform-admin actions plugin-auth mounts on the host server already refuse such a user. Three doors better-auth serves itself did not, because their session is a raw read that never carries the posture:
+  
+  - **Impersonation** (`POST /admin/impersonate-user`): a held platform administrator could mint a session as another user, and that session is not held, so the hold was bypassed outright.
+  - **SSO-provider administration** (`POST /sso/register`, `/sso/update-provider`, `/sso/delete-provider`): a held platform administrator could register an identity provider, and rewrite the issuer of, or delete, one they own.
+  - **The admin plugin's own actions, judged on the legacy `role` scalar** (set-role, get-user, update-user, list-users, list-user-sessions, revoke-user-session, revoke-user-sessions): a held caller carrying `role = 'admin'` was admitted, writes included.
+  
+  From → to. Before: a held caller passed these doors as if unheld. Now: each door asks the auth service for the caller's posture in the organization their session operates in (the same computation, and the same first entry, the session carries) and refuses a held caller with `403`, `{ success: false, error: { code, message } }`, where `code` is the posture's own (`PASSWORD_EXPIRED`, `MFA_REQUIRED` or `PASSWORD_RESET_REQUIRED`) and `message` names the remedy: the refusal the session gate and `judgePlatformAdmin` already give. No new error code.
+  
+  - **Order:** an anonymous caller still meets the vendor's `401` first. A held signed-in caller who is not an administrator now meets the posture's `403` code instead of the vendor's `403 YOU_ARE_NOT_ALLOWED_*`: same status, the remedy named.
+  - **Unchanged:** a caller the policy does not hold is served exactly as before. Stopping an impersonation and the admin plugin's permission question are not held, and sign-in, change-password, two-factor enrollment and sign-out still answer a held session, so remediation works as before. A posture lookup that fails holds no one, as it does for the session.
+  - **New export:** `judgeHeldSession` (`@objectstack/plugin-auth`), the held refusal `judgePlatformAdmin` gives, now shared with these doors.
+  
+  What changes for you. An administrator the policy holds must remediate (change the password, or enroll an authenticator) before impersonating a user, registering or changing an SSO provider or using the admin plugin's user actions, as on every other protected route.
+- fc1a55a: fix(plugin-auth): the identity import invites with `auth.account_invitation`, not the password-reset email
+  
+  Clause-②: yes (widening)
+  
+  A user created through Setup › Users › Import (`POST /api/v1/auth/admin/import-users`) and invited by email now receives the new `auth.account_invitation` template from `@objectstack/plugin-email`.
+  
+  - **FROM → TO for an imported user's email.** FROM `auth.password_reset` ("We received a request to reset the password … If you didn't request this, ignore this email"), although the user requested nothing. TO `auth.account_invitation`: the administrator who ran the import (name and email, as their user record holds them), the new account's address, a "Set your password" link, and the link's real expiry. The link is the same one as before: it lands on the Console's set-password page, and its token is the same better-auth reset token.
+  - **Every other password reset is unchanged.** A user who asks for a reset (`POST /api/v1/auth/request-password-reset`) still receives `auth.password_reset`, whether or not they were imported. Only the import's own request sends the invitation: the import marks that one request on the server, and nothing a client sends can set the mark. `auth.invitation` (an invitation into an organization) is unchanged.
+  - **If you customized `auth.password_reset` for imported users,** move that wording to `auth.account_invitation`: imported users no longer receive `auth.password_reset`.
+  - **The stated expiry is the token's real lifetime.** better-auth gives the token `emailAndPassword.resetPasswordTokenExpiresIn` seconds, or 3600 when that is unset or `0`. A configured `0` used to make the reset email say "expires in 0 minutes"; it now says 60, as the token does, and so does the invitation.
+- 1d79556: feat(spec,core,runtime,plugin-auth)!: API keys get a lifecycle: a 90-day default expiry, a one-year ceiling, a 90-day inactivity expiry, a one-year grace for keys created with none, and distinct refusal codes
+  
+  Clause-②: yes (narrowing) — the published contract widens (four `auth` settings keys, the `IAuthService.resolveApiKeyLifecyclePolicy` member and its `ApiKeyLifecyclePolicy` type, four registered error codes, new `@objectstack/core` exports) and the API-key doors narrow (a signing past the ceiling is refused; an inactive key, a key past its grace, and a revoked or expired key sent beside a session are refused where they were served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key signing door and the shared key-admission seam, not a metadata change. No authorable spec key, stored shape or metadata surface is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite: the four new `auth` settings keys are additive and defaulted, `sys_api_key` gains no column (its existing `expires_at` and `last_used_at` are written by the platform), and `ResolveAuthzInput.apiKeyLifecycle` / the sixth parameter of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal` are server-side wiring no author writes. What narrows is which API keys are served and which signings are accepted; the remedy is a new key or a nearer date, never a rewrite of a package source or a stored row. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key doors), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling A on #23367: the key store stays `sys_api_key`, and the policy is auth configuration.
+  
+  - **The policy (`@objectstack/plugin-auth`, `IAuthService.resolveApiKeyLifecyclePolicy`).** Three `auth` settings keys, bound by `bindAuthSettings`: `api_key_default_expiry_days` (90), `api_key_max_expiry_days` (365) and `api_key_inactivity_days` (90; `0` turns it off). A fourth, `api_key_policy_started_at`, is recorded once — on the first boot that runs the policy, at `kernel:bootstrapped` — and anchors the two clocks below; it survives restarts and is never overwritten by the platform.
+  - **The signing door (`POST /api/v1/keys`).** A signing that names no `expires_at` gets the default life and the response echoes it. An `expires_at` further away than the ceiling is refused `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date allowed; exactly the ceiling is accepted. A kernel with no auth service signs as before.
+  - **The key-admission seam (`resolveApiKeyAdmission`, `@objectstack/core`).** A real key its own state refuses is a new outcome, `lifecycle`, with one of three distinct codes: `API_KEY_REVOKED`, `API_KEY_EXPIRED` (past `expires_at`, or past the grace of a key created with none) or `API_KEY_INACTIVE` (no recorded use for longer than the window). `resolveAuthzContext` raises it as the branded `ApiKeyLifecycleRefusalError` (`403`, a located message naming the key's prefix, the date and the remedy). An unknown key is still `none`.
+  - **`last_used_at` is written.** Its description promised "Automatically updated on each API call", and nothing wrote it. The seam now stamps it on an admitted (or held) call, at most once an hour per key, and the inactivity judgment reads the value as it was BEFORE that call's stamp, so a key's own use cannot revive it. A stamp that fails never fails the request; it is said once, at `error`.
+  - **Keys created before the policy.** A key with no expiry gets one year from `api_key_policy_started_at`; the date is stamped onto its `expires_at` the first time it is admitted, so the keys page shows it, and the refusal after it names it. A key with no recorded use counts its inactivity from the same anchor (or from its own creation, when later) — never from an earlier `created_at`, since no use was ever recorded before the policy.
+  - **Every face that admits keys** passes the policy source (`apiKeyLifecyclePolicySourceOf(authService)`, a required input beside `userAuthGates`). Every one of them answers the refusal's `403` and code: the runtime dispatcher (the MCP HTTP endpoint among its routes), the REST data API, the settings routes, the storage download routes, the datasource admin routes, the share-link routes, the marketplace install-local routes and the MCP stdio transport. Each relays the refusal by its brand, so every other identity fault at those doors keeps its existing answer.
+  - **`OS_CLOUD_API_KEY` is untouched.** It is the runtime's outbound credential to the control plane, never admitted by this seam.
+  
+  What changes for you:
+  
+  - **A key created without an expiry now expires.** It used to live until revoked; it now lives 90 days (or the configured default). Pass `expires_at` to choose, and create a new key before it ends.
+  - **A signing asking for more than a year is refused** `400 API_KEY_EXPIRY_TOO_LONG`, where it used to be accepted. Ask for the date the message names, or an earlier one.
+  - **A key unused for 90 days is refused** `403 API_KEY_INACTIVE`, where it used to be served. It is not revoked; the remedy is a new key.
+  - **A key that already existed with no expiry keeps working for one year** from the date the policy took effect on your deployment (`auth.api_key_policy_started_at`), then answers `403 API_KEY_EXPIRED` naming that date. Replace such keys within the year.
+  - **A revoked or expired key answers its own code** (`403 API_KEY_REVOKED` / `API_KEY_EXPIRED`) on every face that accepts a key, where it used to answer the generic `401`; and a session cookie sent beside such a key no longer answers for it.
+  - **Hosts calling `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** pass `apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService)` (or the sixth argument), or an explicit `undefined` where no auth service exists. A caller of `resolveAuthzContext` that wants the located answer re-raises `ApiKeyLifecycleRefusalError` (`isApiKeyLifecycleRefusalError`) the way it re-raises the store outage. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `lifecycle` outcome.
+
+### Patch Changes
+
+- e611e2b: fix(plugin-auth): a user import reports an invitation that the email transport failed to deliver
+  
+  Clause-②: no
+  
+  Setup › Users › Import (`POST /api/v1/auth/admin/import-users`) used to report an email invitation as delivered when the email transport failed. The import invites by asking better-auth for a password reset, and better-auth catches whatever the send throws and still answers `{ status: true }`. So the import's `INVITE_EMAIL_FAILED` path was never reached by a failed delivery: the row read `delivery: 'email'`, and `summary.errors` stayed `0`.
+  
+  - **A failed invitation is now reported on its row.** This covers a transport that answers `failed` and a transport that throws. The row is `ok: false`, has no `delivery`, carries `code: 'INVITE_EMAIL_FAILED'` and an `error` naming the transport's reason, and is counted in `summary.errors`. Its `action` stays `'created'` and its `id` stays, because the account exists. The fix is to send the invitation again or to set the user's password as an admin. The import does not roll the row back and does not fall back to a temporary password.
+  - **The SMS invitation reports a failure the same way.** A phone-only row whose invitation SMS fails is `ok: false` with no `delivery`, carries `code: 'INVITE_SMS_FAILED'`, and is counted in `summary.errors`. Before, it read `delivery: 'sms'` and was not counted.
+  - **A delivery is reported only when the email service accepts it.** A row is reported delivered when the service answers `sent` or `queued`. If the reset request answers without the service accepting the message, the row is reported failed, never delivered.
+  - **`summary.delivery` counts only deliveries that succeeded.** A row whose invitation failed is counted in `summary.errors` and in `summary.created`, so `created + updated + skipped + errors` exceeds `total` by exactly those rows.
+  - **A successful invitation is reported as before.** A public `POST /api/v1/auth/request-password-reset` is unchanged: it answers the same thing whether the address's mail went out, failed, or has no account behind it.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c263588]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/rest@18.0.0-next.2
+  - @objectstack/service-messaging@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

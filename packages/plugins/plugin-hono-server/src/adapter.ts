@@ -300,11 +300,12 @@ function toLoggableError(thrown: unknown): Error {
  * So this seam decides the envelope's `code` for that class BEFORE the arm
  * is consulted, keyed exactly as the arm keys it: the registered code AND the
  * class name ({@link isEngineDuplicateRecordEnvelope}, `@objectstack/types`,
- * the same predicate the import runner asks), never message text. Then the
- * arm agrees with the envelope, and its fields ride `details` under the rule
- * {@link declaredArmContext} states for every arm. A producer that merely
- * SPEAKS `DUPLICATE_RECORD` (a hook throwing the registered code without
- * being the engine's class) keeps its own code and its own body. The
+ * the same predicate the import runner asks), never message text. The code
+ * itself is read off that arm (`structuredCodeAnswer`, #23714), never spelled
+ * here. Then the arm agrees with the envelope, and its fields ride `details`
+ * under the rule {@link declaredArmContext} states for every arm. A producer
+ * that merely SPEAKS `DUPLICATE_RECORD` (a hook throwing the registered code
+ * without being the engine's class) keeps its own code and its own body. The
  * `message` stays the thrown one, as on every other code at these doors.
  *
  * ## Exported for the other Hono door (#23365)
@@ -359,7 +360,16 @@ export function declaredEnvelopeForThrow(thrown: unknown): {
     // unique-constraint envelope, which crosses HTTP as the one ruled wire
     // spelling (see "One wire spelling" above). Decided here, before the arm
     // is consulted, so the arm's agreement rule below is unchanged.
-    const code = isEngineDuplicateRecordEnvelope(thrown) ? 'UNIQUE_VIOLATION' : resolved.code;
+    //
+    // [#23714] That wire code is read off the shared classification's arm
+    // for the class (`structuredCodeAnswer`, the arm `RestServer` answers
+    // with), so this package spells no copy of it: the stamp stays where the
+    // error-code ledger lists it, under `@objectstack/types`. The thrown code
+    // is kept only if that arm ever answered no string code for the class.
+    const duplicateArmCode = isEngineDuplicateRecordEnvelope(thrown)
+        ? structuredCodeAnswer(thrown)?.body.code
+        : undefined;
+    const code = typeof duplicateArmCode === 'string' ? duplicateArmCode : resolved.code;
 
     // [#23531, #23587] The structured context `RestServer`'s classification
     // states for this refusal joins the producer's own context in `details`.

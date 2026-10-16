@@ -1,5 +1,251 @@
 # @objectstack/lint
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 4e0838d: fix(spec,lint)!: an `objectExtensions` entry that leaves a `controlled_by_parent` object with anything but one required `master_detail` is refused, as the same object declared directly already was (#23210)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered cbp-extension-merged-master-refused -->
+  
+  **BREAKING** (an accept-set narrowing on a published authoring surface), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0055 §1: a `controlled_by_parent` object derives its master from exactly one `master_detail` field declared `required: true`. `ObjectSchema` refuses an object that declares anything else, and so does the security-posture lint. Neither looked at the object the runtime actually runs: at boot the registry merges every `objectExtensions` entry onto its target, field by field, so an extension could add a second required `master_detail`, or demote the one master. `defineStack`, `os validate` and the lint passed the stack, and the runtime then derived no master: every read of the object denied, every write refused with `422 INVALID_METADATA`.
+  
+  **What is refused, and where.**
+  
+  - **`@objectstack/spec`.** `ObjectStackDefinitionSchema` (so `defineStack`, `os validate`, `os build`, the lint scorer and an artifact load) judges the rule on the merged field set of every `controlled_by_parent` object that an `objectExtensions` entry of the same stack extends. In a multi-package artifact (`packages[]`), an extension in any package judges an object any package declares. The merge is read as the registry computes it: fields by name, a later writer replacing the whole field, extensions in ascending `priority`. The issue sits at the `fields` of the extension that wrote the deciding field (`objectExtensions.0.fields`, or `packages.0.manifest.objectExtensions.0.fields`), with the message the same object gets when declared directly. `defineStack` throws `STACK_SCHEMA_INVALID` (422) carrying it.
+  - **`@objectstack/lint`.** `security-controlled-by-parent-ambiguous-relation` and `security-controlled-by-parent-no-relation` judge the same merged shape and report it at the same extension, in the words of the declared object's finding.
+  
+  No export, signature or error code is added or removed.
+  
+  ## FROM → TO
+  
+  | stack | FROM | TO |
+  |:--|:--|:--|
+  | `objects: [{ name: 'cbpx_line', sharingModel: 'controlled_by_parent', fields: { header: { type: 'master_detail', reference: 'cbpx_header', required: true } } }, …]`, `objectExtensions: [{ extend: 'cbpx_line', fields: { other: { type: 'master_detail', reference: 'cbpx_other', required: true } } }]` | accepted; at runtime the object derived no master and failed closed | refused at `objectExtensions.0.fields`: "Object 'cbpx_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields (`header`, `other`)…" |
+  | the same object, extended with `fields: { header: { type: 'master_detail', reference: 'cbpx_header', required: false } }` | accepted; no master at runtime | refused at `objectExtensions.0.fields`: "…but no required `master_detail` field…" |
+  | an artifact built before this change that carries either shape | loaded; the object failed closed | refused at load; rebuild it from the corrected source |
+  
+  **Remedy, in one line.** In the extension, drop the second master or declare it `type: 'lookup'`, and never redeclare the object's master with `required: false` or another type.
+  
+  **Unchanged.**
+  
+  - An extension adding any non-master field (a `lookup` to another parent included) to a `controlled_by_parent` object.
+  - An extension whose target the stack does not declare: another package's object, or the platform's. It is not judged, and the runtime's fail-closed refusal remains the backstop there.
+  - An object already refused as declared is reported once, at the object.
+  - In a multi-package artifact, a target on which two packages write one field at the same `priority`: the winner is the order the artifact loader registers them in, which the parse does not compute, so it is not judged.
+  - Stored `sys_metadata` rows: an extension is merged only when a stack or an artifact registers, so no stored row carries the shape and none is rewritten.
+  - The step-18 entry `cbp-extension-merged-master-refused` carries the prescription for `os migrate meta`. It is asked only of a stack that declares `objectExtensions`.
+- 54af6c0: feat(lint): export the dataset dimension leg's group-key classifier, so a consumer asks the lint instead of composing the analytics door's two predicates itself (#23235)
+  
+  Clause-②: yes
+  
+  `@objectstack/lint` now exports `groupKeyClassOf(shape)` and its result type `GroupKeyClass`:
+  
+  - `groupKeyClassOf(shape)` answers "may a dataset or cube dimension group by a column declared this way?". `null` means yes: the column stores one scalar value, and the analytics door serves it as a group key. Otherwise it names the JSON-stored class the door refuses with `400 INVALID_FIELD`: `'structured-json'` (a type in `STRUCTURED_JSON_TYPES`) or `'multi-value'` (`isMultiValueField`: `multiselect`, `checkboxes`, `tags`, or a multi-capable type such as `select` declared `multiple: true`). The two spec predicates are applied in the door's order.
+  - `shape` is `ValueShapeFieldDef` from `@objectstack/spec/data`, the slice of a field definition the predicates read (`type`, `multiple`). A declared `Field` passes as it is. The classifier reads no object graph: for a dotted path, pass the leaf field's definition.
+  
+  A consumer that derives dataset dimensions keeps a field as a group key when `groupKeyClassOf(field) === null`, and gets the lint's own verdict. The `dimension-json-stored-field-refused` rule (dataset dimensions and cube dimensions) keeps calling the same function; on the rule's own fixtures, every declared field type with and without `multiple: true` and every column of the cube fixture, the export and the rule agree on the verdict and the class. The rule's findings, paths and texts are unchanged.
+  
+  No export is removed, and no accepted or refused shape changes.
+- 301eec6: feat(spec)!: retire the object's `externalSharingModel` — the external org-wide default no principal ever read (#23268)
+  
+  **BREAKING** — `externalSharingModel` on an object (`ObjectSchema`, the `object` metadata type) is now refused at parse. ADR-0090 D11 declared it as a second org-wide default for portal and partner principals, and nothing ever evaluated it: no request resolves an external principal, and the authorization kernel's `EXTERNAL` rung (ADR-0095 / ADR-0099) admits explicitly shared rows only, never an org-wide default. Setting `externalSharingModel: 'private'` hid nothing from anyone. Delete the key. `sharingModel` is the one org-wide default; a principal reaches a row it does not own through an explicit share (a manual share or a sharing rule), and an anonymous reader through a share link (`publicSharing`, unchanged).
+  
+  Clause-②: no (narrowing)
+  
+  Measured before removal, at `e4ec6ec1a`: no row-pipeline reader in any package. The key's only readers were authoring checks of its own ordering against `sharingModel` — the publish linter's alias and wider-than-internal branches, and the `plugin-security` posture gate's env-tighten comparison — plus the Studio console's object settings select (a separate console change). The only authored instances in this repository were two showcase objects.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `externalSharingModel: 'private'` (or `'public_read'`, `'public_read_write'`, `'controlled_by_parent'`) on an object | nothing — delete the key; share rows explicitly where an outside principal needs them |
+  | `import { SECURITY_EXTERNAL_WIDER } from '@objectstack/lint'` | nothing — the rule `security-external-wider-than-internal` is removed with the key it judged |
+  
+  **The one-line fix:** delete `externalSharingModel` from every object.
+  
+  **What an author who still writes it sees.** `tsc` fails at the authoring site (`ObjectSchema` types the key as retired), and the parse — `ObjectSchema.create()`, `defineStack({ objects })`, `PUT /api/v1/meta/object/:name` (draft saves included) — refuses it at its own path with the prescription:
+  
+  > `object.externalSharingModel` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — it never had an effect: no request resolves an external principal, and the external rung of the authorization kernel (ADR-0095) admits explicitly shared rows only, never an org-wide default, so the value changed no answer for anyone. Delete the key. `sharingModel` is the one org-wide default; a principal reaches a row it does not own through an explicit share, and an anonymous reader through a share link (`publicSharing`). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  ## The retirement kit
+  
+  - **A `retiredKey()` tombstone** on `ObjectSchema`, a `strictObject` — so the refusal carries the prescription rather than a bare unknown-key report, and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `data/Object:externalSharingModel`.
+  - **The D2 conversion `object-external-sharing-model-removed`** (protocol 18, retired from the load path) deletes the key from every `objects[]` entry, one notice per object, as a lossless delete. Studio's object settings offered the select and `PUT /api/v1/meta/object` persisted it until this release, so a stored `object` row can carry it; the rehydration seams replay this conversion over stored rows, and `os migrate meta --stored` lists the rows that carry it before the upgrade.
+  - **The D3 entry `object-external-sharing-model-retired`** asks the author whether anything they built assumed the key kept outside users away from an object's rows. Nothing ever enforced that.
+  - **Ledger:** the row goes `planned` → `dead`, kept as a tombstone row (a tombstone keeps the key in the walked shape).
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  **`@objectstack/lint`:** the `security-external-wider-than-internal` rule and its exported `SECURITY_EXTERNAL_WIDER` id are removed, and `security-owd-alias` no longer reads `externalSharingModel`; the parse refuses the key on every parsed door. On an unparsed intake (`os lint` on a raw config) the ledger-driven advisory reports it as `liveness-dead-property`.
+  
+  **`@objectstack/plugin-security`:** the object posture gate's env-tighten-only rule (R1) compares `sharingModel` alone; the external half left with the key.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered object-external-sharing-model-removed, object-external-sharing-model-retired -->
+- d0c09e4: The metadata save door runs the two page component rules that `objectstack validate`, `objectstack build` and `objectstack lint` run. A page saved through Studio, REST `/meta` or an MCP/AI author whose components carry an undeclared, wrong-typed or retired property (`component-props-unknown-key`, `component-props-invalid`), or a component `type` inside a spec-reserved namespace that the platform does not declare (`component-type-unknown`), is refused with `422 INVALID_METADATA`, and each issue carries the fix the CLI already prints. Before, the save answered `200` and the renderer ignored the property or drew a placeholder.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered element-data-source-and-object-block-filter-rule-array, element-flat-data-binding-retired, element-text-variant-heading-subheading-retired, ui-action-group-menu-member-params-array-only, ui-action-group-menu-members-typed, ui-object-block-grouping-config-typed, ui-object-form-custom-fields-typed, ui-object-form-fields-names-typed, ui-object-form-members-typed, ui-object-form-sections-typed, ui-object-gantt-markers-typed, ui-object-grid-columns-typed, ui-object-grid-export-options-closed, ui-object-grid-kanban-calendar-list-members-typed, ui-object-grid-page-size-positive-integer-refused, ui-object-grid-row-members-typed, ui-object-kanban-conditional-formatting-typed, ui-object-map-gantt-tree-navigation-typed, ui-object-master-detail-form-details-closed, ui-object-metric-aggregate-trend-typed, ui-object-metric-compare-to-typed, ui-object-metric-drill-down-report-typed, ui-object-metric-drill-down-typed, ui-object-timeline-items-typed, ui-object-timeline-mapping-typed, ui-record-line-items-props-closed) Every props shape the save door now refuses was declared, and each narrowing of one recorded in its own D3 entry, before this change; the entries named here are the step's narrowings whose refusal the component-props gate carries, and this diff amends each one whose text said a stored page still saves, to say its next save meets that gate at the metadata save door. The change moves an existing rule onto one more door; it removes no key and rewrites no shape, so it adds no entry and no conversion: nothing on the load path refuses a page. -->
+  
+  **BREAKING**: an accept-set narrowing on the metadata save door (`PUT /api/v1/meta/page/:name`, the draft promotion `POST /api/v1/meta/page/:name/publish`, the package publish, and every in-process `saveMetaItem` caller on an environment's authoring channel), shipped as `minor` under the launch-window convention for accept-set narrowings (`.changeset/pre.json` is open in `next` pre mode).
+  
+  **The next save of a stored page whose components carry an undeclared, wrong-typed or retired property, or a reserved-namespace type the platform does not declare, is refused with the fix; stored pages keep serving until then.** The door judges writes only: a stored page row is not re-judged at boot, loads and is served as before, and a draft save is not judged until it is published.
+  
+  ## FROM → TO
+  
+  | you saved | the door now answers | write instead |
+  |:--|:--|:--|
+  | `page:header` with `properties: { titel: 'Deals' }` | `422`, `component-props-unknown-key` at `…properties.titel`, offering `title` | `properties: { title: 'Deals' }` |
+  | `record:related_list` with `properties: { limit: 'five' }` | `422`, `component-props-invalid`, naming the expected type | `properties: { limit: 5 }` |
+  | a component typed `page:headr` | `422`, `component-type-unknown`: "Rename `page:headr` → `page:header`." | `type: 'page:header'` |
+  | a component typed `acme:pipeline_board` (outside the reserved namespaces) | unchanged: saved | nothing |
+  
+  **The one-line fix: apply what the issue names, then save again.** If a component really does read the key, the props row in `@objectstack/spec` is what is wrong, not the page.
+  
+  **Who is affected.** A deployment whose stored pages carry such a finding: those pages keep loading and serving, and only their next save is refused until the finding is fixed. `objectstack migrate meta --stored` does not list these findings. The authored pages measured when the props findings became errors (37 pages in this repository and 8 in `objectstack-ai/hotcrm`) carried none, and the in-repo page corpus carries no `component-type-unknown` finding; deployed rows were not measured. The two former ADR-0087 D2 aliases on page component properties, `page:header` `description` (write `subtitle`) and an `element:button` inline `type: 'api'` action's object `params` (write `bodyExtra`), are retired from the load path at 18 and refused at every door with the rename (`objectstack validate`, load, and this save door), so the save door and `objectstack validate` agree on them.
+  
+  The `@objectstack/spec` change is text only: the reason of each D3 migration entry named above (and the matching step-18 summaries) said a stored page still saves and loads, and now says it still loads and that its next save meets the component-props gate at the metadata save door.
+- 30b0fc2: fix(lint)!: a permission set's field-permission key with an empty object part (`'.FIELD'`) is refused as unqualified, at `os validate` and at the metadata save door alike (#23549)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is added, removed, renamed or re-shaped, and no stored row is rewritten or converted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a lint verdict, and with it the accept set of the save door that runs the lint: a `fields` key whose object part is empty is now refused where it was accepted. No ledger entry can derive the repair, because an empty object part does not say which object the author meant; the repair is the author's edit of the key. A stored set holding such a key keeps loading until its next ordinary publish-mode save, which is judged; the `os migrate meta --stored --apply` pass, when it re-saves such a row for another conversion, does so unjudged (the gate exempts `source: 'migrate-stored'`), and the row keeps loading. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict and none is added (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A permission set's `fields` map is keyed `OBJECT.FIELD`, and the security plugin applies a set's field rules to an object by the key prefix `OBJECT.` (`PermissionEvaluator.getFieldPermissions`). A key whose object part is empty, such as `'.full_name'`, matches no object, because no object name can be empty, so the mask it declares never enforces: the field stays exactly as readable and editable as the object-level grant leaves it, for every holder of the set.
+  
+  **What changes for `'.FIELD'`.**
+  
+  - Before this change, both field-permission rules let the key through. `security-fls-unqualified-key` skipped every key containing a `.`, and `security-fls-unknown-field` read the empty object part as another package's object and did not judge it. `os validate`, `os build` and `os lint` passed the stack, and the metadata save door stored the set with `success: true`.
+  - Now `security-fls-unqualified-key` reports it, at `error`: a key is object-qualified only when it has a non-empty object part before its first `.`. The finding sits at `permissions[N].fields[".FIELD"]`. Its message says the object part before the first `.` is empty, and its fix line names the `'<object>.<field>'` form, with an example that keeps the remainder as the field when it is one plain name. `security-fls-unknown-field` no longer considers the shape, so each such key earns exactly one finding. The same holds for `'.'`, `'..FIELD'` and `'.FIELD.MORE'`.
+  - At the save door, a `permission` write in publish mode on the environment authoring channel that carries such a key now answers `422 INVALID_METADATA`, with one `security-fls-unqualified-key` issue. This covers `PUT /api/v1/meta/permission/:name` (and `saveMetaItem` in publish mode), the promotion of a draft (`publishMetaItem`), and every other publish-mode save through `saveMetaItem` on that channel: cloning a permission set, `duplicatePackage`, the import of an unmanaged package and the organization-ownership ceremony. A kernel assembled on the `package-author` authoring channel skips this gate; the author-time CLI doors above judge that channel's source instead.
+  - An `os migrate meta --stored --apply` re-save is not judged: the gate exempts `source: 'migrate-stored'`, so a stored set holding such a key is rewritten into the current dialect unjudged, is not reported `failed`, and keeps loading. Its next ordinary publish-mode save is judged.
+  
+  **Remedy.** Put the object's name before the `.`, so `'.full_name'` becomes `'crm_account.full_name'` for the object whose field it masks. Saving the set as a draft (`mode: 'draft'`) is still allowed, because drafts are never gated; publishing that draft is judged.
+  
+  **Unchanged.**
+  
+  - A qualified key naming a real field (`OBJECT.FIELD`) is accepted as before.
+  - A key naming an object this stack does not define, such as `no_such_object.x` or `no_such_object.`, is still not judged, because another installed package may declare that object.
+  - A bare key (`full_name`) is refused under `security-fls-unqualified-key` with the same message and fix line as before; an empty or dangling remainder on an object of this stack (`crm_account.`, `crm_account.owner.name`) is refused under `security-fls-unknown-field` as before.
+  - Stored rows are not migrated by this change, and they are not refused on read or at boot: the save door judges new writes only. A set stored before this change keeps loading until its next ordinary publish-mode save, which is judged; an `os migrate meta --stored --apply` re-save is not (above).
+  - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
+  - No rule id, error code, export or signature is added or removed. `PermissionSetSchema` is unchanged.
+  - Measured before this change: no permission set in this repository's examples, templates, skills or fixtures carries a `fields` key that starts with `.`.
+
+### Patch Changes
+
+- c911ab6: fix(lint): the 11 dashboard widget-binding rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these 11 rule ids (all in `validate-widget-bindings.ts`) now carries a `hint` (the CLI's `fix:` line, the runtime issue's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (the lengths here are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after:
+    - dashboard filters: `dashboard-filter-field-unprovisioned` (561 → 177), `dashboard-filter-field-unknown` (403 → 148) and `dashboard-filter-field-not-included` (218 → 144);
+    - widget filters: `widget-filter-field-unknown` (322 → 133);
+    - refused `chartConfig` keys: `chart-field-unknown` (415 → 152);
+    - empty selections: `chart-measures-missing` (369 → 144), `widget-measures-missing` (330 → 154) and `chart-dimensions-missing` (291 → 161);
+    - legacy analytics keys: `widget-legacy-analytics-shape` (338 → 113) and `widget-legacy-analytics-unrenderable` (320 → 105);
+    - tables: `table-count-only` (311 → 136).
+  - **Lists are no longer echoed.** `dashboard-filter-field-unknown` and `widget-filter-field-unknown` no longer append the object's whole field list, and `dashboard-filter-field-not-included` no longer lists the dataset's declared `include` paths: the verdict's (or, on a bare dashboard-filter field, the fix line's own) "Did you mean" names the nearest field. The three empty-selection ids still name what the dataset declares, because no "Did you mean" can: at most three names, then `…`, or "it declares no measures yet".
+  - **One line, one remedy.** The `suppressWarnings` clause leaves every warning's fix line, and with it: how DatasetWidget reads a dataset-bound widget; that a dotted filter target must traverse relationship fields and have its prefix in `include`, and that `a.b` includes `a`; how to vouch for or opt out of an unprovisioned anchor (`dashboard-filter-field-unprovisioned` now prints the shared one-line anchor fix the other anchor ids print); what replaces each refused `chartConfig` key, and the `os migrate meta --from 17` route; which widget families need no dimensions; and why a flat record listing is not an analytics dataset (ADR-0017).
+  - **`os explain RULE_ID` carries the rest.** What the fix lines stopped saying is each id's `RULE_EXPLANATIONS` entry in `@objectstack/lint`, which `os explain RULE_ID` prints. Two ids gain an entry, so their `rule:` line now carries the `os explain` pointer: `table-count-only` and `widget-legacy-analytics-shape`. Seven existing entries gain text.
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), all 11 fire on a `dashboard` write; the `hint` FROM → TO, measured at the door:
+    - 422 `issues[].hint`: `widget-legacy-analytics-unrenderable` 320 → 105; `dashboard-filter-field-unknown` 196 / 195 / 290 → 148 / 147 / 137 (an inherited bare field, a re-targeted bare field, a dotted path); `dashboard-filter-field-not-included` 213 → 139; `widget-filter-field-unknown` 220 → 126;
+    - 2xx `advisories[].hint`: `widget-legacy-analytics-shape` 338 → 112; `dashboard-filter-field-unprovisioned` 550 → 173; `chart-field-unknown` 413 / 294 / 324 → 150 / 124 / 127 (an x-axis, a y-axis, a series); `chart-measures-missing` 240 → 96; `widget-measures-missing` 310 → 134; `chart-dimensions-missing` 297 → 156; `table-count-only` 311 → 136.
+  
+    Studio's save-advisory toast prints an advisory's `hint` after its message, so the seven advisories shorten there; Studio renders no 422 issue's `hint`. No Studio, REST or MCP reader in this repository or in objectui matches on `hint` text; a tool that did should match on `rule` and `path` instead.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- fba3712: fix(lint): `page-field-unknown` judges each of a `record:related_list`'s bindings against its own object, so a `dataSource`-bound list no longer reports its parent-side `relationshipValueField` as missing from the child (#23207)
+  
+  Clause-②: no
+  
+  - **Child refs** (`columns`, `sort`, `filter`, `relationshipField`, `add.linkField`) resolve against the node-level `dataSource.object` when the list binds its rows that way, else against `properties.objectName`. Before, they resolved only against `properties.objectName`, so a `dataSource`-bound list's child columns went unchecked.
+  - **The parent ref** (`relationshipValueField`) resolves against the list's `parentDataSource.object` when it declares one, else against the object the list inherits (its container's binding, else the page object). Before, a `dataSource`-bound list checked it against the child, which gave a false `field "…" is not a field on object "CHILD"` warning on a field of the parent.
+  - **Severity is unchanged.** These findings stay warnings, so default `os validate`, `os lint` and `os build` accept every stack they accepted before. Under `--strict`, which treats warnings as errors, a `dataSource`-bound list with a misspelled child column can now fail a stack that used to pass, because that column was not checked before. To fix it, correct the column name to a field of `dataSource.object`.
+  - `WalkedComponent` (from `walkPageComponents`) gains an optional `inheritedObject`: the object a component inherits before its own `dataSource.object` / `properties.object` override. `objectName` is unchanged.
+- 5547ad4: feat(spec): export the `controlled_by_parent` exactly-one-master predicate, so a producer asks the spec instead of restating ADR-0055 §1 (#23272)
+  
+  Clause-②: yes
+  
+  `@objectstack/spec/data` now exports the predicate `ObjectSchema` already refuses with:
+  
+  - `controlledByParentMasterRefusal(objectName, sharingModel, fields)` answers "does this object satisfy the exactly-one-master rule?". `undefined` means yes, or that the rule does not apply (another sharing model, or no field map). Otherwise it returns the refusal: the parse issue's `path` (`fields` or `sharingModel`), its `message`, the object's `shape` (`several-required-masters`, `several-masters`, `master-not-required`, `required-lookup-only` or `no-master`), and the `master_detail` and required `lookup` fields it declares. Types: `ControlledByParentMasterRefusal`, `ControlledByParentMasterShape`.
+  - `isControlledByParentMasterField(field)` answers "does this field count as the master?": a `master_detail` field declared `required: true`, and nothing else. The object satisfies the rule when exactly one of its fields counts.
+  
+  A producer that defaults an object to `controlled_by_parent` asks `controlledByParentMasterRefusal(name, 'controlled_by_parent', fields) === undefined` with the field map it is about to write. The answer is the parse's: on every shape the v18 upgrade lists, the export and `ObjectSchema` agree on the verdict, the issue path and the message.
+  
+  `@objectstack/lint`: `security-controlled-by-parent-no-relation` and `security-controlled-by-parent-ambiguous-relation` count masters with the exported field predicate instead of their own copy. Their findings, paths and texts are unchanged. A `master_detail` that names no `reference` still does not count for the lint.
+  
+  No export is removed, and no accepted or refused shape changes.
+- c5dd7fc: feat(spec)!: the page kind `jsx` is retired — an authored `kind: 'jsx'` is refused with the prescription naming `html`, and `page-kind-jsx-to-html` leaves the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** `jsx` was the first name of the constrained-JSX page tier (ADR-0080), which ADR-0081 renamed `html`. Through 17 it stayed a declared `PageSchema.kind` member and the loader rewrote an authored `kind: 'jsx'` to `html` with a notice. At 18 it is retired: `PageSchema.kind` declares it through `enumWithRetiredValues`, so it is refused by name at `os validate`, `os build`, the metadata save door and `defineStack`, so under `os lint` too when the config calls it: "Page `kind: 'jsx'` was removed in @objectstack/spec 18 (ADR-0087 D2) … Use `kind: 'html'`." Writing it in TypeScript no longer compiles either. The ADR-0087 D2 conversion `page-kind-jsx-to-html` is retired from the load path (`retiredAfter: '17.7.0'`), so the authoring funnel no longer rewrites the value. `COMPILED_PAGE_KINDS` is now `['html']`: `requires` is accepted on an `html` page only.
+  
+  Migration:
+  
+  - `kind: 'jsx'` → `kind: 'html'`. Change the value; the page's `source` is compiled and rendered exactly as before, and `requires` stays legal on it.
+  - A script or integration that saves a page through the metadata API with `kind: 'jsx'` → send `kind: 'html'`.
+  
+  `os migrate meta` does not list this edit: the rename belongs to protocol 11, below the migration floor, so make it by hand. The D3 entry `page-kind-jsx-retired` states it for upgraders.
+  
+  Stored metadata needs no edit. Every stored-row rehydration seam replays the retired conversion, so a `sys_metadata` page row written as `jsx` keeps loading as an `html` page, and a built artifact whose declared protocol floor is at or below `17.7.0` is still converted at the artifact-ingestion door.
+  
+  The readers that branched on the retired value dropped it: the metadata save door's html-page compile gate (`@objectstack/metadata-protocol`), the CLI's SDUI-manifest page count, and the lint page walk, `validateJsxPages` and the page-source styling rule (`@objectstack/lint`) now read `html` (and `react` where they did before) only.
+  
+  `@objectstack/platform-objects` publishes the Studio page form's `source` help text in four locales (`en`, `zh-CN`, `ja-JP`, `es-ES`); it no longer names `jsx`.
+  
+  <!-- adr-0087: registered page-kind-jsx-retired -->
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/sdui-parser@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Major Changes

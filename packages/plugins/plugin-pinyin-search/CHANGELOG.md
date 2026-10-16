@@ -1,5 +1,28 @@
 # @objectstack/plugin-pinyin-search
 
+## 18.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [0d3ea29]
+- Updated dependencies [584e737]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [1d79556]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [daafae6]
+- Updated dependencies [be48c5e]
+- Updated dependencies [989aa48]
+- Updated dependencies [30c33e3]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cd86e41]
+- Updated dependencies [3bc407d]
+- Updated dependencies [76560a1]
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes

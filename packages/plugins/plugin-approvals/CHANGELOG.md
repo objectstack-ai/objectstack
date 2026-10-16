@@ -1,5 +1,91 @@
 # @objectstack/plugin-approvals
 
+## 18.0.0-next.2
+
+### Patch Changes
+
+- a6d0715: fix(plugin-approvals): the `approval.requested` notification names the record by its object label and id, and the empty-slot warning no longer says the request "cannot advance"
+  
+  Clause-②: no
+  
+  - **The notification names the record's object by its label.** The body of `approval.requested` used to read `A decision on crm_opportunity/JCqLLy5dSug1MldB is waiting on you.`, with the object's API name. It now reads `A decision on Opportunity JCqLLy5dSug1MldB is waiting on you.`, using the label the Approvals Inbox row shows for that object. The API name is used only when the object's schema declares no label, as in the inbox. The body carries the record's id, as before, and not its title, from any source. Title, topic, action link and recipients are unchanged.
+  - **The empty-slot warning states the slot, not the request's fate.** An approver that expands to nobody used to log `the slot routes to no one and the request cannot advance until someone is added or the approver is re-pointed`. On the default `onEmptyApprovers: 'admin_rescue'` path the next line opened the request on the organization's administrators, who then decided it. The line now reads `the slot names no one, so no one is asked through it. Staff it or re-point the approver; a slate left naming no one is decided by the node's onEmptyApprovers.` What the node does with an empty slate is stated once, by the node-level line that already follows it.
+  
+  A patch: both are server-authored texts. No schema, translation key, export or notification field moves.
+- 9f81260: fix(plugin-approvals): a request's `record_title` is served only from fields its reader may read, and the one-tap action pages name the record by its id
+  
+  Clause-②: no
+  
+  - **The inbox title follows the reader's field-level security.** `listRequests`, `getRequest` and every action's read-back row (which the request actions' success messages read) now pick `record_title` from the subject record as served to the reading caller: the same answer the payload snapshot is redacted by (readable, and not masked for that caller). A display field the reader may not read, or is served masked, gives no title, and the key is absent, the shape the redaction gives that field in the payload. A title-eligible field the reader may read still names the record, and a reader who may read the display field gets the same title as before. Deleted records fall back to the reader's redacted snapshot, as before. Nothing is granted: record access stays with object permissions, sharing and row-level rules.
+  - **The action-link pages name the record by its id.** The session-less confirm and result pages (ADR-0043) have no reader to narrow for, so their "Record" row shows the record id beside the object's label, as the approval notification names it, and never the title.
+  
+  A patch: a narrowing of served values only. No schema, route, translation key, export or notification field moves. With no field-visibility source wired, every title is served as before.
+- b513343: fix(plugin-approvals): the inbox's referenced-record titles (`payload_display`) and the record-lock refusal's title are served only from fields the caller may read
+  
+  Clause-②: no
+  
+  - **Referenced-record titles follow the reader's field-level security on the referenced object.** `listRequests` and `getRequest` now pick each `payload_display` title from the referenced record as served to the reading caller: the same answer the payload snapshot and `record_title` are narrowed by (readable, and not masked for that caller), asked for the referenced object, once per object per read. A display field the reader may not read on the referenced object, or is served masked, gives that key no display value, so the snapshot's stored id stands, as it already does for a deleted referenced record. A title-eligible field the reader may read still names the record, and a reader who may read the display field gets the same title as before.
+  - **The `RECORD_LOCKED` refusal names the record only from what the writer may read.** The per-record refusal sentence takes its title from the record as served to the refused writer, asked with the writer's own execution context. When the writer may not read the display field, or is served it masked, the sentence names the object's label alone (`This Opportunity is locked …`), as it already does for a record with no title; it never names the id. A writer who may read the field is told the title as before. The code (`RECORD_LOCKED`) and status (409) are unchanged.
+  
+  A patch: a narrowing of served values only. Nothing is granted, and no schema, route, error code, translation key or export moves. With no field-visibility source wired, every title is served as before.
+- 7e6e4e1: fix(plugin-approvals): the inbox's referenced-record titles (`payload_display`) are served only for a referenced record the caller may read
+  
+  Clause-②: no
+  
+  - **Referenced-record titles follow the reader's access to the referenced RECORD.** `listRequests` and `getRequest` now title a lookup in the payload snapshot only when the reading caller may read the record it points at, asked through the platform's one caller-scoped row-access answer (`resolveReadableParentIds`, the same one the comment, activity, attachment and mail gates ask), once per referenced object per read. So the referenced object's object-level read, its sharing and its row-level rules decide, as they already do for the data API's `$expand`. A referenced record the reader may not read gets no display value and the snapshot's stored id stands, as it already does for a deleted referenced record. A reader who may read the record gets the same title as before, still picked from the fields they may be served. A referenced object the reader may not read at all is first skipped by the security service's object-level read admission (`canReadObject`), so an inbox read does not add an access-denied warning to the server log for it.
+  - **Nothing about the record under approval changes.** Its title (`record_title`), its label and its field-level-security-redacted snapshot are served to a routed approver exactly as before, whatever their access to that record.
+  
+  A patch: a narrowing of served values only. Nothing is granted, and no schema, route, error code, translation key or export moves. With no security plugin composed, every caller-scoped read answers every record, so every title is served as before.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

@@ -41,6 +41,8 @@ export const REST_SERVER_REGISTRAR_FILES = [
     'analytics-routes.ts',
     // [#23050 slice 6] `registerSecurityExplainEndpoints`' and `registerSecurityEndpoints`' bodies.
     'security-routes.ts',
+    // [#23050 slice 7] `registerDiscoveryEndpoints`' and `registerOpenApiEndpoints`' bodies.
+    'discovery-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */

@@ -77,6 +77,21 @@ const PLACED_BEFORE_THE_RULE: ReadonlySet<string> = new Set([
   'viewPageMountRemoved',
 ]);
 
+/**
+ * `maskComments`, once per distinct text. The registry is ~750 KB, the mask is a
+ * full lexer pass over it, and the edits below re-derive the same handful of
+ * texts (the real file, each side, each side's half-made intermediate) dozens of
+ * times through `entriesOf` and `definitionsOf`. The mask is a pure function of
+ * its input, so a repeated text reads its first answer back: every finding below
+ * is computed from exactly the bytes it was before, one lexer pass per text.
+ */
+const masked = new Map<string, string>();
+function maskOnce(source: string): string {
+  let text = masked.get(source);
+  if (text === undefined) masked.set(source, (text = maskComments(source)));
+  return text;
+}
+
 interface Entry {
   ident: string;
   order: number;
@@ -89,7 +104,7 @@ interface Entry {
  * Read through the shared comment mask, which keeps offsets, so a comment between entries is a blank line here.
  */
 function entriesOf(source: string): { entries: Entry[]; end: number } {
-  const text = maskComments(source);
+  const text = maskOnce(source);
   const start = text.indexOf(OPEN);
   expect(start, 'the MAJOR_18_CONVERSIONS declaration').toBeGreaterThan(-1);
   const entries: Entry[] = [];
@@ -115,7 +130,7 @@ function entriesOf(source: string): { entries: Entry[]; end: number } {
 
 /** Every conversion definition in the file, in file order — a commented-out one is not a definition. */
 function definitionsOf(source: string): { ident: string; id: string; at: number }[] {
-  return [...maskComments(source).matchAll(DEFINITION)].map((m) => ({ ident: m[1]!, id: m[2]!, at: m.index! }));
+  return [...maskOnce(source).matchAll(DEFINITION)].map((m) => ({ ident: m[1]!, id: m[2]!, at: m.index! }));
 }
 
 /** Rule 1, as findings: the entries are sorted strictly by identifier. */

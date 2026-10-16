@@ -40,6 +40,17 @@ const SPEC = path.resolve(HERE, '..');
 const REPO = path.resolve(SPEC, '../..');
 const SRC = path.join(SPEC, 'src');
 
+/**
+ * The tree's ledger, loaded ONCE for the file. `loadLedger` parses every
+ * `*.zod.ts` under `src/` into an AST, which is the whole cost of this file,
+ * and it is a pure read: the same checkout yields the same `LoadedLedger`, and
+ * no case below writes to the one it is handed. So the eleven cases that read
+ * it share one load instead of re-parsing the tree each time. The independent
+ * AST walk in "measures the same tree the AST counter does" stays its own walk.
+ */
+let ledgerOnce: ReturnType<typeof loadLedger> | undefined;
+const treeLedger = (): ReturnType<typeof loadLedger> => (ledgerOnce ??= loadLedger(REPO, SRC));
+
 describe('Class cell grammar', () => {
   it('reads a bare verdict through the markdown the ledger writes it in', () => {
     // Every one of these spellings exists in the file today.
@@ -105,7 +116,7 @@ describe('`covered` — the ninth verdict (#5249)', () => {
     // The counts artifact is read by people who never open this file, so the
     // bucket label has to carry the three-part test (`no carrier, no parse,
     // guarded at every consumer`) rather than a bare `covered`.
-    const { shards } = loadLedger(REPO, SRC);
+    const { shards } = treeLedger();
     expect(shards.get('ui.md')).toContain('covered — no carrier, no parse, guarded at every consumer');
   });
 
@@ -116,7 +127,7 @@ describe('`covered` — the ninth verdict (#5249)', () => {
     // requires the keys to reach consumers by `...X.shape` SPREAD — `.extend()`
     // INHERITS posture, which makes the base a real door (`FormFieldBaseSchema`,
     // `BaseQuerySchema`) rather than an inert fragment.
-    const { parsed, model } = loadLedger(REPO, SRC);
+    const { parsed, model } = treeLedger();
     const rows = parsed.strip.filter((r) => parseClassCell(r.classCell)?.verdict === 'covered');
     expect(rows.map((r) => `${r.dir}/${r.file}`)).toEqual(['ui/app.zod.ts']);
     expect(model.global.buckets.covered).toBe(1);
@@ -155,7 +166,7 @@ describe('bucketize refuses to guess', () => {
 });
 
 describe('the ledger and the generated counts agree', () => {
-  const loaded = () => loadLedger(REPO, SRC);
+  const loaded = treeLedger;
 
   it('has no unresolved Class cells — every row buckets', () => {
     const { problems, model } = loaded();

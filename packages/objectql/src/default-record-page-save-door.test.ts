@@ -166,7 +166,13 @@ async function boot(topology: Topology) {
             (result: any) => ({ ok: true as const, result }),
             (error: any) => ({ ok: false as const, error }),
         );
-    return { engine, protocol, storedPages, save };
+    /** A stored ACTIVE environment page row, laid in the store directly — no write door in front of it. */
+    const storeRow = (name: string, body: Record<string, unknown>) =>
+        driver.create('sys_metadata', {
+            type: 'page', name, organization_id: null, package_id: null,
+            metadata: JSON.stringify(body), state: 'active', version: 1,
+        });
+    return { engine, protocol, storedPages, save, storeRow };
 }
 
 /** The envelope, the object and both pages of one refusal, by its first sentence. */
@@ -261,9 +267,19 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         expect(outcome.ok, String((outcome as any).error?.message)).toBe(true);
     });
 
-    it('control: an isDefault page that is not a record page is outside the rule', async () => {
-        const { save } = await boot(topology);
+    it('an isDefault page that is not a record page holds no default — the page parse refuses its flag (#23610), and nothing is stored', async () => {
+        const { save, storedPages } = await boot(topology);
         const outcome = await save('env_home', { name: 'env_home', label: 'Home', type: 'home', isDefault: true, regions: [] });
+        expect(outcome.ok, 'the save was refused').toBe(false);
+        const err = (outcome as { error: any }).error;
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(String(err.message)).toContain("`isDefault: true` is refused on a `type: 'home'` page");
+        expect(storedPages()).toEqual([]);
+    });
+
+    it('control: the same home page without the flag saves', async () => {
+        const { save } = await boot(topology);
+        const outcome = await save('env_home', { name: 'env_home', label: 'Home', type: 'home', regions: [] });
         expect(outcome.ok, String((outcome as any).error?.message)).toBe(true);
     });
 
@@ -274,5 +290,43 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         const promoted = await save('env_task_b', recordPage('env_task_b', 'acme_task'));
         expect(promoted.ok, String((promoted as any).error?.message)).toBe(true);
         expect(storedPages()).toEqual(['env_task_a', 'env_task_b']);
+    });
+});
+
+// #23610 (maintainer ruling A on Q1 and Q2, record 6190536588) — the save door
+// is the page parse's: a non-record page's `isDefault: true`, the retired
+// `full-width` template and a region the template does not place are each
+// refused 422 `INVALID_METADATA` at save. A row ALREADY stored in one of those
+// shapes is read as it was (no conversion touches it and the read path does
+// not refuse it); saving it again is refused until it is fixed.
+const PLACEMENT_SHAPES: ReadonlyArray<[label: string, body: Record<string, unknown>, says: string]> = [
+    ['a home page with `isDefault: true`', { name: 'env_shape', label: 'Shape', type: 'home', isDefault: true, regions: [] }, '`isDefault: true` is refused'],
+    ['the retired `full-width` template', { name: 'env_shape', label: 'Shape', type: 'record', object: 'acme_task', template: 'full-width', regions: [{ name: 'main', components: [] }] }, "`template: 'full-width'` was removed"],
+    ['a `left_sidebar` region on `three-column`', { name: 'env_shape', label: 'Shape', type: 'home', template: 'three-column', regions: [{ name: 'left_sidebar', components: [] }, { name: 'main', components: [] }] }, 'Region `left_sidebar` is refused'],
+];
+
+describe.each(TOPOLOGIES)('%s kernel — the page parse at the save door, and rows stored before it (#23610)', (topology) => {
+    it.each(PLACEMENT_SHAPES)('%s: the save is refused 422 INVALID_METADATA, and nothing is stored', async (_label, body, says) => {
+        const { save, storedPages } = await boot(topology);
+        const outcome = await save('env_shape', body);
+        expect(outcome.ok, 'the save was refused').toBe(false);
+        const err = (outcome as { error: any }).error;
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(String(err.message)).toContain(says);
+        expect(storedPages()).toEqual([]);
+    });
+
+    it.each(PLACEMENT_SHAPES)('%s, ALREADY stored: the read serves the row as stored, and saving it again is refused', async (_label, body) => {
+        const { protocol, save, storeRow } = await boot(topology);
+        await storeRow('env_shape', body);
+        const read: any = await protocol.getMetaItem({ type: 'page', name: 'env_shape' });
+        expect(read?.item?.name).toBe('env_shape');
+        for (const key of ['isDefault', 'template'] as const) {
+            if (key in body) expect(read.item[key]).toEqual(body[key]);
+        }
+        expect(read.item.regions).toEqual(body.regions);
+        const again = await save('env_shape', body);
+        expect(again.ok, 'the re-save was refused').toBe(false);
+        expect((again as { error: any }).error?.status).toBe(422);
     });
 });

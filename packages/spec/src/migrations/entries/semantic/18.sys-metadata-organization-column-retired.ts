@@ -19,7 +19,8 @@ export const entry: SemanticMigration = {
     'nothing on this table — metadata is the environment\'s (ADR-0131 D6), and no organization owns '
     + 'a row. Delete any authored filter, list-view column, report grouping, formula or seed key that '
     + 'names `organization_id` on `sys_metadata`. Existing databases: run the v18 ceremony, '
-    + '`os migrate organization-ownership --apply`, which promotes or reports the legacy '
+    + '`os migrate organization-ownership --out PLAN` to write its plan for review, then '
+    + '`os migrate organization-ownership --apply --plan-file PLAN`, which promotes or reports the legacy '
     + 'organization rows and then drops the physical column',
   reason:
     'ADR-0131 D6 retired the per-organization overlay axis: every metadata write now lands '
@@ -39,6 +40,6 @@ export const entry: SemanticMigration = {
   acceptanceCriteria:
     'No authored metadata names `organization_id` on `sys_metadata`: the field resolver (lint and the data '
     + 'door) answers it as an unknown field. A fresh database creates `sys_metadata` with no organization '
-    + 'column. On a legacy database, after `os migrate organization-ownership --apply` the column is '
+    + 'column. On a legacy database, after `os migrate organization-ownership --apply --plan-file PLAN` the column is '
     + 'gone and the boot no longer reports it orphaned.',
 };

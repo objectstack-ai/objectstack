@@ -3780,13 +3780,30 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse: unbound on the standalone form routes, where the predicate would fault open.'),
   /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
   visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
+  /**
+   * Section density, two meanings and no default:
+   *
+   * - **Declared** (`1`–`4`, or the string spellings `'1'`–`'4'`, which parse
+   *   to the number): the author's CEILING — at most that many fields per row
+   *   where the container is wide enough. A renderer collapses it on narrow
+   *   containers, so `columns: 1` is the way to say "always one column".
+   * - **Undeclared**: the renderer's choice, by available width. The parse adds
+   *   nothing, so a renderer can tell "the author said nothing" apart from "the
+   *   author asked for one column" — a `default(1)` here erased exactly that.
+   *
+   * No pixel or breakpoint value belongs to the protocol: where a container
+   * counts as wide is the renderer's. `FormViewSchema.columns` (the form body)
+   * is likewise optional with no default.
+   */
   columns: z.union([
     z.enum(['1', '2', '3', '4']),
     z.literal(1),
     z.literal(2),
     z.literal(3),
     z.literal(4),
-  ]).default(1).transform(val => (typeof val === 'string' ? parseInt(val) : val) as 1 | 2 | 3 | 4),
+  ]).optional()
+    .transform(val => (typeof val === 'string' ? parseInt(val, 10) : val) as 1 | 2 | 3 | 4 | undefined)
+    .describe("Fields per row, 1–4 ('1'–'4' parse to the number). Declared: the author's ceiling — at most that many per row where the container is wide enough; a renderer collapses it on narrow containers. Undeclared: the renderer's choice by available width — the parse adds no default, so declare `columns: 1` to keep a section single-column."),
   /**
    * Which pane of a split form this section renders in (`type: 'split'` only —
    * any other form type rejects the key at parse, see the FormViewSchema

@@ -42,8 +42,8 @@
  * A throw that is NOT a declared envelope keeps the arm's answer: a bare
  * `Error` is still `500 INTERNAL_ERROR` carrying `code` and `message` only, with
  * no `cause` in the body; a throw that declares `statusCode` and no registered
- * code (the shape `callData`'s exposure gate throws) keeps the status it
- * declared. The declared 503 also carries no `cause`: the session read's own
+ * code (the shape `callData` throws when no data service resolves) keeps the
+ * status it declared. The declared 503 also carries no `cause`: the session read's own
  * failure stays off the wire.
  *
  * ## The auth-mount arm

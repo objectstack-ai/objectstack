@@ -18,7 +18,7 @@ const base = {
   type: 'list' as const,
   object: 'showcase_task',
   kind: 'full' as const,
-  template: 'default',
+  template: 'default' as const,
   isDefault: false,
   regions: [],
 };

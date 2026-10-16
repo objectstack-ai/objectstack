@@ -1,5 +1,550 @@
 # @objectstack/metadata-protocol
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 87d0619: feat(spec): the app item read answers by package id. `GET /meta/app/<packageId>` returns the package's app, or the same 403 / 404 the read by name gives (ADR-0048 §3.1)
+  
+  Clause-②: yes (widening)
+  
+  ADR-0048 §3.1 makes an installed package's id the route key of its UI. With one app per package the app is the package container, so the console opens an app at `/apps/<packageId>`. The app item read now accepts that key too.
+  
+  - **`GetMetaItemRequestSchema.name`** declares it. For `type: 'app'` only, a key in the package-id grammar (`MANIFEST_ID_PATTERN`, at least one dot) names the package. App names are snake_case with no dot, so the two grammars never overlap and every read by name is unchanged. The new export `isAppPackageIdKey(type, name)` is the one test for the arm.
+  - **`getMetaItem`** (`@objectstack/metadata-protocol`) resolves it to the package's one app, as the package-scoped list (`GET /meta/app?package=<id>`) serves it, read by its own name in that package. The response's `name` is the app's name. Both hosts' item reads (`RestServer` and the `@objectstack/hono` catch-all) answer it with no change of their own, and the per-caller read gate judges the app exactly as it does by name:
+    - a caller the app is withheld from gets `403 PERMISSION_DENIED`;
+    - an unknown package, a package with no app, a package whose app is unpublished, and a package holding more than one app all get the `404` absence answer, byte-identical to the one for an unknown app name. A package holding more than one app (ADR-0019 D3 allows at most one) is also reported once in the server log, naming its apps;
+    - a caller who holds the app is served it.
+  - A `packageId` (`?package=`) naming a different package than the key is refused with `400 INVALID_REQUEST`.
+  - `/meta/app/<key>/history`, `/audit` and `/diff` stay by name (`@objectstack/rest`): the package-id key belongs to the plain item read only.
+  
+  From a client: `client.meta.getItem('app', 'com.acme.crm')`.
+- b1e9280: feat(spec): the seed loader reports the rows each dataset landed on, and the seed-settlement contract hands them to readers
+  
+  - **`SeedLoadResult.landedIds`** (`@objectstack/spec/data`, default `[]`): the ids of the stored rows a dataset's records landed on — a row a record inserted, a row it updated, and a row its key matched on a replay and left as it was. Each id appears once, in record order. A dry run reports none. A replay therefore reports the rows an earlier load wrote, so the answer holds across boots. The loader's own key and reference resolution is behind it: a dataset keyed on a reference reports the matched row, whose stored key is the resolved id, never the dataset's value.
+  - **`ISeedSettlementService.seededRecordIds?(object, organizationId?)`** (`@objectstack/spec/contracts`, optional): "which rows of this object did this process's seed write?". Without `organizationId` it answers for the boot-time seed sources (the inline seed `app:seeded` announces); a source publishes its rows before it settles, so a reader inside `app:seeded` already sees them. With `organizationId` it answers for that organization's per-organization replay; the host keeps the most recent replay only, so a process that creates many organizations does not hold every replay's rows. A host that does not implement it publishes no reading, and a reader treats every unowned row as one it cannot place.
+  - **`@objectstack/metadata-protocol`**: `SeedLoaderService.load()` fills `landedIds` on every per-dataset result.
+  - **`@objectstack/runtime`**: the `seed-settlement` service implements `seededRecordIds`. `AppPlugin` publishes the inline seed's rows before the source settles (the loader path and the basic-insert fallback alike), and its per-organization `seed-replayer` records each replay's rows under that organization. `SeedSourceHandle` gains `publishLanded(report)`.
+  
+  Nothing is removed or renamed. The reader this exists for is the seed-ownership claim, which now hands over only the seed's rows (see the `@objectstack/plugin-security` and `@objectstack/organizations` entries).
+- 1baf976: fix(metadata-protocol)!: a metadata delete with `dropStorage` drops an object's table only with the object's last stored row, and is refused `409 RESOURCE_CONFLICT` while another row of the object remains (ADR-0048)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or deleted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one runtime write door: a metadata delete that asks to drop an object's table, while another stored row of the object stays after it, is refused before anything is written; the remedy is in the request a caller sends (drop the opt-in, or delete the other rows first), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A `sys_metadata` row is keyed by its package (ADR-0048), so one object can hold one row per package, and a package-less row beside them. Every such row serves the object over the one table its name maps to.
+  
+  **FROM.** `DELETE /api/v1/meta/object/my_object?package=com.acme.a&dropStorage=true` (`deleteMetaItem({ type: 'object', name, packageId, dropStorage: true })` in process), of an object a second package `com.acme.b` also holds, removed `com.acme.a`'s row, answered `200` with a receipt saying `com.acme.b`'s row remains, and dropped the object's table. The object stayed defined and served by `com.acme.b`'s row while its records were gone: its next data read answered `500`. The same held for a package-less row left beside the deleted package's row, and for an uninstall (`deletePackage`, which deletes each of the package's rows with `dropStorage` unless `keepData` is set).
+  
+  **TO.** Such a delete is refused `409 RESOURCE_CONFLICT` before anything is written: both rows, the table and its records stay. The message names the rows that remain and the way out. An uninstall of a package holding such an object, without `keepData`, is refused whole, `409 RESOURCE_CONFLICT`, before anything is removed; its message names the object, the rows that keep it, and the ways out.
+  
+  **Unchanged.** The delete of an object's last stored row with `dropStorage` still drops its table. A delete without `dropStorage` still removes the named package's row and keeps the table, and its receipt names the rows that remain. Only `active` rows count: a draft is never materialised, so a remaining draft does not keep the table.
+  
+  **Remedy.** To remove one package's row of an object another row still holds, send the delete without `dropStorage`. To drop the table, delete the object's other rows first, then send the last row's delete with `dropStorage`.
+- 222293f: fix(metadata-protocol)!: a save into a second package of an object a runtime-authored row owns is refused before any write, as a code-owned object's is (ADR-0029 D9.9)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of the metadata save door for one shape: an `object` save naming a package other than the one whose runtime-authored row already owns the object is now refused where it was written and then discarded by the registry. The remedy is in the request a caller sends (bind it to the owner's package, or name no package), never a rewrite of a package source or a stored row; a row of that shape stored before this change is not rewritten (the registry never held it) and leaves by an ordinary delete naming its package. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  An object has exactly one registry entry, so it has exactly one owning package (ADR-0029 D3), and `sys_metadata` must not describe a shape the registry cannot hold (D9.9). The save door enforced that against a CODE-shipped owner only. Against an object that a package's `sys_metadata` row created at runtime, a save naming a second package was stored, and the registry's single-owner rule then refused it into a warning. The save answered `200`, the data plane kept the first package's schema, and `sys_metadata` held a second-package row that nothing served.
+  
+  `saveMetaItem` now refuses that save before any write, with the refusal and the prescription that the code-owner case gives.
+  
+  What changes for you, where package `P`'s runtime-authored row owns object `NAME` and `Q` is any other package:
+  
+  - FROM `PUT /api/v1/meta/object/NAME?package=Q` (`saveMetaItem({ type: 'object', name: NAME, packageId: Q, … })`) answering `200` "Saved object … package=Q", with a `Q`-bound row stored while the registry kept `P`'s schema and logged `registerObject failed … already owned by package "P"`, TO `422 OBJECT_OVERLAY_PACKAGE_MISMATCH` with nothing stored for `Q`: "Cannot layer object 'NAME': the overlay is bound to package 'Q', but the object is owned by package 'P'. …"
+  - FROM the same save with `?mode=draft` storing a `Q`-bound draft row, TO the same `422` with no draft row.
+  - FROM `duplicatePackage` from `P` to `Q` listing in `copied` an object whose name does not carry `P`'s namespace prefix (so the copy keeps `NAME`), with a `Q`-bound row stored that the registry never held, TO that object listed in `failed` with the refusal's text and nothing stored for it.
+  - The same save naming `P`, or naming no package, answers `200` as before.
+  
+  **Remedy, in one line.** Save the object with `?package=P` (or with no package, which addresses `P`'s row), or give `Q`'s object its own name. A `Q`-bound row stored before this change is removed with `DELETE /api/v1/meta/object/NAME?package=Q`.
+  
+  **Also changed, in a log line only.** At boot, `loadMetaFromDb` still counts a stored second-package row in its per-record `errors` and leaves `P` registered. Its `Failed to hydrate object/NAME` warning now carries the D9.9 refusal's text and `code=OBJECT_OVERLAY_PACKAGE_MISMATCH`, in place of the registry's ownership message and `code=OBJECT_OWNERSHIP_CONFLICT`.
+  
+  **Unchanged.**
+  
+  - A code-shipped owner. The package door still answers first (`403 NOT_OVERRIDABLE`).
+  - Every type except `object`. Two packages may still hold one name.
+- dd29bbe: feat(metadata-core,metadata-protocol)!: the `sys_metadata` family declares no organization column — `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit` and `sys_metadata_history` (ADR-0131 D6/D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-metadata-organization-column-retired, sys-metadata-audit-organization-column-retired, sys-metadata-commit-organization-column-retired, sys-metadata-history-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Metadata is the environment's (ADR-0131 D6). The four tables of the metadata family no longer declare `organization_id`, and each sets `systemFields.tenant: false`, so the engine injects none back. The engine refuses an undeclared field, so nothing reads or writes the column any more.
+  
+  FROM → TO:
+  
+  - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
+  - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
+  - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+  - `@objectstack/spec`: the published `ApiError.code` / `ErrorCode` enum widens by `LEGACY_ORGANIZATION_ROWS_UNREADABLE`, registered under `@objectstack/metadata-core`.
+  - `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
+  - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply --plan-file FILE` with that plan file. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
+  
+  The indexes are re-keyed with the column:
+  
+  - The overlay unique key is (`type`, `name`, `package_id`, `bundle_member`): the declared `idx_sys_metadata_overlay_active` and the runtime partial indexes of the same names. Removing the organization TIGHTENS uniqueness. On a database the ceremony has not cleared, two legacy organizations' rows, or an organization's row and the environment's, can share a key. There the runtime index migration keeps the previous index and names the duplicates (ADR-0120 D4); it never drops a row. `os migrate duplicates` and the boot report group by the same key.
+  - `sys_metadata_history` is unique on (`event_seq`) and on (`type`, `name`, `version`). Its other indexes, and those of `sys_metadata_audit` and `sys_metadata_commit`, lose their organization prefix.
+  - `idx_sys_metadata_org_type` is gone.
+  
+  What else changes:
+  
+  - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
+  - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+  - Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+    - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+    - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+    - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history`, `/audit` and `/diff` admit `studio.access` or `manage_metadata`, and `/packages/:id/commits` admits `studio.access` alone; `setup.access` alone is refused at all four. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `manage_metadata` therefore still reads the history and audit rows through `/meta`, but not the commit rows, and none of them through the data door.
+    - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+  - On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+    - every read the metadata protocol makes of the family goes through one seam that leaves them out. That covers boot hydration; the `/meta` list, by-name, layered and draft-preview reads; the item lock (`_lock`) the reads report and the save and delete gates enforce; the package-less write and read address; and the package, commit, audit, history and diff reads. Two reads keep them on purpose and read the column themselves: `os migrate meta --stored` reports such a row, and the commit revert refuses a legacy commit by name. The authored hook and action binders leave them out too;
+    - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+    - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+    - `os migrate security-catalog-overlays` neither lists nor deletes it;
+    - a commit recorded in a legacy organization's layer is still refused by the revert;
+    - the runtime-datasource reads, the packaged permission-set overlay reading, the kernel:ready security-catalog echo, the stored flow-credential move and a `DatabaseLoader` (engine- or driver-backed) leave them out.
+  - `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
+  - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+  - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
+- 7cb33cf: fix(metadata-protocol)!: an uninstall without `keepData` of a package holding an object another stored row also holds is refused `409 RESOURCE_CONFLICT` before anything is removed, instead of dropping the object's table while the other row still serves it (ADR-0048)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or deleted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one runtime door: an uninstall that would drop an object's table while another stored row of the object stays is refused before anything durable; the remedy is in the request a caller sends (`keepData`, or delete a row of the object first), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A `sys_metadata` row is keyed by its package (ADR-0048), so one object can hold one row per package, and a package-less row beside them, all served over the one table its name maps to. An uninstall drops each of its objects' tables unless `keepData` is set, and a table is dropped only with the object's last stored row.
+  
+  **FROM.** `DELETE /api/v1/packages/com.acme.a` (`deletePackage({ packageId: 'com.acme.a' })` in process), for a package whose object a second package `com.acme.b` (or the package-less row) also holds, removed the package and its rows and dropped the shared object's table along with the package's row of it. The object stayed defined and served by `com.acme.b`'s row while its records were gone: its next data read answered `500`.
+  
+  **TO.** Such an uninstall is refused `409 RESOURCE_CONFLICT` before its first durable step: the `sys_packages` row, the registry entry, every row, the tables and their records all stay. The message names each shared object and the rows that keep it, and the ways out.
+  
+  **Unchanged.** An uninstall with `keepData` drops no table, so a shared object does not refuse it. An uninstall whose objects no other row holds still drops their tables.
+  
+  **Remedy.** Uninstall with `?keepData=true` (`keepData: true` in process) to keep every table of the package; or first delete the package's own row of each shared object without `dropStorage` (`DELETE /api/v1/meta/object/NAME?package=com.acme.a`), which keeps that table for the other rows, then uninstall again to drop the tables the package alone held.
+- 57994c3: fix(metadata-protocol)!: the per-item publish and the draft discard that name no package act on the draft a draft save that names no package writes, and are refused `409 RESOURCE_CONFLICT` where that save is; the draft save's receipt names the package it inherits (ADR-0048, ADR-0070)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is rewritten, converted or deleted by this change itself, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is two runtime write doors: a per-item publish or a draft discard through the metadata API that names no package is refused `409 RESOURCE_CONFLICT` for an item whose active rows two or more packages hold, and a publish naming no package answers `404 NO_DRAFT` where the only draft is bound to a package other than the item's own; the remedy is in the request a caller sends (name the package with `?package=`), never a rewrite of a package source or a stored row. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A `sys_metadata` row is keyed by its package (ADR-0048), so one item can hold a draft per package. A draft save that names no package (`PUT /api/v1/meta/TYPE/NAME?mode=draft`) writes the draft of the package the item's active rows are bound to, and the strict draft read and the draft preview that name no package serve that draft. The other two draft doors did not take that address.
+  
+  **FROM.** Over an item whose active rows are bound to package `P`:
+  
+  - With a package-unbound draft stored beside `P`'s draft, `POST /api/v1/meta/TYPE/NAME/publish` promoted whichever draft the database returned first. On SQLite that is the package-unbound one, and it was promoted into a package-unbound active row that no read naming no package serves. The publish answered `200`, and the item read kept serving `P`'s row unchanged.
+  - With the only draft bound to another package `Q` (saved with `?mode=draft&package=Q`), the strict draft read answered `404 NO_DRAFT`, but the publish promoted `Q`'s draft into a second package's active row. After that, every save and delete of the item that names no package was refused `409`. `DELETE …?state=draft` removed `Q`'s draft.
+  - With only a package-unbound draft, the publish promoted it into a package-unbound active row beside `P`'s, which no read naming no package serves.
+  - With drafts bound to two or more packages, `DELETE …?state=draft` was refused `409 RESOURCE_CONFLICT`. The discard took its address from the draft rows, not from the active rows the draft save inherits from. An item never published into a package, with a package-unbound draft beside two or more packages' drafts, was refused the same way.
+  
+  Over an item whose active rows two packages hold, the publish naming no package promoted the first draft it met, and the discard removed the draft of the one package the drafts were bound to, while the draft save naming no package was refused `409`. A draft save naming no package that inherited `P` answered "Saved … (env-wide, state=draft)", without the package.
+  
+  **TO.** A per-item publish and a draft discard that name no package act on the draft the draft save naming no package writes:
+  
+  - **Active rows bound to one package `P`.** They act on `P`'s draft, else the package-unbound draft. A publish promotes either one into `P`'s active row, the row the read naming no package serves next. A package-unbound draft is adopted into `P`, as the draft save adopts it. When neither exists, the publish answers `404 NO_DRAFT`, as the strict draft read does. Its message names the other packages' drafts and the remedy, `?package=`. The discard removes nothing (`reset: false`) and its receipt names the drafts that remain.
+  - **Active rows bound to two or more packages.** Both are refused `409 RESOURCE_CONFLICT` and change nothing, as the draft save naming no package is. The message names the packages and the remedy, `?package=`.
+  - **An item never published into a package.** Both act on the package-unbound draft, the one the draft save writes. If there is none, they act on the one package's draft, and are refused `409 RESOURCE_CONFLICT` when two or more packages hold drafts.
+  
+  The draft save's receipt names the package the draft went into: "Saved view 'my_view' (env-wide, package=com.acme.app, state=draft)". A draft save into the package-unbound row reads as before.
+  
+  **Unchanged.** A publish or a discard that names its package (`?package=`, `packageId` in process). A publish stating `packageId: null` in process, which still pins the package-unbound draft. The batch publish and discard of a package's drafts (`POST /packages/:id/publish-drafts`, the discard of a package's drafts). No stored row is rewritten or removed by the upgrade.
+  
+  **Remedy.** For an item two or more packages hold, or to publish or discard a draft bound to a package other than the item's own, send the request with `?package=` naming that package (`packageId` in process). A client that compares draft-save receipt text should expect `, package=<id>` after `env-wide` when the draft inherits a package.
+  
+  `@objectstack/spec`: the `PublishMetaItemRequestSchema.packageId` description now states what a publish naming no package promotes, where it said "match any package"; the `DeleteMetaItemRequestSchema.packageId` description states what a draft discard naming no package removes.
+- a869ea6: fix(metadata-protocol)!: a save naming a package of a runtime object whose owner is its package-less definition is refused before any write, with a way out that moves the object into that package (ADR-0029 D9.9)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten, converted or deleted by this change, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of the object save door for one shape: a save naming a package of an object whose registry owner is its package-less definition (the `sys_metadata` sentinel), or a save naming no package that the door addresses to such a package's row, is refused, where it was written and then discarded by the registry. The remedy is in the requests a caller sends (deletes and saves through the same doors), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  An object has exactly one registry entry, so it has exactly one owner (ADR-0029 D3), and `sys_metadata` must not describe a shape the registry cannot hold (D9.9). A runtime object first saved naming no package is owned by that package-less row. A save naming package `Q` beside it was written and answered `200`, but the registry refused `Q`'s row into a warning and kept the package-less definition. The metadata read then served `Q`'s row while the data plane served the package-less one, before and after a boot, and at boot `Q`'s row was counted in `errors`. The package-less state is no authoring destination (ADR-0070), so the refusal does not say "bind it to `sys_metadata`". It names the way into `Q` that is true in the state it answers.
+  
+  What changes for you, where object `NAME` is owned by its package-less definition and `Q` is any package. Every refusal below is `422 OBJECT_OVERLAY_PACKAGE_MISMATCH` with nothing written. The error carries `packageId: Q` and `ownerPackageId: null`.
+  
+  - With no package's row stored beside the package-less one: FROM `PUT /api/v1/meta/object/NAME?package=Q` (`saveMetaItem({ type: 'object', name: NAME, packageId: Q, … })`) answering `200` "Saved object … package=Q" with a `Q`-bound row stored that nothing served, TO the refusal: "Move object 'NAME' into package 'Q' first: delete its package-less definition without dropStorage, which keeps its table and records … then send this save again. …".
+  - FROM the same save as a draft (`PUT /api/v1/meta/object/NAME?package=Q&mode=draft`, Studio's designer) answering `200` with a `Q` draft that could never go live, TO the refusal: "Move object 'NAME' into package 'Q' first: … then save it naming 'Q' in publish mode, which serves it at once, and draft after that. …".
+  - Where rows bound to packages are already stored beside the package-less one (the rows this defect wrote before the refusal existed, bound to `Q` or to any other package `P`), every refusal names each such row's own `DELETE …?package=` before the package-less `DELETE`. A `DELETE` naming no package over those rows does not reach the package-less definition: over one package's row it removes that row (its receipt says "(package=P), and it still exists"), and over two it is refused `409 RESOURCE_CONFLICT` ("Name the package this delete is for …"). Two saves change:
+    - FROM `PUT /api/v1/meta/object/NAME?package=Q` (publish or draft) answering `200`, TO the refusal: "Object 'NAME' is served by its package-less definition; its definitions bound to 'P', 'Q' are never served. To move it into 'Q': DELETE /api/v1/meta/object/NAME?package=P, then ?package=Q, then the same DELETE with no package and no dropStorage (the table and records stay), then save it naming 'Q' in publish mode. …" (with one row, its own package only).
+    - FROM `PUT /api/v1/meta/object/NAME` naming NO package answering `200`, TO the refusal, where one package's row is stored. The door addresses a save naming no package to the item's one package binding, so the edit was written to that row and never served. Over two bindings this save is refused `409` before, as now. The refusal reads: "A save naming no package of object 'NAME' is addressed to its stored definition bound to 'Q', which is never served: … Delete the 'Q' row first (REST: DELETE /api/v1/meta/object/NAME?package=Q), then send this save again: it then saves the package-less definition. …".
+  - FROM promoting `Q`'s draft of the object (`POST /api/v1/meta/object/NAME/publish?package=Q`, or `POST /api/v1/packages/Q/publish-drafts`) answering success with `Q`'s active row stored beside the package-less one and never served, TO the refusal. This reaches a draft stored before the package-less row existed, or one a draft save naming no package wrote over the rows above. The per-item publish answers `422`; `publish-drafts` answers `200` with `outcome: 'refused'` and the draft in `failed[]` with this code (ADR-0067 D2). The text reads "Move object 'NAME' into package 'Q' first: delete its package-less definition without dropStorage … then POST /api/v1/meta/object/NAME/publish?package=Q: the draft then serves the object at once. …". Where any package's active row is also stored, it names deleting each such row first, as above, then the same `POST …/publish?package=Q`. The publish step always names the draft's package: a publish naming none resolves by the rows the deletes leave, and over `[package-less, P]` with both `P`'s draft and a draft bound to no package it would then promote the other draft. The draft stays stored.
+    - A publish naming NO package of a draft bound to no package, over one package's row `P`, is addressed into `P` (the draft doors adopt the unbound draft into the one binding), and is refused the same way. No publish moves that draft into `P`: with `P`'s row deleted it lands in the package-less definition, and a publish naming `P` answers `404 NO_DRAFT`. So its text says that: "This draft of object 'NAME' is bound to no package; a publish naming no package is addressed into 'P', whose row is never served. DELETE /api/v1/meta/object/NAME?package=P, then publish again: the draft lands in the package-less definition. To move it into 'P' then: the same DELETE with no package and no dropStorage (records stay), then save it naming 'P' in publish mode. …".
+  - The boot's reason for those rows changes. `loadMetaFromDb` still keeps the package-less owner and counts each package's row in `errors`. Its warning, `[Protocol] Failed to hydrate object/NAME: … (code=OBJECT_OVERLAY_PACKAGE_MISMATCH)`, now carries the move above, naming every package's row, and ends "The row bound to 'Q' is not registered.". It carried the registry's "already owned by package \"sys_metadata\"" text.
+  
+  **Remedy, in one line per state.** Do not send the request again unchanged; follow its order. With no package's row stored: `DELETE /api/v1/meta/object/NAME` (no `package`, no `dropStorage`), then `PUT /api/v1/meta/object/NAME?package=Q` in publish mode. That publish-mode save makes `Q`'s row the owner at once and at every boot; a draft save registers nothing, so draft only after it. With rows bound to packages stored (`Q` or any other): first `DELETE /api/v1/meta/object/NAME?package=PKG` for each such package, then as above. Where the one stored row is the one a save naming no package was addressed to, after its delete that save may instead be sent again, and it edits the package-less definition. For a refused publish of `Q`'s draft (whether the request named `Q` or the address resolved to it): the same deletes for its state, then `POST /api/v1/meta/object/NAME/publish?package=Q`; the draft's promotion makes `Q`'s row the owner. For a refused publish naming no package of a draft bound to no package: `DELETE …?package=P`, then the same publish (the draft lands package-less), then the package-less `DELETE` and a publish-mode save naming `P` if the object belongs in `P`. Never rely on a `DELETE` naming no package while a package's row is stored: it removes that row, or is refused over two. No step drops a table or a record.
+  
+  **Unchanged.**
+  
+  - A save naming no package where only the package-less row is stored (its own re-save), in either mode.
+  - The D9.9 refusal for an owner bound to a real package: same code, status and prescription.
+  - An object with no owner, and an object a code package ships.
+  - Every type except `object`.
+  - Stored rows are not rewritten on upgrade.
+- 4feb2d0: fix(metadata-protocol): every write over a sealed, package-held name reads one sentence that states what the door knows; the inferred create remedy retires
+  
+  Clause-②: no
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/metadata-protocol/src/protocol.ts#ObjectStackProtocolImplementation) No metadata moves: no spec key, authorable spelling, stored row or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the TypeScript signature of two public methods of the exported runtime class: `packagedBaseRefusal`'s `operation` loses its `'create'` member, and `tenantAuthoredWriteRefusal` loses its optional `operation` parameter. The channel that reaches every affected consumer is the compiler, which refuses the retired argument where it is written. -->
+  
+  **BREAKING** (a public method-signature narrowing in `@objectstack/metadata-protocol`), shipped as `minor` under the launch-window convention for breaking changes. The `'create'` member of `ObjectStackProtocolImplementation.packagedBaseRefusal`'s `operation` (now `'save' | 'delete'`) and the optional `operation` parameter of `tenantAuthoredWriteRefusal` retire. A caller that passed `operation: 'create'` passes `'save'` (or omits `operation` on `tenantAuthoredWriteRefusal`): the verdict, the code and the status were always the same.
+  
+  **What was wrong.** A save over a name a managed package holds, on a type with no environment overlay, is refused `403 NOT_OVERRIDABLE`. The sentence guessed what the save meant from `If-None-Match: *`. A publish-mode `*` was told "… so its name is taken. To author your own TYPE, choose a name no package or built-in holds …", and every other save, the console's generic create (`?mode=draft` with `If-None-Match: *`) included, was told "… Edit the source artifact and redeploy." Neither request declares a create or an edit, so each remedy was wrong for one of its callers. An editor who followed the first authored a second item. A creator who followed the second, and every administrator of an installed package, was sent to an artifact they cannot edit.
+  
+  **What changed.**
+  
+  - `@objectstack/metadata-protocol`: every write over such a name, on a type with no regime row, reads one sentence, whatever its mode or pin: "'TYPE/NAME' is provided by a managed package and is sealed: it cannot be written here. GET /api/v1/meta/TYPE lists the names in use." The same sentence comes from the repository's type door (draft promotion, restore, revert). It gives no create advice and no source-artifact advice. It names no holding package, because neither door has the package at hand. A type with a regime row (`flow`, `action`, `permission`, `datasource`) keeps its regime sentence, and every removal keeps its sentence.
+  - `@objectstack/metadata-protocol` (retired, no producer remains): the two signature members named under **BREAKING** above, and the `create` arm of the internal `SealedItemOperation`.
+  - `@objectstack/spec`: the `GetMetaItemResponseSchema.version` and `MetadataConflictErrorSchema.currentVersion` descriptions say that a `null` beside `editable: false` takes no save, and prescribe no `If-None-Match: *` pin for it.
+  - `@objectstack/runtime`: a permission-set clone (`POST /api/v1/security/permission-sets/:name/clone`) whose save loses the race for the target name now answers the door's own `409` name-taken refusal ("Permission set 'NAME' already exists — a clone must take a NEW machine name. …", code `RESOURCE_CONFLICT`, where it used to answer code `METADATA_CONFLICT`), the same refusal a name the catalog already held reads. It used to relay the `/meta` door's conflict sentence, which told the caller to send `If-Match`, and this door takes no `If-Match`.
+  
+  **Unchanged.** Which requests are accepted or refused. The `NOT_OVERRIDABLE` code and `403` status. The named read-only base's `ITEM_LOCKED` sentence. The `/meta` door's conflict sentence for its own callers.
+- 954bf72: fix(metadata-protocol)!: a draft of an object promoted into a second package after another package's runtime-authored row came to own the object is refused before any write, as its save is (ADR-0029 D9.9)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten, converted or deleted by this change, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of the two draft promotion doors for one shape: promoting an `object` draft into a package other than the one whose runtime-authored row now owns the object is refused, where it was written and then discarded by the registry. The remedy is in the request a caller sends (re-save the draft bound to the owner's package, discard it, or give the object its own name), never a rewrite of a package source or a stored row; the draft stays stored. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  An object has exactly one registry entry, so it has exactly one owning package (ADR-0029 D3), and `sys_metadata` must not describe a shape the registry cannot hold (D9.9). The save door refuses an `object` row bound to a package that does not own the object. A draft save is judged against the owner of its own moment, so package `Q`'s draft of an object that no row held yet was stored, correctly. When package `P`'s runtime-authored row of that object was saved after it, `P` owned the object. Promoting `Q`'s draft then wrote `Q`'s active row beside `P`'s and answered success, while the registry refused it into a warning and kept serving `P`'s schema. An uninstall of `P` then refused `409 RESOURCE_CONFLICT` until a row was removed by hand.
+  
+  Both promotion doors now ask the save door's question of the row the promotion writes, and refuse it before any write, with the save door's code and prescription.
+  
+  What changes for you, where package `P`'s runtime-authored row owns object `NAME`, `Q` is any other package, and `Q`'s draft of `NAME` was saved before `P`'s row existed:
+  
+  - FROM `POST /api/v1/meta/object/NAME/publish?package=Q` (`publishMetaItem({ type: 'object', name: NAME, packageId: Q })`) answering `200` "Published draft …", with a `Q`-bound active row stored while the registry kept `P`'s schema, TO `422 OBJECT_OVERLAY_PACKAGE_MISMATCH` with nothing written and `Q`'s draft still stored: "Cannot layer object 'NAME': the overlay is bound to package 'Q', but the object is owned by package 'P'. …", the save door's text for the same row.
+  - FROM `POST /api/v1/packages/Q/publish-drafts` (`publishPackageDrafts({ packageId: Q })`) answering `200` with `outcome: 'published'` and `failed: []`, TO `200` with `success: false`, `outcome: 'refused'` and `publishedCount: 0`. `NAME` is in `failed[]` with `code: 'OBJECT_OVERLAY_PACKAGE_MISMATCH'` and that text. Every other draft of `Q` is in `failed[]` with `code: 'BATCH_ABORTED'`. Nothing is promoted (the batch is all-or-nothing, ADR-0067 D2).
+  
+  **Remedy, in one line.** Re-save the draft bound to the owner (`PUT /api/v1/meta/object/NAME?package=P&mode=draft`) and publish it there, or give `Q`'s object its own name, and discard `Q`'s draft with `DELETE /api/v1/meta/object/NAME?package=Q&state=draft`.
+  
+  **Unchanged.**
+  
+  - A promotion of `Q`'s draft of an object no other package's row holds, and the owner `P`'s promotion of its own draft.
+  - A publish naming no package that promotes a package-unbound draft into the owner's package.
+  - A code-packaged owner. An object a code package ships is sealed, so a promotion of another package's draft of it still answers `403 NOT_OVERRIDABLE` (the batch door: that code in `failed[]`), as the save door does, and never `OBJECT_OVERLAY_PACKAGE_MISMATCH`.
+  - A package-less owner (the `sys_metadata` sentinel). Its rule is decided separately.
+  - Every type except `object`. Two packages may still hold one name.
+  - Rows stored before ADR-0029 D9.9 stay as they are. Nothing is rewritten on upgrade.
+- c03077e: fix(metadata-protocol)!: a draft save that names no package, of an item never published into a package, writes the draft the publish and the discard naming none act on, and is refused `409 RESOURCE_CONFLICT` where they are; the draft discard's receipt names the package (ADR-0048, ADR-0070)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is added, removed, renamed or re-shaped (the spec changes one description only), and no stored row is rewritten, converted or deleted by this change itself, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one runtime write door: a draft save through the metadata API that names no package, of an item with no active row bound to a package and no package-unbound draft, is refused `409 RESOURCE_CONFLICT` when two or more packages hold drafts of it; the remedy is in the request a caller sends (name the package with `?package=`), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A `sys_metadata` row is keyed by its package (ADR-0048), so an item can hold a draft per package. Over an item never published into a package (no active row bound to one), the per-item publish (`POST /api/v1/meta/TYPE/NAME/publish`) and the draft discard (`DELETE /api/v1/meta/TYPE/NAME?state=draft`) that name no package act on the package-unbound draft, else on the one package's draft, and are refused `409 RESOURCE_CONFLICT` when two or more packages hold drafts. The draft save naming no package did not take that address.
+  
+  **FROM.** Over such an item, `PUT /api/v1/meta/TYPE/NAME?mode=draft` with no `?package=`:
+  
+  - With the only draft bound to package `Q` (saved with `?mode=draft&package=Q`), the save wrote a package-unbound draft beside `Q`'s and answered `200` ("Saved … (env-wide, state=draft)"). The drafts became `[package-unbound, Q]`, and from then on the publish and the discard naming no package acted on the package-unbound one, while `Q`'s draft stayed pending.
+  - With drafts bound to two or more packages and no package-unbound draft, the save wrote a package-unbound draft beside them and answered `200`, while the publish and the discard naming no package were refused `409`.
+  - `DELETE …?state=draft` of a package's draft answered "Draft discarded — TYPE/NAME", without the package.
+  
+  **TO.**
+  
+  - With the only draft bound to `Q`, the save updates `Q`'s draft and its receipt names the package ("Saved view 'my_view' (env-wide, package=Q, state=draft)"). The strict draft read's `version` (`GET …?state=draft`) is that draft's, so a save pinned to it with `If-Match` is accepted; the publish and the discard naming no package act on the same draft.
+  - With drafts bound to two or more packages and no package-unbound draft, the save is refused `409 RESOURCE_CONFLICT` and writes nothing, as the publish and the discard are. The message names the packages and the remedy, `?package=`.
+  - A draft discard of a package's draft names the package: "Draft discarded (package=Q) — TYPE/NAME. [seq=N]". The discard of a package-unbound draft reads as before.
+  
+  **What follows from the save writing `Q`'s draft**, over an item never published into a package whose only draft is bound to `Q`, for a draft save naming no package:
+  
+  - FROM `If-Match` carrying `Q`'s draft token (the version `GET …?state=draft&package=Q` serves) refused `409 METADATA_CONFLICT`, TO accepted: that draft is the row the save writes, so the strict draft read naming no package now serves the same token.
+  - FROM `If-None-Match: *` (a first-write pin) creating a package-unbound draft and answering `200`, TO `409 METADATA_CONFLICT` with nothing written: `Q`'s draft is the row the save would overwrite.
+  - FROM a permission set whose body declares `packageId: Q` refused `400 VALIDATION_ERROR` (the owner binding of ADR-0086 D3, judged against a save "into no package"), TO accepted: the binding the write resolves is `Q`. A body declaring another package is still refused, and the refusal now names `Q`.
+  
+  `@objectstack/spec`: the `SaveMetaItemRequestSchema.packageId` description now states the draft save's address in the words the publish's and the discard's descriptions use: the draft of the one package the item's active rows are bound to, else its package-unbound draft; for an item never published into a package, the package-unbound draft, else the one package's draft; refused `409 RESOURCE_CONFLICT` when the active rows (or, with none and no package-unbound draft, the drafts) are bound to two or more packages. It said the save wrote "the env-local draft" whenever the active row was not bound to a package. No key, type, enum or default moves.
+  
+  **Unchanged.** A draft save that names its package (`?package=`, `packageId` in process). An item with an active row bound to a package, whose draft save naming no package still inherits that package. An item with a package-unbound draft, which a draft save naming no package still updates, whatever packages' drafts sit beside it. A brand-new item with no draft at all, whose first draft save naming no package writes the package-unbound draft. No stored row is rewritten or removed by the upgrade.
+  
+  **Remedy.** For an item two or more packages hold drafts of, send the draft save with `?package=` naming the package (`packageId` in process). A client that compares draft-discard receipt text should expect ` (package=ID)` after `Draft discarded` when the draft discarded is bound to a package.
+- 069fd40: fix(metadata-protocol): the strict draft read naming no package (`GET /api/v1/meta/TYPE/NAME?state=draft`) serves its content from the draft its `version` names, the draft the draft save, the per-item publish and the draft discard naming no package act on (ADR-0048, ADR-0070)
+  
+  Clause-②: yes
+  
+  A `sys_metadata` row is keyed by its package (ADR-0048), so an item never published into a package can hold a package-unbound draft beside package `Q`'s. The strict draft read naming no package answered its `version` from the package-unbound draft (the draft the save naming no package writes), but its content from whichever draft row the store returned first. On a store that returned `Q`'s row first, it served `Q`'s body under the package-unbound draft's token, and a save pinned to that token (`If-Match`) wrote the package-unbound draft, a different row from the one read.
+  
+  The read now takes its content from the same address as its `version`, in every storage order: the package-unbound draft when one is stored, else the one package's draft; for an item whose active rows are bound to one package, that package's draft as before. The draft-overlay preview naming no package (`previewDrafts`) serves the same draft. Drafts bound to two or more packages with no package-unbound draft are still served best-effort, with `version: null`, as before (the save naming no package is refused there). No accept set changes: no request that was answered `200` is refused now, and `?package=` still reaches each package's draft.
+  
+  `@objectstack/spec`: the description of `PublishMetaItemRequestSchema.packageId` now says, as `SaveMetaItemRequestSchema.packageId`'s does, that a publish naming no package is refused for drafts bound to two or more packages only when no package-unbound draft is stored. Description only.
+
+### Patch Changes
+
+- 0d3ea29: fix(plugin-security): the data-door write gates of the retired catalog row objects are removed, the boot report names positions that bind a permission set nobody serves, and the texts that still named the retired objects and modules are corrected (ADR-0131 D3/D4, C3 stage 8-post)
+  
+  Clause-②: no
+  
+  Stage 8 retired the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` row objects, so no write to them reaches the engine. This change removes what only guarded those writes. No export of any package's entry changes, and no request that reaches the server is answered differently.
+  
+  - **`@objectstack/plugin-security`.**
+    - Three of the security middleware's gates on those objects are gone: the package-provenance gate on `sys_permission_set`, the platform/package row gate on `sys_position` and `sys_capability`, and the curated capability-name gate on `sys_capability`. The delegated-administration gate no longer judges `sys_position_permission_set` bindings or `sys_permission_set` authoring; it still governs `sys_user_position` assignments, `sys_user_permission_set` grants and `sys_member`. The rules those gates carried still hold where the catalog now lives: `everyone` and `guest` are code-declared positions an environment cannot overlay, and a capability cannot be created or overlaid through the metadata door at all.
+    - The walled data-door refusal for those objects is deleted. Stage 8 already left it unwired, and no composition registers the objects it judged; the metadata door's walled refusal is unchanged.
+    - The internal duplicate-name refusal class that only the retired permission-set data door raised is removed.
+    - The packaged-permission-set lock's refusal no longer has a "choose a different name" variant: only the retired data door's create raised it. The metadata door's refusal text is unchanged, and the published signatures keep their `operation` parameter.
+    - The boot's catalog reference report lists one more finding, per position: a position definition whose `permissionSets` names a set the security catalog does not resolve, usually because the package that declared the set is uninstalled or disabled. A holder of such a position is granted nothing through that name. The line clears by itself at the next boot after the package is installed again. It is logged at `error` once per boot, like the report's other lines.
+  - **`@objectstack/platform-objects`** and **`@objectstack/plugin-security`** object metadata: the descriptions of `sys_invitation.positions`, `sys_user_position` (object and `position`), and `sys_audience_binding_suggestion`'s permission-set name no longer name the retired objects. The translated texts follow.
+  - **`@objectstack/spec`**: the `projectionApplied` and `materializeApplied` descriptions on the metadata save, publish and batch-publish responses give a current example (`datasource`, `flow`) instead of `permission` → `sys_permission_set`. `EvalUser.positions` describes the positions assigned through `sys_user_position`. `PermissionSet.description`'s doc comment no longer names the deleted projection. The `name` describes of `PositionSchema` and `PermissionSetSchema` say a name is unique within the security catalog the environment serves (ADR-0131 D3: there is no organization-level catalog), replacing "unique per organization", which read the retired rows' index. The error-code ledger drops `@objectstack/plugin-security`'s `UNIQUE_VIOLATION` row, which named the removed refusal; `UNIQUE_VIOLATION` stays registered by its other emitters.
+  - **`@objectstack/core`**: the doc comments of `positionDefinitionFromRow` and `permissionSetDefinitionFromRow` no longer describe the deleted boot backfills as current.
+  - **`@objectstack/metadata-protocol`**: the doc comments of the publish materializer, mutation projector and uninstall cleanup registries give current examples (`flow`, `datasource`, the grant revocation) instead of `permission` → `sys_permission_set`.
+- 47d569e: fix(metadata-protocol): a metadata read that names no package serves the row a save that names no package writes, when a package-unbound row of the item is stored beside its one package's row (ADR-0048, ADR-0070)
+  
+  Clause-②: no
+  
+  - **What was wrong.** A save naming a package (`PUT /api/v1/meta/TYPE/NAME?package=P`) of an item that already had a package-unbound row stored the package's row beside it, with the unbound row first. The read naming no package (`GET /api/v1/meta/TYPE/NAME`) then served the unbound row's body. Meanwhile the save naming no package wrote the package's row, the delete naming no package removed it, the list served it, and the read's own `version` was the package row's token. An author editing the item without `?package=` was served a body that no save changed. A save pinned to the served token overwrote the package's row with an edit of the unbound body.
+  - **What it does now.** For an item whose stored active rows are bound to exactly one package, a read that names no package takes its stored content from what the read naming that package takes it from: the package's own row, else the package-unbound one. That is the address the package-less save, delete and version token already resolve. The doors whose served row changes:
+    - the item read, `GET /api/v1/meta/TYPE/NAME`;
+    - the layered read, `GET …/layers` and the deprecated `?layers=` (its `overlay` and `effective`);
+    - the published read, `GET …/published`, on the REST server and on the dispatcher;
+    - the draft reads, `?state=draft` and the draft preview, whose address comes from the same active rows, because the package-less draft save inherits that package.
+  
+    An item bound to two or more packages is read as before: the first stored row, ADR-0048 §3.3's best effort. A save or delete naming none of them is still refused `409 RESOURCE_CONFLICT`. The lock reported by these reads is selected as before.
+  - **What follows the read.** In-process readers of the item that name no package see the same row: the data doors' object reads (import reference targets, export and template fields), seed apply's object lookup, and the security catalog echo of a `permission` or `position`.
+  - **The `object` save's destructive-change check (`409 DESTRUCTIVE_CHANGE`) now judges the row the save overwrites**, read at the save's own address. Before, it read naming no package and judged the first stored row, which is the package-unbound row in the order that saves produce it. In this two-row state that moves its verdict in both directions:
+    - A package-less save that drops a field only the package's row has is now refused. Before, it was judged against the package-unbound row and accepted, and the field was dropped with no confirmation.
+    - A package-less save that drops a field only the package-unbound row has is now accepted. Before, it was refused over a row it does not write.
+    - A save naming a package with no row of its own is judged against the package-unbound row it overlays, never another package's row.
+  
+    The rule and its remedy (`force`) are unchanged.
+  - **The draft read's corner: a 200 becomes a 404.** Take an item whose active rows are bound to package P and whose only draft is bound to another package Q. Naming no package, the strict draft read (`?state=draft`) now answers `404 NO_DRAFT` instead of serving Q's draft. P's draft is what a package-less draft save would write, and there is none; the read's `version` was already `null`. Read that draft with `?package=Q`. The draft preview naming no package now serves P's active row.
+  - **What does not change.** No stored row is rewritten or removed. No key, export, schema or error code moves. No metadata write door's own rule moves. The package-unbound row still stands in for every package that has no row of its own: a read naming such a package serves it. Once the package's row is deleted, it is what the read and the next package-less save address again.
+- 3b28905: fix(metadata-protocol): a refused first-write pin is told what it asserted
+  
+  Clause-②: no
+  
+  **What was wrong.** A save that sent `If-None-Match: *` (the first-write pin) to `PUT /api/v1/meta/:type/:name` over a row that already exists was refused `409 METADATA_CONFLICT` with "TYPE/NAME has been modified since you loaded it. Expected parent null but current is VERSION.", though the caller had loaded nothing.
+  
+  **What changed.**
+  
+  - Such a save is now told what it asserted: "TYPE/NAME: this save asserted that no draft row exists (the first-write pin, If-None-Match: * on the REST door), but one does (current is VERSION). …" (`active row` for a save without `?mode=draft`). Every other conflict keeps its sentence.
+  
+  **Unchanged.** Which requests are accepted or refused, every code and status, and the conflict body's `currentVersion` and the refusal's keyed fields.
+- 5fd2c76: feat(spec)!: seven overdue ADR-0087 D2 conversions leave the load path at 18 — six flow-node config aliases and a sharing rule's `accessLevel: 'full'` are refused with their rename at every door that judges a flow or a sharing rule
+  
+  Clause-②: no (narrowing)
+  
+  **BREAKING (authoring):** seven ADR-0087 D2 conversions whose one-major window had already run are now retired from the load path: `flow-node-crud-object-alias`, `flow-node-notify-config-aliases`, `flow-node-map-flow-alias`, `flow-node-subflow-flow-alias`, `flow-node-script-config-aliases` and `sharing-rule-access-level-full-to-edit` (protocol 17's window), and `flow-node-crud-filter-alias` (protocol 11's). The authoring funnel (`defineStack`, `os validate`, `os build`, `os lint`) no longer rewrites these spellings. An author who still writes one meets the refusal of the surface's own contract, and every one of those refusals is now the upgrade prescription: it names the canonical key and the release that refuses the old spelling. The flow-node prescriptions used to say "the conversion rewrites it at load". `accessLevel: 'full'` used to get zod's bare "Expected one of: read, edit"; `SharingLevel` now names `edit`.
+  
+  Migration:
+  
+  - CRUD node (`get_record` / `create_record` / `update_record` / `delete_record`) `config.object` → `config.objectName`, and `config.filters` → `config.filter`. Rename the key; the value is unchanged.
+  - `notify` node `config.to` → `recipients`, `config.subject` → `title`, `config.body` → `message`, `config.url` → `actionUrl`, and a nested `config.source: { object, id }` → the flat pair `sourceObject` / `sourceId`. Rename (or move) the key; the value is unchanged.
+  - `map` and `subflow` node `config.flow` → `config.flowName`. Rename the key; the value is unchanged.
+  - `script` node `config.functionName` → `config.function`, and `config.input` → `config.inputs`. Rename the key; the value is unchanged. (`connectorConfig.input` on a `connector_action` node is canonical; leave it.)
+  - Sharing rule `accessLevel: 'full'` → `accessLevel: 'edit'`. `full` never granted more than `edit`.
+  - If a config carries both spellings with different values, decide which one you mean, keep it under the canonical key, and delete the old one.
+  
+  Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. (`config.filters` belongs to protocol 11, below the migration floor, so `os migrate meta` does not list it: rename that one by hand.)
+  
+  Stored metadata needs no edit. The automation engine's flow rehydration and stored-row rehydration still replay the whole conversion chain, these seven entries included, so `sys_metadata` flows and sharing-rule rows written under an old spelling keep loading in canonical form. A built artifact whose declared protocol floor is at or below `17.7.0` is also still converted at the artifact-ingestion door.
+  
+  The metadata save door's flow fallback now reaches the canonicalizer's verdict for every retired flow shape. When no automation service is reachable (or its canonicalizer throws), `saveMetaItem` judges a flow body after replaying the full conversion chain the automation engine's canonicalizer replays, retired entries included (the default flip `flow-decision-mode-inclusive-explicit` excepted, as there). That covers the seven entries retired here and those retired earlier that walk a flow: `flow-inert-keys-removed` (`flow.active`, `flow.template`, `nodes[].outputSchema`, `errorHandling.fallbackNodeId`) and `flow-node-wait-timeout-keys-removed` (`waitEventConfig.timeoutMs` / `onTimeout`). On such a host a body carrying one of those older keys was refused 422 by its tombstone before; it is now healed for the verdict, which is what a host with an automation service already did. What is stored stays the body as submitted, so a host's verdict on a saved flow no longer depends on whether it runs an automation service.
+  
+  Eight more entries below 18 stay on the load path, each with the reason recorded in its docblock: `flow-node-http-callout-rename` and `page-kind-jsx-to-html` (the old value is still accepted by its schema), `view-visibleOn-to-visibleWhen` and `page-component-visibility-to-visibleWhen` (the schema still declares and folds the deprecated key), `flow-node-wait-event-config-lift` and `flow-node-connector-config-lift` (the node's `config` has no contract to refuse the loose keys), `datasource-driver-mongo-to-mongodb` and `retry-policy-converged`.
+  
+  <!-- adr-0087: not-required (already-registered flow-node-crud-object-alias, flow-node-crud-filter-alias, flow-node-notify-config-aliases, flow-node-map-flow-alias, flow-node-subflow-flow-alias, flow-node-script-config-aliases, sharing-rule-access-level-full-to-edit) All seven D2 conversions are registered in their migration steps before this change, and they are the whole mechanical migration: this diff marks them retiredFromLoadPath with retiredAfter 17.7.0 and makes the refusals an author now meets name the release, so the authoring funnel stops replaying them while os migrate meta, stored-row and flow rehydration and the artifact door keep replaying them. No key, value or shape is added or removed, so there is no new D2 conversion and no D3 semantic judgment to register: each rewrite is a lossless rename. -->
+- 56147a8: fix(metadata-protocol): `duplicatePackage` copies an object whose name lacks the source namespace prefix into the target namespace, and a copied reference follows it
+  
+  Clause-②: no
+  
+  `duplicatePackage` (ADR-0070 D4, the package duplicate route's method) renames every copied object into the target namespace, because an object's name is its registry key and its table name, so a same-name copy is a second claim on the source's object.
+  
+  **FROM.** Only a name that starts with the source prefix was renamed (`crm_account` → `crm2_account`). An object whose name lacks it (`ticket`, stored by a direct publish-mode save, which no prefix gate reads, or bound to a package that had no namespace) kept its name. The copy then failed: it was listed in `failed[]` with the object-ownership refusal ("bind the customization to 'com.acme.crm', or have 'com.acme.crm2' extend the object instead"), which names no way out for a duplicate. Before that refusal existed, the same object was listed in `copied` while the registry refused the target row, and the copy sat over the source's table. Every copied item that referenced it (a lookup `reference`, a view's `object`, a flow node's `objectName`) still named the source's object.
+  
+  **TO.** Such an object is copied as `<target namespace>_<name>` (`ticket` → `crm2_ticket`), the rename the namespace-prefix rule itself prescribes (ADR-0129 D2), with its own registry entry and its own table. Every reference to it is rewritten where a property names an object, and only when the value is exactly the object's name. A field that happens to be called `ticket`, and the word in a label or description, are left unchanged. When that target name is already taken (the source also holds `crm_ticket`, whose copy is `crm2_ticket`, or the source holds an object of that name), the object is listed in `failed[]` before anything is written for it. The entry names the object, the name it would take and who holds that name, and says to rename the object on the source.
+  
+  **Also.** A map keyed by object name (a permission set's `objects`, a translation's `objects`) now has its keys follow the copied objects, prefixed names included. So the duplicate's permission set grants on the duplicate's objects. Before, it kept the source's names and granted on the source.
+  
+  **Unchanged.** A prefixed object's copy name, a non-object item's name, and every other `failed[]` cause are unchanged.
+- 7b64a3d: fix(metadata-protocol): `duplicatePackage` points a copied permission set's field-level rules at the copied objects
+  
+  Clause-②: no
+  
+  `duplicatePackage` (ADR-0070 D4, the package duplicate route's method) renames every copied object into the target namespace and rewrites the references to it. A permission set's field-level rules are a map keyed `<object>.<field>` (`PermissionSetSchema.fields`), and the security plugin applies an entry to the object its key names.
+  
+  **FROM.** A copied permission set kept the source's `fields` keys: `crm_customer.full_name` stayed `crm_customer.full_name`, and `ticket.title` (an object whose name lacks the source prefix, copied as `crm2_ticket`) stayed `ticket.title`. The copy's `objects` map already named the copied objects, so the copied set granted access to the duplicate's objects while its field rules applied to the source's objects. A field the source set hides or locks was readable and editable on the duplicate's object for whoever held the copied set.
+  
+  **TO.** In a copied set's `fields`, a key's object part takes the copied object's name: `crm_customer.full_name` → `crm2_customer.full_name`, `ticket.title` → `crm2_ticket.title`. The object part is everything before the key's first `.`, and it is rewritten only when it is exactly the name of an object the copy renamed. The field part is left as stored, even when it spells an object's name (`ticket.ticket` → `crm2_ticket.ticket`). A key naming an object outside the package keeps its name. If a rewritten key equals a key the set already holds (the source set also has a rule for an object, outside the package, named like the copy), the set is listed in `failed[]` with both keys, and nothing is written for it, because keeping either rule would drop the other.
+  
+  **Unchanged.** The source set, the copied set's `objects` map, and every other copied item are unchanged.
+- 8226755: fix(metadata-protocol): `duplicatePackage` refuses a copied item whose renamed object reference meets a name the item already holds, instead of merging the two
+  
+  Clause-②: no
+  
+  `duplicatePackage` (ADR-0070 D4, the package duplicate route's method) renames every copied object into the target namespace and rewrites each reference to it where a property names an object: a string, an array entry, or a record key (a permission set's `objects`, a translation's `objects`).
+  
+  **FROM.** When a copied item also named the object the copy is about to be called, the renamed name landed on a name the item already held, and the copy merged the two with `failed: []`. A permission set holding `objects: { crm_customer: { allowRead: true }, crm2_customer: { allowRead: true, allowEdit: true, allowDelete: true } }`, duplicated into namespace `crm2`, was copied as `objects: { crm2_customer: { allowRead: true, allowEdit: true, allowDelete: true } }`: whichever entry came last was kept, so one grant was dropped, and here the copied object gained edit and delete the source set never granted on its own object. A translation's `objects` dropped one object's labels the same way. A hook whose `object` list held both names was copied as `['crm2_customer', 'crm2_customer']`, so its handler ran twice per event on the copied object.
+  
+  **TO.** Such an item is listed in `failed[]`, and nothing of it is written (no item row, no history entry). The entry names the item, the property, the name that moved and the name it met, and the source edit that clears it, for example: "Permission set 'crm_access' is not copied: its `objects` key 'crm_customer' follows the copied object to 'crm2_customer', a key it already holds there, which this copy does not rename. … Remove 'crm_customer' or 'crm2_customer' on the source, then duplicate again." Remove one of the two names on the source item, then duplicate again.
+  
+  **Unchanged.** An item with no such collision copies as before, its references following the copied objects. An entry the source item itself repeats is copied as stored. The source package is never modified.
+- cdc42eb: fix(metadata-protocol): `duplicatePackage` keeps a copied field's key and `name` in step, and gives a bare object's view item the copied object's `OBJECT.VIEWKEY` name
+  
+  Clause-②: no
+  
+  `duplicatePackage` (ADR-0070 D4, the package duplicate route's method) renames every copied object into the target namespace and rewrites the references to it. Three copied names fell out of step with what they name.
+  
+  **FROM.**
+  
+  - A field named after a prefixed object, or ending in its name, kept its `fields` key but had its `name` renamed. Duplicating `crm` into `crm2`, the field `crm_customer` of `crm_customer` was copied as `fields.crm_customer.name: 'crm2_customer'`, and `x_crm_customer` as `x_crm2_customer`. The data plane addresses the column by the key. The save door's FLS lint reads the `name`, so a copied permission set with a rule on such a field was refused at the copy with `security-fls-unknown-field`.
+  - A view item of an object whose name lacks the source prefix kept its name. `ticket.board` was copied under that name with `object: 'crm2_ticket'`, so a by-name read naming no package served the source's item. A view item of an object outside the package that carries the source prefix was renamed while its `object` stayed (`crm_ext.board` became `crm2_ext.board`, bound to `crm_ext`).
+  - A form action's `target` naming such a view item (`ticket.entry`) kept the source's name, so the copy's button opened the source's form.
+  
+  **TO.**
+  
+  - A field's `name` follows its key, and both are kept: `crm_customer` and `x_crm_customer` keep their names. Free text renames an object's name only as a whole identifier, so `x_crm_customer` stays in a description or a view's columns too.
+  - A view item's name takes its object's copy name and keeps its view key: `ticket.board` becomes `crm2_ticket.board`. An item of an object the copy does not rename keeps its name.
+  - A value that is a renamed view item's whole name follows it: the action's `target` becomes `crm2_ticket.entry`.
+  
+  **Unchanged.** Object names, object references and a permission set's `objects` and `fields` keys are renamed as before. The source package is never modified. To bring an earlier copy in step, delete it and duplicate the source again.
+- 7ffc578: fix(metadata-protocol): an object's "Used by" answer lists a permission set that names the object only in its `fields` keys (#23539)
+  
+  **What was wrong.** `findReferencesToMeta` serves `GET /api/v1/meta/object/:name/references`, the admin "Used by" panel, which reads an empty answer as "Safe to delete." `PermissionSetSchema.fields` is keyed `<object>.<field>`, and the security plugin applies a set's field rules to an object by that key prefix. The reference index read `permission.fields` only as a site naming `field` items, never an object. So a set whose only rule for an object was a field rule (`objects: {}`, `fields: { 'customer.full_name': … }`) was missing from that object's answer, and the object could be cleared for deletion while the set still masked its fields.
+  
+  **What the answer reads now.** Such a set is listed for the object that each `fields` key starts with, at path `fields{key}` with kind `permission fields`. The object part is the text before the key's first `.`, the same split the security plugin makes. A key whose field part spells another object's name is not a reference to that object. A key with no object part (`.full_name`) names no object.
+  
+  Unchanged: every existing row of the answer, the response shape, the `field` target's `501 NOT_IMPLEMENTED` refusal, and `duplicatePackage`.
+- c5dd7fc: feat(spec)!: the page kind `jsx` is retired — an authored `kind: 'jsx'` is refused with the prescription naming `html`, and `page-kind-jsx-to-html` leaves the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** `jsx` was the first name of the constrained-JSX page tier (ADR-0080), which ADR-0081 renamed `html`. Through 17 it stayed a declared `PageSchema.kind` member and the loader rewrote an authored `kind: 'jsx'` to `html` with a notice. At 18 it is retired: `PageSchema.kind` declares it through `enumWithRetiredValues`, so it is refused by name at `os validate`, `os build`, the metadata save door and `defineStack`, so under `os lint` too when the config calls it: "Page `kind: 'jsx'` was removed in @objectstack/spec 18 (ADR-0087 D2) … Use `kind: 'html'`." Writing it in TypeScript no longer compiles either. The ADR-0087 D2 conversion `page-kind-jsx-to-html` is retired from the load path (`retiredAfter: '17.7.0'`), so the authoring funnel no longer rewrites the value. `COMPILED_PAGE_KINDS` is now `['html']`: `requires` is accepted on an `html` page only.
+  
+  Migration:
+  
+  - `kind: 'jsx'` → `kind: 'html'`. Change the value; the page's `source` is compiled and rendered exactly as before, and `requires` stays legal on it.
+  - A script or integration that saves a page through the metadata API with `kind: 'jsx'` → send `kind: 'html'`.
+  
+  `os migrate meta` does not list this edit: the rename belongs to protocol 11, below the migration floor, so make it by hand. The D3 entry `page-kind-jsx-retired` states it for upgraders.
+  
+  Stored metadata needs no edit. Every stored-row rehydration seam replays the retired conversion, so a `sys_metadata` page row written as `jsx` keeps loading as an `html` page, and a built artifact whose declared protocol floor is at or below `17.7.0` is still converted at the artifact-ingestion door.
+  
+  The readers that branched on the retired value dropped it: the metadata save door's html-page compile gate (`@objectstack/metadata-protocol`), the CLI's SDUI-manifest page count, and the lint page walk, `validateJsxPages` and the page-source styling rule (`@objectstack/lint`) now read `html` (and `react` where they did before) only.
+  
+  `@objectstack/platform-objects` publishes the Studio page form's `source` help text in four locales (`en`, `zh-CN`, `ja-JP`, `es-ES`); it no longer names `jsx`.
+  
+  <!-- adr-0087: registered page-kind-jsx-retired -->
+- 7dc7d22: fix(metadata-protocol): an optimistic-concurrency conflict reports only what the caller may read
+  
+  Clause-②: no
+  
+  `updateData` and `deleteData` judge a caller's version token (`If-Match`, or the body/query `expectedVersion`) on the row their existence probe reads with a system context. On a mismatch they used to answer `409 CONCURRENT_UPDATE` with that system-read row as `currentRecord`, before the caller's row- and field-level security had run.
+  
+  Now a mismatch re-reads the row under the caller's own context, and only then answers:
+  
+  - **A row the caller cannot read:** `404 RECORD_NOT_FOUND`, the same answer the same request without a version token gets. It carries no `currentVersion` and no `currentRecord`.
+  - **A row the caller can read:** `409 CONCURRENT_UPDATE` as before, with `currentRecord` read as the caller reads it, so a field hidden from the caller is absent from it. `currentVersion` is unchanged.
+  
+  A request whose token matches, or that sends none, is unchanged and issues no extra read. Every door that renders the protocol's answer (`RestServer`, the runtime dispatcher's `/data` domain and the Hono hosts) gets the narrowed answer.
+- cad343e: fix(metadata-protocol): deleting a runtime object that was loaded at boot unregisters it at once, instead of leaving it registered and served until a restart
+  
+  Clause-②: no
+  
+  Before this fix, deleting such an object could leave it registered. This happened on a kernel whose ObjectQL plugin has no `environmentId`: the CLI's host-config boot, or a control plane. The object was a runtime object created before the server's last start. `DELETE /api/v1/meta/object/NAME` answered "it no longer exists" and removed the stored row, but the object stayed registered. Until a restart, data CRUD kept serving its table's records. `GET /api/v1/meta/object/NAME`, the object list and the layered read kept serving the deleted definition.
+  
+  The cause: at boot the ObjectQL plugin copies every registered object into the `metadata` service. The delete's registry heal read that copy as the code baseline and registered it again. An object created in the same process was never copied, so its delete already worked.
+  
+  Now an object body in the `metadata` service stamped tenant-authored (`_provenance: 'org'`) is never read as the object's code layer. What changes on those kernels:
+  
+  - After the delete, the object is unregistered, as one created in the same process is. Data CRUD answers `404 OBJECT_NOT_FOUND`. The by-name read and the object list no longer serve it. Its table and records are kept: a delete without `dropStorage` drops nothing. This holds whether or not the row was bound to a package.
+  - A save afterwards that names a package makes that package the object's owner at once, over the kept table.
+  - The layered read's `code` layer for a runtime object is `null`, as it already was on a kernel with an `environmentId`. Before, it was the boot copy.
+  
+  Unchanged: an object a code package ships keeps its baseline through the same delete. The `metadata` service itself still holds its boot copy. Other types are not affected: the security catalog's `permission` and `position` entries in the `metadata` service are still read as before.
+- cbe7712: fix(metadata-protocol): an orphan adoption moves each adopted object's registry owner and definition to the target package in the same request (ADR-0070 D5)
+  
+  Clause-②: no
+  
+  `reassignOrphanedMetadata`, the method `POST /api/v1/packages/:id/adopt-orphans` calls, rebinds every package-less `sys_metadata` row to the target package. For an object, only the stored row moved. The registry kept the owner that the package-less row had registered (the `sys_metadata` sentinel) and the pre-adoption definition until the next restart. Until then, a save of the object naming the target package answered success and never went live: its new fields were not on the data plane.
+  
+  Each adopted object row now goes through the same registry write-through a save uses, in the same request. The package-less row's own registration leaves the registry first (`SchemaRegistry.unregisterObject`, the verb the delete heal already uses), so the object keeps exactly one owner (ADR-0029 D3). Right after the adoption, the target package owns the object, the data plane serves its definition stamped with that package, and the package's object list includes it. A save naming the target package then goes live at once, and the next boot registers the same owner.
+  
+  What stays as before:
+  
+  - The adoption's request and response shapes, and which rows it rebinds.
+  - A package-less row of an object that another package's row owns is rebound in storage only, and the registry keeps that owner. The next boot judges the two rows, as before.
+  - If another package extends the object, the registry refuses to drop the old owner. The adoption then logs one `error` naming the object, and the registry keeps the old owner until the next restart.
+  - Views follow their rebound row as before. Other types are rebound in storage only.
+- 9bb9370: fix(metadata-protocol): an orphan adoption no longer makes a draft view live; an adopted draft view is rebound in storage only (ADR-0070 D5, ADR-0048)
+  
+  Clause-②: no
+  
+  `reassignOrphanedMetadata`, the method `POST /api/v1/packages/:id/adopt-orphans` calls, sends each rebound view row through the registry write-through so the registry follows it at once. It admitted a view row whatever its `state`. So adopting a package-less DRAFT view registered its draft body as live, stamped with the target package, until the next restart. The boot registers active rows only, so it dropped the view again. A draft adopted beside a published row of the same view replaced the published body the runtime served.
+  
+  Only an active row now reaches the registry, for a view as for an object. An adopted draft view is rebound in storage only: the registry serves nothing for it until it is published, and the next boot agrees.
+  
+  What stays as before:
+  
+  - Which rows the adoption rebinds, the stored `state` of each, and the response (`reassignedCount`, `reassigned`).
+  - An adopted active view is served at its new binding at once, and an adopted active object moves its registry owner, as before.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [c911ab6]
+- Updated dependencies [87d0619]
+- Updated dependencies [fba3712]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [54af6c0]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [30b0fc2]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/lint@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/metadata@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+  - @objectstack/sdui-parser@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

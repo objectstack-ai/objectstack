@@ -632,6 +632,18 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "Referencia mediante",
         helpText: "Convierte este campo de texto en la mitad de id de un puntero polimórfico: nombra el campo HERMANO del mismo objeto que guarda, fila a fila, el nombre del objeto destino (ADR-0052 §5). En snake_case; solo campos de texto y excluyente con `reference`."
       },
+      referenceDeletedWhen: {
+        label: "Referencia eliminada cuando",
+        helpText: "Solo junto a referenceVia: en las filas donde un campo de selección hermano tiene una de sus opciones, el registro al que apunta este puntero fue eliminado por la plataforma, y el puntero se muestra como eliminado con la etiqueta de esa opción. Sin definir: ninguna fila se marca como eliminada."
+      },
+      "referenceDeletedWhen.field": {
+        label: "Campo",
+        helpText: "El campo de selección hermano de este objeto (snake_case), p. ej. cancel_reason. Debe ser una selección de un solo valor que declare opciones en línea."
+      },
+      "referenceDeletedWhen.value": {
+        label: "Valor",
+        helpText: "El valor de opción de ese campo de selección que indica que el destino fue eliminado, p. ej. record_deleted. Debe ser uno de sus valores de opción declarados."
+      },
       mailAssociation: {
         label: "Asociar correo entrante",
         helpText: "Vincula el correo entrante a los registros de este objeto cuyo valor en este campo coincide con el remitente o con algún destinatario del mensaje (sin distinguir mayúsculas; se excluye la dirección del propio buzón). Solo campos de email. Solo surte efecto donde hay un servicio de buzón configurado."

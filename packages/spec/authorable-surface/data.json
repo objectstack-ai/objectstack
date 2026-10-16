@@ -369,6 +369,7 @@
     "data/Field:readonly",
     "data/Field:readonlyWhen",
     "data/Field:reference",
+    "data/Field:referenceDeletedWhen",
     "data/Field:referenceVia",
     "data/Field:relatedList",
     "data/Field:relatedListColumns",
