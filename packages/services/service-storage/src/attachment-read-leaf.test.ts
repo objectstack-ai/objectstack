@@ -38,7 +38,7 @@ function matches(row: Record<string, unknown>, where: any): boolean {
   });
 }
 
-function boot(opts: {
+function boot(fixture: {
   rows?: Row[];
   objects?: string[];
   /** Parents an object-scoped read middleware narrows (D5.2). */
@@ -53,37 +53,39 @@ function boot(opts: {
   engineLacks?: 'registry' | 'hasObjectMiddleware' | 'resolveEffectiveDatasource';
   failPreScan?: boolean;
 }) {
-  const rows = opts.rows ?? [];
-  const objects = opts.objects ?? ['att_case', 'att_secret', 'sys_attachment', 'sys_comment'];
-  const gated = new Set(opts.middlewareGated ?? []);
+  const rows = fixture.rows ?? [];
+  const objects = fixture.objects ?? ['att_case', 'att_secret', 'sys_attachment', 'sys_comment'];
+  const gated = new Set(fixture.middlewareGated ?? []);
   const reads = { preScans: [] as any[], parentReads: [] as Array<{ object: string; ids: string[] }> };
   let mw!: Mw;
+  // Only the members the read gate calls: `find` (its probe) and the three
+  // classifying questions. The write verbs are not part of this gate.
   const engine: any = {
     registerHook: () => {},
     registerMiddleware: (fn: Mw) => {
       mw = fn;
     },
-    find: async (object: string, options: any) => {
+    find: async (object: string, query: any) => {
       if (object === 'sys_attachment') {
-        reads.preScans.push(options);
-        if (opts.failPreScan) throw new Error('driver down');
-        return rows.filter((r) => matches(r, options.where)).slice(0, options.limit);
+        reads.preScans.push(query);
+        if (fixture.failPreScan === true) throw new Error('driver down');
+        const hits = rows.filter((r) => matches(r, query?.where));
+        return typeof query?.limit === 'number' ? hits.slice(0, query.limit) : hits;
       }
-      const ids: string[] = (options?.where?.id?.$in ?? []).map(String);
+      const ids: string[] = (query?.where?.id?.$in ?? []).map(String);
       reads.parentReads.push({ object, ids });
-      return ids.filter((id) => (opts.visible?.[object] ?? []).includes(id)).map((id) => ({ id }));
+      const visible = ids.filter((id) => (fixture.visible?.[object] ?? []).includes(id)).map((id) => ({ id }));
+      return typeof query?.limit === 'number' ? visible.slice(0, query.limit) : visible;
     },
-    findOne: async () => null,
-    update: async () => ({}),
     registry: { getAllObjects: () => objects.map((name) => ({ name })) },
     hasObjectMiddleware: (name: string) => gated.has(name),
-    resolveEffectiveDatasource: (name: string) => opts.datasources?.[name],
+    resolveEffectiveDatasource: (name: string) => fixture.datasources?.[name],
   };
-  if (opts.engineLacks === 'registry') delete engine.registry;
-  if (opts.engineLacks === 'hasObjectMiddleware') delete engine.hasObjectMiddleware;
-  if (opts.engineLacks === 'resolveEffectiveDatasource') delete engine.resolveEffectiveDatasource;
+  if (fixture.engineLacks === 'registry') delete engine.registry;
+  if (fixture.engineLacks === 'hasObjectMiddleware') delete engine.hasObjectMiddleware;
+  if (fixture.engineLacks === 'resolveEffectiveDatasource') delete engine.resolveEffectiveDatasource;
 
-  const admission = opts.admission ?? 'can-read-object';
+  const admission = fixture.admission ?? 'can-read-object';
   const getAdmission =
     admission === 'omitted'
       ? undefined
