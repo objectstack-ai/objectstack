@@ -1024,6 +1024,13 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       revoked: {
         label: "Revoked"
       },
+      revoked_reason: {
+        label: "Revoke Reason",
+        help: "Set when an administrator's forced password reset revoked this key. Only a platform administrator can restore such a key; its owner creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.",
+        options: {
+          admin_password_reset: "Administrator password reset"
+        }
+      },
       key: {
         label: "Hashed Key",
         help: "Hashed API key value — never exposed to clients"

@@ -1024,6 +1024,13 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       revoked: {
         label: "Revocado"
       },
+      revoked_reason: {
+        label: "Motivo de la revocación",
+        help: "Se registra cuando el restablecimiento forzado de la contraseña por parte de un administrador revocó esta clave. Solo un administrador de la plataforma puede restaurar una clave así; su propietario crea una nueva. Se borra cuando la clave se restaura. Vacío para una clave revocada desde la lista de claves de API.",
+        options: {
+          admin_password_reset: "Restablecimiento forzado de la contraseña por un administrador"
+        }
+      },
       key: {
         label: "Clave con hash",
         help: "Valor de la clave de API con hash; nunca se expone a los clientes."

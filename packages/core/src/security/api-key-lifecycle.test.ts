@@ -329,4 +329,23 @@ describe('[#23944] the revoked refusal agrees with the declared restore action',
     expect(err.message).toContain('POST /api/v1/keys');
     expect(err.message).not.toMatch(/never|permanent|forever|for good/i);
   });
+
+  it('a key a forced password reset revoked names a platform administrator as its only restorer', async () => {
+    // `revoked_reason: admin_password_reset` is stamped by plugin-auth's forced
+    // reset, and its restore door refuses the owner on that reason. The text
+    // follows the door: the owner is not offered a restore they would be
+    // refused. Code, status and every carried field stay those of any revoked key.
+    const reset = await resolveApiKeyAdmission(
+      makeQl({ revoked: true, revoked_reason: 'admin_password_reset' }), headers(), NOW, undefined, undefined, policy(),
+    );
+    const plain = await resolveApiKeyAdmission(makeQl({ revoked: true }), headers(), NOW, undefined, undefined, policy());
+
+    expect(reset.outcome === 'lifecycle' && reset.refusal).toMatchObject({ code: 'API_KEY_REVOKED', keyId: KEY_ID, userId: OWNER });
+    const resetMessage = reset.outcome === 'lifecycle' ? reset.refusal.message : '';
+    const plainMessage = plain.outcome === 'lifecycle' ? plain.refusal.message : '';
+    expect(resetMessage).toMatch(/forced password reset\. Only a platform administrator can restore it/);
+    expect(resetMessage).not.toMatch(/owner/i);
+    expect(resetMessage).toContain('POST /api/v1/keys');
+    expect(plainMessage).toMatch(/Its owner or a platform administrator can restore it/);
+  });
 });

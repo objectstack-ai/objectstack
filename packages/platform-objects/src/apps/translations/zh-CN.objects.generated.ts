@@ -1024,6 +1024,13 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       revoked: {
         label: "已撤销"
       },
+      revoked_reason: {
+        label: "撤销原因",
+        help: "管理员强制重置密码时撤销了该密钥，则记录此原因。此类密钥只能由平台管理员恢复，其所有者应创建新的密钥。密钥恢复后清除。从 API 密钥列表撤销的密钥此项为空。",
+        options: {
+          admin_password_reset: "管理员强制重置密码"
+        }
+      },
       key: {
         label: "哈希密钥",
         help: "API 密钥值的哈希——绝不会向客户端暴露"
