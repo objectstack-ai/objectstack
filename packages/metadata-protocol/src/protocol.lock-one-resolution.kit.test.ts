@@ -11,10 +11,13 @@
  *
  * The table is 16 320 rows, and its wall is the protocol's own cost: with the
  * reads taken once per distinct read request (`readScenario`) the single file
- * still read about 8.4 s alone and 27.5 s in a CI-shaped package run, over the
+ * still read about 8 s alone and 21 to 28 s in CI-shaped package runs, over the
  * 10 s line of a test file (#22998). Its time is the CPU of 7 212 distinct
  * reads and 28 848 doors, with nothing waited on, so the cut that remains is
  * across files: each shard file runs a quarter of the rows in its own worker.
+ * The count is `ROW_SHARDS`; to change it, change that constant and add or
+ * delete the shard files, and the pin at the foot of this file stays red until
+ * the two agree.
  *
  * ## How the rows are partitioned
  *
@@ -32,8 +35,8 @@
  *
  * Three gates read engine doubles, and each one walks `*.test.ts` files only:
  * `check:engine-double-contract` (this double's `findOne` is pinned to the
- * real engine's predicate, its ledger row is `scripts/engine-double-contract
- * .pinned.json`), `check:where-matcher` (its WHERE matcher refuses a
+ * real engine's predicate; its ledger is `engine-double-contract.pinned.json`
+ * under `scripts/`), `check:where-matcher` (its WHERE matcher refuses a
  * combinator) and `check:objectql-double-limit` (its `find` applies the
  * caller's bound). A double in a `*.testkit.ts` file would leave all three
  * without saying so, and the first of them would call the leaving row a
