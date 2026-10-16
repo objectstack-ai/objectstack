@@ -1,13 +1,13 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { recordNotFoundError } from '@objectstack/core';
+import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import type { EngineSchemaRegistryView, IDataEngine, IFileAttachmentService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { defaultRecordPageObject } from '@objectstack/spec/ui';
 import type { ChromiumDriver } from './chromium-driver.js';
 import type { PrintPlacement, PrintPlacementResolution } from './config.js';
 import type { PrincipalSessionMinter, PrintSession } from './principal-session.js';
-import { printRefusal } from './refusal.js';
 
 /**
  * The print service: render a record's print page in headless Chromium, as
@@ -135,6 +135,18 @@ export const PRINT_SESSION_TTL_SECONDS = 60;
 export const PRINT_PROBE_TIMEOUT_MS = 15_000;
 
 const PDF_MIME_TYPE = 'application/pdf';
+
+/**
+ * An ADR-0112-shaped refusal: an `Error` carrying `code` and `status`. Every
+ * code the print service answers is from the standard catalog, plus the
+ * registered `FILES_DISABLED`: it adds no wire vocabulary of its own.
+ */
+function printRefusal(code: StandardErrorCode | RegisteredErrorCode, status: number, message: string): never {
+  const err = new Error(message) as Error & { code: string; status: number };
+  err.code = code;
+  err.status = status;
+  throw err;
+}
 
 function nonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim().length > 0;

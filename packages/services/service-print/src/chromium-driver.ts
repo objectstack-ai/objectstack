@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describeEndpoint, type PrintPlacement, type ResolvedPrintPlacement } from './config.js';
-import { refusalError } from './refusal.js';
+import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import type { PrintSessionCookie } from './principal-session.js';
 
 /**
@@ -96,6 +96,16 @@ const PRINT_READY_PREDICATE = `(() => {
 })()`;
 
 const FONTS_READY = `document.fonts.ready.then(() => true)`;
+
+/**
+ * An ADR-0112-shaped refusal: an `Error` carrying `code` and `status`. Its codes are from the standard catalog.
+ */
+function refusalError(code: StandardErrorCode | RegisteredErrorCode, status: number, message: string): Error {
+  const err = new Error(message) as Error & { code: string; status: number };
+  err.code = code;
+  err.status = status;
+  return err;
+}
 
 /** `SameSite` as playwright spells it. */
 function sameSiteOf(value: PrintSessionCookie['sameSite']): 'Strict' | 'Lax' | 'None' | undefined {

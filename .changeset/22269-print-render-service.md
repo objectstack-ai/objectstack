@@ -1,5 +1,6 @@
 ---
 '@objectstack/service-print': minor
+'@objectstack/spec': patch
 ---
 
 feat(service-print): print a record's print page to a PDF in headless Chromium, as the requesting user, and archive it as a file attached to the record
@@ -18,3 +19,5 @@ plugins: [new PrintServicePlugin()]
 - **As the requesting user.** The page is rendered through a short-lived session minted for the caller's own principal by the auth service (`mintPrincipalSession`), and revoked in a `finally`. There is no system principal.
 - **Refusals first, each with `code` and `status`, before any session is minted or browser started:** a caller that is not a human user acting for themselves (`PERMISSION_DENIED` / 403); an engine that is not ready (`SERVICE_UNAVAILABLE` / 503); an unknown page (`RESOURCE_NOT_FOUND` / 404); a page that is not the object's default record page or declares no `print` (`VALIDATION_ERROR` / 400); a record the caller cannot read (`RECORD_NOT_FOUND` / 404); an object without `enable: { files: true }` (`FILES_DISABLED` / 403).
 - **The archive** goes through `file-attachments` (`IFileAttachmentService.attachFile`): one `sys_file` and one `sys_attachment` on the record, under its size limit and organization wall.
+
+`@objectstack/spec`'s `llms.txt` counts the new package: the workspace publishes 72 packages.

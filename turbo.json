@@ -539,6 +539,7 @@
         "$TURBO_ROOT$/packages/plugins/plugin-hono-server/src/**",
         "$TURBO_ROOT$/packages/rest/src/**",
         "$TURBO_ROOT$/packages/runtime/src/**",
+        "$TURBO_ROOT$/packages/services/service-print/src/**",
         "$TURBO_ROOT$/packages/services/service-realtime/src/**",
         "$TURBO_ROOT$/packages/services/service-storage/src/storage-route-ledger.ts",
         "$TURBO_ROOT$/packages/services/service-i18n/src/i18n-route-ledger.ts",

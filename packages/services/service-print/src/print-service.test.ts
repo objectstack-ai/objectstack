@@ -12,7 +12,11 @@ import {
   PrintService,
   type PrintRecordRequest,
 } from './print-service.js';
-import { refusalError } from './refusal.js';
+
+/** A refusal as a gate or a collaborator throws it: `code` and `status` on an `Error`. */
+function refusalError(code: string, status: number, message: string): Error {
+  return Object.assign(new Error(message), { code, status });
+}
 
 const CONSOLE = 'http://127.0.0.1:3000/_console';
 const COOKIE_VALUE = 'minted-cookie-value.signature';

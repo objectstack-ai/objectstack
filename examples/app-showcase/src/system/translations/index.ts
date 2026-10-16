@@ -1059,6 +1059,8 @@ export const ShowcaseTranslationBundle = {
     // The pages' own label/title/subtitle predate the ratchet and stay in the
     // frozen baseline, same as Revenue Pulse's older widget titles above.
     pages: {
+      // `ui/pages/invoice-document.page.ts` — the invoice print page.
+      showcase_invoice_document: { label: '发票' },
       showcase_contact_form: {
         components: {
           field_name: { label: '姓名', placeholder: '艾达·洛夫莱斯' },
