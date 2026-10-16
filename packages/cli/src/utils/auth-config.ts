@@ -2,7 +2,8 @@
 
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { readFile, writeFile, mkdir, chmod } from 'node:fs/promises';
+import { readFile, writeFile, chmod } from 'node:fs/promises';
+import { makeDirectorySync } from './make-directory.js';
 
 /**
  * Authentication configuration stored in ~/.objectstack/credentials.json
@@ -70,8 +71,10 @@ export async function writeAuthConfig(config: AuthConfig): Promise<void> {
   const path = getCredentialsPath();
   const dir = join(homedir(), '.objectstack');
 
-  // Ensure directory exists
-  await mkdir(dir, { recursive: true });
+  // Ensure directory exists. Bounded (#23858): a `HOME` under which it can
+  // never be made is refused at once with the OS's code and the path; Node's
+  // recursive mkdir never settled on it.
+  makeDirectorySync(dir);
 
   // Write credentials file
   await writeFile(path, JSON.stringify(config, null, 2), { mode: 0o600 });

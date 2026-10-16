@@ -19,6 +19,20 @@
           "message": "Type 'string' is not assignable to type '{ '[REMOVED] Key retired: run `os validate` for its migration.': never; }'."
         }
       ]
+    },
+    {
+      "retired": "nothing retired -- the spec ADDED an optional key: the select option's lifecycle `kind` (`open` | `won` | `lost`, required only under a `stageField`, #23809). objectui's select-option convergence pins assert by design that the converged form and metadata faces gained no key beyond `description` / `default`, so a new spec key reds them (TS2344 `Equal` pins, compiled only by the package's chained test project); the entry is deleted when objectui re-pins the faces",
+      "objectstack_pr": 23846,
+      "objectstack_commit": "adad73f71483abf84b470e90367fe8080c44a4e0",
+      "downstream_card": "objectstack-ai/objectui#12711",
+      "registered_at": "2026-10-16",
+      "matches": [
+        {
+          "file": "packages/types/src/__tests__/select-option-tier1-convergence-7014.test.ts",
+          "code": "TS2344",
+          "message": "Type 'false' does not satisfy the constraint 'true'."
+        }
+      ]
     }
   ]
 }
