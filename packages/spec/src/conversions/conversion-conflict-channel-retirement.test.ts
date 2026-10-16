@@ -183,6 +183,10 @@ describe('tree-scoped absence: no spelling of the conversion-conflict channel su
     // Registers the retirement (the D3 entry's prose names what left; the
     // generated, git-ignored `registry.ts` concatenates it).
     'packages/spec/src/migrations/',
+    // The protocol upgrade guide is that registry's projection — git-ignored,
+    // written by `gen:upgrade-guide` (and the docs build) into this tree — so
+    // once generated it prints the D3 entry's prose verbatim.
+    'content/docs/protocol-upgrade/',
     // Release prose records the removal (release-owned; never edited by a code PR).
     'content/docs/releases/',
     '.changeset/',
