@@ -17,6 +17,8 @@ Clause-②: yes (narrowing)
 
 **The one-line fix:** delete the import and the call, and read `visibleWhen`.
 
+This supersedes the sentence in this release's `visibleOn` / `visibility` retirement note that says the two exports "stay exported": they leave in the same release.
+
 **What an author who still imports them sees:** `tsc` fails with TS2305 (`Module '"@objectstack/spec/shared"' has no exported member …`); a plain-JS import resolves to `undefined`.
 
 **Nothing to migrate in metadata.** No authored document ever carried either export, so `os migrate meta` has nothing to visit. The stored-row conversions `view-visibleOn-to-visibleWhen` and `page-component-visibility-to-visibleWhen` are unchanged: a pre-18 `sys_metadata` view or page row that still carries an old key keeps loading with `visibleWhen`.
