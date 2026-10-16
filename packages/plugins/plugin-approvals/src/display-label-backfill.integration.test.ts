@@ -26,7 +26,9 @@
  *      address by design;
  *  (e) the action-slot backfill labels every `acted_as` it writes;
  *  (f) an empty authored label is stored as the humanized machine name, never
- *      `''`, at open.
+ *      `''`, at open;
+ *  (g) every row a boot fills keeps its own `updated_at` exactly — the request
+ *      lists sort on it, and a derived display column is not an edit.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -37,6 +39,7 @@ import { ApprovalService, slotLabelSourceOf } from './approval-service.js';
 import { ApprovalsServicePlugin } from './approvals-plugin.js';
 import { backfillApprovalDisplayLabels } from './display-label-backfill.js';
 import { backfillActionSlots } from './action-slot-backfill.js';
+import { slateLabelOf } from './display-labels.js';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 import { SysApprovalAction } from './sys-approval-action.object.js';
 import { SysApprovalApprover } from './sys-approval-approver.object.js';
@@ -64,6 +67,9 @@ const deal = {
 };
 
 const quiet = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} };
+
+/** A fixed past instant the rows are back-dated to after their insert (an insert stamps now). */
+const BACKDATED = '2026-03-04T05:06:07.000Z';
 
 /** A request row exactly as the previous release wrote it, keyed `areq_<key>`. */
 function legacyRequest(id: string, extra: Record<string, unknown>) {
@@ -101,6 +107,10 @@ async function boot(engine: ObjectQL): Promise<{ warn: string[] }> {
 
 describe('#23889 — the boot-time display-label backfill', () => {
   let engine: ObjectQL;
+
+  /** Set a row's `updated_at` to {@link BACKDATED} — a preserving write, as an import would. */
+  const backdate = async (object: string, id: string) =>
+    engine.update(object, { id, updated_at: BACKDATED }, { context: { ...SYSTEM, preserveAudit: true } } as any);
 
   const row = async (object: string, id: string) =>
     ((await engine.find(object, { where: { id }, limit: 1, context: SYSTEM } satisfies EngineQueryOptions)) as any[])[0];
@@ -221,7 +231,7 @@ describe('#23889 — the boot-time display-label backfill', () => {
     const labels = slotLabelSourceOf(broken);
     // A person slot gets null; a non-person slot keeps its address by design.
     expect(await labels.slotLabels(['u_alice', 'position:legal'])).toEqual([null, 'position:legal']);
-    expect(await labels.slateLabels(['u_alice', 'position:legal'])).toBeNull();
+    expect(slateLabelOf(await labels.slotLabels(['u_alice', 'position:legal']))).toBeNull();
     expect(warn.filter((m) => m.includes('could not be read'))).toHaveLength(2);
 
     await backfillApprovalDisplayLabels(engine as any, labels);
@@ -254,6 +264,21 @@ describe('#23889 — the boot-time display-label backfill', () => {
     });
   });
 
+  it('(e2) the action-slot backfill keeps each row\'s updated_at', async () => {
+    await engine.insert('sys_approval_action', legacyAction('a_slot_kept', 'areq_open', {
+      action: 'comment', actor_id: 'mail@example.com',
+    }), { context: SYSTEM } as any);
+    await engine.insert('sys_approval_action', legacyAction('a_vote_kept', 'areq_open', {
+      action: 'approve', actor_id: 'u_alice',
+    }), { context: SYSTEM } as any);
+    await backdate('sys_approval_action', 'a_slot_kept');
+    await backdate('sys_approval_action', 'a_vote_kept');
+    const svc = new ApprovalService({ engine: engine as any, logger: quiet as any });
+    await backfillActionSlots(engine as any, { labels: slotLabelSourceOf(svc) });
+    expect(await row('sys_approval_action', 'a_slot_kept')).toMatchObject({ acted_as: 'mail@example.com', updated_at: BACKDATED });
+    expect(await row('sys_approval_action', 'a_vote_kept')).toMatchObject({ acted_as: 'u_alice', updated_at: BACKDATED });
+  });
+
   it('(f) an empty authored label is stored as the humanized machine name, never the empty string', async () => {
     await engine.insert('crm_deal', { id: 'D_f', title: 'f' }, { context: SYSTEM } as any);
     const svc = new ApprovalService({
@@ -271,5 +296,22 @@ describe('#23889 — the boot-time display-label backfill', () => {
     });
     expect(opened.process_label).toBe('Deal Review');
     expect(opened.step_label).toBe('Legal Review');
+  });
+
+  it('(g) one boot keeps the updated_at of every row it fills', async () => {
+    for (const id of ['areq_done', 'areq_open']) await backdate('sys_approval_request', id);
+    for (const id of ['a_submit', 'a_vote', 'a_thread']) await backdate('sys_approval_action', id);
+    expect((await row('sys_approval_request', 'areq_open')).updated_at).toBe(BACKDATED);
+
+    await boot(engine);
+
+    // Filled — and still dated where they were.
+    expect(await row('sys_approval_request', 'areq_done')).toMatchObject({ process_label: 'Deal Review', updated_at: BACKDATED });
+    expect(await row('sys_approval_request', 'areq_open')).toMatchObject({
+      pending_approver_labels: 'Alice, position:legal', updated_at: BACKDATED,
+    });
+    for (const id of ['a_submit', 'a_vote', 'a_thread']) {
+      expect(await row('sys_approval_action', id), id).toMatchObject({ object_name: 'crm_deal', updated_at: BACKDATED });
+    }
   });
 });

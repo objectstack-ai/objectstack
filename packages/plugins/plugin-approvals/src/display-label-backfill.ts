@@ -34,6 +34,13 @@
  *    label is its own humanized `step_name`;
  *  - action `acted_as_label` — `slotLabels(acted_as)`.
  *
+ * ## Each row keeps its `updated_at`
+ *
+ * Every write passes the read row's `updated_at` back under `preserveAudit`
+ * ({@link PRESERVING_CONTEXT}), so a filled request keeps its place in the
+ * lists that sort on it. Where `plugin-audit` is composed, each filled row still
+ * gets one system audit entry for the write.
+ *
  * ## Idempotent, null-only, and run at every boot
  *
  * Each write names only columns that were null on the row it read, so the
@@ -49,7 +56,7 @@
  */
 
 import { keysetWalk } from '@objectstack/types';
-import { prettifyMachineName, requestDisplayLabels } from './display-labels.js';
+import { prettifyMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
 
 /**
  * The engine surface the fill needs — a structural subset of
@@ -63,14 +70,13 @@ export interface DisplayLabelBackfillEngine {
 
 /**
  * The approval service's own slot labeller, as the live writers call it
- * (`slotLabelSourceOf` in `approval-service.ts`): `slotLabels` answers one
- * label per slot, null for a person slot whose name could not be read;
- * `slateLabels` answers the joined column, null when any slot's name could not
- * be read or the slate is empty.
+ * (`slotLabelSourceOf` in `approval-service.ts`): one label per slot, null for
+ * a person slot whose name could not be read. It takes the whole page's slots
+ * in one call, so a page costs one `sys_user` read (two when an email slot
+ * does not resolve by id), never one per row.
  */
 export interface SlotLabelSource {
   slotLabels(slots: readonly string[]): Promise<Array<string | null>>;
-  slateLabels(slate: readonly string[]): Promise<string | null>;
 }
 
 /** What one run wrote. */
@@ -82,7 +88,31 @@ export interface DisplayLabelBackfillResult {
 }
 
 const SYSTEM_CONTEXT = { isSystem: true, positions: [], permissions: [] };
+/**
+ * Writes keep each row's own `updated_at`: filling a derived display column is
+ * not an edit of the request or the action, and the request lists sort on
+ * `updated_at`. `preserveAudit` makes the engine's update stamp and the SQL
+ * driver keep the value the write passes back (the read row's), the same way
+ * `plugin-audit`'s comment-parent-pair backfill does. A row with no stored
+ * `updated_at` passes none, and the write stamps as usual.
+ */
+const PRESERVING_CONTEXT = { ...SYSTEM_CONTEXT, preserveAudit: true };
 const PAGE = 500;
+
+/** The read row's own `updated_at`, to hand back on the write. */
+function keptStamp(row: Record<string, unknown>): Record<string, unknown> {
+  return row.updated_at !== undefined && row.updated_at !== null ? { updated_at: row.updated_at } : {};
+}
+
+/** Label every distinct slot on the page in one labeller call. */
+async function pageLabels(labels: SlotLabelSource, slots: Iterable<string>): Promise<Map<string, string | null>> {
+  const distinct = [...new Set(slots)];
+  const out = new Map<string, string | null>();
+  if (!distinct.length) return out;
+  const answered = await labels.slotLabels(distinct);
+  distinct.forEach((slot, i) => out.set(slot, answered[i] ?? null));
+  return out;
+}
 
 function nonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -112,7 +142,7 @@ export async function backfillApprovalDisplayLabels(
       ...q,
       fields: [
         'id', 'status', 'process_name', 'current_step', 'node_config_json', 'pending_approvers',
-        'process_label', 'current_step_label', 'pending_approver_labels',
+        'process_label', 'current_step_label', 'pending_approver_labels', 'updated_at',
       ],
       context: SYSTEM_CONTEXT,
     }) as Promise<Record<string, unknown>[]>,
@@ -128,6 +158,10 @@ export async function backfillApprovalDisplayLabels(
     },
   );
   for await (const rows of requests.pages()) {
+    const waitingOnSlots = rows
+      .filter((row) => row.status === 'pending' && !nonEmpty(row.pending_approver_labels))
+      .flatMap((row) => slateOf(row.pending_approvers));
+    const named = await pageLabels(labels, waitingOnSlots);
     for (const row of rows) {
       const id = nonEmpty(row.id);
       if (!id) continue;
@@ -139,11 +173,11 @@ export async function backfillApprovalDisplayLabels(
       }
       if (row.status === 'pending' && !nonEmpty(row.pending_approver_labels)) {
         const slate = slateOf(row.pending_approvers);
-        const waitingOn = slate.length ? await labels.slateLabels(slate) : null;
+        const waitingOn = slate.length ? slateLabelOf(slate.map((slot) => named.get(slot) ?? null)) : null;
         if (waitingOn) patch.pending_approver_labels = waitingOn;
       }
       if (!Object.keys(patch).length) continue;
-      await engine.update('sys_approval_request', { id, ...patch }, { context: SYSTEM_CONTEXT });
+      await engine.update('sys_approval_request', { id, ...patch, ...keptStamp(row) }, { context: PRESERVING_CONTEXT });
       requestsFilled++;
     }
   }
@@ -153,7 +187,7 @@ export async function backfillApprovalDisplayLabels(
   const actions = keysetWalk<Record<string, unknown>>(
     (q) => engine.find('sys_approval_action', {
       ...q,
-      fields: ['id', 'request_id', 'step_name', 'acted_as', 'step_label', 'object_name', 'record_id', 'acted_as_label'],
+      fields: ['id', 'request_id', 'step_name', 'acted_as', 'step_label', 'object_name', 'record_id', 'acted_as_label', 'updated_at'],
       context: SYSTEM_CONTEXT,
     }) as Promise<Record<string, unknown>[]>,
     {
@@ -183,6 +217,10 @@ export async function backfillApprovalDisplayLabels(
         if (pid) parents.set(pid, p);
       }
     }
+    const named = await pageLabels(
+      labels,
+      rows.filter((row) => !nonEmpty(row.acted_as_label)).map((row) => nonEmpty(row.acted_as)).filter((v): v is string => v !== null),
+    );
     for (const row of rows) {
       const id = nonEmpty(row.id);
       if (!id) continue;
@@ -196,11 +234,11 @@ export async function backfillApprovalDisplayLabels(
       if (parent && !nonEmpty(row.record_id) && nonEmpty(parent.record_id)) patch.record_id = parent.record_id;
       const actedAs = nonEmpty(row.acted_as);
       if (actedAs && !nonEmpty(row.acted_as_label)) {
-        const [actedAsLabel] = await labels.slotLabels([actedAs]);
+        const actedAsLabel = named.get(actedAs) ?? null;
         if (actedAsLabel) patch.acted_as_label = actedAsLabel;
       }
       if (!Object.keys(patch).length) continue;
-      await engine.update('sys_approval_action', { id, ...patch }, { context: SYSTEM_CONTEXT });
+      await engine.update('sys_approval_action', { id, ...patch, ...keptStamp(row) }, { context: PRESERVING_CONTEXT });
       actionsFilled++;
     }
   }

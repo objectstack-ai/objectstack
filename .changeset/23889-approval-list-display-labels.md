@@ -18,14 +18,14 @@ The Requests and Action History lists are generic list views. They show stored c
 
 - `step_label`: the request's step label.
 - `object_name` + `record_id`: the request's record pointer (`record_id` declares `referenceVia: 'object_name'`), so a list can name the record.
-- `acted_as_label`: `acted_as` labelled the same way as the waiting-on column. It is null exactly when `acted_as` is null.
+- `acted_as_label`: `acted_as` labelled the same way as the waiting-on column. It is null when `acted_as` is null, and also while a person slot's name could not be read (see below).
 - The list views: `step_label` replaces `step_name` in `recent`, `all_actions` and `by_actor`. `recent` and `all_actions` add the record pointer and show `acted_as_label` in place of `acted_as`.
 
 The inbox door's `process_label` / `step_label` now read the new columns first. They fall back to the config snapshot for rows opened earlier, so what they serve is unchanged.
 
 **Read security.** Every new value is either a column of the request the row's readers can already read, or a name the approvals door already serves those readers for that request: `pending_approver_names`, and the timeline's names. The names come from the same resolver, under the same system read. The generic data door serves both objects only to the callers the approvals door would serve.
 
-**Rows written before this release are filled at boot.** A new boot-time pass runs on `kernel:ready`, after the action-slot repair. It fills the new columns on rows that hold null, writing only into null columns, so it never overwrites a value a live writer stored. A second boot writes nothing.
+**Rows written before this release are filled at boot.** A new boot-time pass runs on `kernel:ready`, after the action-slot repair. It fills the new columns on rows that hold null, writing only into null columns, so it never overwrites a value a live writer stored. Every row it fills keeps its own `updated_at`: the write passes the stored value back under `preserveAudit`, so the request lists, which sort on `updated_at`, keep their order. The action-slot repair's writes keep it the same way. Where `plugin-audit` is composed, the first boot after the upgrade writes one system audit entry per row it fills. A second boot writes nothing.
 
 - On every request, the flow and step labels come from the chain the approvals door serves: the authored labels the config snapshot carries, else the humanized machine name. The list and the inbox therefore show the same label for the same row, and no request is left blank.
 - On a pending request, whom it waits on is filled.

@@ -90,7 +90,7 @@ import {
   slateNamesAPerson,
   type ActingCaller,
 } from './approver-address.js';
-import { labelOrMachineName, requestDisplayLabels } from './display-labels.js';
+import { labelOrMachineName, requestDisplayLabels, slateLabelOf } from './display-labels.js';
 import type { SlotLabelSource } from './display-label-backfill.js';
 import {
   redactSnapshot,
@@ -1529,7 +1529,6 @@ export class ApprovalService implements IApprovalService {
     // reads it — `findChildRequestId`, shared with that method.
     SLOT_LABELS.set(this, {
       slotLabels: (slots) => this.slotLabels(slots),
-      slateLabels: (slate) => this.slateLabels(slate),
     });
     REQUEST_VISIBILITY.set(this, {
       visibleRequestIdsFor: async (context, target) => {
@@ -6743,8 +6742,7 @@ export class ApprovalService implements IApprovalService {
    */
   private async slateLabels(slate: readonly string[]): Promise<string | null> {
     if (!slate.length) return null;
-    const labels = await this.slotLabels(slate);
-    return labels.some((label) => label === null) ? null : labels.join(', ');
+    return slateLabelOf(await this.slotLabels(slate));
   }
 
   /**

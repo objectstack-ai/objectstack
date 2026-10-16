@@ -71,3 +71,14 @@ export function requestDisplayLabels(row: Record<string, unknown>): {
     current_step_label: label(row.current_step_label) ?? labelOrMachineName(cfg?.__nodeLabel, row.current_step),
   };
 }
+
+/**
+ * `sys_approval_request.pending_approver_labels` from the slate's slot labels,
+ * in slate order: joined with ", ", or null when the slate is empty or any
+ * slot's label is null (its name could not be read). The live writers and the
+ * boot backfill both join through here.
+ */
+export function slateLabelOf(labels: ReadonlyArray<string | null>): string | null {
+  if (!labels.length || labels.some((label) => label === null)) return null;
+  return labels.join(', ');
+}
