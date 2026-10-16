@@ -1194,7 +1194,7 @@ function reconcileOwnership() {
       'a package command filters to its owner',
       ownerRunCommand(DEFAULT_OWNER, 'gen:x') === `pnpm --filter ${DEFAULT_OWNER} gen:x`,
     ],
-    ['a spawn asks for silence', ownerRunCommand(ROOT_OWNER, 'check:x', { silent: true }) === 'pnpm -s check:x'],
+    ['a spawn asks for silence', ownerRunCommand(ROOT_OWNER, 'check:x', { silent: true }) === 'pnpm --silent check:x'],
   ];
 
   const failures = cases.filter(([, ok]) => !ok).map(([name]) => name);
@@ -1715,7 +1715,7 @@ function endToEndWorktreeRefusal() {
     const target = REGEN_ARTIFACTS[0].path;
     const gateScript = REGEN_ARTIFACTS[0].check;
 
-    /* The stub gate, and the pin that keeps it honest. `pnpm -s` resolves its own
+    /* The stub gate, and the pin that keeps it honest. `pnpm --silent` resolves its own
      * version from the manifest of the directory it runs in, so a fixture with no
      * `packageManager` grades whatever Corepack resolves as `latest` instead of the
      * pnpm this repository pins — the same trap `check-regen-pending.mjs`'s fixture

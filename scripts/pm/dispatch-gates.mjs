@@ -9316,7 +9316,7 @@ export function governedReadCensus({ files = null, read = null } = {}) {
  * quoted literal that `resolvePathExpression` refuses by construction, so
  * admitting them would add a scan that cannot return a target: dead code that
  * reads as coverage. Live specimens of the refused class in this tree, both
- * shell-quoted: `pnpm -s ${script}` and `git rev-parse --show-toplevel`.
+ * shell-quoted: `pnpm --silent ${script}` and `git rev-parse --show-toplevel`.
  *
  * THE PROGRAM POSITION ONLY — argument 0, plus the elements of an argv ARRAY
  * LITERAL in argument 1. That is where a program path is; an options object is

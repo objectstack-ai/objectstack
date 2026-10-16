@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect } from 'vitest';
+import { ObjectSchema } from '@objectstack/spec/data';
 import { SysApprovalRequest } from './sys-approval-request.object.js';
 
 /**
@@ -47,5 +48,32 @@ describe('sys_approval_request — declared pointer pair (#11386)', () => {
     // back-filled by pass 2 the way an optional one is.
     expect(fields.record_id.required).toBe(true);
     expect(fields.object_name.required).toBe(true);
+  });
+});
+
+/**
+ * The pointer's tombstone predicate — objectui#12489 ruling, letter A.
+ *
+ * When the platform voids a `pending` request because its record was deleted
+ * (`cancelled` + `cancel_reason: 'record_deleted'`), `record_id` names a record
+ * that no longer exists. `referenceDeletedWhen` is the object's own assertion of
+ * that, so a renderer draws the sibling option's label instead of a link to
+ * nothing. The spec refuses the declaration at parse unless the sibling is a
+ * single-value `select` holding the option, so the parse is half of the pin.
+ */
+describe('sys_approval_request — record_id tombstone predicate', () => {
+  const fields = SysApprovalRequest.fields as Record<string, Record<string, unknown>>;
+
+  it('declares record_id as deleted when cancel_reason holds record_deleted', () => {
+    expect(fields.record_id.referenceDeletedWhen).toEqual({ field: 'cancel_reason', value: 'record_deleted' });
+  });
+
+  it('names a sibling select that declares that option, and the object parses through ObjectSchema', () => {
+    expect(fields.cancel_reason.type).toBe('select');
+    expect(fields.cancel_reason.options).toEqual(
+      expect.arrayContaining([expect.objectContaining({ value: 'record_deleted' })]),
+    );
+    const parsed = ObjectSchema.safeParse(SysApprovalRequest);
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);
   });
 });

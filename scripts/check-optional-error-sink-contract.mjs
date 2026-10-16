@@ -160,11 +160,12 @@
  *
  * ### Scope: `packages/**` only
  *
- * These are the contracts plugins and services PUBLISH. `examples/**` holds one
- * further red sink (`app-showcase/src/system/server/recalc-endpoint.ts`) — a
- * consumer's local shape, not a contract anyone implements. Stated with its
- * number rather than left to silence, so widening the scan is a decision
- * someone can make with the count in hand.
+ * These are the contracts plugins and services PUBLISH. `examples/**` holds no
+ * further red sink today (its one, the showcase's imperative recalc route, was
+ * deleted) — and any it gains would be a consumer's local shape, not a
+ * contract anyone implements. Stated with its number rather than left to
+ * silence, so widening the scan is a decision someone can make with the count
+ * in hand.
  *
  * ## The baseline is a shrink-only ledger, and it is NOT an exemption list
  *

@@ -331,6 +331,8 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       'kind',
     ),
   ],
+  // #23650: retired after 17.7.0, so the v18 train's major.
+  'page-header-show-star-removed': [tombstone(PageHeaderProps, 'page:header', 'showStar')],
   // #23543 F3: a loose `config` key under a sibling-block node type, refused by
   // the flow parse; the node's block is complete, so the key is the only issue.
   'flow-node-wait-event-config-lift': [

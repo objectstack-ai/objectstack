@@ -11,8 +11,9 @@ import type { SemanticMigration } from '../../types.js';
 // `z.unknown()` (the form draws a `{ name }` field entry and an inline runtime
 // field inside a section, which the typed shapes would refuse), and
 // `customFields` waits for the spec to declare objectui's runtime form field.
-// D3 only: page-component `properties` is not parsed on the metadata save or
-// load path, so a stored page is never refused at load; an off-shape value has no
+// D3 only: page-component `properties` is not parsed on the metadata load path,
+// so a stored page is never refused at load (its next save meets the
+// component-props gate at the metadata save door); an off-shape value has no
 // rewrite that says what the author meant; and the authored census found no
 // authored value to respell — the refused values are fixtures probing that the
 // form refuses them.

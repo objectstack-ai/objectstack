@@ -715,8 +715,9 @@ export const PageHeaderProps = strictObject({
    * Which of the two page-header layouts the renderer builds (#6776).
    *
    * ON (the default) the header carries the **record chrome**: the title
-   * renders as a record chip with the follow star and the copy-record-id
-   * button beside it. OFF it falls back to a bare heading — one title line and
+   * renders as a record chip with the copy-record-id button beside it (the
+   * follow star draws there only where a host wires a favorites toggle; the
+   * reference console's favorites entry is the header's ⋯ menu). OFF it falls back to a bare heading — one title line and
    * nothing record-shaped — which is what a dashboard or a landing page wants,
    * since there is no record for the chip to describe.
    *
@@ -730,20 +731,38 @@ export const PageHeaderProps = strictObject({
    * authorities disagreeing about one key (#5435).
    */
   recordChrome: z.boolean().default(true).describe(
-    'Render the record chrome — the title as a record chip with its follow star and copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout.',
+    'Render the record chrome — the title as a record chip with its copy-id button. Set false on a non-record page (dashboard, landing) to fall back to the bare heading layout.',
   ),
   /**
-   * Follow (favourite) star beside the record title — `RecordTitleChip
-   * showStar` (#6776). Part of the record chrome, so it has no effect when
-   * `recordChrome` is false. Read by the header renderer and consumed by the
-   * record chip (read points recorded in `liveness/page.json`, row `regions`).
+   * REMOVED (#23650, ADR-0049 enforce-or-remove through the ADR-0087 D2 route,
+   * the way `breadcrumb` above left this row; ruling record 6203775759,
+   * letter A).
+   *
+   * A switch for a star the reference console no longer draws. Since
+   * objectui#12427 the record chip draws the follow star only where the HOST
+   * wires a favorites toggle into the record context (`onToggleFavorite`),
+   * and no reference host does: the record's favorites entry is the header's
+   * ⋯ overflow menu. So `showStar: true` (the default) drew nothing and
+   * `showStar: false` hid nothing. No example app, skill or doc authored it.
+   *
+   * The host hook stays: objectui's `RecordContextValue.onToggleFavorite` is a
+   * host opt-in of the published component library, untouched by this
+   * retirement — what leaves is the metadata switch over it.
+   *
+   * Stored and built pages that carry the key (`true` or `false`) are stripped
+   * by the D2 conversion `page-header-show-star-removed`, with a notice.
    */
-  showStar: z.boolean().default(true).describe(
-    'Show the follow (favourite) star beside the record title. Part of the record chrome — no effect when `recordChrome` is false.',
+  showStar: retiredKey(
+    '`page:header` property `showStar` was removed in @objectstack/spec 18 (ADR-0087 D2) — '
+    + 'the reference console draws no star beside the record title, so the key switched nothing: '
+    + 'the record\'s favorites entry is the header\'s ⋯ menu, and metadata does not control it. '
+    + 'Delete the key, whether it was `true` or `false`; the ⋯ menu\'s favorites entry is unchanged. '
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
   /**
    * Copy-record-id button beside the record title — `RecordTitleChip
-   * showCopyId` (#6776). Same record-chrome scoping as `showStar`. Read by the
+   * showCopyId` (#6776). Part of the record chrome, so it has no effect when
+   * `recordChrome` is false. Read by the
    * header renderer and consumed by the record chip (read points recorded in `liveness/page.json`, row `regions`).
    */
   showCopyId: z.boolean().default(true).describe(
@@ -2548,6 +2567,77 @@ const RecordApprovalsProps = strictObject({
       + 'it: the block reads the signed-in user itself.',
   },
 }, {});
+
+/**
+ * `record:json` (#23745, the spec half of face 4 of objectui#12438's ruling,
+ * letter C): one key of the bound record, drawn as indented JSON in a panel
+ * that starts collapsed, with a copy control. The worked case is the approval
+ * request page's raw request snapshot (`payload` on a `sys_approval_request`
+ * row), which only a caller holding `studio.access` may see.
+ *
+ * A NEW block rather than a widened one, on the ruling's own test ("A NEW block
+ * is opened only where no existing block can carry the face"): no declared
+ * block draws a record value as JSON, `record:details` draws JSON only for a
+ * DECLARED `json` field, and the gate this face needs fails CLOSED, which the
+ * record blocks' gate of the same name does not
+ * ({@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}, clause 5). That
+ * shared gate is left exactly as it is.
+ *
+ * Declared spec first, like `record:approval_decision`: no renderer draws it
+ * and no page authors it on the day it lands. objectui registers the renderer,
+ * and plugin-approvals places it on the request page, after this declaration.
+ *
+ * Three keys, all of them the renderer's whole contract:
+ *
+ *  - `field` — the key to draw. It is NOT judged against the object's
+ *    declared fields (it has no entry in `@objectstack/lint`'s
+ *    `COMPONENT_FIELD_SPECS`), because the key this block exists for is one
+ *    the read route serves beside the declared fields: the request's
+ *    `payload` is parsed from the declared column `payload_json`, which is
+ *    never served under its own name. `attachedOnRead` on the object does not
+ *    describe such a key either — it declares per-caller blocks with a fixed
+ *    set of scalar leaves, and a snapshot's leaves are the source record's
+ *    fields. So a misspelled `field` draws nothing, and nothing at publish
+ *    says so.
+ *  - `label` — the collapsed panel's summary line.
+ *  - `requiredPermissions` — REQUIRED, and fail-CLOSED: see the describe.
+ *    Presentation only, like every block-level gate: it authorises nothing.
+ */
+export const RecordJsonProps = strictObject({
+  surface: 'this `record:json`',
+  history: PROPS_HISTORY,
+  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
+  aliases: {
+    key: 'field', path: 'field', fieldName: 'field',
+    title: 'label', summary: 'label',
+    permissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
+  },
+}, {
+  field: z.string()
+    .regex(/^[a-z_][a-z0-9_]*$/, {
+      message: 'record:json `field` must be a lowercase snake_case key of the bound record (e.g. "payload").',
+    })
+    .describe(
+      'The key of the bound record whose value this block draws as indented JSON, in a panel that starts '
+      + 'collapsed, with a copy control. A declared field, or a key the record\'s read route serves beside '
+      + 'the declared fields (`payload` on a `sys_approval_request` row). It is NOT checked against the '
+      + 'object\'s fields: a key with no value on the served record draws nothing, so a misspelled `field` '
+      + 'draws nothing and no publish check reports it.',
+    ),
+  label: I18nLabelSchema.optional().describe(
+    'The collapsed panel\'s summary line — a string or an inline locale map (renderer default: "Raw data (JSON)").',
+  ),
+  requiredPermissions: z.array(z.string().min(1)).min(1).describe(
+    '[ADR-0066] REQUIRED, at least one. Capabilities the user must ALL hold — names that permission sets grant '
+    + 'through `systemPermissions`, not object actions. It fails CLOSED, unlike the record blocks\' gate of the '
+    + 'same name: a client that cannot resolve the user\'s capabilities (no permission provider, or one that '
+    + 'does not report `systemPermissions`) draws nothing, and so does a user missing any of them — no notice, '
+    + 'no summary line, no empty panel. '
+    + 'Presentation only: it authorises nothing, and the read route still serves the value to the same user. '
+    + 'To keep a value from a user, gate the object, the field or the route.',
+  ),
+});
+export type RecordJsonProps = z.input<typeof RecordJsonProps>;
 
 export const PageAccordionProps = strictObject({
   surface: 'this `page:accordion`',
@@ -5225,10 +5315,11 @@ export const ObjectGridPropsSchema = lazySchema(() => strictObject({
    * own retirement text) and a key the block does not declare.
    *
    * No conversion lifts the array: it never worked on this surface. Read by the
-   * component-props gate (refused as an error); a stored page still saves and
-   * loads, because page-component `properties` is not parsed on the metadata
-   * save or load path (the `ui-object-grid-export-options-closed` semantic
-   * entry).
+   * component-props gate (refused as an error) on `os validate`, `os build`
+   * and `os lint` and at the metadata save door. A stored page still loads,
+   * because page-component `properties` is not parsed on the metadata load
+   * path, and its next save meets the component-props gate at the save door
+   * (the `ui-object-grid-export-options-closed` semantic entry).
    */
   exportOptions: ListViewExportOptionsSchema.optional()
     .describe("Export config — the object `{ formats?, maxRecords?, includeHeaders?, fileNamePrefix?, streaming? }`, the same block a list view's `exportOptions` declares, with `formats` drawn from `csv`, `xlsx` and `json`. A bare format array is refused: the grid reads `exportOptions.formats`, so write `{ formats: ['csv', 'xlsx'] }`"),
@@ -8233,6 +8324,13 @@ export const ComponentPropsMap = {
   //    attributes it reads are node-level, never `properties`.
   'record:approvals': RecordApprovalsProps,
   'record:attachments': emptyProps('record:attachments'),
+  // #23745 — one key of the bound record drawn as indented JSON, behind a
+  // REQUIRED, fail-closed `requiredPermissions` gate (objectui#12438 ruling,
+  // letter C, face 4). A `PageComponentType` member declared spec first, as
+  // `record:approval_decision` was: no renderer and no authored page yet, so
+  // the key set is the declared contract the renderer is built to, not a
+  // measurement of read points. See the schema's own header.
+  'record:json': RecordJsonProps,
 
   // Navigation
   'app:launcher': emptyProps('app:launcher'),

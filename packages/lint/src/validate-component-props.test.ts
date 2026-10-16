@@ -93,6 +93,25 @@ describe('validateComponentProps — undeclared keys', () => {
     }
   });
 
+  // #23650 — `PageHeaderProps.showStar` is a retiredKey tombstone, the
+  // `breadcrumb` route one key over: the reference console draws no star, and
+  // the record's favorites entry is the header's ⋯ menu. It replaces the
+  // acceptance this file used to pin for `showStar: false` (#6776, below).
+  it('refuses a retired page-header `showStar` as an error carrying the prescription, for `true` and `false`', () => {
+    for (const showStar of [true, false]) {
+      const findings = validateComponentProps(
+        stackWith([{ type: 'page:header', properties: { title: 'T', showStar, showCopyId: false } }]),
+      );
+      expect(findings, `showStar: ${showStar}`).toHaveLength(1);
+      const [f] = findings;
+      expect(f.rule).toBe('component-props-invalid');
+      expect(f.severity).toBe('error');
+      expect(f.path).toBe('pages[0].regions[0].components[0].properties.showStar');
+      expect(f.message).toContain('`page:header` property `showStar` was removed in @objectstack/spec 18');
+      expect(f.message).toContain('the record\'s favorites entry is the header\'s ⋯ menu, and metadata does not control it');
+    }
+  });
+
   // #21589 — an `object-master-detail-form` detail entry's `sortField` is a
   // retiredKey tombstone, one array level down. The same door and, since
   // #23026, the same refusal: an error that names the entry's key.
@@ -535,7 +554,9 @@ describe('validateComponentProps — value verdicts', () => {
         // objectui `apps/console/src/preview-samples.ts:68` verbatim — the
         // measured warning site, on a non-record page.
         { type: 'page:header', properties: { title: 'Welcome to the CRM', recordChrome: false } },
-        { type: 'page:header', properties: { title: 'Lead', showStar: false, showCopyId: false } },
+        // `showStar` left this shape at 18 (#23650, a tombstone now refused
+        // below); its live sibling stays.
+        { type: 'page:header', properties: { title: 'Lead', showCopyId: false } },
         { type: 'page:accordion', properties: { items: [], variant: 'card' } },
         { type: 'page:tabs', properties: { tabStyle: 'card', items: [] } },
       ]),

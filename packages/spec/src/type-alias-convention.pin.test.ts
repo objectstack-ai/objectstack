@@ -277,7 +277,7 @@ import type * as M189 from './system/fate-supplement.zod.js';
 import type * as M190 from './kernel/execution-context.zod.js';
 
 // ---------------------------------------------------------------------------
-// 787 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
+// 788 isomorphic aliases: `z.input` === `z.infer`, so no `XParsed` is declared.
 //
 // That number is machine-checked, not hand-kept. The runtime companion at the
 // bottom of this file recomputes the pin count from the source and asserts that
@@ -1520,11 +1520,14 @@ export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.Char
 // default-free on the same principle: the renderer's one-column and
 // "No details" fallbacks stay the renderer's facts. Its five sibling rows from
 // that card carry an expression or a filter rule and declare `XParsed` instead.
+// #23745 — `record:json` (`RecordJsonProps`), default-free and transform-free:
+// the renderer's "Raw data (JSON)" summary-line fallback stays the renderer's.
 export type Iso_ui_component__ElementDefinitionListPropsSchema = Assert<Eq< z.input< typeof M170.ElementDefinitionListPropsSchema >, z.infer< typeof M170.ElementDefinitionListPropsSchema > >>;
 export type Iso_ui_component__PageContainerProps = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
 export type Iso_ui_component__RecordAlertActionSchema = Assert<Eq< z.input< typeof M170.RecordAlertActionSchema >, z.infer< typeof M170.RecordAlertActionSchema > >>;
 export type Iso_ui_component__RecordHighlightsField = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
 export type Iso_ui_component__RecordHistoryProps = Assert<Eq< z.input< typeof M170.RecordHistoryProps >, z.infer< typeof M170.RecordHistoryProps > >>;
+export type Iso_ui_component__RecordJsonProps = Assert<Eq< z.input< typeof M170.RecordJsonProps >, z.infer< typeof M170.RecordJsonProps > >>;
 export type Iso_ui_component__RecordPathProps = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer< typeof M170.RecordPathProps > >>;
 export type Iso_ui_component__RecordQuickActionsProps = Assert<Eq< z.input< typeof M170.RecordQuickActionsProps >, z.infer< typeof M170.RecordQuickActionsProps > >>;
 export type Iso_ui_component__RecordReferenceRailProps = Assert<Eq< z.input< typeof M170.RecordReferenceRailProps >, z.infer< typeof M170.RecordReferenceRailProps > >>;
@@ -1699,7 +1702,7 @@ describe('ADR-0122 type-alias convention', () => {
   // this title and the section header above the pin list — are now asserted
   // against the recomputed count below, so neither can go stale without a red
   // test naming it.
-  it('still declares all 787 isomorphic pins', () => {
+  it('still declares all 788 isomorphic pins', () => {
     // The truth of each pin is proved by tsc, not here — an `Assert<Eq<...>>`
     // that stops holding is a compile error with the alias named. What tsc
     // cannot notice is a pin that was DELETED: removing the assertion removes
@@ -2526,7 +2529,13 @@ describe('ADR-0122 type-alias convention', () => {
     // `kernel/execution-context.zod.ts`) are plain string enums, so both are
     // pinned here (Iso_kernel_executionContext__*) rather than given
     // `…Parsed` synonyms. +2 added.
-    expect(pins).toHaveLength(787);
+    //
+    // 787 -> 788 is #23745: `RecordJsonProps` (`record:json`) — a snake_case
+    // string, an `I18nLabelSchema` union and a string array, with no default
+    // and no transform anywhere in its tree, so it is pinned here
+    // (Iso_ui_component__RecordJsonProps) rather than given a `…Parsed`
+    // synonym. +1 added.
+    expect(pins).toHaveLength(788);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either

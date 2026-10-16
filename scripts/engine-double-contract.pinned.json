@@ -902,7 +902,7 @@
       "pinned": 1
     },
     {
-      "file": "packages/metadata-protocol/src/protocol.lock-one-resolution.test.ts",
+      "file": "packages/metadata-protocol/src/protocol.lock-one-resolution.kit.test.ts",
       "verb": "findOne",
       "pinned": 1
     },

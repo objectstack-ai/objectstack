@@ -86,6 +86,64 @@ export interface ApiKeyLifecyclePolicy {
     startedAt?: string;
 }
 
+/**
+ * [#23772] The longest life, in seconds, of a session minted by
+ * {@link IAuthService.mintPrincipalSession}. A fixed ceiling, not a setting:
+ * a caller may ask for less, and an ask for more is refused rather than
+ * clamped. Long enough for one headless render (a browser launch, a page
+ * load and a print, measured at about 1.3 s on a local executable), short
+ * enough that a credential which leaves the process expires on its own.
+ */
+export const PRINCIPAL_SESSION_MAX_TTL_SECONDS = 120;
+
+/** [#23772] What a caller of {@link IAuthService.mintPrincipalSession} may ask. */
+export interface PrincipalSessionMintOptions {
+    /**
+     * The session's life in whole seconds, from 1 to
+     * {@link PRINCIPAL_SESSION_MAX_TTL_SECONDS}; the ceiling when omitted. A
+     * value outside that range is refused (`VALIDATION_ERROR` / `400`).
+     */
+    ttlSeconds?: number;
+}
+
+/**
+ * [#23772] The session cookie of a minted principal session, under the name
+ * and attributes the auth service gives its own session cookie (the
+ * deployment's cookie prefix and, on a secure deployment, `__Secure-`).
+ */
+export interface PrincipalSessionCookie {
+    /** The cookie name. */
+    name: string;
+    /** The signed cookie value, ready to send. */
+    value: string;
+    /** The cookie path. */
+    path: string;
+    /** Whether the cookie is `HttpOnly`. */
+    httpOnly: boolean;
+    /** Whether the cookie is `Secure`. */
+    secure: boolean;
+    /** The `SameSite` attribute, when the auth service sets one. */
+    sameSite?: 'lax' | 'strict' | 'none';
+    /** The cookie domain, when the auth service sets one (cross-subdomain cookies). */
+    domain?: string;
+}
+
+/** [#23772] A short-lived session minted for the requesting user's own principal. */
+export interface PrincipalSession {
+    /** The session as a bearer credential: send it as `Authorization: Bearer <token>`. */
+    token: string;
+    /** The same session as the auth service's session cookie. */
+    cookie: PrincipalSessionCookie;
+    /** When the session ends (ISO 8601). Reading the session never moves it. */
+    expiresAt: string;
+    /**
+     * End the session now. Afterwards neither {@link token} nor
+     * {@link cookie} resolves a session. Bound to this session alone, and
+     * safe to call more than once; call it in a `finally`.
+     */
+    revoke(): Promise<void>;
+}
+
 export interface IAuthService {
     /**
      * Handle an incoming HTTP authentication request
@@ -237,6 +295,32 @@ export interface IAuthService {
      * resolver has always called it through `any`.
      */
     verifyMcpAccessToken?(token: string): Promise<{ userId: string; scopes: string[]; clientId?: string } | undefined>;
+
+    /**
+     * [#23772] Mint a short-lived session for the requesting user's OWN
+     * principal, so an in-process service can act as that user through a
+     * door that only accepts a session (a headless browser rendering a page
+     * the user may see). In-process only; no HTTP route reaches it.
+     *
+     * Human principals only. Every refusal is thrown before anything is
+     * minted, carrying `code` and `status`: a context with no user, a system
+     * context, or a principal that is not `human` answers
+     * `PERMISSION_DENIED` / `403`, as does a user row that is not a human
+     * (the system user) or is banned; a principal an authentication policy
+     * holds (`authGate`, carried or computed now) answers `403` with the
+     * posture's own code; a `ttlSeconds` outside its range answers
+     * `VALIDATION_ERROR` / `400`.
+     *
+     * The session lives at most {@link PRINCIPAL_SESSION_MAX_TTL_SECONDS}, is
+     * never renewed by a read on either lane (cookie or bearer), carries the
+     * context's `tenantId` as its active organization, and ends at
+     * {@link PrincipalSession.revoke}.
+     *
+     * @param context - The requesting user's execution context
+     * @param options - The session's life, at most the ceiling
+     * @returns The session as a bearer token and a cookie, with its revoke
+     */
+    mintPrincipalSession?(context: ExecutionContext, options?: PrincipalSessionMintOptions): Promise<PrincipalSession>;
 }
 
 /**
