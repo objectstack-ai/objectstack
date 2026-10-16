@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import type { IAuthService, AuthResult, AuthUser } from './auth-service';
+import type { IAuthService, AuthResult, AuthUser, PrincipalSession } from './auth-service';
+import { PRINCIPAL_SESSION_MAX_TTL_SECONDS } from './auth-service';
 
 describe('Auth Service Contract', () => {
   it('should allow a minimal IAuthService implementation with required methods', () => {
@@ -113,5 +114,22 @@ describe('Auth Service Contract', () => {
 
     expect(service.getMcpResourceUrl).toBeUndefined();
     expect(service.getMcpResourceMetadataUrl).toBeUndefined();
+  });
+  // [#23772] The principal-session mint is OPTIONAL: an auth service that
+  // cannot mint a session keeps satisfying the contract unchanged, and a
+  // consumer reads its absence as "no mint here", never as a failed mint.
+  it('should keep mintPrincipalSession optional, with a fixed TTL ceiling', async () => {
+    const minimal: IAuthService = { handleRequest: async () => new Response('OK'), verify: async () => ({ success: false }) };
+    expect(minimal.mintPrincipalSession).toBeUndefined();
+    expect(PRINCIPAL_SESSION_MAX_TTL_SECONDS).toBe(120);
+
+    const minted: PrincipalSession = {
+      token: 't.sig',
+      cookie: { name: 'better-auth.session_token', value: 't.sig', path: '/', httpOnly: true, secure: false, sameSite: 'lax' },
+      expiresAt: '2099-01-01T00:00:00Z',
+      revoke: async () => {},
+    };
+    const service: IAuthService = { ...minimal, mintPrincipalSession: async () => minted };
+    expect((await service.mintPrincipalSession!({ userId: 'u1', positions: [], permissions: [], isSystem: false }, { ttlSeconds: 60 })).cookie.name).toBe('better-auth.session_token');
   });
 });

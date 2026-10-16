@@ -51,7 +51,14 @@ import {
   resolveUserAuthzGrants,
 } from '@objectstack/core';
 import type { AuthGate } from '@objectstack/core';
-import type { ApiKeyLifecyclePolicy, IEmailService, ISmsService } from '@objectstack/spec/contracts';
+import type { ExecutionContext } from '@objectstack/spec/kernel';
+import type {
+  ApiKeyLifecyclePolicy,
+  IEmailService,
+  ISmsService,
+  PrincipalSession,
+  PrincipalSessionMintOptions,
+} from '@objectstack/spec/contracts';
 import {
   readEnvWithDeprecation,
   resolveTenancyPosture,
@@ -95,6 +102,11 @@ import {
   VENDOR_ROLE_SCALAR_ADMIN_PATHS,
 } from './admin-impersonate-endpoint.js';
 import { judgeHeldSession } from './platform-admin-gate.js';
+import {
+  holdPrincipalSessionExpiry,
+  mintPrincipalSession,
+  type PrincipalSessionAuthContext,
+} from './principal-session-mint.js';
 import {
   applyDeclaredInvitationVerificationToListing,
 } from './list-user-invitations-verification.js';
@@ -7837,6 +7849,31 @@ export class AuthManager {
       );
       return result;
     };
+    // [#23772] A minted principal session is NEVER renewed. better-auth's
+    // `get-session` renews any session past `updateAge` to `now + expiresIn`,
+    // a short session from its first read, and on the bearer lane nothing
+    // client-side can stop it (no dont-remember cookie rides a bearer). Every
+    // renewal is one `internalAdapter.updateSession`, so the guard sits on
+    // that write — the cookie lane, the bearer lane and the in-process
+    // `getSession` alike, under secondary storage too
+    // (`principal-session-mint.ts`, `holdPrincipalSessionExpiry`). A host
+    // hook chains FIRST and its `false` (abort) is honoured; the guard then
+    // judges what the host left.
+    const hostSessionUpdateBefore = (host as any)?.session?.update?.before;
+    const sessionUpdateBefore = async (update: any, ctx: any) => {
+      let draft = update;
+      if (hostSessionUpdateBefore) {
+        const hostResult = await hostSessionUpdateBefore(update, ctx);
+        if (hostResult === false) return false;
+        if (hostResult && typeof hostResult === 'object' && 'data' in hostResult) {
+          draft = { ...draft, ...(hostResult as any).data };
+        }
+      }
+      const held = holdPrincipalSessionExpiry(draft, ctx);
+      if (held) return { data: held };
+      return draft === update ? undefined : { data: draft };
+    };
+
     const hostSessionDeleteAfter = (host as any)?.session?.delete?.after;
     const sessionDeleteAfter = async (session: any, ctx: any) => {
       const result = hostSessionDeleteAfter ? await hostSessionDeleteAfter(session, ctx) : undefined;
@@ -7937,6 +7974,10 @@ export class AuthManager {
           // key is absent rather than explicitly `undefined`.
           ...(sessionBefore ? { before: sessionBefore } : {}),
           after: sessionCreateAfter,
+        },
+        update: {
+          ...((host as any)?.session?.update ?? {}),
+          before: sessionUpdateBefore,
         },
         delete: {
           ...((host as any)?.session?.delete ?? {}),
@@ -8287,6 +8328,28 @@ export class AuthManager {
       inactivityDays: days(this.config.apiKeyInactivityDays, API_KEY_INACTIVITY_DAYS, 0),
       ...(startedAt ? { startedAt } : {}),
     };
+  }
+
+  /**
+   * [#23772] `IAuthService.mintPrincipalSession`: a short-lived session for
+   * the requesting user's own principal, in-process only (no route reaches
+   * it). Human principals only, refused before anything is minted; at most
+   * `PRINCIPAL_SESSION_MAX_TTL_SECONDS`; never renewed by a read on either
+   * lane (the `session.update.before` guard in `composeDatabaseHooks`); ended
+   * by the returned `revoke`. `principal-session-mint.ts` owns all of it.
+   */
+  public async mintPrincipalSession(
+    context: ExecutionContext,
+    options?: PrincipalSessionMintOptions,
+  ): Promise<PrincipalSession> {
+    return mintPrincipalSession(
+      {
+        authContext: async () => (await this.getAuthContext()) as PrincipalSessionAuthContext,
+        resolveUserAuthGates: (userId, opts) => this.resolveUserAuthGates(userId, opts),
+      },
+      context,
+      options,
+    );
   }
 
   public async resolveUserAuthGates(
