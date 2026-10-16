@@ -185,6 +185,9 @@ describe('ADR-0126 §7.3 at REGISTRATION — the arming gate declines a packaged
         expect(row).toMatchObject({ enabled: true, bound: false });
         expect(row?.reason).toContain("'shared_step'");
         expect(row?.reason).toContain('ADR-0126 §7.3');
+        // [#23842] The classifier rides beside the sentence: an admin remedy
+        // (enable the subflow), ⛔ neither a policy nor a binding defect.
+        expect(row?.unboundCause).toBe('disabled_subflow');
         const declined = declineWarnings(logger, 'vendor_process');
         expect(declined).toHaveLength(1);
         expect(declined[0]).toContain("'shared_step' (switched off in the activation ledger)");
@@ -230,6 +233,7 @@ describe('ADR-0126 §7.3 at REGISTRATION — the arming gate declines a packaged
 
         expect(trigger.isBound('vendor_process')).toBe(true);
         expect(stateOf(engine, 'vendor_process')?.reason).toBeUndefined();
+        expect(Object.keys(stateOf(engine, 'vendor_process') ?? {}), '[#23842] armed: the cause clears with the sentence').not.toContain('unboundCause');
         expect((await engine.execute('vendor_process')).success).toBe(true);
     });
 
