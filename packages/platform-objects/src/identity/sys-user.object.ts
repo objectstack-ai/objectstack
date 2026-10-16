@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
 
 /**
  * The BCP-47 shape `sys_user.locale` accepts — a 2–8 letter language subtag
@@ -105,7 +106,13 @@ export const SysUser = ObjectSchema.create({
       refreshAfter: true,
       params: [
         { field: 'email', required: true },
-        { field: 'role', objectOverride: 'sys_member', required: true },
+        // [ADR-0105 D8] The role picker offers only what this caller may
+        // grant: each option's `visibleWhen` is built from the same grant
+        // table the server's invitation role cap enforces
+        // (`INVITATION_ROLE_GRANTORS`), so a delegated_admin is offered
+        // `member` alone. Declared on the param, not inherited from the
+        // field, so the gate narrows this dialog and no other picker.
+        { field: 'role', objectOverride: 'sys_member', required: true, options: [...INVITATION_ROLE_OPTIONS] },
       ],
     },
 
