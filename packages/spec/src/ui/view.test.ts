@@ -625,7 +625,17 @@ describe('FormSectionSchema', () => {
     const result = FormSectionSchema.parse(section);
     expect(result.collapsible).toBe(false);
     expect(result.collapsed).toBe(false);
-    expect(result.columns).toBe(1);
+    // An undeclared density is the renderer's (by available width): the parse
+    // adds no `columns`, so "said nothing" stays distinguishable from `1`.
+    expect('columns' in result).toBe(false);
+  });
+
+  it('keeps a declared `columns` as the author\'s ceiling — string spellings parse to the number, out-of-range is refused', () => {
+    expect(FormSectionSchema.parse({ fields: ['name'], columns: 1 }).columns).toBe(1);
+    expect(FormSectionSchema.parse({ fields: ['name'], columns: '2' }).columns).toBe(2);
+    expect(FormSectionSchema.parse({ fields: ['name'], columns: 4 }).columns).toBe(4);
+    expect(FormSectionSchema.safeParse({ fields: ['name'], columns: 5 }).success).toBe(false);
+    expect(FormSectionSchema.safeParse({ fields: ['name'], columns: '0' }).success).toBe(false);
   });
 
   it('should accept form section with all properties', () => {

@@ -242,6 +242,12 @@ regions:
   are written in the vocabulary the schemas accept.
 </Callout>
 
+A section's `columns` has no default. Declared, it is the author's **ceiling**:
+at most that many fields per row where the container is wide enough, collapsed
+by the renderer on narrow containers — so `columns: 1` is how to keep a section
+single-column. Undeclared, the density is the **renderer's** choice by available
+width. No pixel or breakpoint value is part of the protocol.
+
 All layouts use a responsive grid that divides space into columns.
 
 ### Basic Grid Layout
