@@ -127,9 +127,12 @@ export async function runArtifactBootMigrationGate(opts: {
 
     // [#23816] A driver that declares its report must not be acted on
     // unattended gets this gate's "did not run" answer: warn, apply nothing,
-    // refuse nothing. The Turso REMOTE face declares one: its schema sync does
-    // not create a declared NOT NULL, so a healthy remote database reads as
-    // destructive drift, and the refusal's remedy cannot run on that transport.
+    // refuse nothing. The Turso REMOTE face declares one: a remote database its
+    // schema sync created in an earlier release lacks the NOT NULL its fields
+    // declare, so a healthy one can read as destructive drift; and [#23848]
+    // the refusal's remedy, `os migrate apply --allow-destructive`, now runs on
+    // that transport but applies only a column drop or an index change there,
+    // naming a tightening it cannot apply rather than performing it.
     // Read from the driver's declaration, never from its transport name.
     const caveat = driver.driftReportCaveat;
     if (typeof caveat === 'string' && caveat) {
