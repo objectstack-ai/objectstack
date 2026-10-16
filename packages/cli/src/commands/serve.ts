@@ -616,6 +616,62 @@ export function readComposedMcpRouteOwner(
 }
 
 /**
+ * The period of {@link holdKernelOnlyProcess}'s handle: the largest delay a
+ * Node timer accepts (2^31 - 1 ms, about 24.8 days). Its callback does nothing,
+ * so the period decides only how rarely the event loop wakes for it.
+ */
+const KERNEL_ONLY_HOLD_PERIOD_MS = 0x7fffffff;
+
+/**
+ * Keep a boot that composes no HTTP transport alive until its kernel stops
+ * (#23744).
+ *
+ * ## The defect this closes
+ *
+ * `os serve objectstack.config.ts --no-server --preset minimal`, in production
+ * with no `OS_DATABASE_URL`, printed its ready banner ending `Press Ctrl+C to
+ * stop` and then exited 0 by itself, milliseconds later, with no signal and
+ * without its kernel ever shutting down. On a composed boot the HTTP listener
+ * holds the event loop. With none composed, nothing this command owns did. The
+ * same command stayed up whenever the storage driver happened to keep a
+ * connection pool (`--dev --no-server`, or `--no-server` with
+ * `OS_DATABASE_URL` set): measured, the only ref'd handle on those boots was
+ * the SQL driver's pool-reaping interval. So whether a kernel-only boot stayed
+ * up depended on the driver, and nothing decided it.
+ *
+ * ## Why "stay up" and not "run and exit"
+ *
+ * - The banner says `Press Ctrl+C to stop`.
+ * - The kernel is built to own the process: under `gracefulShutdown` a signal
+ *   drains it and then exits.
+ * - The platform's background loops are `unref()`ed on purpose, so they never
+ *   keep a process alive by themselves (`DispatchLoop` in `@objectstack/core`).
+ *   The host decides the lifetime.
+ * - The run-and-exit kernel boot already exists, and is explicit:
+ *   `OS_MIGRATE_AND_EXIT=1` shuts the kernel down and exits before any banner.
+ *
+ * ## The mechanism
+ *
+ * One ref'd interval whose callback does nothing. It is a handle, not a
+ * timeout: it ends nothing and decides nothing. The kernel's own shutdown
+ * releases it (`onShutdown`), so the kernel's signal handling stays the only
+ * thing that ends the process, with the kernel's exit code. ⛔ No signal
+ * listener here: the kernel installs its own, and a second one is how one
+ * SIGTERM used to exit a process more than once (#22286).
+ *
+ * Returns the handle, for the pin that reads it.
+ */
+export function holdKernelOnlyProcess(
+  kernel: { onShutdown(handler: () => Promise<void>): void },
+): ReturnType<typeof setInterval> {
+  const hold = setInterval(() => {}, KERNEL_ONLY_HOLD_PERIOD_MS);
+  kernel.onShutdown(async () => {
+    clearInterval(hold);
+  });
+  return hold;
+}
+
+/**
  * The `objectstack:listening` IPC message the `os dev` parent waits for.
  *
  * Sent only when an HTTP transport is composed (#23743): its documented
@@ -5697,6 +5753,14 @@ export default class Serve extends Command {
 
       // Kernel already registers SIGINT/SIGTERM handlers during bootstrap.
       // No duplicate handler needed here — just keep the process alive.
+      //
+      // [#23744] On a composed boot the HTTP listener is what keeps it alive.
+      // With no transport composed (the SAME `httpServer` the banner and the
+      // publish site above read), nothing this command owns held the event
+      // loop: the process exited 0 milliseconds after a banner ending `Press
+      // Ctrl+C to stop`, unless the storage driver happened to keep a pool.
+      // Hold it until the kernel stops — see {@link holdKernelOnlyProcess}.
+      if (httpServer !== 'composed') holdKernelOnlyProcess(kernel);
 
     } catch (error: any) {
       restoreOutput();
