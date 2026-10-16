@@ -181,6 +181,7 @@ import {
     type SkippedManifestEntry,
 } from './local-manifest-source.js';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
+import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
 import type { IAuthService, IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
@@ -1124,8 +1125,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         if (!admission.ok) return admission.response;
         const userId = admission.userId;
 
-        let body: any = {};
-        try { body = await c.req.json(); } catch { /* empty body */ }
+        // [#23914] A declared JSON body that does not parse is refused 400,
+        // never read as no body (`./request-json-body.ts`).
+        const read = await readJsonRequestBody(c);
+        if (!read.ok) return read.response;
+        const body: any = read.body;
 
         // 0. [ADR-0131 D6] ⭐ THE REQUESTED INSTALL MODE, parsed against the
         //    manifest key's own enum (`InstallModeSchema`, by reference — never
