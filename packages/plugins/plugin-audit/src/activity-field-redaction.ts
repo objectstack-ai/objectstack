@@ -363,13 +363,13 @@ function reportOnce(engine: object, logger: ActivityRedactionLogger, key: string
   logger.warn(message);
 }
 
-/** The CURRENT `activityMilestones` declaration of `object`: its watched fields, or `[]`. */
+/**
+ * The CURRENT `activityMilestones` declaration of `object`: its watched fields,
+ * or `[]`. A definition that cannot be read throws, and the middleware denies
+ * the read (fail closed) rather than judge its milestone rows unread.
+ */
 function currentMilestoneWatched(engine: ActivityRedactionEngine, object: string): string[] {
-  try {
-    return declaredMilestoneWatchedFields(typeof engine.getSchema === 'function' ? engine.getSchema(object) : undefined);
-  } catch {
-    return [];
-  }
+  return declaredMilestoneWatchedFields(typeof engine.getSchema === 'function' ? engine.getSchema(object) : undefined);
 }
 
 /**
@@ -446,7 +446,11 @@ export async function computeWithheldRowFilter(
   logger: ActivityRedactionLogger,
 ): Promise<unknown | null> {
   const pinned = pinnedParentObject(ast.where, ACTIVITY_OBJECT);
-  const parents = pinned !== null ? [pinned] : enumerateParentObjects(engine, ACTIVITY_GATE);
+  const parents = pinned !== null ? [pinned] : enumerateParentObjects(
+    // It reads the registry view alone (the read gate's own enumeration).
+    engine as ParentRecordGateEngine,
+    ACTIVITY_GATE,
+  );
   if (parents === null) {
     reportOnce(
       engine,
