@@ -89,6 +89,7 @@ const LONG_EXPLANATION = 'This is not a binding failure';
 
 const BASE: ServerReadyOptions = {
   externalBaseOrigin: 'http://localhost:3000',
+  httpServer: 'composed',
   isDev: true,
   pluginCount: 3,
 };

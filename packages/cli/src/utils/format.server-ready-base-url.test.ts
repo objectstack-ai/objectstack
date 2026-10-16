@@ -30,6 +30,7 @@ import { printServerReady, type ServerReadyOptions } from './format.js';
  */
 describe('printServerReady links (#10646)', () => {
   const base: Omit<ServerReadyOptions, 'externalBaseOrigin'> = {
+    httpServer: 'composed',
     configFile: 'objectstack.config.ts',
     isDev: false,
     pluginCount: 1,

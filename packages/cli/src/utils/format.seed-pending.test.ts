@@ -36,6 +36,7 @@ import { printServerReady, type ServerReadyOptions, type SeedSourceSummary } fro
 describe('printServerReady seed-settlement row (#17329)', () => {
   const base: ServerReadyOptions = {
     externalBaseOrigin: 'http://localhost:3000',
+    httpServer: 'composed',
     configFile: 'objectstack.config.ts',
     isDev: true,
     pluginCount: 1,

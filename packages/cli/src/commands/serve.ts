@@ -155,6 +155,7 @@ import {
   printServerReady,
   printBootDiagnostics,
   type AutomationReadySummary,
+  type HttpServerComposition,
   type SeedSourceSummary,
 } from '../utils/format.js';
 // [#16630] The reader half of the degraded-boot data path — the kernel's own
@@ -510,14 +511,10 @@ export function resolveBoundPort(
   kernel: { getService?: (name: string) => unknown } | undefined,
   requestedPort: number,
 ): number {
+  const server = readComposedHttpServer(kernel) as { getPort?: () => unknown } | undefined;
+  if (typeof server?.getPort !== 'function') return requestedPort;
   let reported: unknown;
   try {
-    // `http.server` is the CANONICAL service name; `http-server` is a
-    // deprecated alias for the same instance (#4251) that new code must not
-    // read. ⚠️ `getService` THROWS when nothing registered the name — it does
-    // not return undefined — hence the `try`, not a `?.` chain alone.
-    const server = kernel?.getService?.('http.server') as { getPort?: () => unknown } | undefined;
-    if (typeof server?.getPort !== 'function') return requestedPort;
     reported = server.getPort();
   } catch {
     return requestedPort;
@@ -525,6 +522,48 @@ export function resolveBoundPort(
   if (typeof reported !== 'number' || !Number.isInteger(reported)) return requestedPort;
   if (reported <= 0 || reported > MAX_PORT) return requestedPort;
   return reported;
+}
+
+/**
+ * The HTTP server this boot composed: the kernel's `http.server` service, or
+ * `undefined` when nothing registered one.
+ *
+ * The ONE read behind both {@link resolveBoundPort} (which port the transport
+ * bound) and {@link resolveHttpServerComposition} (whether there is a
+ * transport at all), so the banner's address and the banner's decision to
+ * print one cannot come from two different answers.
+ *
+ * `http.server` is the CANONICAL service name; `http-server` is a deprecated
+ * alias for the same instance (#4251) that new code must not read. ⚠️
+ * `getService` THROWS when nothing registered the name — it does not return
+ * undefined — hence the `try`, not a `?.` chain alone.
+ */
+export function readComposedHttpServer(
+  kernel: { getService?: (name: string) => unknown } | undefined,
+): unknown {
+  try {
+    return kernel?.getService?.('http.server') ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether this boot serves HTTP, for the ready banner's address rows (#23623).
+ *
+ * Read off the booted kernel, not off `--server`: under `--no-server` a config
+ * can still mount its own `HonoServerPlugin` (serve skips only its own
+ * auto-wired one), and then an `http.server` is registered and its address is
+ * real. `serverFlag` only says WHY there is none, so the banner names
+ * `--no-server` when that flag is what left the boot without one, and not
+ * otherwise.
+ */
+export function resolveHttpServerComposition(
+  kernel: { getService?: (name: string) => unknown } | undefined,
+  serverFlag: boolean,
+): HttpServerComposition {
+  if (readComposedHttpServer(kernel) !== undefined) return 'composed';
+  return serverFlag ? 'not-composed' : 'skipped-by-no-server';
 }
 
 /** The `objectstack:listening` IPC message the `os dev` parent waits for. */
@@ -732,8 +771,8 @@ export interface BoundPortChannels {
    */
   writeRuntimeState: (published: { port: number; url: string }) => void;
   /**
-   * Prints the ready banner, whose `API:` row names the same address, and the
-   * boot diagnostics under it. ⛔ Must COMPLETE before the IPC message below:
+   * Prints the ready banner, whose `API:` row names the same address when an
+   * HTTP server is composed (#23623), and the boot diagnostics under it. ⛔ Must COMPLETE before the IPC message below:
    * the `os dev` parent prints its MCP connect block on that message, into the
    * same terminal (#22410).
    */
@@ -5362,6 +5401,11 @@ export default class Serve extends Command {
       // what this repairs is exactly a set of channels that agreed with each
       // other while disagreeing with the socket.
       const boundPort = resolveBoundPort(kernel, port);
+      // [#23623] …and whether there is a transport at all, from the same read
+      // ({@link readComposedHttpServer}). Only the banner takes it: on a boot
+      // with none, its address rows give way to one line saying so. ⛔ The IPC
+      // message and the runtime state file below are not changed by it.
+      const httpServer = resolveHttpServerComposition(kernel, flags.server);
 
       // ── Clean startup summary ──────────────────────────────────────
       // #8978 — the Config:/Artifact: row must name what actually booted,
@@ -5399,6 +5443,9 @@ export default class Serve extends Command {
         // something unparseable; the banner then prints paths with no origin
         // rather than a confident wrong URL.
         externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin,
+        // #23623 — whether any address above is served at all. See `httpServer`
+        // a few lines up.
+        httpServer,
         ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact, configBootBundle }),
         isDev,
         pluginCount: loadedPlugins.length,
@@ -5452,8 +5499,9 @@ export default class Serve extends Command {
         bootDiagnostics: collectBootDiagnostics(),
         // #3167 — surface the default-on MCP endpoint in the dev loop, where an
         // AI client can connect to operate the running app. Same decision point
-        // that auto-loads the plugin + gates the route, so the banner never
-        // advertises an endpoint that isn't served.
+        // that auto-loads the plugin + gates the route. It is not the whole
+        // answer: with no HTTP server composed nothing serves the route, and
+        // the banner drops the row on `httpServer` (#23623).
         mcpEnabled: isMcpServerEnabled(),
       });
 
@@ -5470,7 +5518,8 @@ export default class Serve extends Command {
       // one so supervisors and the `os dev` parent never have to guess:
       //   • runtime.json: a small state file under OS_HOME for external
       //     supervisors / health checks (pid + port + url).
-      //   • the ready banner, whose `API:` row names the same address.
+      //   • the ready banner, whose `API:` row names the same address (when an
+      //     HTTP server is composed; with none it prints no address, #23623).
       //   • IPC: when spawned with an 'ipc' channel (as `os dev` does), the
       //     parent learns the real port without polling.
       //
