@@ -116,11 +116,18 @@ policy layer over an existing pipeline, never a second execution dialect.
 | Use | When |
 |:---|:---|
 | **`defineStack({ apis })`** | The endpoint is a *projection* of something the platform already executes: query/return records, or trigger a flow. No code, no deploy artifact, publish-gated. **Prefer this.** |
-| **`http.server` mount** (plugin code) | The endpoint needs real handler CODE — a third-party callback with its own signature verification, a streaming response, a protocol the platform does not speak. Mount it on `http.server`. |
+| **A flow that runs your code** | The endpoint needs real handler CODE: point a `type: 'flow'` endpoint at a flow whose `script` node names a stack function (`defineStack({ functions })`), or whose `connector_action` node calls a declared connector (outbound). The URL stays declarative; the code runs where the automation surface already runs it. |
 
-If the logic is "a bit of computation, then a record write", express it as a
-**flow** and point a `type: 'flow'` endpoint at it — that keeps the URL
-declarative and the logic in the automation surface that already runs it.
+An inbound webhook from a sender you control is a `type: 'api'` flow
+(objectstack-automation → **Inbound webhook (`api`) triggers**): it verifies
+ObjectStack's own `x-objectstack-signature`, enqueues, and answers `202`.
+**An app never mounts on `http.server`** — that service is the platform
+plugins' own door-building primitive, and a code-mounted route gets no caller
+identity, auth gate, rate limit, namespace carve-out or OpenAPI entry. Three
+cases have no app surface today; say so rather than invent one: a third-party
+callback verified by its own signature over the raw body (the hook checks only
+`x-objectstack-signature`), a streaming response (a declared endpoint answers
+one JSON envelope), and a protocol the platform does not speak.
 
 <!-- os:check -->
 ```typescript
@@ -195,32 +202,6 @@ through the `declarative-apis-endpoints-live` entry of the protocol upgrade
 guide before upgrading; it is a security review, not a rename. Its two
 load-bearing steps: move every `path` into the carve-out, and grep every entry
 for `authRequired: false`.
-
----
-
-## Code routes: mounting on `http.server`
-
-The one code-route pattern the platform ships:
-
-```ts
-import type { IHttpServer } from '@objectstack/spec/contracts';
-
-// in a plugin's `start(ctx)`. ONE `try` PER NAME: `getService` is SYNCHRONOUS
-// and THROWS on an empty slot, so `a() ?? b()` in one `try` never reaches `b`.
-const read = (n: string): IHttpServer | null => {
-  try { return ctx.getService<IHttpServer>(n); } catch { return null; }
-};
-ctx.hook('kernel:ready', () => {              // NOT later — see below
-  const http = read('http.server') ?? read('http-server');   // canonical FIRST
-  http?.post('/api/v1/apps/acme/recalc', (req, res) => { res.status(200).json({}); });
-});
-```
-
-`http-server` is the deprecated alias and is absent on the provider path that
-registers no alias, so an alias-only read mounts nothing there. `listen()` is
-deferred to `kernel:listening` so late registration still lands — Hono seals
-its matcher on the first matched request and a later `post()` throws. Service
-resolution itself is objectstack-platform → `rules/service-registry.md`.
 
 ---
 

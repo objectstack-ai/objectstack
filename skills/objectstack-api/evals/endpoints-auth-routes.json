@@ -24,11 +24,11 @@
     {
       "id": 3,
       "prompt": "We receive Stripe webhooks and must verify the signature with real code before writing anything. Mount POST /api/v1/apps/acme/stripe in our plugin.",
-      "expected_output": "Uses the code-route pattern, not `apis:` (`script` / `proxy` targets do not execute in 17.x): in the plugin's `start(ctx)`, inside `ctx.hook('kernel:ready', ...)`, read `http.server` canonical-first with one `try` per name (`getService` is synchronous and throws on an empty slot), then `http.post('/api/v1/apps/acme/stripe', handler)`. Notes that `listen()` is deferred to `kernel:listening` so the route lands before Hono seals its matcher.",
+      "expected_output": "Does not mount on `http.server` (the platform plugins' own primitive, not an app surface) and does not invent a door. States the gap: a callback verified by Stripe's own signature over the raw body has no app surface today — the inbound `type: 'api'` flow hook checks only `x-objectstack-signature`. Names what holds for code: a `type: 'flow'` endpoint whose `script` node runs a stack function (`defineStack({ functions })`).",
       "files": [],
       "assertions": {
-        "must_contain": ["http.server", "kernel:ready", "getService"],
-        "must_not_contain": ["type: 'script'", "type: 'proxy'"]
+        "must_contain": ["x-objectstack-signature", "functions"],
+        "must_not_contain": ["http.server", "kernel:ready", "getService"]
       }
     },
     {
