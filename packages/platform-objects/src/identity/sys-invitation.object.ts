@@ -295,14 +295,14 @@ export const SysInvitation = ObjectSchema.create({
       label: 'Placement Business Unit',
       required: false,
       description:
-        'Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer\'s delegated subtree.',
+        'Business unit the invitee is placed under on acceptance. Must lie inside the issuer\'s delegated subtree.',
     }),
 
     positions: Field.json({
       label: 'Placement Positions',
       required: false,
       description:
-        'Position names assigned on acceptance (ADR-0105 D8). Every position\'s permission sets must be allowlisted by the issuer\'s adminScope.',
+        'Position names assigned on acceptance. Every position\'s permission sets must be allowlisted by the issuer\'s adminScope.',
     }),
   },
   

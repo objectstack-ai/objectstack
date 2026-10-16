@@ -31,7 +31,9 @@ export const NotificationPreference = ObjectSchema.create({
     // global defaults) from the Setup "Notification Preferences" grid. The bucket
     // default is full CRUD, so no `userActions` block is needed — RLS is the authz.
     managedBy: 'system-data',
-    description: 'Per-user × topic × channel notification toggle (mute/allow), with admin-global defaults.',
+    // Admin-facing copy; the per-user × topic × channel matrix is described in
+    // the docblock above (ADR-0030 Layer 3).
+    description: 'Which topics and channels each user receives; admins set the defaults.',
     // [ADR-0079] The record title is `display_title`, a text formula over the
     // same three columns `titleFormat` names. With no pointer declared, the
     // registry's designate-only pass stamped `nameField: 'id'` (the first
