@@ -22,6 +22,5 @@ What changes for an integrator, on a host that serves `createHonoApp`:
 **Unchanged.**
 
 - An empty or whitespace-only JSON body is dispatched as `{}` (an empty query), as before.
-- A body that does not declare JSON is read as before: parsed when it is JSON, `{}` when it is not.
 - The request handed on beside the body still arrives unread, in every case. A domain that forwards it and reads its own bytes answers exactly as before, a malformed JSON body included: `/webhooks/redeliver` and the inbound automation hooks give their own refusal after their own sign-in or signature check, and the `/approvals/act` form `POST` reads its form.
 - The catch-all dispatches `GET`, `HEAD` and `DELETE` with no body, and the `/auth/*` fallback hands `GET` and `HEAD` `{}`, as before.

@@ -18,7 +18,7 @@ What changes for an integrator, on a host that serves `createHonoApp`, for a `PO
 - Any other body that declares neither JSON nor a form (`text/plain`, `application/octet-stream`, a `+json` suffix type such as `application/merge-patch+json`, or no `Content-Type` at all), when the request declares a body (`Content-Length` other than `0`, or `Transfer-Encoding`): FROM `{}`, TO the same refusal ("sent with no Content-Type" when there is none).
 - A `multipart/form-data` or `application/x-www-form-urlencoded` body: FROM `{}`, TO its parsed fields, as `plugin-hono-server` hands them (Hono's `parseBody`: the last value of a repeated name). A form that does not parse: TO the refusal "The request body could not be parsed as form data (it was sent as multipart/form-data). It was refused rather than read as an empty body."
 
-The domain acts on nothing past its read of the body, and the dispatcher's own gates still answer first. Each answer is the status and body `@objectstack/plugin-hono-server` gives the same request. This replaces the earlier `createHonoApp` entry's statement that a body that does not declare JSON is read as before.
+The domain acts on nothing past its read of the body, and the dispatcher's own gates still answer first. Each answer is the status and body `@objectstack/plugin-hono-server` gives the same request.
 
 **Remedy, in one line.** Send a JSON body with `Content-Type: application/json`, or send no body.
 
