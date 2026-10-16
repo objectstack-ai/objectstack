@@ -183,11 +183,14 @@ jobs:
       #
       # The time bound (#23880) sits INSIDE the guard, as the command it wraps:
       # the guard runs that command in its own process group, so `timeout` is
-      # that group's leader and its SIGTERM reaches turbo, which stops its tasks
-      # ("Shutting down Turborepo tasks...") and prints no `Tasks:` summary --
-      # the absence the verdict reads as a pass that did not finish. Wrapped the
-      # other way round, `timeout` would kill only the guard and leave its
-      # detached group running into pass 2.
+      # that group's leader and its SIGTERM reaches turbo, which stops its tasks.
+      # Measured locally at 98ba1bf1d2 (guard -> timeout 45s -> turbo over core,
+      # types and formula): exit 124 came back through the guard, and the log
+      # ended at "Shutting down Turborepo tasks..." / "Force killed Turborepo
+      # tasks: @objectstack/core#test" with no `Tasks:` summary. The verdict reads
+      # 124 (or 137, after --kill-after) as a pass that did not finish. Wrapped
+      # the other way round, `timeout` would kill only the guard and leave its
+      # detached group running into the next step.
       - name: Test suite — pass 1
         run: |
           # Bound vitest's INNER worker pool (#11958). A no-op on a runner with

@@ -331,8 +331,9 @@ export function verdict({ pass1, pass2 }) {
     const found = [[1, pass1], [2, pass2]].flatMap(([n, p]) => {
       const own = byBudget(p) ? p.reported : p.failing;
       const killed = byBudget(p) ? without(p.failing, p.reported) : [];
+      const when = unfinished.some(([u]) => u === n) ? ' before it stopped' : '';
       return [
-        ...(own.length > 0 ? [`Failed in pass ${n} before it stopped: ${own.join(', ')}`] : []),
+        ...(own.length > 0 ? [`Failed in pass ${n}${when}: ${own.join(', ')}`] : []),
         ...(killed.length > 0 ? [`Stopped mid-run in pass ${n} by the time bound (unmeasured): ${killed.join(', ')}`] : []),
       ];
     });
@@ -745,8 +746,17 @@ function selfTest() {
     );
   }
   {
+    // The shape measured locally (guard -> timeout -> turbo, stopped at 45 s):
+    // exit 124 through the guard, and the log ends at turbo's shutdown lines.
     const pass1 = passOf(1, NIGHT_1014_PASS1);
-    const cut = passOf(124, `${testFiles('@objectstack/core:test:', 0, 96)}\nShutting down Turborepo tasks...\n`);
+    const cut = passOf(
+      124,
+      [
+        testFiles('@objectstack/core:test:', 0, 96),
+        'Shutting down Turborepo tasks...',
+        'Force killed Turborepo tasks: @objectstack/core#test',
+      ].join('\n'),
+    );
     const v = verdict({ pass1, pass2: cut });
     check(
       'verdict: a pass that did not finish -> INCOMPLETE, NOT MEASURED, exit 1',
@@ -756,7 +766,7 @@ function selfTest() {
     check(
       'verdict: a pass that did not finish -> INCOMPLETE, NOT MEASURED, exit 1',
       v.detail.some((d) => d.includes('Pass 2 (exit 124)') && d.includes("share of the job's time")) &&
-        v.detail.some((d) => d.includes('Failed in pass 1 before it stopped: @objectstack/dogfood#test')),
+        v.detail.includes('Failed in pass 1: @objectstack/dogfood#test'),
       v.detail.join(' | '),
     );
   }
