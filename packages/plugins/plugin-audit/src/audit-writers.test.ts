@@ -799,10 +799,11 @@ describe('audit writers — a user\'s own per-user UI-state write is not recorde
  * to the hook session), and `result` / `previous` are whatever the engine
  * binds for a create, an update and a delete, not hand-built shapes.
  *
- * Each case writes its own preference row and reads only the rows about it.
- * An own-write case that can still be written to ends with an administrator's
- * write to the same row, which must land exactly one ledger row: a "no row"
- * verdict cannot pass on a writer that never ran.
+ * Each case writes its own preference row and reads only the rows its write
+ * under test ADDS about that row, so the seeding write never counts for or
+ * against it. An own-write case that can still be written to ends with an
+ * administrator's write to the same row, which must add exactly one ledger
+ * row: a "no row" verdict cannot pass on a writer that never ran.
  */
 describe('audit writers — a user\'s own UI-state write leaves no ledger row, on a real engine (#23804)', () => {
   const PREFS = 'sys_user_preference';
@@ -829,9 +830,21 @@ describe('audit writers — a user\'s own UI-state write leaves no ledger row, o
   const as = (userId: string) => ({ context: { userId } });
   const SYSTEM = { context: { isSystem: true } };
 
+  type Table = 'sys_audit_log' | 'sys_activity';
   /** Every row `table` holds about one record, at rest. */
-  const rowsAbout = (table: 'sys_audit_log' | 'sys_activity', object: string, recordId: string) =>
+  const rowsAbout = (table: Table, object: string, recordId: string) =>
     sql(`SELECT * FROM "${table}" WHERE object_name = ? AND record_id = ?`, [object, recordId]);
+  /** The rows `write` adds to each table about one record. */
+  async function rowsAddedBy(object: string, recordId: string, write: () => Promise<unknown>) {
+    const seen = new Set<string>();
+    for (const table of ['sys_audit_log', 'sys_activity'] as const) {
+      for (const r of await rowsAbout(table, object, recordId)) seen.add(`${table}:${String(r.id)}`);
+    }
+    await write();
+    const added = async (table: Table) =>
+      (await rowsAbout(table, object, recordId)).filter((r) => !seen.has(`${table}:${String(r.id)}`));
+    return { ledger: await added('sys_audit_log'), activity: await added('sys_activity') };
+  }
 
   /** The owner's own create of a fresh preference row (a distinct key per case). */
   let seq = 0;
@@ -882,72 +895,67 @@ describe('audit writers — a user\'s own UI-state write leaves no ledger row, o
     expect(await rowsAbout('sys_activity', PREFS, id)).toHaveLength(0);
 
     // Live-writer CONTROL: another actor's write to the same row is recorded.
-    await setValue(id, [{ id: 'acc-1' }], as(ADMIN));
-    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
-    expect(ledger.map((r) => [r.action, r.user_id])).toEqual([['update', ADMIN]]);
+    const control = await rowsAddedBy(PREFS, id, () => setValue(id, [{ id: 'acc-1' }], as(ADMIN)));
+    expect(control.ledger.map((r) => [r.action, r.user_id])).toEqual([['update', ADMIN]]);
   });
 
   it('the owner\'s own update writes no sys_audit_log row and no sys_activity row', async () => {
     const id = await ownPreference();
-    await setValue(id, [{ id: 'acc-1' }], as(OWNER));
-    await setValue(id, [{ id: 'acc-1' }, { id: 'acc-2' }], as(OWNER));
+    const own = await rowsAddedBy(PREFS, id, async () => {
+      await setValue(id, [{ id: 'acc-1' }], as(OWNER));
+      await setValue(id, [{ id: 'acc-1' }, { id: 'acc-2' }], as(OWNER));
+    });
 
-    expect(await rowsAbout('sys_audit_log', PREFS, id)).toHaveLength(0);
-    expect(await rowsAbout('sys_activity', PREFS, id)).toHaveLength(0);
+    expect(own.ledger).toHaveLength(0);
+    expect(own.activity).toHaveLength(0);
 
     // Live-writer CONTROL, as above.
-    await setValue(id, [], as(ADMIN));
-    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
-    expect(ledger.map((r) => [r.action, r.user_id])).toEqual([['update', ADMIN]]);
+    const control = await rowsAddedBy(PREFS, id, () => setValue(id, [], as(ADMIN)));
+    expect(control.ledger.map((r) => [r.action, r.user_id])).toEqual([['update', ADMIN]]);
   });
 
   it('the owner\'s own delete writes no sys_audit_log row and no sys_activity row', async () => {
     // The engine binds the deleted row as `previous`, which names the owner;
     // the delete's `result` names no owner and is not evidence either way.
     const id = await ownPreference();
-    await engine.delete(PREFS, { where: { id }, ...as(OWNER) } as any);
+    const own = await rowsAddedBy(PREFS, id, () => engine.delete(PREFS, { where: { id }, ...as(OWNER) } as any));
 
-    expect(await rowsAbout('sys_audit_log', PREFS, id)).toHaveLength(0);
-    expect(await rowsAbout('sys_activity', PREFS, id)).toHaveLength(0);
+    expect(own.ledger).toHaveLength(0);
+    expect(own.activity).toHaveLength(0);
   });
 
   it('an administrator\'s update of another user\'s row writes a ledger row (and its activity row)', async () => {
     const id = await ownPreference();
-    await setValue(id, [{ id: 'acc-9' }], as(ADMIN));
+    const added = await rowsAddedBy(PREFS, id, () => setValue(id, [{ id: 'acc-9' }], as(ADMIN)));
 
-    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
-    expect(ledger.map((r) => [r.action, r.user_id])).toEqual([['update', ADMIN]]);
-    const activity = await rowsAbout('sys_activity', PREFS, id);
-    expect(activity.map((r) => [r.type, r.actor_id])).toEqual([['updated', ADMIN]]);
+    expect(added.ledger.map((r) => [r.action, r.user_id])).toEqual([['update', ADMIN]]);
+    expect(added.activity.map((r) => [r.type, r.actor_id])).toEqual([['updated', ADMIN]]);
   });
 
   it('a system write with no user writes a ledger row', async () => {
     const id = await ownPreference();
-    await setValue(id, [{ id: 'acc-9' }], SYSTEM);
+    const added = await rowsAddedBy(PREFS, id, () => setValue(id, [{ id: 'acc-9' }], SYSTEM));
 
-    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
-    expect(ledger.map((r) => [r.action, r.user_id ?? null])).toEqual([['update', null]]);
+    expect(added.ledger.map((r) => [r.action, r.user_id ?? null])).toEqual([['update', null]]);
   });
 
   it('the owner moving the row to another user writes a ledger row', async () => {
     const id = await ownPreference();
-    await engine.update(PREFS, { user_id: 'u_bob' }, { where: { id }, ...as(OWNER) } as any);
+    const added = await rowsAddedBy(PREFS, id, () =>
+      engine.update(PREFS, { user_id: 'u_bob' }, { where: { id }, ...as(OWNER) } as any),
+    );
 
-    const ledger = await rowsAbout('sys_audit_log', PREFS, id);
-    expect(ledger.map((r) => [r.action, r.user_id])).toEqual([['update', OWNER]]);
+    expect(added.ledger.map((r) => [r.action, r.user_id])).toEqual([['update', OWNER]]);
   });
 
   it('the same user\'s update of a sys_sharing_rule writes a ledger row', async () => {
     const rule = await engine.insert(RULE, { name: 'Region West', object_name: 'account', access_level: 'read' }, SYSTEM as any);
     const id = String((rule as { id: unknown }).id);
-    await engine.update(RULE, { access_level: 'edit' }, { where: { id }, ...as(OWNER) } as any);
+    const added = await rowsAddedBy(RULE, id, () =>
+      engine.update(RULE, { access_level: 'edit' }, { where: { id }, ...as(OWNER) } as any),
+    );
 
-    const ledger = await rowsAbout('sys_audit_log', RULE, id);
-    const pairs = ledger.map((r) => [String(r.action), r.user_id ?? null]).sort((a, b) => a[0]!.localeCompare(b[0]!));
-    expect(pairs).toEqual([
-      ['create', null],
-      ['update', OWNER],
-    ]);
+    expect(added.ledger.map((r) => [r.action, r.user_id])).toEqual([['update', OWNER]]);
   });
 });
 
