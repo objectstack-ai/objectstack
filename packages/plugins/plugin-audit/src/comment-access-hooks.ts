@@ -116,6 +116,13 @@ import type { StandardErrorCode } from '@objectstack/spec/api';
 import type { ISecurityService, ISharingService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { renderOperationMessage, type ValidationMessageTranslator } from '@objectstack/spec/system';
+import { AUDIT_EXCLUDED_OBJECTS } from './audit-writers.js';
+import {
+  computeParentRecordFilter,
+  type ParentObjectReadAdmissionSource,
+  type ParentRecordGate,
+  type ParentRecordGateEngine,
+} from './parent-record-read-gate.js';
 
 /** Minimal engine surface these installers need — duck-typed (like
  * service-storage's attachment seams) so tests can fake it and so plugin-audit
@@ -146,6 +153,10 @@ export interface CommentAccessEngine {
   ): void;
   find(object: string, options: Record<string, unknown>): Promise<Array<Record<string, unknown>>>;
   findOne(object: string, options: Record<string, unknown>): Promise<Record<string, unknown> | null>;
+  /** [ADR-0139 E7] The registered schema, read to learn whether `sys_comment`
+   * declares its parent pair ({@link declaresCommentParentPair}). Optional: an
+   * engine without it is treated as one whose `sys_comment` declares none. */
+  getSchema?(object: string): unknown;
 }
 
 /** Minimal shape of the engine `OperationContext` the read middleware reads. */
@@ -252,6 +263,175 @@ export function parseCommentThreadId(threadId: unknown): CommentThreadTarget | n
   if (!OBJECT_NAME_RE.test(object)) return null;
   if (object === 'sys_comment') return null;
   return { object, recordId };
+}
+
+/** [ADR-0139 E7, ADR-0052 §5] The column a comment's parent OBJECT is stamped in. */
+export const COMMENT_PARENT_OBJECT_COLUMN = 'object_name';
+
+/** [ADR-0139 E7, ADR-0052 §5] The column a comment's parent RECORD id is stamped in. */
+export const COMMENT_PARENT_RECORD_COLUMN = 'record_id';
+
+/** The pair, in one list. */
+export const COMMENT_PARENT_PAIR_COLUMNS = [COMMENT_PARENT_OBJECT_COLUMN, COMMENT_PARENT_RECORD_COLUMN] as const;
+
+/** What a comment row's parent pair is stamped with. Both `null`: the thread names no record. */
+export interface CommentParentPair {
+  object_name: string | null;
+  record_id: string | null;
+}
+
+/**
+ * [ADR-0139 E7] The ONE derivation of a comment's parent pair: the record its
+ * `thread_id` names, by {@link parseCommentThreadId} — the parse every gate in
+ * this module authorizes by — or `null` / `null` for a thread that names none.
+ * Called by the stamp on create and on a re-point, and by the stored-row
+ * backfill (`comment-parent-pair-backfill.ts`), so a stored row and a new row
+ * with the same thread carry the same pair. Pure.
+ *
+ * `thread_id` stays the authored key: the pair is never authored, only derived.
+ */
+export function planCommentParentPair(threadId: unknown): CommentParentPair {
+  const target = parseCommentThreadId(threadId);
+  return target ? { object_name: target.object, record_id: target.recordId } : { object_name: null, record_id: null };
+}
+
+/**
+ * Whether the REGISTERED `sys_comment` declares both pair columns. Read on
+ * every call, never cached: a composition that registers its own earlier
+ * definition of the object (a test harness, a host override) has no column to
+ * stamp — an insert naming one would be refused as an unknown field — and no
+ * column a read could be narrowed by, so the read gate keeps the thread probe
+ * for it (`installCommentReadVisibility`). The E6 precedent
+ * (`declaresActivityStampColumns`).
+ */
+export function declaresCommentParentPair(engine: { getSchema?(object: string): unknown }): boolean {
+  let fields: unknown;
+  try {
+    const schema = typeof engine.getSchema === 'function' ? engine.getSchema('sys_comment') : undefined;
+    fields = schema && typeof schema === 'object' ? (schema as { fields?: unknown }).fields : undefined;
+  } catch {
+    return false;
+  }
+  return !!fields && typeof fields === 'object' && COMMENT_PARENT_PAIR_COLUMNS.every((column) => column in (fields as object));
+}
+
+/** Stamp one row in place: the planner's answer, over whatever the writer sent. */
+function stampCommentParentPair(row: Record<string, unknown>): void {
+  const pair = planCommentParentPair(row.thread_id);
+  row[COMMENT_PARENT_OBJECT_COLUMN] = pair.object_name;
+  row[COMMENT_PARENT_RECORD_COLUMN] = pair.record_id;
+}
+
+/**
+ * [ADR-0139 E7] The pair's two writers, both registered for EVERY caller —
+ * system, seed and context-less included — because the pair is derived, not
+ * authorized: the authorization handlers below exempt system callers, this
+ * stamp exempts nobody.
+ *
+ *  - create (`beforeInsert`): every inserted row is stamped from its
+ *    `thread_id`, over whatever value the writer sent. The engine's create-side
+ *    `readonly` strip leaves `sys_` objects to their own guards
+ *    (`staticReadonlyInsertSubject`), so this assignment is the guard, as the
+ *    create hook is for `is_edited`.
+ *  - update (`beforeUpdate`), for every caller: an update that names
+ *    `thread_id` — the re-point the update gate authorizes as an insert into
+ *    the new thread — is stamped from it. The payload is shared by every row a
+ *    predicate update matches, so every row gets the same pair, as it gets the
+ *    same `thread_id`. An update that names either pair column WITHOUT a
+ *    thread is re-derived from the row's own stored thread (`previous`), so no
+ *    writer's value lands, the backfill's included. ⛔ The engine's update-side
+ *    `readonly` strip is not the guard here: under `preserveAudit` (a REST
+ *    historical import puts it on an ordinary caller's write) it keeps a
+ *    readonly value. A predicate update naming the pair without a thread
+ *    re-derives a pair per matched row over one shared payload, and one SET
+ *    clause carries a single pair to every row, so when the matched rows'
+ *    threads name different records the write is refused whole, before
+ *    anything is written ({@link refusePairDivergence}, `VALIDATION_ERROR` /
+ *    400): the engine's own key-set divergence check cannot see it, since
+ *    every row assigns the same two keys. With no stored row to derive from,
+ *    the pair is dropped from the write. An update naming none of the three
+ *    columns stamps nothing.
+ */
+/** The catalog member for a request whose shape is refused (ADR-0112). */
+const PAIR_DIVERGENCE_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+
+/** The pair the first row of a predicate update derived, per write (the engine's shared `dispatch.scope`). */
+const pairByWrite = new WeakMap<object, CommentParentPair>();
+
+/**
+ * Refuse a predicate (`per-row`) update whose matched rows derive different
+ * parent pairs: one `SET` clause cannot carry two pairs, and carrying one row's
+ * pair to another row would authorize that comment by a record its thread does
+ * not name. Refused before anything is written (every before-hook runs ahead
+ * of the one write). A by-id update, and a predicate update whose rows share
+ * one thread, pass. `VALIDATION_ERROR` / 400: the request's shape is what is
+ * refused, and the remedy is in the caller's hands.
+ */
+function refusePairDivergence(dispatch: unknown, pair: CommentParentPair): void {
+  const d = dispatch as { mode?: unknown; scope?: unknown } | undefined;
+  if (d?.mode !== 'per-row' || !d.scope || typeof d.scope !== 'object') return;
+  const first = pairByWrite.get(d.scope);
+  if (!first) {
+    pairByWrite.set(d.scope, pair);
+    return;
+  }
+  if (first.object_name === pair.object_name && first.record_id === pair.record_id) return;
+  const err: any = new Error(
+    'Refusing a multi-row update of sys_comment that names object_name / record_id without thread_id: the matched ' +
+      "comments' threads name different records, and one write cannot store each comment's own pair. The pair is " +
+      "derived from thread_id — update the comments one by one, or name thread_id.",
+  );
+  err.code = PAIR_DIVERGENCE_CODE;
+  err.status = 400;
+  err.statusCode = 400;
+  throw err;
+}
+
+function installCommentParentPairStamp(engine: CommentAccessEngine): void {
+  engine.registerHook(
+    'beforeInsert',
+    (ctx: any) => {
+      if (!declaresCommentParentPair(engine)) return;
+      const data = ctx?.input?.data;
+      for (const row of Array.isArray(data) ? data : [data]) {
+        if (row && typeof row === 'object' && !Array.isArray(row)) stampCommentParentPair(row as Record<string, unknown>);
+      }
+    },
+    { object: COMMENT_OBJECT, packageId: PACKAGE_ID },
+  );
+  engine.registerHook(
+    'beforeUpdate',
+    (ctx: any) => {
+      const data: unknown = ctx?.input?.data;
+      if (!data || typeof data !== 'object' || Array.isArray(data)) return;
+      const payload = data as Record<string, unknown>;
+      const names = (key: string) => Object.prototype.hasOwnProperty.call(payload, key);
+      if (!names('thread_id') && !COMMENT_PARENT_PAIR_COLUMNS.some(names)) return;
+      if (!declaresCommentParentPair(engine)) return;
+      if (names('thread_id')) {
+        stampCommentParentPair(payload);
+        return;
+      }
+      // The pair named without a thread: derive it from the row's own thread.
+      const previous: unknown = ctx?.previous;
+      const storedThread =
+        previous && typeof previous === 'object' ? (previous as Record<string, unknown>).thread_id : undefined;
+      if (typeof storedThread !== 'string') {
+        for (const column of COMMENT_PARENT_PAIR_COLUMNS) delete payload[column];
+        return;
+      }
+      const pair = planCommentParentPair(storedThread);
+      // A predicate update dispatches this handler once per matched row over
+      // ONE shared payload, and one SET clause carries the last row's values to
+      // every row. The engine's key-set divergence check cannot see this (every
+      // row assigns the same two keys), so the pair is compared here, across
+      // the call's rows, on the scope object the engine shares between them.
+      refusePairDivergence(ctx?.dispatch, pair);
+      payload[COMMENT_PARENT_OBJECT_COLUMN] = pair.object_name;
+      payload[COMMENT_PARENT_RECORD_COLUMN] = pair.record_id;
+    },
+    { object: COMMENT_OBJECT, packageId: PACKAGE_ID },
+  );
 }
 
 function forbid(message: string, object?: string): never {
@@ -801,6 +981,11 @@ export function installCommentAccessHooks(
   // {@link stampCommentBodyEdit}.
   engine.registerHook('beforeUpdate', stampCommentBodyEdit, { object: COMMENT_OBJECT, packageId: PACKAGE_ID });
 
+  // ── Create and re-point: the platform stamps the parent pair (ADR-0139 E7) ─
+  // Its own registrations, for the stamp's reason above: every caller is
+  // stamped — see {@link installCommentParentPairStamp}.
+  installCommentParentPairStamp(engine);
+
   // ── Delete: author or parent editor ─────────────────────────────────
   engine.registerHook(
     'beforeDelete',
@@ -836,22 +1021,80 @@ export function installCommentAccessHooks(
  * the returned rows — a beforeFind/afterFind hook would leave `count()`
  * unfiltered and leak the true row count via `total`.
  *
- * Mechanism: for each read, pre-scan the candidate `thread_id`s the query
- * would touch (system context), resolve which of their parent records the
- * caller can actually read through the caller-scoped engine (the parent's own
- * RLS/OWD/sharing apply), and AND `{ thread_id: { $in: <visible threads> } }`
- * into `ctx.ast.where`. Threads whose parent is invisible — and threads that
- * name no parent at all — simply never enter that list.
+ * ## Comment threads: one `ReadableIds` leaf per parent object (ADR-0139 D4, E7)
+ *
+ * A comment's parent is stamped in its pair, `object_name` + `record_id`
+ * ({@link planCommentParentPair}), so the thread gate is the parent-record gate
+ * the activity stream and the ledger use (`parent-record-read-gate.ts`,
+ * {@link computeParentRecordFilter}), over the comment's own pair: one branch
+ * `{ object_name: P, record_id: { $in: ReadableIds.of(P) } }` per registered
+ * parent object, ORed and ANDed into the read's `where`. No pre-scan reads the
+ * comments, so a list, its `total` and a grouped count are each one statement
+ * over every comment the caller may read, on any table size. The parent
+ * objects are every registered object but `sys_comment` itself: a comment can
+ * hang off any record (the console writes `thread_id` from every record
+ * detail page), so every object the audit writer excludes is a named parent of
+ * this gate ({@link commentThreadGate}).
+ *
+ * That module decides up front, by name, what keeps the bounded probe (over the
+ * pair): ADR-0139 D5's three classes — a delegated caller (the whole read), a
+ * parent an object-scoped read middleware narrows (`sys_attachment`,
+ * `sys_comment_reaction`, `sys_approval_request`, …), a federated parent — and
+ * the two whole-read states it reports once: an engine that cannot classify,
+ * and a security service that answers no `canReadObject` (no leaf is written
+ * without it). ⛔ Never reached by catching a refusal.
+ *
+ * ## A row the backfill has not reached keeps the probe — never a leaf
+ *
+ * A row with no stamped pair (`object_name` NULL) — written before the pair
+ * existed, until `os migrate comment-parent-pair --apply` stamps it, or a
+ * thread that names no record — is answered by the bounded thread probe this
+ * gate always had, restricted to those rows ({@link probeUnstampedThreads}):
+ * pre-scan their `thread_id`s under SYSTEM context (at most
+ * {@link READ_SCAN_LIMIT}, in the caller's order), resolve which parent records
+ * the caller can read through the caller-scoped engine, and OR in
+ * `{ object_name: NULL, thread_id: { $in: VISIBLE_THREADS } }`. Beyond the
+ * bound it fails CLOSED, and says so. A thread naming no record never enters
+ * that list. Once the backfill has run, the probe finds no candidate.
+ *
+ * A composition whose registered `sys_comment` declares no pair
+ * ({@link declaresCommentParentPair}) has no column to leaf over: every read is
+ * the thread probe over every row, and that is said once.
+ *
+ * ## What the read's own refusal does (ADR-0139 D3)
+ *
+ * A leaf is composed by the engine after this middleware hands the read on
+ * (`next()`), so a composition or driver refusal (on `driver-mongodb`, a 500
+ * until O3) is the read's own failure and reaches the caller saying why.
+ * ⛔ Nothing here catches it into the deny-all sentinel: the `catch` below
+ * wraps only this gate's own filter computation, which runs before `next()`.
+ *
+ * ## Comment reactions keep the probe (ADR-0139 D5.2)
+ *
+ * A reaction's only parent is `sys_comment`, which this very middleware
+ * narrows — D5.2's class by name — so the reaction gate stays the bounded
+ * probe ({@link computeReactionVisibilityFilter}). A leaf over the comment's
+ * parent record instead would skip the caller's grant on `sys_comment` and
+ * widen an access boundary.
+ *
+ * `getAdmission` resolves, on every read, the security service whose
+ * `canReadObject` admits a leaf's parent object (absent: every read is the
+ * probe, said once).
  */
 export function installCommentReadVisibility(
-  engine: CommentAccessEngine,
+  engine: ParentRecordGateEngine,
   logger: CommentAccessLogger,
+  getAdmission?: ParentObjectReadAdmissionSource,
 ): void {
   if (typeof engine.registerMiddleware !== 'function') return; // engine lacks the seam
   const andIn = (ctx: CommentReadMiddlewareCtx, filter: unknown) => {
     if (!ctx.ast) return;
     ctx.ast.where = ctx.ast.where ? { $and: [ctx.ast.where, filter] } : filter;
   };
+  // Built at install time, never at module load: `audit-writers.ts` is read
+  // through an import this module shares with its consumers.
+  const threadGate = commentThreadGate();
+  const admission: ParentObjectReadAdmissionSource = getAdmission ?? (() => undefined);
 
   // One handler for both objects (see "A comment's reactions" in the module
   // header): the system / context-less exemption is decided once.
@@ -865,7 +1108,7 @@ export function installCommentReadVisibility(
     try {
       const filter = reaction
         ? await computeReactionVisibilityFilter(engine, ctx, logger)
-        : await computeThreadVisibilityFilter(engine, ctx, logger);
+        : await computeThreadVisibilityFilter(engine, ctx, logger, threadGate, admission);
       if (filter) andIn(ctx, filter);
     } catch (err) {
       // A filter-compute failure must never fall open into a leak.
@@ -875,10 +1118,28 @@ export function installCommentReadVisibility(
       );
       andIn(ctx, reaction ? REACTION_READ_DENY_ALL : READ_DENY_ALL);
     }
+    // [ADR-0139 D3] Outside the `try`: a leaf's composition refusal is the read's.
     return next();
   };
   engine.registerMiddleware(gate, { object: COMMENT_OBJECT });
   engine.registerMiddleware(gate, { object: COMMENT_REACTION_OBJECT });
+}
+
+/**
+ * [ADR-0139 E7] The comment-thread gate, as the parent-record gate reads it:
+ * `sys_comment` over its pair, every row naming no parent excluded, no caller
+ * exempt. Every object the audit writer excludes is a named parent: comment
+ * writers name any record, so the comment gate enumerates every registered
+ * object but `sys_comment`, exactly the set {@link parseCommentThreadId}
+ * accepts.
+ */
+export function commentThreadGate(): ParentRecordGate {
+  return {
+    object: COMMENT_OBJECT,
+    seam: 'comment read visibility',
+    denyAll: READ_DENY_ALL,
+    namedParents: [...AUDIT_EXCLUDED_OBJECTS],
+  };
 }
 
 /**
@@ -950,34 +1211,102 @@ async function computeReactionVisibilityFilter(
   return { comment_id: { $in: kept } };
 }
 
+/** The thread probe's whole-read state, reported once per engine. */
+const undeclaredPairReported = new WeakSet<object>();
+
+/** The rows no pair is stamped on: the unbackfilled ones, and threads naming no record. */
+const UNSTAMPED_ROWS = { [COMMENT_PARENT_OBJECT_COLUMN]: { $null: true } } as const;
+
 /**
- * Resolve the thread-visibility WHERE predicate for one sys_comment read.
- * Returns `null` when the query matches no rows (nothing to narrow), a
- * `thread_id` `$in` of the visible threads, or the deny-all sentinel.
+ * Resolve the thread-visibility WHERE predicate for one sys_comment read
+ * (installer docblock above): the parent-record gate's branches over the
+ * stamped pair, ORed with the bounded thread probe's branch for the rows no
+ * pair is stamped on — or, on a composition whose `sys_comment` declares no
+ * pair, the thread probe over every row. Returns `null` only on that last
+ * path when the query matches no row (nothing to narrow); otherwise the
+ * predicate, or the deny-all sentinel when no branch remains.
  */
 async function computeThreadVisibilityFilter(
+  engine: ParentRecordGateEngine,
+  ctx: CommentReadMiddlewareCtx,
+  logger: CommentAccessLogger,
+  gate: ParentRecordGate,
+  getAdmission: ParentObjectReadAdmissionSource,
+): Promise<unknown | null> {
+  if (!declaresCommentParentPair(engine)) {
+    if (!undeclaredPairReported.has(engine)) {
+      undeclaredPairReported.add(engine);
+      logger.warn(
+        `[audit] comment read visibility: the registered sys_comment declares no ${COMMENT_PARENT_OBJECT_COLUMN} / ` +
+          `${COMMENT_PARENT_RECORD_COLUMN} pair, so every read is answered by the bounded thread probe (at most ` +
+          `${READ_SCAN_LIMIT} candidate rows, fail-closed). Reported once for this engine.`,
+      );
+    }
+    return probeUnstampedThreads(engine, ctx, logger, false);
+  }
+
+  const branches: unknown[] = [];
+  // 1. The stamped rows: one ReadableIds leaf per composable parent object, or
+  //    the bounded probe over the pair for D5's classes (ADR-0139 D4, D5).
+  const stamped = await computeParentRecordFilter(engine, ctx, logger, gate, getAdmission);
+  if (stamped && stamped !== gate.denyAll) branches.push(stamped);
+  // 2. The rows no pair is stamped on: the bounded thread probe, never a leaf.
+  const unstamped = await probeUnstampedThreads(engine, ctx, logger, true);
+  if (unstamped && unstamped !== READ_DENY_ALL) branches.push(unstamped);
+
+  if (branches.length === 0) return READ_DENY_ALL;
+  return branches.length === 1 ? branches[0] : { $or: branches };
+}
+
+/**
+ * The bounded thread probe (the gate's mechanism before ADR-0139 E7): pre-scan
+ * the candidate `thread_id`s the query would touch under SYSTEM context,
+ * resolve which of their parent records the caller can read through the
+ * caller-scoped engine (the parent's own RLS/OWD/sharing apply), and keep the
+ * visible threads verbatim.
+ *
+ * `onlyUnstamped`: restricted to the rows no pair is stamped on, and the
+ * emitted branch says so, so it can never select a stamped row — those are the
+ * leaf's. Returns `null` when the query matches no candidate, the deny-all
+ * sentinel when none is visible. A throw is the caller's to fail closed on.
+ */
+async function probeUnstampedThreads(
   engine: CommentAccessEngine,
   ctx: CommentReadMiddlewareCtx,
   logger: CommentAccessLogger,
+  onlyUnstamped: boolean,
 ): Promise<unknown | null> {
   // 1. Candidate thread ids the query would touch — read under SYSTEM context
   //    (the caller may not see the rows yet; that is exactly what we are
-  //    deciding). Bypasses this middleware (isSystem).
+  //    deciding). Bypasses this middleware (isSystem). The caller's own order
+  //    rides along, so on a table larger than the scan bound the window
+  //    scanned is the window the caller pages through.
+  const callerWhere = ctx.ast?.where as Record<string, unknown> | undefined;
+  const where = onlyUnstamped
+    ? callerWhere
+      ? { $and: [callerWhere, { ...UNSTAMPED_ROWS }] }
+      : { ...UNSTAMPED_ROWS }
+    : (callerWhere ?? {});
+  const orderBy = (ctx.ast as { orderBy?: unknown } | undefined)?.orderBy;
   const candidates = await engine.find('sys_comment', {
-    where: (ctx.ast?.where as Record<string, unknown>) ?? {},
+    where,
     fields: ['thread_id'],
+    ...(Array.isArray(orderBy) && orderBy.length > 0 ? { orderBy } : {}),
     limit: READ_SCAN_LIMIT,
     context: { ...SYSTEM_CTX },
   });
   if (!candidates.length) return null;
   if (candidates.length >= READ_SCAN_LIMIT) {
     // Not silent (fail-closed truncation): rows beyond the scan window are
-    // excluded from the visibility filter, so a very broad unscoped list may
-    // omit rows the caller could see. The comment panel scopes to one thread
-    // so never hits this; a global list should paginate by thread_id.
+    // excluded from the visibility filter, so a very broad read may omit rows
+    // the caller could see. Stamping the pair lifts the bound for every row.
     logger.warn(
-      `[audit] comment read visibility: candidate pre-scan hit the ${READ_SCAN_LIMIT}-row cap; ` +
-        'the visibility filter for this broad read is fail-closed and may omit visible rows — scope the query by thread_id',
+      `[audit] comment read visibility: the thread probe's candidate pre-scan ` +
+        `(${onlyUnstamped ? 'rows with no stamped parent pair' : 'the whole read'}) hit the ${READ_SCAN_LIMIT}-row ` +
+        'cap; the visibility filter for these rows is fail-closed and may omit visible rows — ' +
+        (onlyUnstamped
+          ? 'run `os migrate comment-parent-pair --apply` to stamp them'
+          : 'scope the query by thread_id'),
     );
   }
 
@@ -1008,6 +1337,6 @@ async function computeThreadVisibilityFilter(
     if (visibleByObject.get(target.object)?.has(target.recordId)) visibleThreads.push(threadId);
   }
   if (visibleThreads.length === 0) return READ_DENY_ALL;
-  return { thread_id: { $in: visibleThreads } };
+  const visible = { thread_id: { $in: visibleThreads } };
+  return onlyUnstamped ? { ...UNSTAMPED_ROWS, ...visible } : visible;
 }
-

@@ -33,17 +33,17 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 226 |
-| Object name statically decidable | 155 |
+| Write call sites | 227 |
+| Object name statically decidable | 156 |
 | Object name chosen at run time | 71 |
-| Against a tenancy-enabled object | 154 |
+| Against a tenancy-enabled object | 155 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 165 |
+| Threading a tenant context | 166 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
 | Options argument unreadable | 53 |
 | …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 122 |
+| Threading a decidably elevated context | 123 |
 | Threading a decidably non-elevated context | 0 |
 | Threading a context of undecidable elevation | 96 |
 
@@ -90,12 +90,12 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-16 at `c53c594e7`.
+Measured on 2026-10-16 at `caebc6a7b`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 654 |
-| engine-shaped types recognised | 77 |
+| tracked non-test sources scanned | 655 |
+| engine-shaped types recognised | 78 |
 | declared objects in the registry | 116 |
 | same-named calls subtracted as non-engine | 165 |
 
@@ -117,6 +117,7 @@ Measured on 2026-10-16 at `c53c594e7`.
 | `packages/plugins/plugin-approvals/src/backfill-platform-row-organizations.ts` | `update` | `objectPlan.object` | undecidable | context, elevation undecidable | 1 |
 | `packages/plugins/plugin-audit/src/activity-changed-fields-backfill.ts` | `update` | `sys_activity` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/auth-event-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
+| `packages/plugins/plugin-audit/src/comment-parent-pair-backfill.ts` | `update` | `sys_comment` | enabled | elevated | 1 |
 | `packages/plugins/plugin-audit/src/read-audit.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-audit/src/stored-metadata-body-migration.ts` | `update` | `object` | undecidable | elevated | 1 |
 | `packages/plugins/plugin-auth/src/admin-import-users.ts` | `insert` | `sys_audit_log` | enabled | options unreadable | 1 |
