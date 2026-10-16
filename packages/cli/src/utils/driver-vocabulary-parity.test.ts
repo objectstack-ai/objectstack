@@ -486,20 +486,45 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
     }
   });
 
-  // A value carrying a scheme with no `//` (`jdbc:postgresql://…`, `redis:h`)
-  // matches neither host's `<scheme>://` test, so the runtime host takes it as a
-  // SQLite file path and the CLI host mirrors it. Which answer is RIGHT is not
-  // this row's question; that the two hosts give the SAME one is — so a change
-  // to either host's scheme-less arm reddens here until the other follows.
-  it.each(['jdbc:postgresql://localhost:5432/db', 'redis:cache'])(
-    'both hosts give %s the same verdict, in dev and prod',
-    (url) => {
-      const runtime = runtimeUrlVerdict(url);
-      for (const isDev of [false, true]) {
-        const cli = cliUrlVerdict(url, isDev);
-        expect(cli.accepted, `the hosts disagree on ${url} (isDev=${isDev})`).toBe(runtime.accepted);
-        if (cli.accepted && runtime.accepted) expect(cli.driverId).toBe(runtime.driverId);
-      }
-    },
-  );
+  // An OPAQUE scheme — two or more characters and a `:`, no `//`
+  // (`jdbc:postgresql://…`, `redis:h`). The CLI host refuses it, typed, in dev
+  // and prod. The runtime host's answer is deliberately NOT pinned here: today
+  // its scheme-less arm opens these as a SQLite file at a path made of the URL,
+  // an implementation gap against its own "unknown schemes throw" rule that is
+  // #23765's to close, so asserting either agreement or its current answer
+  // would pin that gap.
+  it.each([
+    ['jdbc:postgresql://localhost:5432/db', 'jdbc:'],
+    ['redis:cache', 'redis:'],
+  ])('the CLI host REFUSES the opaque scheme of %s, in dev AND in prod', (url, scheme) => {
+    for (const isDev of [false, true]) {
+      const cli = cliUrlVerdict(url, isDev);
+      expect(cli.accepted, `the CLI host (isDev=${isDev}) accepted ${url}`).toBe(false);
+      const error = (cli as { error: unknown }).error;
+      expect(error, `the CLI host (isDev=${isDev}) did not refuse ${url} by type`).toBeInstanceOf(UnsupportedDriverError);
+      expect((error as UnsupportedDriverError).recognized).toBe(false);
+      expect((error as Error).message).toContain(`"${scheme}"`);
+      expect((error as Error).message).toContain('OS_DATABASE_URL');
+    }
+  });
+
+  // `sqlite:` / `sqlite://` are aliases of `file:` on both hosts, by ONE rule —
+  // the runtime host's `normalizeDatabaseUrl`, which the CLI host calls. Both
+  // hosts must name the same FILE: `sqlite://x.db` used to open `//x.db` (the
+  // filesystem root) on the CLI host while the runtime host opened `x.db`.
+  it.each([
+    ['sqlite://x.db', 'x.db'],
+    ['sqlite:x.db', 'x.db'],
+    ['sqlite:///var/lib/objectstack/x.db', '/var/lib/objectstack/x.db'],
+  ])('both hosts open %s as the sqlite file %s, in dev and prod', (url, file) => {
+    process.env.OS_DATABASE_URL = url;
+    const runtime = resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' });
+    expect(runtime.driver).toBe('sqlite');
+    expect(runtime.sqliteFile, `the runtime host's file for ${url}`).toBe(file);
+    for (const isDev of [false, true]) {
+      const definition = resolveStorageDefinition(resolveDriverType(undefined, url), { databaseUrl: url, isDev });
+      expect(definition!.driverId).toBe('sqlite');
+      expect(definition!.config.filename, `the CLI host's file for ${url} (isDev=${isDev})`).toBe(runtime.sqliteFile);
+    }
+  });
 });

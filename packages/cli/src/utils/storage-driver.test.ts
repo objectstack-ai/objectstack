@@ -85,9 +85,10 @@ describe('inferDriverTypeFromUrl', () => {
     expect(inferDriverTypeFromUrl(':memory:')).toBe('sqlite');
   });
 
-  // A value with no `<scheme>://` is a SQLite file path whatever its name — the
-  // runtime host's arm. These used to answer '' (dev booted `:memory:`).
-  it.each(['./data/app', 'data/app', '/var/lib/objectstack/app', 'C:\\data\\app'])(
+  // A value with no scheme is a SQLite file path whatever its name — the runtime
+  // host's arm. These used to answer '' (dev booted `:memory:`). A one-letter
+  // drive and a `:` is a drive, not a scheme.
+  it.each(['./data/app', 'data/app', '/var/lib/objectstack/app', 'C:\\data\\app', 'C:/data/app', './backup:2026.db'])(
     'classifies the scheme-less path %s as a sqlite file',
     (url) => {
       expect(inferDriverTypeFromUrl(url)).toBe('sqlite');
@@ -112,6 +113,10 @@ describe('inferDriverTypeFromUrl', () => {
     ['mssql://h/db', 'mssql://'],
     // A `.db` name does not rescue a scheme nothing recognises.
     ['redis://h/app.db', 'redis://'],
+    // An OPAQUE scheme (two or more characters and a `:`, no `//`) is refused
+    // too, rather than opened as a file at a path made of the URL.
+    ['jdbc:postgresql://localhost:5432/db', 'jdbc:'],
+    ['redis:cache', 'redis:'],
   ])('refuses %s at inference, naming the scheme and the recognised ones', (url, scheme) => {
     let err: unknown;
     try {
@@ -254,6 +259,23 @@ describe('resolveStorageDefinition (#3826 — a definition, not a driver)', () =
     expect(r!.driverId).toBe('sqlite');
     expect(r!.config.filename).toBe('./app.db');
     expect(r!.sqliteFilePath).toBe('./app.db');
+  });
+
+  // `sqlite:` / `sqlite://` are aliases of `file:` (the runtime host's
+  // `normalizeDatabaseUrl`): `sqlite://x.db` is `x.db`, never `//x.db`, which
+  // is the filesystem root. The cross-host equality is pinned in
+  // `driver-vocabulary-parity.test.ts`.
+  it.each([
+    ['sqlite://x.db', 'x.db'],
+    ['sqlite:x.db', 'x.db'],
+    ['sqlite:///var/lib/objectstack/x.db', '/var/lib/objectstack/x.db'],
+    ['SQLITE://x.db', 'x.db'],
+  ])('reads %s as the sqlite file %s', (url, file) => {
+    const r = resolveStorageDefinition(resolveDriverType(undefined, url), { databaseUrl: url, isDev: false });
+    expect(r!.config.filename).toBe(file);
+    expect(r!.sqliteFilePath).toBe(file);
+    // The banner keeps what the operator typed.
+    expect(r!.displayUrl).toBe(url);
   });
 
   it('dev default (no driver) declares sqlite :memory: with NO telemetry sibling', () => {
