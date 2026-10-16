@@ -132,6 +132,12 @@
 // makes one of them false reds this file — round 6 raised the bar from
 // "checked" to "pinned" and this round keeps it there.
 //
+// ⚠️ Since rewritten (#23808): the `api`, `doc`, `book` and `capability`
+// descriptions are now plain admin copy, with their ADR vocabulary moved to the
+// comments beside the registry rows. "pipeline" and "ordered groups" no longer
+// appear in that prose; their schema readings stay pinned below because they
+// are still true, and the four rows record the new renderings.
+//
 // ## ⭐ THE SAME ENGLISH STEM IN THREE POSITIONS, DECIDED TWO WAYS
 //
 // `capability.label` is the third position in this catalog for the word round 6
@@ -306,10 +312,10 @@ const DECISIONS: readonly Decision[] = [
     scope: 'type',
     key: 'api',
     prop: 'description',
-    en: 'Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)',
+    en: 'A stable HTTP URL that other systems call to reach flows, scripts and data in the app',
     verdict: ALL_TRANSLATE,
     reason:
-      '⭐ "pipeline" READS LIKE AN ApiEndpointSchema.type AND IS NOT ONE — asserted below: the schema accepts type "proxy" and refuses type "pipeline" (flow/script/object_operation/proxy), so the word is prose and is rendered 管道 / パイプライン / pipeline. "policy" takes the sense this catalog already separates and round 6 recorded: 策略 for a configured strategy (hook.fields.retryPolicy.label 重试策略), NOT 政策 which is reserved for a published document (sys_oauth_application.fields.policy.label 隐私政策); ja ポリシー, es política. "layer" takes sys_view_definition.description (软件包层 / パッケージレイヤー / La capa de paquete) — ⚠️ zh renders it 层 and ja レイヤー there, but this leaf\'s ja reads 層 in the compound ポリシー層 because the twin\'s レイヤー is itself attached to a katakana head; the reading is recorded rather than silently harmonised. ⭐ `HTTP`, `URL` and `ADR-0121` are KEPT VERBATIM in all three — machine tokens by the rule that kept 256 and N in round 6, asserted by the token guard below. ⚠️ em-dash convention copied: zh folds to —— with no spaces (hook.sections.legacy_handler.description 函数名引用——已废弃), ja and es keep a spaced —.',
+      'REWRITTEN AS PLAIN ADMIN COPY: the registry description is what Setup shows, so it says what the item is and who uses it, and the ADR-0121 vocabulary (declarative endpoint, policy layer, pipeline) moved to the comment beside the registry row. "flows, scripts and data" names what ApiEndpointSchema.type can target (flow/script/object_operation; proxy is the rare fourth) in words an admin reads. ⇒ 其他系统调用的稳定 HTTP URL，用于访问应用的流程、脚本和数据 / 他のシステムがアプリのフロー、スクリプト、データにアクセスするために呼び出す固定の HTTP URL / URL HTTP estable a la que llaman otros sistemas para acceder a los flujos, scripts y datos de la aplicación. ⭐ `HTTP` and `URL` stay machine tokens in all three, asserted by the token guard below. ⚠️ No second person in zh/ja/es: the catalog carries no 你的/您的, so "the app" is rendered 应用 / アプリ / la aplicación.',
   },
   {
     scope: 'type',
@@ -324,10 +330,10 @@ const DECISIONS: readonly Decision[] = [
     scope: 'type',
     key: 'doc',
     prop: 'description',
-    en: 'Package documentation — flat Markdown items (ADR-0046)',
+    en: 'A help page written in Markdown that a package ships for its users to read',
     verdict: ALL_TRANSLATE,
     reason:
-      '⭐⭐ ONE OF THE TWO ROWS WHERE THE #19430 NEAR-MISS IS REAL. `package` IS a legal MetadataProvenanceSchema value and DocSchema really does accept `_provenance: "package"` while refusing a rendered one — both asserted below, so the trap is proved to exist before it is cleared. It is CLEARED three ways, each asserted: the key is `_provenance`, which the loader sets and no form asks for (a doc parses without it, and the whole en metadata-forms catalog names no `_`-prefixed key); `doc` is BARE, so this string labels no input at all; and where this catalog DOES render a leaf whose stored value is literally `package` it renders the display and keeps the value (sys_metadata.fields.managed_by.options.package is 包 / パッケージ / Paquete). ⇒ rendered. "flat" takes position.sections.position.description (扁平的 / フラットな / plano); "items" takes app.sections.navigation.description (侧边栏菜单项 / サイドバー項目 / Elementos de barra lateral). ⇒ 软件包文档——扁平的 Markdown 文档项（ADR-0046） / パッケージのドキュメント — フラットな Markdown 項目（ADR-0046） / Documentación del paquete — elementos Markdown planos (ADR-0046). ⚠️ zh answers "package" two ways in this catalog — 包 inside compounds (包 ID, 包版本) and 软件包 in running prose (软件包层) — and this is prose, so it takes 软件包. ⭐ `Markdown` is KEPT as a format proper noun in all three, the same treatment the catalog gives HTML in sys_email_template.fields.body_text.help; asserted by the token guard.',
+      'REWRITTEN AS PLAIN ADMIN COPY: "flat Markdown items (ADR-0046)" became what an admin meets, a help page, and the ADR reference moved to the comment beside the registry row. `package` is still rendered as the noun, by the near-miss clearing asserted below (zh prose takes 软件包, as in 软件包层). ⇒ 软件包随附的 Markdown 帮助页面，供用户阅读 / パッケージに同梱される、ユーザー向けの Markdown ヘルプページ / Página de ayuda en Markdown que un paquete incluye para que la lean sus usuarios. ⭐ `Markdown` is KEPT as a format proper noun in all three; asserted by the token guard.',
   },
   {
     scope: 'type',
@@ -342,10 +348,10 @@ const DECISIONS: readonly Decision[] = [
     scope: 'type',
     key: 'book',
     prop: 'description',
-    en: 'Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)',
+    en: 'A table of contents that groups the help pages of a package into ordered sections',
     verdict: ALL_TRANSLATE,
     reason:
-      '`groups` IS A KEY, NOT AN ENUM VALUE — asserted below by the rule round 6 used to clear timeoutMs: BookSchema.groups takes an ARRAY (it refuses the string "ordered"), so no rendered word can land in it. "navigation" takes app.sections.navigation.label (导航 / ナビゲーション / Navegación); "ordered" takes report.fields.order.label (排序 / 並び順 / Orden); "derived" takes dataset.fields.measures.derived.label (派生自 / 派生元 / Derivada de). "spine" and "membership" have no authored twin and the row says so: spine is rendered 主干 / 骨格 / Columna vertebral and membership 成员 / メンバーシップ / pertenencia. ⇒ 文档导航主干——有序分组，成员由派生确定（ADR-0046 §6） / ドキュメントナビゲーションの骨格 — 順序付きグループと派生されたメンバーシップ（ADR-0046 §6） / Columna vertebral de navegación de la documentación — grupos ordenados con pertenencia derivada (ADR-0046 §6). ⭐ `ADR-0046` AND `§6` are both kept verbatim — the section mark is part of the citation and is asserted as its own token, because dropping it is the kind of loss no census can see.',
+      'REWRITTEN AS PLAIN ADMIN COPY: "navigation spine — ordered groups with derived membership (ADR-0046 §6)" became a table of contents, and the ADR-0046 §6 vocabulary moved to the comment beside the registry row. "help pages" is the same phrase the doc row now uses, so the two types read as a pair in every locale. "sections" is prose, not BookSchema.groups (a key that takes an array, asserted below). ⇒ 将软件包的帮助页面按顺序分节组织的目录 / パッケージのヘルプページを順序付きのセクションにまとめた目次 / Índice que organiza las páginas de ayuda de un paquete en secciones ordenadas. No machine token is kept: the ADR citation and its §6 are exactly what this rewrite removed, asserted by the plain-copy guard below.',
   },
   {
     scope: 'type',
@@ -360,10 +366,10 @@ const DECISIONS: readonly Decision[] = [
     scope: 'type',
     key: 'capability',
     prop: 'description',
-    en: 'Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)',
+    en: 'A permission a package defines; you grant it through permission sets',
     verdict: ALL_TRANSLATE,
     reason:
-      'THE SECOND REAL `package` NEAR-MISS, cleared exactly as the doc row above and asserted separately on CapabilityDeclarationSchema rather than inherited — the two schemas splice the same protection mixin but that is a fact to assert, not to assume. ⭐ The clause "grants live on permission sets" has a STRUCTURAL authored twin one panel away: position.sections.position.description renders "Capability lives on permission sets" as 能力在权限集上 / 能力は権限セットに / La capacidad reside en los permission sets, and this row copies the frame while substituting 授予 / 付与 / las concesiones for "grants". "authorization" takes sys_oauth_application._actions.enable_oauth_application.description (授权 / 認可 / la autorización) — ⚠️ ja answers this word two ways and the row picks deliberately: 認可 (authz, that leaf) over 認証 (authn, sys_device_code.description), because ADR-0066 is about what a principal MAY do. "resources" takes sys_organization._actions.leave_organization.confirmText (资源 / リソース / recursos). ⇒ 软件包声明的授权能力——ADR-0066 D1 的定义侧（授予在权限集上；要求在资源上） / パッケージが宣言する認可ケイパビリティ — ADR-0066 D1 の定義側（付与は権限セットに、要件はリソースに） / Capacidad de autorización declarada por el paquete — el lado de la DEFINICIÓN de ADR-0066 D1 (las concesiones residen en los conjuntos de permisos; los requisitos, en los recursos). ⚠️ es answers "permission sets" two ways — conjuntos de permisos (permission.sections.identity.description) and the English permission sets (position.sections.position.description) — and this row takes the Spanish one, because the leaf it is describing IS the permission domain\'s own definition side. ⭐ `ADR-0066` and `D1` are kept verbatim and asserted; the en\'s uppercase DEFINITION is carried as case in es and as plain text in zh/ja, which have no case to carry it with.',
+      'REWRITTEN AS PLAIN ADMIN COPY, in the voice the Setup review gave verbatim for this type. "the DEFINITION side of ADR-0066 D1" moved to the comment beside the registry row. "permission sets" takes the type label permission.label (权限集 / 権限セット / Conjunto de permisos, plural conjuntos de permisos); "grant" takes 授予 / 付与 / conceder, the verbs this catalog already uses for permission grants. zh/ja/es use an impersonal second clause, since the catalog carries no second person. ⇒ 软件包定义的一项权限；通过权限集授予 / パッケージが定義する権限。権限セットを通じて付与します / Permiso que define un paquete; se concede mediante conjuntos de permisos. No machine token is kept: ADR-0066 and D1 are exactly what this rewrite removed, asserted by the plain-copy guard below.',
   },
 ];
 
@@ -659,10 +665,8 @@ describe('#19403 round 7 — the #19430 discipline, asserted AT THE SCHEMA', () 
   it('the machine tokens the ledger decided to KEEP are still verbatim in every locale', () => {
     const KEPT: ReadonlyArray<readonly [string, 'label' | 'description', readonly string[]]> = [
       ['api', 'label', ['API']],
-      ['api', 'description', ['HTTP', 'URL', 'ADR-0121']],
-      ['doc', 'description', ['Markdown', 'ADR-0046']],
-      ['book', 'description', ['ADR-0046', '§6']],
-      ['capability', 'description', ['ADR-0066', 'D1']],
+      ['api', 'description', ['HTTP', 'URL']],
+      ['doc', 'description', ['Markdown']],
     ];
     for (const [type, prop, tokens] of KEPT) {
       for (const [locale, forms] of TRANSLATED_LOCALES) {
@@ -677,17 +681,38 @@ describe('#19403 round 7 — the #19430 discipline, asserted AT THE SCHEMA', () 
 
   it('⭐ the token predicate can say NO — and a bare `includes` could not', () => {
     // Dark. Without this the assertion above could be a guard that is true of
-    // every string. `§6` must not be found as `§7`, and `D1` must not be found
-    // inside `ADR-0121`'s digits.
-    const zhBook = (zhCNMetadataForms as Record<string, any>).book.description as string;
-    expect(carriesToken(zhBook, '§6')).toBe(true);
-    expect(carriesToken(zhBook, '§7')).toBe(false);
+    // every string. `Markdown` must not be found as `Mark`, and `URL` must not
+    // be found as `UR`.
+    const jaDoc = (jaJPMetadataForms as Record<string, any>).doc.description as string;
+    expect(carriesToken(jaDoc, 'Markdown')).toBe(true);
+    expect(jaDoc.includes('Mark'), 'substring containment says YES').toBe(true);
+    expect(carriesToken(jaDoc, 'Mark'), 'the word-boundary predicate says NO').toBe(false);
     const zhApi = (zhCNMetadataForms as Record<string, any>).api.description as string;
     expect(zhApi.includes('D1'), 'substring says nothing here').toBe(false);
-    expect(carriesToken(zhApi, 'ADR-0121')).toBe(true);
-    expect(carriesToken(zhApi, 'ADR-012')).toBe(false);
+    expect(carriesToken(zhApi, 'HTTP')).toBe(true);
+    expect(carriesToken(zhApi, 'HTT')).toBe(false);
     expect(carriesToken(zhApi, 'URL')).toBe(true);
     expect(carriesToken(zhApi, 'UR')).toBe(false);
+  });
+
+  it('the four descriptions Setup shows are plain copy — no ADR vocabulary in any locale', () => {
+    // The admin-facing half of the registry rows: ADR numbers, decision ids,
+    // finding ids, `emit()` and `kernel` live in the comments beside the rows,
+    // never in the string Setup renders. Checked in `en` AND every translated
+    // locale, because a translation made from the old source would carry them.
+    const ADR_VOCABULARY = /ADR-|\bD\d|finding F|emit\(\)|kernel|§/;
+    const PLAIN = ['api', 'doc', 'book', 'capability'];
+    for (const type of PLAIN) {
+      expect(registryEntry(type)?.description, `registry ${type}.description`).not.toMatch(ADR_VOCABULARY);
+      for (const [locale, forms] of [['en', enMetadataForms], ...TRANSLATED_LOCALES] as const) {
+        const text = (forms as Record<string, any>)[type]?.description as string;
+        expect(typeof text, `${locale} ${type}.description`).toBe('string');
+        expect(text, `${locale} ${type}.description`).not.toMatch(ADR_VOCABULARY);
+      }
+    }
+    // Dark: the same pattern fires on the prose this rewrite replaced.
+    expect('Documentation navigation spine (ADR-0046 §6)').toMatch(ADR_VOCABULARY);
+    expect('the DEFINITION side of ADR-0066 D1').toMatch(ADR_VOCABULARY);
   });
 });
 
