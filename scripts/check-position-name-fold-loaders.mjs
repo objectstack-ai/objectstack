@@ -146,10 +146,30 @@ export function classifyReference(relPath) {
  * long file that happens to mention `__fixtures__` in one place and `hotcrm` in
  * another, and a gate whose red is a coincidence gets weakened rather than
  * obeyed.
+ *
+ * Rule 3 does not count a fully spelled path to ANOTHER package's fixtures
+ * directory ({@link OTHER_PACKAGE_FIXTURE_PATH}): `packages/objectql/src/
+ * __fixtures__/hotcrm-4.0.1-published-pages.artifact.json` names one file in
+ * one other directory and cannot sweep up this artifact, while matching the
+ * glob shape would red on it. Only that path is set aside, and the rest of the
+ * line is still judged, so a bare glob beside it still counts. A path that
+ * climbs (`..`) or carries a glob character is never set aside — either can
+ * reach this directory — and this package's own directory is rule 2's, before
+ * rule 3 is asked at all.
  */
+const OTHER_PACKAGE_FIXTURE_PATH = /packages\/(?:[\w.-]+\/)+src\/__fixtures__\/[\w.-]+(?:\/[\w.-]+)*/g;
+
+function withoutOtherPackageFixturePaths(line) {
+  return line.replace(OTHER_PACKAGE_FIXTURE_PATH, (path) => (
+    path.startsWith(`${FIXTURES_DIR}/`) || path.split('/').includes('..') ? path : ''
+  ));
+}
+
 export function referencesArtifact(text) {
   if (text.includes(ARTIFACT_BASENAME) || text.includes(FIXTURES_DIR)) return true;
-  for (const line of text.split('\n')) {
+  for (const raw of text.split('\n')) {
+    if (!raw.includes('__fixtures__')) continue;
+    const line = withoutOtherPackageFixturePaths(raw);
     if (!line.includes('__fixtures__')) continue;
     if (line.includes('hotcrm') || line.includes('.artifact')) return true;
   }
@@ -316,7 +336,7 @@ let selfTestReachedVerdict = false;
 const SELF_TEST_BATTERIES = Object.freeze({
   'REVERSE CONTROL. A zero from a scan that cannot report anything is not a': 3,
   'The allowed dispositions, each for its own stated reason.': 5,
-  'The text matcher, both directions. A matcher that never matches turns': 5,
+  'The text matcher, both directions. A matcher that never matches turns': 12,
   'The permission-set extractor, on the real artifact shape.': 2,
 });
 
@@ -398,6 +418,41 @@ function selfTest() {
     'matcher does NOT credit __fixtures__ and hotcrm on separate lines',
     referencesArtifact("import x from './__fixtures__/widget.json';\n// unrelated: hotcrm#788\n"),
     false,
+  );
+  check(
+    "matcher does NOT count a full path to another package's fixture",
+    referencesArtifact("      'packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json',"),
+    false,
+  );
+  check(
+    "matcher does NOT count a full path to a nested package's fixture",
+    referencesArtifact("readFileSync('packages/services/service-x/src/__fixtures__/hotcrm-1.artifact.json')"),
+    false,
+  );
+  check(
+    'matcher still sees a bare fixtures glob',
+    referencesArtifact("globs: ['__fixtures__/*.artifact.json'],"),
+    true,
+  );
+  check(
+    'matcher still sees a path into this package\'s own fixtures directory',
+    referencesArtifact("readFileSync('packages/metadata/src/__fixtures__/x.json')"),
+    true,
+  );
+  check(
+    'matcher still sees a bare glob beside another package\'s fixture path on one line',
+    referencesArtifact("['packages/objectql/src/__fixtures__/a.json', '**/__fixtures__/*.artifact.json']"),
+    true,
+  );
+  check(
+    'matcher still sees another package\'s path that climbs back toward this directory',
+    referencesArtifact("glob('packages/objectql/src/__fixtures__/../../../metadata/src/__fixtures__/*.artifact.json')"),
+    true,
+  );
+  check(
+    'matcher still sees a wildcard package path',
+    referencesArtifact("glob('packages/*/src/__fixtures__/*.artifact.json')"),
+    true,
   );
 
   // ── The permission-set extractor, on the real artifact shape.
