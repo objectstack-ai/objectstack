@@ -25,6 +25,7 @@ describe('server-ready banner external base URL (#10646)', () => {
   const saved: Partial<Record<(typeof TOUCHED)[number], string | undefined>> = {};
 
   const bannerOpts: Omit<ServerReadyOptions, 'externalBaseOrigin'> = {
+    httpServer: 'composed',
     configFile: 'objectstack.config.ts',
     isDev: false,
     pluginCount: 1,

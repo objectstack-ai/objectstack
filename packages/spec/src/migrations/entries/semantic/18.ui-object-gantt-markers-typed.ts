@@ -9,7 +9,7 @@ import type { SemanticMigration } from '../../types.js';
 // spec now declares objectui's own authoring declaration of a marker,
 // `{ date, label?, color? }` with `date` a string, and the row takes it. D3
 // only: page-component `properties` is not parsed on the metadata save or load
-// path, so a stored page is never refused; a misspelled member has no rewrite
+// path, so a stored page is never refused at load; a misspelled member has no rewrite
 // that says which of the three the author meant; and the authored census found
 // no authored value to respell — the one refused value is objectui's own
 // compile-time refusal probe.
@@ -29,8 +29,7 @@ export const entry: SemanticMigration = {
     + '`Date`), closed as every element shape on that map is. It is read where every page component\'s props '
     + 'are: the component-props gate reports a refused value as a `component-props-invalid` / '
     + '`component-props-unknown-key` error on `objectstack validate`, `objectstack build` and `objectstack '
-    + 'lint`, and a stored page still saves and loads, because a page component\'s `properties` is not parsed '
-    + 'on the metadata save or load path. No conversion is registered: nothing on the load path refuses the '
+    + 'lint`, and a stored page still loads, because a page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is registered: nothing on the load path refuses the '
     + 'shape, and a misspelled member has no rewrite that says which member the author meant — which is the '
     + 'judgment this entry leaves to the upgrader. Deployed metadata NOT MEASURED.',
   acceptanceCriteria: 'Every `object-gantt` node validates: `objectstack validate` reports no '

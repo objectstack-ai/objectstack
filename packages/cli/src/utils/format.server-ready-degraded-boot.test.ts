@@ -82,6 +82,7 @@ async function bootKernel(names: string[]): Promise<ObjectKernel> {
 /** Banner options held fixed across the legs, so only the boot differs. */
 const BASE: ServerReadyOptions = {
   externalBaseOrigin: 'http://localhost:3000',
+  httpServer: 'composed',
   isDev: true,
   pluginCount: 3,
 };
