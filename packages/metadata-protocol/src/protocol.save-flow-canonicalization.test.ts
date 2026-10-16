@@ -632,11 +632,11 @@ describe('saveMetaItem canonicalizes flow bodies (#4542)', () => {
             const body = flowBody({ objectName: 'lead', filter: { status: 'stale' } });
 
             await save(protocol, body);
-            expect(spy.mock.calls.at(-1)?.[2]).toEqual({ includeRetired: false });
+            expect(spy.mock.lastCall?.[2]).toEqual({ includeRetired: false });
 
             await seedStoredFlow(engine, legacyBody(), 'draft');
             await save(protocol, legacyBody(), { mode: 'draft' });
-            expect(spy.mock.calls.at(-1)?.[2]).toEqual({ includeRetired: true });
+            expect(spy.mock.lastCall?.[2]).toEqual({ includeRetired: true });
         });
 
         it('the refusal is the authoring funnel\'s own text: the issue `os validate` gets for the same flow', async () => {
