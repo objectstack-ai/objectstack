@@ -848,7 +848,7 @@ function fixtureTree({ plant = {}, untracked = {}, omit = [], git = true } = {})
   const dir = mkdtempSync(join(tmpdir(), 'pnpm-flag-spellings-'));
   const files = {
     'package.json': manifest({ build: 'pnpm --silent turbo run build' }),
-    'scripts/ok.sh': '#!/usr/bin/env bash\nset -euo pipefail\npnpm --filter fixture --silent build\n',
+    'scripts/ok.sh': '#!/usr/bin/env bash\nset -euo pipefail\npnpm --filter @objectstack/spec --silent build\n',
     'packages/foo/package.json': `${JSON.stringify({ name: 'foo', scripts: { test: 'vitest run' } }, null, 2)}\n`,
     'packages/foo/scripts/gen.mjs': "import { execSync } from 'node:child_process';\nexecSync('pnpm --silent gen');\n",
     '.githooks/pre-commit': '#!/bin/sh\nexec pnpm --silent check:hooks\n',
@@ -898,7 +898,7 @@ const TREE_CASES = [
   },
   { label: 'a planted `pnpm -s` in a tracked scripts/ shell file → red at its line', tree: { plant: { 'scripts/plant.sh': PLANT } }, check: one('scripts/plant.sh', 3) },
   { label: 'a planted package.json script → red naming the manifest', tree: { plant: { 'package.json': manifest({ build: 'pnpm --silent build', plant: 'pnpm -s check:x' }) } }, check: one('package.json') },
-  { label: 'a planted JS spawn under packages/*/scripts/ → red', tree: { plant: { 'packages/foo/scripts/gen.mjs': "execSync('pnpm --filter foo -s gen');\n" } }, check: one('packages/foo/scripts/gen.mjs', 1) },
+  { label: 'a planted JS spawn under packages/*/scripts/ → red', tree: { plant: { 'packages/foo/scripts/gen.mjs': "execSync('pnpm --filter @objectstack/spec -s gen');\n" } }, check: one('packages/foo/scripts/gen.mjs', 1) },
   { label: 'a planted spelling in an extension-less git hook → red', tree: { plant: { '.githooks/pre-commit': '#!/bin/sh\nexec pnpm install --prod=false\n' } }, check: one('.githooks/pre-commit', 2) },
   { label: 'the same plant UNTRACKED → green (only tracked files are read)', tree: { untracked: { 'scripts/plant.sh': PLANT } }, check: clean },
   { label: 'the same plant tracked OUTSIDE every root → green', tree: { plant: { 'docs/plant.sh': PLANT } }, check: clean },
