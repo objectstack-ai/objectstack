@@ -19,6 +19,7 @@ import {
   detectUnboundFormViewPredicateRoots,
   unboundRootsInCelSource,
 } from './form-predicate-root-policy.js';
+import { applyArtifactForwardConversions } from './artifact-forward-conversion.js';
 
 /** The repro artifact's shape: one form view, one section, one gated field. */
 function definitionWithFieldPredicate(predicate: unknown, object = 'crm_lead'): unknown {
@@ -343,19 +344,26 @@ describe('detectUnboundFormViewPredicateRoots — traversal', () => {
     ).toEqual([]);
   });
 
-  it('reads the bare-string shorthand and the deprecated `visibleOn` alias', () => {
-    // Both reach this scan because it runs BEFORE the parse that normalizes them.
+  it('reads the bare-string shorthand', () => {
+    // It reaches this scan because the scan runs BEFORE the parse that normalizes it.
     expect(detectUnboundFormViewPredicateRoots(
       definitionWithFieldPredicate('status == "unqualified"'),
     )).toHaveLength(1);
+  });
 
+  it('a legacy artifact\'s retired `visibleOn` is renamed by the forward conversions before this scan reads it (#23543 F4)', () => {
     const withAlias: any = definitionWithFieldPredicate(CEL('record.x'));
     const field = withAlias.views[0].form.sections[0].fields[1];
     delete field.visibleWhen;
     field.visibleOn = CEL('status == "unqualified"');
-    const findings = detectUnboundFormViewPredicateRoots(withAlias);
-    expect(findings).toHaveLength(1);
-    expect(findings[0]!.path).toBe('views[0].form.sections[0].fields[1].visibleOn');
+    // The caller's order: forward-convert first (the 17-era window opens and
+    // replays the retired `view-visibleOn-to-visibleWhen`), then detect.
+    const forwarded = applyArtifactForwardConversions(withAlias, { runtimeSpecVersion: '18.0.0' });
+    expect(forwarded.notices.map((n) => n.conversionId)).toContain('view-visibleOn-to-visibleWhen');
+    const findings = detectUnboundFormViewPredicateRoots(forwarded.definition);
+    expect(findings.map((f) => f.path)).toEqual(['views[0].form.sections[0].fields[1].visibleWhen']);
+    // CONTROL — the scan itself reads only the canonical key now.
+    expect(detectUnboundFormViewPredicateRoots(withAlias)).toEqual([]);
   });
 
   it('passes an opaque predicate: AST-only, and any non-CEL dialect', () => {

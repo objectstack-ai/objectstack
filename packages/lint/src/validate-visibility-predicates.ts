@@ -6,8 +6,9 @@
  * ADR-0089 unifies the conditional-visibility predicate under the single
  * canonical key **`visibleWhen`** across data fields, view form sections/fields,
  * and page components. The deprecated spellings — `visibleOn` (view form) and
- * `visibility` (page component) — stay accepted and are folded into `visibleWhen`
- * before this file ever sees them.
+ * `visibility` (page component) — retired at 18 (#23543 F4): each is a spec
+ * tombstone, refused by name with the prescription naming `visibleWhen`, so no
+ * input this file is handed carries them (measured below, under "Input").
  *
  * ## Why there is no alias-KEY rule here any more (#6318, retired)
  *
@@ -31,18 +32,14 @@
  * "Unrecognized key(s) on this view container: `sections`". A green unit test
  * over a fixture production can never send — the #4984 / #6251 signature.
  *
- * **The surface is still guarded, and better.** The same D2 conversion shouts
- * through `warnConversionNotice` in `defineStack`, with wording this rule never
- * had — it names the site, the conversion, and the retirement window:
- *
- * ```
- * defineStack: views[0].form.sections[0].visibleWhen: 'visibleOn' -> 'visibleWhen'
- *   (converted at load; conversion 'view-visibleOn-to-visibleWhen', retires in protocol 16).
- *   Update the source to the canonical shape — the conversion stops running then.
- * ```
+ * **The surface is still guarded, and better.** Until 18 the same D2
+ * conversion shouted through `warnConversionNotice` in `defineStack`, naming the
+ * site and the conversion; since the keys retired at 18 the parse itself refuses
+ * each by name, at its path, with the rename to `visibleWhen` (the spec
+ * tombstones on `FormFieldSchema`, `FormSectionSchema` and `PageComponentSchema`).
  *
  * So no working app lost a signal when the rule went: authors were never hearing
- * this rule, and they do hear the conversion notice. Retired under ADR-0049
+ * this rule, and they heard the conversion notice, now the refusal. Retired under ADR-0049
  * (declared ≠ enforced) rather than re-anchored, because re-anchoring would have
  * had to change `runAuthoringRules`' external input contract — a `packages/lint`
  * public-API question that is the maintainer's to settle, not this file's.
@@ -104,11 +101,9 @@
  * `validate-expressions` and is not re-checked here.
  *
  * The predicate family is read off the schema, not guessed: `visibleWhen` is the
- * canonical key on all three carriers (`FormFieldBaseSchema` `view.zod.ts:1416`,
- * `FormSectionSchema` `view.zod.ts:1510`, `PageComponentSchema`
- * `page.zod.ts:143`), `visibleOn` is the view-side deprecated alias
- * (`view.zod.ts:1418` / `:1512`) and `visibility` the page-side one
- * (`page.zod.ts:145`). There is no fourth spelling on this surface.
+ * canonical key on all three carriers (`FormFieldBaseSchema`, `FormSectionSchema`
+ * and `PageComponentSchema`), and the only one: the view-side `visibleOn` and the
+ * page-side `visibility` are retired tombstones since 18 (#23543 F4).
  *
  * ## Syntax — the one surface where "don't judge syntax" meant nobody judged it
  *
@@ -547,10 +542,20 @@ export interface VisibilityFinding {
 type AnyRec = Record<string, unknown>;
 
 /**
- * The canonical predicate key (ADR-0089). The two deprecated spellings
- * (`visibleOn` / `visibility`) are read inline in `checkElement`, canonical-first
- * — the `ALIASES` list that used to sit here existed only to iterate the retired
- * alias-KEY rule, and went with it (#6318).
+ * The canonical predicate key (ADR-0089), and the one read.
+ *
+ * ## Input — why the retired spellings are not read (#23543 F4)
+ *
+ * `checkElement` used to read `visibleWhen ?? visibleOn ?? visibility`, for a
+ * caller handing this export a raw authored object. Both aliases retired at 18
+ * as spec tombstones, and every door that runs this rule hands it a body the
+ * spec parse ACCEPTED: the three CLI commands run the rule stage only after
+ * `ObjectStackDefinitionSchema` passes (`judgeAuthorTimeRules`), per-package
+ * bodies come from that parsed stack, and the metadata save door parses the
+ * `view` body (a 422 on refusal) before its runtime rule pass. An accepted body
+ * cannot carry either key, so the limbs could only ever judge the value of a key
+ * the spec already refuses — the consumer-side alias tolerance the retirement
+ * ends.
  */
 const CANONICAL = 'visibleWhen';
 
@@ -1022,17 +1027,9 @@ function checkElement(
   // (1) mis-layered binding root — check the effective predicate (canonical wins)
   // against the root expected for this layer.
   //
-  // The two alias limbs STAY, and are not the thing #6318 retired. That issue is
-  // about the alias KEY as a verdict; this is the predicate VALUE, and the value
-  // is what all three surviving rules judge. Through the three CLI commands the
-  // limbs are already unreachable (the D2 fold renamed the key one layer up), but
-  // `validateVisibilityPredicates` is a PUBLISHED export that a caller — this
-  // package's own unit tests included — may hand a raw authored object, and on
-  // that door an alias-spelled predicate must still be judged rather than skipped
-  // silently. Ordering is canonical-first per ADR-0089, so an alias can never
-  // override a `visibleWhen` that is present: the limbs can only ever add
-  // coverage, never change a verdict.
-  const raw = el[CANONICAL] ?? el.visibleOn ?? el.visibility;
+  // Canonical key only: the alias limbs went with the retired keys (#23543 F4,
+  // see `CANONICAL`).
+  const raw = el[CANONICAL];
   const source = predicateSource(raw);
   const rule = MISLAYER_BY_LAYER[layer];
   if (source && usesRoot(source, rule.forbiddenRoot)) {

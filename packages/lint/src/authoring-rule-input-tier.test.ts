@@ -223,31 +223,21 @@ describe('premise 2 (FALSE): "the parse strips `userFilters`/`quickFilters` on a
 
 // ───────────────────────────────────────────────────────────────────────────
 describe('premise 3 (FALSE): "the `visibleOn` alias survives until the parse"', () => {
-  // The fold is an ADR-0087 D2 conversion inside `normalizeStackInput` — one
-  // layer BEFORE this tier — not a parse-time `.transform()`. So the alias is
-  // gone from the tier's own input on every door, `os lint` included.
+  // Measured at #6073: the fold was an ADR-0087 D2 conversion inside
+  // `normalizeStackInput` — one layer BEFORE this tier — not a parse-time
+  // `.transform()`, and #6318 retired the alias-KEY rule on that measurement.
   //
-  // #6318 acted on that measurement: the alias-KEY rule this premise was
-  // written to justify (`visibility-alias-deprecated`) has been RETIRED, so the
-  // assertions below no longer count its findings. They pin the mechanism that
-  // outlives it, which is what makes the retirement safe to keep:
+  // #23543 F4 then retired the aliases themselves at 18: each is a spec
+  // tombstone, both D2 conversions left the load path, and the lint family
+  // stopped reading the alias VALUE. What these pins hold now:
   //
-  //   * the KEY does not cross the fold — nothing downstream can judge it;
-  //   * the VALUE does cross it intact — which is why the three surviving rules
-  //     work on this tier and were not swept in;
-  //   * the author is not silent — the D2 conversion notice fires in
-  //     `defineStack`, and that notice IS the recorded guard for this surface.
-  //
-  // Read `toHaveLength(0)` on the raw leg as "the alias key is nobody's verdict
-  // any more"; the fold measurement itself now lives in the VALUE assertions,
-  // which are non-empty and can actually fail.
-  /**
-   * The three spec-valid alias sites, each carrying `predicate` under its
-   * DEPRECATED key. Parameterised on the predicate so the same three shapes can
-   * be measured twice: once with a clean value (nothing to find but the retired
-   * key) and once with a bare-identifier value (a VALUE defect the surviving
-   * gate must still reach through the fold).
-   */
+  //   * the authoring funnel no longer renames the key — `normalizeStackInput`
+  //     passes it through, so a rule fed this tier would see it;
+  //   * no rule reads it either way — the family reads `visibleWhen` only;
+  //   * the author is not silent — `defineStack` (and the parse every door
+  //     runs before its rule pass) refuses the key by name with the rename.
+  //     That refusal IS the recorded guard for this surface now.
+  /** The three alias sites, each carrying `predicate` under its RETIRED key. */
   const aliasSitesWith = (predicate: string): Array<[string, AnyRec]> => [
     ['views[].form.sections[]', {
       manifest,
@@ -275,57 +265,35 @@ describe('premise 3 (FALSE): "the `visibleOn` alias survives until the parse"', 
     }],
   ];
 
-  /** Clean, canonically-rooted predicate: the only thing wrong is the key spelling. */
-  const aliasSites = aliasSitesWith('record.a == 1');
-  /** Same three sites, predicate rooted nowhere (#5149 Repro 1) — a VALUE defect. */
+  /** The same three sites, predicate rooted nowhere (#5149 Repro 1) — a VALUE defect. */
   const aliasSitesBadValue = aliasSitesWith('approved');
 
-  it.each(aliasSites)('%s: no rule judges the alias KEY any longer (#6318 retirement)', (_site, stack) => {
-    // Both doors report nothing, and for TWO DIFFERENT reasons that must not be
-    // conflated. Raw: the rule that would have judged the key is retired.
-    // Normalized: the key is not even there — the D2 fold renamed it one layer
-    // up. The `normalized` leg is a VACUOUS green after the retirement (it is
-    // empty because no rule exists, not because of the fold), so it is labelled
-    // as such and carries no weight on its own; the leg below is the one that
-    // measures the fold.
-    expect(validateVisibilityPredicates(structuredClone(stack))).toHaveLength(0);
-    expect(validateVisibilityPredicates(normalizeStackInput(structuredClone(stack)) as AnyRec)).toEqual([]);
-  });
-
   it.each(aliasSitesBadValue)(
-    '%s: the KEY does not cross the fold but the VALUE does — measured on a NON-EMPTY finding set',
+    '%s: the funnel no longer renames the retired key, and no rule reads it (#23543 F4)',
     (_site, stack) => {
-      // The replacement for the vacuous green above, and the assertion that
-      // actually measures the fold. Same three sites, but the predicate is now
-      // a bare identifier — a VALUE defect. If the fold dropped the predicate
-      // instead of renaming its key, or if the surviving gate stopped reaching
-      // it, this set would be EMPTY and the assertion would fail. It cannot
-      // pass by producing nothing, which is exactly what the leg above can do.
       const normalized = normalizeStackInput(structuredClone(stack)) as AnyRec;
-      // The KEY is gone from the tier's own input …
-      expect(JSON.stringify(normalized)).not.toContain('visibleOn');
-      expect(JSON.stringify(normalized)).not.toContain('"visibility"');
-      // … and the VALUE arrived under the canonical key, where the surviving
-      // gate reads it. Exactly one finding, named.
-      expect(validateVisibilityPredicates(normalized).map((f) => f.rule)).toEqual([
-        'visibility-bare-identifier',
-      ]);
+      // The key passes through: the D2 conversion is retired from the load path.
+      expect(JSON.stringify(normalized)).toMatch(/"visibleOn"|"visibility"/);
+      // A VALUE defect under it is nobody's verdict here, raw or normalized —
+      // the parse refuses the key before any rule runs (next case).
+      expect(validateVisibilityPredicates(structuredClone(stack))).toEqual([]);
+      expect(validateVisibilityPredicates(normalized)).toEqual([]);
     },
   );
 
-  it('the author is NOT left silent — the D2 conversion notice names the site and its retirement', () => {
-    // This notice is the RECORDED GUARD for the alias surface: it is why #6318
-    // could retire the lint rule instead of re-anchoring it, and why no working
-    // app lost a signal. If this test ever goes red, the retirement's premise is
-    // gone and the surface is genuinely unguarded — re-open #6318, do not delete
-    // this assertion.
-    const { error, warnings } = quietly(() => defineStack(structuredClone(aliasSites[0][1]) as never));
-    expect(error).toBeUndefined();
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toContain("'visibleOn' → 'visibleWhen'");
-    expect(warnings[0]).toContain('views[0].form.sections[0].visibleWhen');
-    expect(warnings[0]).toContain('retires in protocol 16');
-  });
+  it.each(aliasSitesWith('record.a == 1'))(
+    '%s: the author is NOT left silent — defineStack refuses the retired key by name with the rename',
+    (_site, stack) => {
+      // The recorded guard for the alias surface. If this goes red, the surface
+      // is genuinely unguarded — do not delete this assertion.
+      const { error } = quietly(() => defineStack(structuredClone(stack) as never));
+      expect(error).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (error as unknown as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      const flat = JSON.stringify(issues);
+      expect(flat).toMatch(/(visibleOn|visibility)` was removed in @objectstack\/spec 18/);
+      expect(flat).toContain('Use `visibleWhen`');
+    },
+  );
 
   it('the predicate-VALUE rules in the same file are unaffected — do not connect them', () => {
     // The value moves into `visibleWhen` intact, so these still report on the

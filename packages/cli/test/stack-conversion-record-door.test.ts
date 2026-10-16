@@ -23,7 +23,7 @@
  * |                                                             |   BEFORE the spread drops it |
  * | `composeStacks([built-with-it, built-without])`             | the one notice, from the    |
  * |                                                             |   input that applied it     |
- * | canonical `defineStack` + a NAMED export `pages` carrying    | the one notice — the door's |
+ * | canonical `defineStack` + a NAMED export `flows` carrying    | the one notice — the door's |
  * |   the retiring spelling (merged after the producer ran)      |   own pass, which stays     |
  * | the canonical spelling (control)                            | `[]`                        |
  *
@@ -59,10 +59,12 @@
  * needed no conversion answers `[]`, so an exit that reports the notice without
  * reading it off the refusal it caught is red there.
  *
- * `page-component-visibility-to-visibleWhen` is the live conversion driven here
- * (`visibility` on a `page:header` component, canonical `visibleWhen`; it was
- * the header's `description` → `subtitle` until that entry retired from the
- * load path at protocol 18). The day it retires from
+ * `flow-node-http-callout-rename` is the live conversion driven here (a flow
+ * node typed `http_request`, canonical `http`; it was the header's
+ * `description` → `subtitle`, then a page component's `visibility` →
+ * `visibleWhen`, until each entry retired from the load path at protocol 18 —
+ * the second with its key, #23543 F4). It is the last live entry. The day it
+ * retires from
  * the load path the non-empty rows go red; re-point the fixture at a live entry
  * in `packages/spec/src/conversions/registry.ts`.
  *
@@ -124,10 +126,10 @@ function payloadOf(run: Run, label: string): Payload {
 /** The one entry every non-empty row must carry, by identity, site and direction. */
 const THE_NOTICE = {
   code: 'OS_METADATA_CONVERTED',
-  conversionId: 'page-component-visibility-to-visibleWhen',
-  path: 'pages[0].regions[0].components[0].visibleWhen',
-  from: 'visibility',
-  to: 'visibleWhen',
+  conversionId: 'flow-node-http-callout-rename',
+  path: 'flows[0].nodes[1].type',
+  from: 'http_request',
+  to: 'http',
 };
 
 function expectExactly(payload: Payload, expected: Array<typeof THE_NOTICE>, label: string): void {
@@ -143,50 +145,54 @@ function expectExactly(payload: Payload, expected: Array<typeof THE_NOTICE>, lab
 const manifest = (ns: string) =>
   `{ id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' }`;
 
-const page = (ns: string, headerKey: 'visibility' | 'visibleWhen') => `{
-    name: '${ns}_home',
-    label: 'Home',
-    regions: [{ name: 'main', components: [
-      { type: 'page:header', properties: { title: 'Things' }, ${headerKey}: "page.mode != 'edit'" },
-    ] }],
+const flow = (ns: string, nodeType: 'http_request' | 'http') => `{
+    name: '${ns}_notify',
+    label: 'Notify',
+    type: 'autolaunched',
+    nodes: [
+      { id: 'start', type: 'start', label: 'Start' },
+      { id: 'call', type: '${nodeType}', label: 'Call', config: { url: 'https://example.com/hook' } },
+      { id: 'end', type: 'end', label: 'End' },
+    ],
+    edges: [{ id: 'e1', source: 'start', target: 'call' }, { id: 'e2', source: 'call', target: 'end' }],
   }`;
 
-const stackBody = (ns: string, headerKey: 'visibility' | 'visibleWhen' | null, requires?: string) => `{
+const stackBody = (ns: string, nodeType: 'http_request' | 'http' | null, requires?: string) => `{
   manifest: ${manifest(ns)},
   objects: [{ name: '${ns}_thing', label: 'Thing', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }],
-  apps: [{ name: '${ns}_app', label: 'App' }],${headerKey ? `\n  pages: [${page(ns, headerKey)}],` : ''}${requires ? `\n  requires: ['${requires}'],` : ''}
+  apps: [{ name: '${ns}_app', label: 'App' }],${nodeType ? `\n  flows: [${flow(ns, nodeType)}],` : ''}${requires ? `\n  requires: ['${requires}'],` : ''}
 }`;
 
 const IMPORT = `import { composeStacks, defineStack } from '@objectstack/spec';\n\n`;
 
 const FIXTURES: Record<string, string> = {
   // The plain case: one `defineStack` default export, no named export.
-  plain: IMPORT + `export default defineStack(${stackBody('pln', 'visibility')});\n`,
+  plain: IMPORT + `export default defineStack(${stackBody('pln', 'http_request')});\n`,
   // The record, across `loadConfig`'s named-export spread.
   recordAcrossSpread:
     IMPORT +
     `export const onEnable = async () => {};\n\n` +
-    `export default defineStack(${stackBody('rec', 'visibility')});\n`,
+    `export default defineStack(${stackBody('rec', 'http_request')});\n`,
   // The record of a composed stack: its inputs' records.
   composed:
     IMPORT +
-    `const withIt = defineStack(${stackBody('cmpa', 'visibility')});\n` +
+    `const withIt = defineStack(${stackBody('cmpa', 'http_request')});\n` +
     `const without = defineStack({ manifest: ${manifest('cmpb')}, objects: [{ name: 'cmpb_thing', label: 'Thing', sharingModel: 'private', fields: { title: { type: 'text', label: 'Title' } } }] });\n\n` +
     `export default composeStacks([withIt, without]);\n`,
   // A key merged after the producer ran: only the door's own pass sees it.
   namedExportPass:
     IMPORT +
-    `export const pages = [${page('nep', 'visibility')}];\n\n` +
+    `export const flows = [${flow('nep', 'http_request')}];\n\n` +
     `export default defineStack(${stackBody('nep', null)});\n`,
   // The control: the canonical spelling.
-  canonical: IMPORT + `export default defineStack(${stackBody('can', 'visibleWhen')});\n`,
+  canonical: IMPORT + `export default defineStack(${stackBody('can', 'http')});\n`,
   // Convert, then refuse: the strict (default) `defineStack` converts the
   // retiring spelling, then refuses an unknown capability token.
   convertThenRefuse:
-    IMPORT + `export default defineStack(${stackBody('ctr', 'visibility', 'no-such-capability')});\n`,
+    IMPORT + `export default defineStack(${stackBody('ctr', 'http_request', 'no-such-capability')});\n`,
   // Its control: the same refusal from a source that needed no conversion.
   canonicalThenRefuse:
-    IMPORT + `export default defineStack(${stackBody('ctc', 'visibleWhen', 'no-such-capability')});\n`,
+    IMPORT + `export default defineStack(${stackBody('ctc', 'http', 'no-such-capability')});\n`,
 };
 
 let root = '';
@@ -234,7 +240,7 @@ for (const command of ['validate', 'build'] as const) {
       expect(run.code, run.stdout + run.stderr).toBe(0);
       expectExactly(p, [THE_NOTICE], `${command} namedExportPass`);
       // The producer never saw that key, so it printed nothing for it.
-      expect(run.stderr).not.toContain("conversion 'page-component-visibility-to-visibleWhen'");
+      expect(run.stderr).not.toContain("conversion 'flow-node-http-callout-rename'");
     }, 180_000);
 
     it('control: the canonical spelling converts nothing — `[]`', async () => {
@@ -253,7 +259,7 @@ describe("os lint --json — the producer's conversion record reaches `conversio
   // and still converts through the pass (`lint-conversion-notices.e2e.test.ts`
   // pins that half on a plain object-literal export).
   const lint = (label: string) => runCli(['lint', '--json'], dirs[label]);
-  const producerLine = "conversion 'page-component-visibility-to-visibleWhen'";
+  const producerLine = "conversion 'flow-node-http-callout-rename'";
 
   it('the plain case: one `defineStack` default export carrying the retiring spelling', async () => {
     const run = await lint('plain');
@@ -335,7 +341,7 @@ describe('os validate --strict — a conversion the producer applied fails it, o
     const json = await runCli(['validate', '--json', '--strict'], dirs.recordAcrossSpread);
     expect(text.code, text.stdout + text.stderr).toBe(1);
     expect(text.stdout).toContain('Strict mode: warnings treated as errors');
-    expect(text.stdout).toContain("conversion 'page-component-visibility-to-visibleWhen'");
+    expect(text.stdout).toContain("conversion 'flow-node-http-callout-rename'");
     expect(json.code, json.stdout + json.stderr).toBe(1);
     const p = payloadOf(json, 'validate --json --strict');
     expect(p.valid).toBe(true);

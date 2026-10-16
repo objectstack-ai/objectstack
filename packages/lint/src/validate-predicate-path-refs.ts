@@ -112,7 +112,8 @@
  *
  * A sub-field of a `type: 'record'` / `repeater` / `composite` entry is rendered
  * with its own activation: objectui's metadata SchemaForm evaluates it as
- * `evaluatePredicate(spec.visibleOn, { data: row })`. So inside `object.form.ts`'s
+ * `evaluatePredicate(spec.visibleOn, { data: row })` (its own runtime slot,
+ * which the form fills from the spec's `visibleWhen`). So inside `object.form.ts`'s
  * `fields` repeater, `data.type` means *this row's* `type` — `FieldSchema.type`,
  * not `ObjectSchema.type` (which does not exist). `view.zod.ts:1647-1657` states
  * both halves: the root is still spelled `data` at every depth, and the object it
@@ -298,16 +299,13 @@ export interface PredicatePathOptions {
 type AnyRec = Record<string, unknown>;
 
 /**
- * The predicate keys a form field / section can carry. Canonical first
- * (ADR-0089): `visibleOn` is the deprecated view-side alias, folded into
- * `visibleWhen` by the ADR-0087 D2 conversion one layer above the `normalized`
- * tier — so on the three CLI commands the alias limb is already unreachable. It
- * stays for the reason `validate-visibility-predicates.ts` states about its own
- * limbs: this is a PUBLISHED export, and a caller handing it a raw authored
- * object must have the alias-spelled predicate judged rather than skipped.
- * Canonical-first ordering means the limb can only ever add coverage.
+ * The predicate keys a form field / section can carry (ADR-0089): `visibleWhen`
+ * alone. The view-side `visibleOn` retired at 18 as a spec tombstone (#23543
+ * F4), and every door that runs this rule hands it a body the spec parse
+ * accepted — the reason `validate-visibility-predicates.ts` states at its own
+ * `CANONICAL` — so no input carries it.
  */
-const PREDICATE_KEYS = ['visibleWhen', 'visibleOn'] as const;
+const PREDICATE_KEYS = ['visibleWhen'] as const;
 
 /** The binding root this rule resolves. Metadata-editing forms only — see the module note. */
 const ROOT = 'data';

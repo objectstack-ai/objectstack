@@ -95,7 +95,7 @@
         "manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "manifest.objects.element.lifecycle",
         "manifest.pages.element",
-        "manifest.pages.element.slots.header.options[0].in.type",
+        "manifest.pages.element.slots.header.options[0].type",
         "manifest.permissions.element.objects.valueType.out",
         "manifest.permissions.element.rowLevelSecurity.element",
         "manifest.reports.element",
@@ -109,7 +109,7 @@
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "manifest.views.element.form",
-        "manifest.views.element.form.sections.element.in",
+        "manifest.views.element.form.sections.element",
         "manifest.views.element.form.submitBehavior.options[1].url",
         "manifest.views.element.list",
         "manifest.views.element.list.bulkActionDefs.element",
@@ -211,7 +211,7 @@
         "data.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.pages.element",
-        "data.options[1].manifest.pages.element.slots.header.options[0].in.type",
+        "data.options[1].manifest.pages.element.slots.header.options[0].type",
         "data.options[1].manifest.permissions.element.objects.valueType.out",
         "data.options[1].manifest.permissions.element.rowLevelSecurity.element",
         "data.options[1].manifest.reports.element",
@@ -222,7 +222,7 @@
         "data.options[1].manifest.sharingRules.element.sharedWith",
         "data.options[1].manifest.skills.element.triggerConditions.element",
         "data.options[1].manifest.views.element.form",
-        "data.options[1].manifest.views.element.form.sections.element.in",
+        "data.options[1].manifest.views.element.form.sections.element",
         "data.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.options[1].manifest.views.element.list",
         "data.options[1].manifest.views.element.list.bulkActionDefs.element",
@@ -254,7 +254,7 @@
     "api/GetUiViewResponse": {
       "sites": [
         "form",
-        "form.sections.element.in",
+        "form.sections.element",
         "form.subforms.element.columns.element",
         "form.submitBehavior.options[1].url",
         "list",
@@ -318,7 +318,7 @@
         "options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.pages.element",
-        "options[1].manifest.pages.element.slots.header.options[0].in.type",
+        "options[1].manifest.pages.element.slots.header.options[0].type",
         "options[1].manifest.permissions.element.objects.valueType.out",
         "options[1].manifest.permissions.element.rowLevelSecurity.element",
         "options[1].manifest.reports.element",
@@ -332,7 +332,7 @@
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "options[1].manifest.views.element.form",
-        "options[1].manifest.views.element.form.sections.element.in",
+        "options[1].manifest.views.element.form.sections.element",
         "options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "options[1].manifest.views.element.list",
         "options[1].manifest.views.element.list.bulkActionDefs.element",
@@ -380,6 +380,7 @@
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.pages.element",
+        "data.packages.element.options[1].manifest.pages.element.slots.header.options[0].type",
         "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out",
         "data.packages.element.options[1].manifest.permissions.element.rowLevelSecurity.element",
         "data.packages.element.options[1].manifest.reports.element",
@@ -390,7 +391,7 @@
         "data.packages.element.options[1].manifest.sharingRules.element.sharedWith",
         "data.packages.element.options[1].manifest.skills.element.triggerConditions.element",
         "data.packages.element.options[1].manifest.views.element.form",
-        "data.packages.element.options[1].manifest.views.element.form.sections.element.in",
+        "data.packages.element.options[1].manifest.views.element.form.sections.element",
         "data.packages.element.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.packages.element.options[1].manifest.views.element.list",
         "data.packages.element.options[1].manifest.views.element.list.bulkActionDefs.element",
@@ -1426,13 +1427,13 @@
     },
     "ui/FormSection": {
       "sites": [
-        "in"
+        ""
       ]
     },
     "ui/FormView": {
       "sites": [
         "",
-        "sections.element.in",
+        "sections.element",
         "subforms.element.columns.element",
         "submitBehavior.options[1].url"
       ]
@@ -1599,19 +1600,19 @@
         "",
         "interfaceConfig.emptyState.link.url",
         "interfaceConfig.filterBy.element",
-        "slots.header.options[0].in.type"
+        "slots.header.options[0].type"
       ]
     },
     "ui/PageComponent": {
       "sites": [
-        "in.dataSource.options[0].filter.element",
-        "in.type"
+        "dataSource.options[0].filter.element",
+        "type"
       ]
     },
     "ui/PageRegion": {
       "sites": [
-        "components.element.lazy.in.dataSource.options[0].filter.element",
-        "components.element.lazy.in.type"
+        "components.element.lazy.dataSource.options[0].filter.element",
+        "components.element.lazy.type"
       ]
     },
     "ui/RecordDetailsProps": {
@@ -1652,7 +1653,7 @@
     "ui/View": {
       "sites": [
         "form",
-        "form.sections.element.in",
+        "form.sections.element",
         "form.subforms.element.columns.element",
         "form.submitBehavior.options[1].url",
         "list",
@@ -1681,7 +1682,7 @@
         "options[0].config.kanban.groupByField",
         "options[0].config.timeline.groupByField",
         "options[1].config",
-        "options[1].config.sections.element.in",
+        "options[1].config.sections.element",
         "options[1].config.subforms.element.columns.element",
         "options[1].config.submitBehavior.options[1].url"
       ]
@@ -1697,7 +1698,7 @@
         "options[0].config.kanban.groupByField",
         "options[0].config.timeline.groupByField",
         "options[1].config",
-        "options[1].config.sections.element.in",
+        "options[1].config.sections.element",
         "options[1].config.subforms.element.columns.element",
         "options[1].config.submitBehavior.options[1].url"
       ]
