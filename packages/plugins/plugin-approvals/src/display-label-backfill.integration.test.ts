@@ -206,7 +206,13 @@ describe('#23889 — the boot-time display-label backfill', () => {
       id: 'a_vote', step_label: 'Recorded step', acted_as_label: 'Recorded name',
     }, { context: SYSTEM } as any);
     const svc = new ApprovalService({ engine: engine as any, logger: quiet as any });
-    const out = await backfillApprovalDisplayLabels(engine as any, slotLabelSourceOf(svc));
+    // The labeller is asked once per page, never once per row: here one request
+    // page (the pending slate) and one action page (two acted_as slots).
+    const source = slotLabelSourceOf(svc);
+    const asked: string[][] = [];
+    const counting = { slotLabels: (slots: readonly string[]) => { asked.push([...slots]); return source.slotLabels(slots); } };
+    const out = await backfillApprovalDisplayLabels(engine as any, counting);
+    expect(asked).toEqual([['u_alice', 'position:legal'], ['position:legal']]);
     expect(out.requestsFilled).toBe(2);
 
     expect((await row('sys_approval_request', 'areq_open')).process_label).toBe('Live label');
