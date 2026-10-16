@@ -204,6 +204,14 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "スレッド",
         help: "スレッド識別子 — 通常は `{object}:{record_id}`（例: `sys_user:abc123`）"
       },
+      object_name: {
+        label: "親オブジェクト",
+        help: "`thread_id` が指すレコードのオブジェクト — プラットフォームが記録し、作成者は書き込めません"
+      },
+      record_id: {
+        label: "親レコード",
+        help: "`thread_id` が指すレコードの ID — プラットフォームが記録し、作成者は書き込めません"
+      },
       parent_id: {
         label: "親コメント",
         help: "ネストした返信用のオプションの親コメント"

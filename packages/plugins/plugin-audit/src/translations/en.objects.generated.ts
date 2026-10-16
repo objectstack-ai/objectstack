@@ -204,6 +204,14 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Thread",
         help: "Thread identifier — conventionally `{object}:{record_id}` (e.g. `sys_user:abc123`)"
       },
+      object_name: {
+        label: "Parent Object",
+        help: "The object of the record `thread_id` names — stamped by the platform, never written by authors"
+      },
+      record_id: {
+        label: "Parent Record",
+        help: "The id of the record `thread_id` names — stamped by the platform, never written by authors"
+      },
       parent_id: {
         label: "Parent Comment",
         help: "Optional parent comment for nested replies"

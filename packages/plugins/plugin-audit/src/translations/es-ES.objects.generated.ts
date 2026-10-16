@@ -204,6 +204,14 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Hilo",
         help: "Identificador del hilo; por convención `{object}:{record_id}` (p. ej. `sys_user:abc123`)."
       },
+      object_name: {
+        label: "Objeto principal",
+        help: "El objeto del registro que nombra `thread_id`; lo registra la plataforma y los autores no lo escriben."
+      },
+      record_id: {
+        label: "Registro principal",
+        help: "El id del registro que nombra `thread_id`; lo registra la plataforma y los autores no lo escriben."
+      },
       parent_id: {
         label: "Comentario principal",
         help: "Comentario principal opcional para respuestas anidadas."
