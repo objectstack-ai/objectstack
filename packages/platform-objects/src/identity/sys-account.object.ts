@@ -80,8 +80,9 @@ export const SysAccount = ObjectSchema.create({
   listViews: {
     // [#21972] Declared FIRST on purpose: a route that names no view opens the
     // first declared list view, so a caller-scoped view (`mine`) is never
-    // first. Setup's `nav_accounts` names this view; the Account app's
-    // `nav_account_linked` names `mine`.
+    // first. The Account app's `nav_account_linked` names `mine`; Setup's
+    // "Identity Links" entry, which named this view, left the menu (#23803)
+    // for the User record page's Linked Accounts tab.
     all_links: {
       type: 'grid',
       name: 'all_links',
