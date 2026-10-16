@@ -2638,13 +2638,13 @@
         ]
       },
       "steps": [
-        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — an object without one is refused at authoring with 422 security-owd-unset) into the writable package and publish; note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
+        "author the scratch object (2 fields + a natural-key `name`, and a declared `sharingModel` — a draft without one is accepted, but its publish is refused (publish-drafts answers outcome 'refused', failed[0] code INVALID_METADATA, rule security-owd-unset) and so is an active save (422 INVALID_METADATA, rule security-owd-unset)) into the writable package and publish; note `externalId` defaults to 'name' and `defaultMode` to 'upsert' (SeedLoaderRequestSchema)",
         "UPSERT: publish a seed draft (mode upsert) with rows A,B → both insert; edit the draft changing B's value and adding C; re-publish → A skipped (no-op replay — only seed-declared fields compared, so runtime edits to OTHER columns never block the skip), B updated in place (same id), C inserted; verify by id stability + values",
         "UPDATE: seed draft (mode update) touching A (changed value) and a nonexistent D → A updates, D is SKIPPED (update never creates); row count unchanged",
         "IGNORE: seed draft (mode ignore) with A (changed value) and new E → A untouched (still the update-mode value; existing rows are never rewritten), E inserted; the skip is visible as A's unchanged value + count",
         "INSERT: seed draft (mode insert) re-declaring A → a SECOND A-named row appears (no matching in insert mode); record the duplication; if the object declares a unique key on the natural key instead, record the refusal — either shape is the mode's real contract",
         "REPLACE (expected-posture probe): add one row F by hand through /api/v1/data (a row the seed does NOT declare); publish a seed draft (mode replace) declaring only G → capture what happens to F. At head: F SURVIVES and G is inserted — the loader's replace case is bare insert with the comment 'caller should have cleared the table', and NO caller in the tree clears anything. Record the declared-vs-implemented gap; do NOT tick 'replace scoped to its own object' (there is no deletion to scope) and do NOT file F's survival as data loss (it is the opposite)",
-        "idempotence tie-in: re-publish the upsert draft unchanged → zero updates (all no-op skips), updated_at values untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
+        "idempotence tie-in: re-publish the upsert draft unchanged TWICE. The first replay may legitimately write, because steps 2–4 rewrote A's rows (update mode set A to a2, insert mode added a second A-named row), so it re-converges them to the seed; the SECOND replay is the idempotence probe — zero inserts and zero updates (all no-op skips), every row's updated_at untouched (the churn-avoidance isNoOpReplay exists for exactly this)",
         "teardown: the writable package's own delete, or discard the isolated DB"
       ],
       "acceptance": [
@@ -2723,7 +2723,7 @@
         {
           "revision": 2,
           "date": "2026-10-16",
-          "change": "fixtures.requires[0], steps[0] and acceptance[4].verify corrected (checklist-accuracy findings of QA run #23939, wave #23878). A seed body refuses a `name` key (SeedSchema is strict; the URL names the seed) and a scratch object needs a sharingModel (422 security-owd-unset), so the fixture as written could not be authored; and the verify text pinned decideWriteAction to a source line that has since moved — it now cites the symbols only. Not loosened: every mode clause and the replace posture are scored as before",
+          "change": "fixtures.requires[0], steps[0] and [6] and acceptance[4].verify corrected (checklist-accuracy findings of QA run #23939, wave #23878; steps[6] from this card's re-run). A seed body refuses a `name` key (SeedSchema is strict; the URL names the seed) and a scratch object needs a sharingModel (its publish is refused, rule security-owd-unset), so the fixture as written could not be authored; steps[6]'s replay ran after steps 2–4 had rewritten A's rows, so its first replay legitimately writes — the step now scores the second replay, which the re-run measured at 0 inserted / 0 updated; and the verify text pinned decideWriteAction to a source line that has since moved — it now cites the symbols only. Not loosened: every mode clause and the replace posture are scored as before",
           "ref": "#24036"
         }
       ]
