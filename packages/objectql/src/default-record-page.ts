@@ -52,6 +52,9 @@
  *    is that package's own residue, not another holder.
  *  - **A page that is not a default record page** — `isDefault` on a `home`,
  *    `app`, `utility` or `list` page, or on a record page bound to no object.
+ *    It holds nothing; it is refused on its own account instead
+ *    ({@link misplacedDefaultPages}; maintainer ruling A on objectstack#23610,
+ *    record 6190536588), at the package door and the item seam alike.
  *
  * ## What it deliberately does not judge
  *
@@ -68,7 +71,7 @@
  *    namespace gate only.
  */
 
-import { defaultRecordPageObject } from '@objectstack/spec/ui';
+import { defaultRecordPageObject, misplacedDefaultPageRefusal } from '@objectstack/spec/ui';
 
 /** Who holds the default record page of an object: a page, and where it comes from. */
 export type DefaultRecordPageHolder =
@@ -113,6 +116,38 @@ export function declaredDefaultRecordPages(manifest: unknown): DeclaredDefaultRe
       const object = defaultRecordPageObject(item);
       const page = pageName(item);
       if (object !== undefined && page !== undefined) out.push({ object, page });
+    }
+  };
+  read(manifest);
+  const plugins = (manifest as { plugins?: unknown } | null | undefined)?.plugins;
+  if (Array.isArray(plugins)) for (const plugin of plugins) read(plugin);
+  return out;
+}
+
+/** One page a manifest declares `isDefault: true` on that is not a record page bound to an object. */
+export interface MisplacedDefaultPage {
+  /** The page's name, or `undefined` for a page that carries none. */
+  readonly page: string | undefined;
+  /** `misplacedDefaultPageRefusal`'s sentence — the one the page parse prints. */
+  readonly refusal: string;
+}
+
+/**
+ * Every page a manifest declares `isDefault: true` on that
+ * `defaultRecordPageObject` does not place, read from the same sources as
+ * {@link declaredDefaultRecordPages}, in declaration order. A package's pages
+ * reach the registry without a `PageSchema` parse, so this is the package
+ * door's half of the refusal the parse makes at `os validate` and at save.
+ */
+export function misplacedDefaultPages(manifest: unknown): MisplacedDefaultPage[] {
+  const out: MisplacedDefaultPage[] = [];
+  const read = (source: unknown) => {
+    if (!source || typeof source !== 'object') return;
+    const pages = (source as { pages?: unknown }).pages;
+    if (!Array.isArray(pages)) return;
+    for (const item of pages) {
+      const refusal = misplacedDefaultPageRefusal(item);
+      if (refusal !== undefined) out.push({ page: pageName(item), refusal });
     }
   };
   read(manifest);

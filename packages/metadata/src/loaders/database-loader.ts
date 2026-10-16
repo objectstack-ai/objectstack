@@ -449,11 +449,21 @@ export class DatabaseLoader implements MetadataLoader {
     return readLegacyOrganizationRows(driver, table);
   }
 
+  /**
+   * [ADR-0131 D6/D7, #23609] The count of {@link _find}'s rows: a legacy
+   * organization's rows are not counted. Counted with them, `exists()`
+   * answered true for an address only a legacy row held while `load()`
+   * answered null, and the history `total` counted rows no page serves. The
+   * count stays the common path; only when it is not zero and the table holds
+   * legacy rows is it re-counted with them excluded in the query itself.
+   */
   private async _count(table: string, query: DriverQuery): Promise<number> {
-    if (this.engine) {
-      return this.engine.count(table, query);
-    }
-    return this.driver!.count(table, query);
+    const count = (q: DriverQuery) => (this.engine ? this.engine.count(table, q) : this.driver!.count(table, q));
+    const total = await count(query);
+    if (total === 0) return total;
+    const legacy = await this.legacyOrganizationRows(table);
+    if (legacy.size === 0) return total;
+    return count({ ...query, where: { $and: [query.where ?? {}, { id: { $nin: [...legacy.keys()] } }] } });
   }
 
   private async _create(table: string, data: Record<string, unknown>): Promise<Record<string, unknown>> {

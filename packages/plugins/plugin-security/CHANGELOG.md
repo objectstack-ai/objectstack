@@ -1,5 +1,265 @@
 # @objectstack/plugin-security
 
+## 18.0.0-next.2
+
+### Minor Changes
+
+- dd29bbe: feat(metadata-core,metadata-protocol)!: the `sys_metadata` family declares no organization column — `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit` and `sys_metadata_history` (ADR-0131 D6/D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-metadata-organization-column-retired, sys-metadata-audit-organization-column-retired, sys-metadata-commit-organization-column-retired, sys-metadata-history-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Metadata is the environment's (ADR-0131 D6). The four tables of the metadata family no longer declare `organization_id`, and each sets `systemFields.tenant: false`, so the engine injects none back. The engine refuses an undeclared field, so nothing reads or writes the column any more.
+  
+  FROM → TO:
+  
+  - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
+  - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
+  - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+  - `@objectstack/spec`: the published `ApiError.code` / `ErrorCode` enum widens by `LEGACY_ORGANIZATION_ROWS_UNREADABLE`, registered under `@objectstack/metadata-core`.
+  - `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
+  - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply --plan-file FILE` with that plan file. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
+  
+  The indexes are re-keyed with the column:
+  
+  - The overlay unique key is (`type`, `name`, `package_id`, `bundle_member`): the declared `idx_sys_metadata_overlay_active` and the runtime partial indexes of the same names. Removing the organization TIGHTENS uniqueness. On a database the ceremony has not cleared, two legacy organizations' rows, or an organization's row and the environment's, can share a key. There the runtime index migration keeps the previous index and names the duplicates (ADR-0120 D4); it never drops a row. `os migrate duplicates` and the boot report group by the same key.
+  - `sys_metadata_history` is unique on (`event_seq`) and on (`type`, `name`, `version`). Its other indexes, and those of `sys_metadata_audit` and `sys_metadata_commit`, lose their organization prefix.
+  - `idx_sys_metadata_org_type` is gone.
+  
+  What else changes:
+  
+  - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
+  - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+  - Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+    - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+    - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+    - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history`, `/audit` and `/diff` admit `studio.access` or `manage_metadata`, and `/packages/:id/commits` admits `studio.access` alone; `setup.access` alone is refused at all four. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `manage_metadata` therefore still reads the history and audit rows through `/meta`, but not the commit rows, and none of them through the data door.
+    - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+  - On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+    - every read the metadata protocol makes of the family goes through one seam that leaves them out. That covers boot hydration; the `/meta` list, by-name, layered and draft-preview reads; the item lock (`_lock`) the reads report and the save and delete gates enforce; the package-less write and read address; and the package, commit, audit, history and diff reads. Two reads keep them on purpose and read the column themselves: `os migrate meta --stored` reports such a row, and the commit revert refuses a legacy commit by name. The authored hook and action binders leave them out too;
+    - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+    - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+    - `os migrate security-catalog-overlays` neither lists nor deletes it;
+    - a commit recorded in a legacy organization's layer is still refused by the revert;
+    - the runtime-datasource reads, the packaged permission-set overlay reading, the kernel:ready security-catalog echo, the stored flow-credential move and a `DatabaseLoader` (engine- or driver-backed) leave them out.
+  - `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
+  - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+  - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
+- 6f21216: feat(plugin-security,cli)!: `sys_user_permission_set.permission_set_id` is retired, the boot-time grant-name backfill is deleted, and a grant is unique per user, set and organization (ADR-0131 D4/D10)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered ups-permission-set-id-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  A permission-set grant names its set by `permission_set`, its one reference (ADR-0131 D4). The legacy id column is no longer declared, and the grant's uniqueness now keys the name.
+  
+  FROM → TO:
+  
+  - `sys_user_permission_set.permission_set_id` → `permission_set`, the machine name of the set the grant holds. A seed row or data-door write that still carries `permission_set_id` is refused with `400 INVALID_FIELD`. Fix: delete the key and name the set, `{ user_id, permission_set: '<set name>', organization_id }`.
+  - The unique index (`user_id`, `permission_set_id`, `organization_id`) and the (`permission_set_id`) index → one unique index on (`user_id`, `permission_set`, `organization_id`), declared `unique: 'organization'`: its organization key part is NULL-safe (ADR-0120 D3), so it refuses a second grant of one set to one user in one organization AND a second platform-wide grant (organization NULL), for every writer and every write path — batches, multi-row updates, concurrent writes and raw SQL included. The data doors answer `409 UNIQUE_VIOLATION` (the engine throws `DuplicateRecordError`, `DUPLICATE_RECORD`). Fix: keep the grant that exists; to change it, update that row.
+  - The boot-time grant-name backfill (`runOneTimeGrantPermissionSetNameBackfill`, the `sys_migration` entry it recorded at `kernel:bootstrapped`) → the v18 ceremony: plan it with `os migrate organization-ownership --out plan.json`, review the file it writes, then run `os migrate organization-ownership --apply --backup-taken --plan-file plan.json`. Its verified rewrite names every grant from the physical `permission_set_id` column by raw SQL, verifies each name against the security catalog, and its `column-drops` step then drops the column through the schema-drift ceremony (schema sync is additive, so an undeclared column stays until it is dropped). Fix: run the ceremony on every database upgraded from a release before the `permission_set` column existed, then restart the server: the boot's organization-administrator sweep revokes, by name, a newly named grant whose pair no longer qualifies, and a server left running across `--apply` serves it until then.
+  
+  On a 17.x database every grant names nothing until `--apply` names it, so between the first v18 boot and `--apply` no grant confers anything, the platform administrator's included.
+  
+  What else changes:
+  
+  - The plan run, `os migrate organization-ownership --out plan.json`, reports a `grants` block on `sys_user_permission_set`, keyed like the new index (a NULL organization keyed with NULL):
+    - `duplicates`: groups of named grants holding one set for one user in one organization. `--apply`'s `column-drops` step does not drop `permission_set_id` while one group remains.
+    - `rewriteCollisions`: legacy grants whose derived name their user already holds in the same organization. `--apply`'s rewrite names none of them and blocks, naming both ids.
+    - On a database without the `permission_set` column it counts zero and names the remedy (boot this release once), instead of refusing the plan.
+  
+    The ceremony deletes no grant: remove the one you do not keep, then re-run.
+  - The organization-administrator reconcile and its boot sweep write no grant for a pair holding an unnamed grant in that organization: the ceremony's rewrite names that grant, and a named grant beside it would hold the key the rename needs.
+  - `--apply` drops the two retired indexes before the column, in a separate earlier schema-drift apply: MySQL refuses to drop a column a key still uses.
+  - The organization-administrator reconcile and its boot sweep, the platform-admin bootstrap's unnamed-grant leg (Leg C) and the catalog reference report read grants by name only. A legacy grant that names nothing confers nothing, still withholds the platform-admin promotion while it is unscoped, and is reached by no revocation until the ceremony's rewrite names it; once named, the boot sweep revokes it where its pair no longer qualifies. The report's `UnnamedGrant` entries lose `permissionSetId`.
+  - `GET /meta/object/sys_user_permission_set` no longer serves the hidden `permission_set_id` field.
+- be48c5e: feat(spec)!: retire the delegated-admin scope's `manageBindings` and `authorEnvironmentSets` — rights no door honoured (#23488)
+  
+  **BREAKING** — `manageBindings` and `authorEnvironmentSets` on a permission set's `adminScope` (`AdminScopeSchema`, ADR-0090 D12) are now refused at parse. They named the right to bind sets to positions and the right to author environment permission sets, and they gated the `sys_position_permission_set` and `sys_permission_set` rows, which ADR-0131 D3 retired. A position's sets are part of its definition and a permission set is a definition; both are written through the metadata door, which admits a `manage_metadata` holder and reads no `adminScope`. So a delegate who "may bind" or "may author" was granted nothing. Delete both keys: a delegate's scope is placement, assignment and the allowlist.
+  
+  Clause-②: yes (narrowing)
+  
+  Measured before removal, at `cdc42eb49`: no production author set either key to `true` (the showcase wrote the default `false`; the control key `manageAssignments: true` has four production authors), and no door that writes a position or a permission set consulted either key. Their one reader was the delegated-admin gate's strict-containment comparison, which changes below.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `adminScope: { …, manageBindings: true \| false }` | nothing — delete the key |
+  | `adminScope: { …, authorEnvironmentSets: true \| false }` | nothing — delete the key |
+  | a delegate who re-composes what a position distributes, or authors a set's body | a `manage_metadata` holder writes the position or set definition through the metadata door (ADR-0131 D3); the delegate assigns people to positions and grants allowlisted sets inside its subtree |
+  | reading `scopes[].manageBindings` / `scopes[].authorEnvironmentSets` from `GET /api/v1/security/my-delegable-scope` (`DelegableAdminScope`) | nothing — the report carries `manageAssignments` as the scope's one action right |
+  
+  **The one-line fix:** delete `manageBindings` and `authorEnvironmentSets` from every `adminScope`.
+  
+  **What an author who still writes either sees.** `tsc` fails at the authoring site (`AdminScope` types both keys as retired), and the parse — `definePermissionSet()`, `defineStack({ permissions })`, `PUT /api/v1/meta/permission/:name` — refuses it at its own path with the prescription:
+  
+  > `permission.adminScope.manageBindings` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0090 D12) — nothing honoured it once the position-to-permission-set binding rows it gated were retired: a position's sets are part of its definition (ADR-0131 D3), and that definition is written through the metadata door, which admits a `manage_metadata` holder and reads no adminScope. Delete the key; a delegate's scope is placement, assignment and the allowlist — `businessUnit` with `includeSubtree`, `manageAssignments`, and `assignablePermissionSets`. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  ## The containment change (`@objectstack/plugin-security`)
+  
+  The delegated-admin gate judges a delegate who hands out a set that itself carries an `adminScope` — a `sys_user_position` assignment of a position that distributes it, or a direct `sys_user_permission_set` grant — by **strict containment**. That comparison read both retired flags. It now reads `includeSubtree`, `manageAssignments` and the allowlist only:
+  
+  - a delegate whose own scope set either flag `true` can **no longer** hand out a scope otherwise EQUAL to its own — the inert flag used to count as the strictly-larger axis and let that lateral copy through the equal-scope refusal. It is refused `403 PERMISSION_DENIED` (`… would hand out an adminScope not strictly contained by yours`);
+  - a granted scope that set either flag `true` no longer counts as out-reaching a delegate that did not.
+  
+  `DelegatedAdminGate.describeDelegableScope()` (and so `GET /api/v1/security/my-delegable-scope`) no longer reports either flag.
+  
+  ## The retirement kit
+  
+  - **Two `retiredKey()` tombstones** on `AdminScopeSchema`, a `strictObject` — so each refusal carries its prescription and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `security/AdminScope:manageBindings`, `security/AdminScope:authorEnvironmentSets`. `DelegableAdminScope` (`@objectstack/spec/contracts`) drops both fields.
+  - **The D2 conversion `permission-admin-scope-binding-authoring-removed`** (protocol 18, retired from the load path) deletes both keys from every `permissions[].adminScope`, one notice per key, whatever they hold. Both keys carried the default `false`, so a 17.x parse materialized them in every declared scope; the rehydration seams replay this conversion over stored `permission` rows and built artifacts, and `os migrate meta --stored` lists the rows that carry them before the upgrade.
+  - **The D3 entry `permission-admin-scope-binding-authoring-retired`** records the containment change above: the judgement the strip cannot make for the upgrader.
+  - **`@objectstack/core`:** `permissionSetDefinitionFromRow` — the mapping `os migrate`'s legacy-row ceremony saves a `sys_permission_set` row through — drops both keys from the row's `admin_scope`. That save goes through `saveMetaItem`, which replays no conversion: measured, a 17.x row's body answered `422 INVALID_METADATA` at `adminScope.manageBindings`, and the same body without the keys saved.
+  - **`@objectstack/platform-objects`:** the permission-set form's `adminScope` help text (all four locales) names the scope's live keys only.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for. Studio's two switches for these keys retire in an objectui follow-up.
+  
+  <!-- adr-0087: registered permission-admin-scope-binding-authoring-removed, permission-admin-scope-binding-authoring-retired -->
+
+### Patch Changes
+
+- 0d3ea29: fix(plugin-security): the data-door write gates of the retired catalog row objects are removed, the boot report names positions that bind a permission set nobody serves, and the texts that still named the retired objects and modules are corrected (ADR-0131 D3/D4, C3 stage 8-post)
+  
+  Clause-②: no
+  
+  Stage 8 retired the `sys_position`, `sys_permission_set`, `sys_position_permission_set` and `sys_capability` row objects, so no write to them reaches the engine. This change removes what only guarded those writes. No export of any package's entry changes, and no request that reaches the server is answered differently.
+  
+  - **`@objectstack/plugin-security`.**
+    - Three of the security middleware's gates on those objects are gone: the package-provenance gate on `sys_permission_set`, the platform/package row gate on `sys_position` and `sys_capability`, and the curated capability-name gate on `sys_capability`. The delegated-administration gate no longer judges `sys_position_permission_set` bindings or `sys_permission_set` authoring; it still governs `sys_user_position` assignments, `sys_user_permission_set` grants and `sys_member`. The rules those gates carried still hold where the catalog now lives: `everyone` and `guest` are code-declared positions an environment cannot overlay, and a capability cannot be created or overlaid through the metadata door at all.
+    - The walled data-door refusal for those objects is deleted. Stage 8 already left it unwired, and no composition registers the objects it judged; the metadata door's walled refusal is unchanged.
+    - The internal duplicate-name refusal class that only the retired permission-set data door raised is removed.
+    - The packaged-permission-set lock's refusal no longer has a "choose a different name" variant: only the retired data door's create raised it. The metadata door's refusal text is unchanged, and the published signatures keep their `operation` parameter.
+    - The boot's catalog reference report lists one more finding, per position: a position definition whose `permissionSets` names a set the security catalog does not resolve, usually because the package that declared the set is uninstalled or disabled. A holder of such a position is granted nothing through that name. The line clears by itself at the next boot after the package is installed again. It is logged at `error` once per boot, like the report's other lines.
+  - **`@objectstack/platform-objects`** and **`@objectstack/plugin-security`** object metadata: the descriptions of `sys_invitation.positions`, `sys_user_position` (object and `position`), and `sys_audience_binding_suggestion`'s permission-set name no longer name the retired objects. The translated texts follow.
+  - **`@objectstack/spec`**: the `projectionApplied` and `materializeApplied` descriptions on the metadata save, publish and batch-publish responses give a current example (`datasource`, `flow`) instead of `permission` → `sys_permission_set`. `EvalUser.positions` describes the positions assigned through `sys_user_position`. `PermissionSet.description`'s doc comment no longer names the deleted projection. The `name` describes of `PositionSchema` and `PermissionSetSchema` say a name is unique within the security catalog the environment serves (ADR-0131 D3: there is no organization-level catalog), replacing "unique per organization", which read the retired rows' index. The error-code ledger drops `@objectstack/plugin-security`'s `UNIQUE_VIOLATION` row, which named the removed refusal; `UNIQUE_VIOLATION` stays registered by its other emitters.
+  - **`@objectstack/core`**: the doc comments of `positionDefinitionFromRow` and `permissionSetDefinitionFromRow` no longer describe the deleted boot backfills as current.
+  - **`@objectstack/metadata-protocol`**: the doc comments of the publish materializer, mutation projector and uninstall cleanup registries give current examples (`flow`, `datasource`, the grant revocation) instead of `permission` → `sys_permission_set`.
+- 301eec6: feat(spec)!: retire the object's `externalSharingModel` — the external org-wide default no principal ever read (#23268)
+  
+  **BREAKING** — `externalSharingModel` on an object (`ObjectSchema`, the `object` metadata type) is now refused at parse. ADR-0090 D11 declared it as a second org-wide default for portal and partner principals, and nothing ever evaluated it: no request resolves an external principal, and the authorization kernel's `EXTERNAL` rung (ADR-0095 / ADR-0099) admits explicitly shared rows only, never an org-wide default. Setting `externalSharingModel: 'private'` hid nothing from anyone. Delete the key. `sharingModel` is the one org-wide default; a principal reaches a row it does not own through an explicit share (a manual share or a sharing rule), and an anonymous reader through a share link (`publicSharing`, unchanged).
+  
+  Clause-②: no (narrowing)
+  
+  Measured before removal, at `e4ec6ec1a`: no row-pipeline reader in any package. The key's only readers were authoring checks of its own ordering against `sharingModel` — the publish linter's alias and wider-than-internal branches, and the `plugin-security` posture gate's env-tighten comparison — plus the Studio console's object settings select (a separate console change). The only authored instances in this repository were two showcase objects.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `externalSharingModel: 'private'` (or `'public_read'`, `'public_read_write'`, `'controlled_by_parent'`) on an object | nothing — delete the key; share rows explicitly where an outside principal needs them |
+  | `import { SECURITY_EXTERNAL_WIDER } from '@objectstack/lint'` | nothing — the rule `security-external-wider-than-internal` is removed with the key it judged |
+  
+  **The one-line fix:** delete `externalSharingModel` from every object.
+  
+  **What an author who still writes it sees.** `tsc` fails at the authoring site (`ObjectSchema` types the key as retired), and the parse — `ObjectSchema.create()`, `defineStack({ objects })`, `PUT /api/v1/meta/object/:name` (draft saves included) — refuses it at its own path with the prescription:
+  
+  > `object.externalSharingModel` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — it never had an effect: no request resolves an external principal, and the external rung of the authorization kernel (ADR-0095) admits explicitly shared rows only, never an org-wide default, so the value changed no answer for anyone. Delete the key. `sharingModel` is the one org-wide default; a principal reaches a row it does not own through an explicit share, and an anonymous reader through a share link (`publicSharing`). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  ## The retirement kit
+  
+  - **A `retiredKey()` tombstone** on `ObjectSchema`, a `strictObject` — so the refusal carries the prescription rather than a bare unknown-key report, and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `data/Object:externalSharingModel`.
+  - **The D2 conversion `object-external-sharing-model-removed`** (protocol 18, retired from the load path) deletes the key from every `objects[]` entry, one notice per object, as a lossless delete. Studio's object settings offered the select and `PUT /api/v1/meta/object` persisted it until this release, so a stored `object` row can carry it; the rehydration seams replay this conversion over stored rows, and `os migrate meta --stored` lists the rows that carry it before the upgrade.
+  - **The D3 entry `object-external-sharing-model-retired`** asks the author whether anything they built assumed the key kept outside users away from an object's rows. Nothing ever enforced that.
+  - **Ledger:** the row goes `planned` → `dead`, kept as a tombstone row (a tombstone keeps the key in the walked shape).
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  **`@objectstack/lint`:** the `security-external-wider-than-internal` rule and its exported `SECURITY_EXTERNAL_WIDER` id are removed, and `security-owd-alias` no longer reads `externalSharingModel`; the parse refuses the key on every parsed door. On an unparsed intake (`os lint` on a raw config) the ledger-driven advisory reports it as `liveness-dead-property`.
+  
+  **`@objectstack/plugin-security`:** the object posture gate's env-tighten-only rule (R1) compares `sharingModel` alone; the external half left with the key.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered object-external-sharing-model-removed, object-external-sharing-model-retired -->
+- b1e9280: fix(plugin-security, organizations): the seed-ownership claims hand over only the rows the seed wrote, and a guest-written or public-form row keeps no owner (ADR-0138 D1)
+  
+  The claim that hands seeded records to the platform admin runs on every `app:seeded`, so on every boot of an app with seed data. Its NULL-owner arm re-owned every unowned row of every eligible object, and no stored column tells a seed row from a guest-written row or a public form's intake. Those rows keep no owner on purpose (ADR-0138 D1: "the owner stays unset"), and the claim handed them to the platform admin at the next boot.
+  
+  - **`claimSeedOwnership`** (`@objectstack/plugin-security`) re-owns a NULL-owner row only when the seed reported landing on it: `owner_id IS NULL AND id IN (seeded ids)`, in chunks of half the per-row hook ceiling, read through the `seed-settlement` contract's `seededRecordIds`. The settle pass (`app:seeded`) and the first-admin promotion (`bootstrapPlatformAdmin`, new option `seededRecordIds`) both pass the reading. A replay reports the rows an earlier boot wrote, so a seed row is still claimed on a later boot. The `usr_system` arm is unchanged: only a seed or a legacy install writes that owner.
+  - **`claimOrgSeedOwnership`** (`@objectstack/organizations`) takes the same selector, read for the organization the owner bind claims for: the rows that organization's seed replay landed on, which ran in the same call that created it. Each write carries at most half the per-row hook ceiling's worth of ids, so none is refused for its size and the claim no longer reads pages.
+  - A row a hook, a flow or an assignment rule gave an owner keeps it, as before.
+  
+  **Direct callers.** Called without `seededRecordIds`, `claimSeedOwnership` re-owns only `usr_system`-owned rows and its pass report says no seed reading was published; `claimOrgSeedOwnership` re-owns nothing and says so. The deprecated `ensureDefaultOrganization` wrapper in `@objectstack/organizations` holds no kernel, so it hands over no row; use `OrganizationsPlugin`, which binds the reading.
+  
+  **Outside the claim's purpose** (handing the boot seed to the first admin), and so no longer re-owned by a later boot's pass: rows written by seed writers that emit no `app:seeded` — a package install's or a publish's seed apply, the dev hot-reload seeder, and the marketplace install's seed. A dataset they share with the boot bundle is re-reported by the next boot's replay and claimed then.
+- 0d784da: fix(cli,plugin-security): `os migrate organization-ownership --apply` resolves the built-in positions and the `everyone` baseline, so a 17.x database's seeded `everyone` binding no longer blocks the ceremony
+  
+  Clause-②: no
+  
+  - **What was wrong.** The ceremony's boot composes the security plugin for its declarations only: `init()` runs, and `start()` and every lifecycle hook do not. The plugin declared the six built-in positions (`platform_admin`, `org_owner`, `org_admin`, `org_member`, `everyone`, `guest`) in `start()`, and the `everyone` baseline at `kernel:ready`. So the ceremony's catalog held neither. Every 17.x environment database carries a seeded binding from `everyone` to `member_default`. On every such database, `authored-conversion` stopped with "Binding rows give position everyone the sets member_default, and the catalog holds no position of that name to carry them". With `OS_MULTI_ORG_ENABLED=true`, the rewrite gate stopped on the same binding ("deleting them would lose a grant").
+  - **What changed.** `SecurityPlugin.init()` now declares the six built-in positions. It also declares `everyone` naming the deployment baseline: the app's `isDefault` set composed with `member_default`. These are registry declarations only, and nothing is read from or written to the database. The ceremony's catalog now resolves `everyone` with `member_default`, as a started kernel does, so that binding converts as declared. A binding that names a position no catalog declares still blocks.
+  - **The baseline in `init()` is the fail-closed reading.** The high-privilege check runs with no declared-capability context there, because the stack's declarations are still arriving while plugins initialize. So a shipped baseline set whose system permission only an app's capability declaration excuses is not named in `init()`. The `everyone` derivation at `kernel:ready` is unchanged. It runs the check against every declared capability, adds the package defaults a `manage_metadata` holder accepted, and replaces the `init()` declaration.
+  - **What a started kernel sees.** Its catalog after boot is the same. Three things move earlier or stay put:
+    - the six positions, and `everyone`'s baseline, are in the engine registry from the plugin's `init()` instead of from its `start()` and `kernel:ready`;
+    - if the `kernel:ready` derivation fails, `everyone` keeps the baseline from `init()`, where it used to name no set;
+    - the "the built-in positions … were NOT declared as position metadata" warning, for an engine that exposes no registry, now prints from `init()`.
+  - **Unchanged.** The cold boot's refusal of an environment-held name still skips the built-in names. A stored definition under a built-in name still shadows the declaration at read. The ceremony's `authored-conversion` and rewrite steps are unchanged. The ceremony still does not read the accepted package defaults: a binding to a set that only an acceptance puts on `everyone` still blocks.
+- 23e689d: fix(plugin-security,spec): the unnamed-grant boot line and the `ups-permission-set-id-column-retired` upgrade entry name the reviewed-plan ceremony, `--out plan.json` then `--apply --backup-taken --plan-file plan.json`, instead of a bare `--apply` the CLI refuses (ADR-0131 D10)
+  
+  Clause-②: no
+  
+  `os migrate organization-ownership --apply` refuses a run without `--plan-file`, the file a plan run wrote and the operator reviewed. Two remedy texts still told the operator to run `--apply` alone, which answers `plan-file-required` and writes nothing:
+  
+  - `@objectstack/plugin-security`: the `kernel:bootstrapped` catalog reference report's error line for grants that name no permission set (`permission_set` empty).
+  - `@objectstack/spec`: the `replacement` of the ADR-0087 entry `ups-permission-set-id-column-retired`, the row the upgrade guide prints for the retired `sys_user_permission_set.permission_set_id`.
+  
+  Both now name the two steps: plan first, `os migrate organization-ownership --out plan.json`, review the file it writes, then `os migrate organization-ownership --apply --backup-taken --plan-file plan.json`, which executes that plan; restart afterwards. The ceremony itself is unchanged: its rewrite names each legacy grant from the retired id, and its column-drops step drops the two retired indexes and then the column. Only the text changes; the line's level, its fields and the entry's `id` are as they were.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

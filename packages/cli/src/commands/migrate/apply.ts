@@ -512,8 +512,8 @@ export default class MigrateApply extends Command {
             return;
           }
           printError(
-            `Refusing this --allow-destructive run: it would drop organization_id from ${organizationDrops.join(', ')}, which the organization-ownership ceremony `
-            + `owns that drop, and it has not verified on this database. ${detail} Dropping the column first would turn `
+            `Refusing this --allow-destructive run: it would drop organization_id from ${organizationDrops.join(', ')}, a drop the organization-ownership ceremony `
+            + `owns, and the ceremony has not verified on this database. ${detail} Dropping the column first would turn `
             + 'every legacy organization row into an environment row without the ceremony\'s promotion or report. Run '
             + '"os migrate organization-ownership --out PLAN" to write and review its plan, then '
             + '"os migrate organization-ownership --apply --plan-file PLAN"; it drops these columns itself, in its '

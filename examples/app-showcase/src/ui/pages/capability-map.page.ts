@@ -43,7 +43,8 @@ export const CapabilityMapPage = definePage({
   label: 'Capability Map',
   type: 'home',
   kind: 'html',
-  isDefault: true,
+  // No `isDefault`: a page does not choose where an app opens. This page is the
+  // showcase's landing because it is the first item of `ShowcaseApp.navigation`.
   source: `
 <flex direction="col" gap={8} style={{"maxWidth":"1080px","margin":"0 auto","padding":"40px"}}>
 

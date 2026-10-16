@@ -296,10 +296,10 @@ describe('[#5038] the matched row set is read ONCE', () => {
 describe('[#5038] an oversized matched set is refused, never silently downgraded', () => {
   it('rejects past the ceiling, naming the count, the limit and the routes out', async () => {
     const fired: string[] = [];
-    const { engine } = await boot([hook('per_row', 'afterUpdate', () => { fired.push('x'); })]);
+    const { engine, driver } = await boot([hook('per_row', 'afterUpdate', () => { fired.push('x'); })]);
 
     const over = ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS + 1;
-    await seedTasks(engine, Array.from({ length: over }, (_, i) => ({ title: `t${i}`, status: 'todo' })));
+    seedCeilingRows(driver, over, 'todo');
 
     const err = await engine
       .update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any)
@@ -322,9 +322,9 @@ describe('[#5038] an oversized matched set is refused, never silently downgraded
   });
 
   it('does not apply to an object with no after-hooks — a big batch still writes', async () => {
-    const { engine } = await boot([]);
+    const { engine, driver } = await boot([]);
     const over = ObjectQL.MAX_BULK_PER_ROW_HOOK_ROWS + 1;
-    await seedTasks(engine, Array.from({ length: over }, (_, i) => ({ title: `t${i}`, status: 'todo' })));
+    seedCeilingRows(driver, over, 'todo');
 
     const affected = await engine.update(
       'task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any,
@@ -870,8 +870,8 @@ describe('[#5574 / D6] one ceiling, BOTH phases, checked before the first dispat
 
   it('refuses an over-ceiling batch on the BEFORE phase — zero handlers, zero rows written', async () => {
     const fired: string[] = [];
-    const { engine } = await boot([hook('per_row_before', 'beforeUpdate', () => { fired.push('x'); })]);
-    await seedTasks(engine, Array.from({ length: over }, (_, i) => ({ title: `t${i}`, status: 'todo' })));
+    const { engine, driver } = await boot([hook('per_row_before', 'beforeUpdate', () => { fired.push('x'); })]);
+    seedCeilingRows(driver, over, 'todo');
 
     const err = await engine
       .update('task', { status: 'done' }, { multi: true, where: { status: 'todo' } })
@@ -890,8 +890,8 @@ describe('[#5574 / D6] one ceiling, BOTH phases, checked before the first dispat
 
   it('refuses an over-ceiling bulk DELETE on the before phase too', async () => {
     const fired: string[] = [];
-    const { engine } = await boot([hook('per_row_before', 'beforeDelete', () => { fired.push('x'); })]);
-    await seedTasks(engine, Array.from({ length: over }, (_, i) => ({ title: `t${i}`, status: 'stale' })));
+    const { engine, driver } = await boot([hook('per_row_before', 'beforeDelete', () => { fired.push('x'); })]);
+    seedCeilingRows(driver, over, 'stale');
 
     const err = await engine
       .delete('task', { multi: true, where: { status: 'stale' } })
@@ -908,12 +908,12 @@ describe('[#5574 / D6] one ceiling, BOTH phases, checked before the first dispat
     // refuse honest batches, which is the failure nobody reports as a bug.
     const beforeFired: string[] = [];
     const afterFired: string[] = [];
-    const { engine } = await boot([
+    const { engine, driver } = await boot([
       hook('pre', 'beforeUpdate', () => { beforeFired.push('x'); }),
       hook('post', 'afterUpdate', () => { afterFired.push('x'); }),
     ]);
     const at = MAX_BULK_PER_ROW_HOOK_ROWS;
-    await seedTasks(engine, Array.from({ length: at }, (_, i) => ({ title: `t${i}`, status: 'todo' })));
+    seedCeilingRows(driver, at, 'todo');
 
     const affected = await engine.update(
       'task', { status: 'done' }, { multi: true, where: { status: 'todo' } } as any,
@@ -1186,6 +1186,24 @@ async function seedTasks(engine: ObjectQL, rows: Record<string, unknown>[]): Pro
   return Array.isArray(written) ? written : [written];
 }
 
+/**
+ * The matched set for the ceiling cases (section 4, D6): `count` task rows, all
+ * in `status`, written straight into the stub driver's store.
+ *
+ * Why not `seedTasks`: the ceiling is judged on what the driver's `find`
+ * returns, so how those rows got into the store is not what these cases pin —
+ * and pushing 10 001 rows through `engine.insert` cost about 40 µs a row, five
+ * times over (about 3 s of this file's 3.6 s of wall, on a quiet box). The
+ * stub's `create` is the only thing the engine's insert path ends in, and the
+ * engine adds nothing to a row on the way (a seeded row and an `engine.insert`
+ * one are the same `{ title, status, id }`), so `seed` lays down the very rows
+ * `seedTasks` would. Small seeds elsewhere in this file still go through
+ * `engine.insert`.
+ */
+function seedCeilingRows(driver: any, count: number, status: string): void {
+  driver.seed('task', Array.from({ length: count }, (_, i) => ({ title: `t${i}`, status })));
+}
+
 function makeStubDriver(): any {
   const stores = new Map<string, Map<string, Record<string, unknown>>>();
   const storeFor = (o: string) => {
@@ -1194,6 +1212,11 @@ function makeStubDriver(): any {
     return s;
   };
   let nextId = 0;
+  const put = (o: string, data: Record<string, unknown>) => {
+    nextId += 1;
+    const id = (data.id as string) ?? `r_${nextId}`;
+    const row = { ...data, id }; storeFor(o).set(id, row); return row;
+  };
   const matches = (row: Record<string, unknown>, where: any): boolean => {
     if (!where || typeof where !== 'object') return true;
     for (const [k, v] of Object.entries(where)) {
@@ -1217,11 +1240,10 @@ function makeStubDriver(): any {
       return Array.from(storeFor(o).values()).filter((r) => matches(r, ast?.where));
     },
     async findOne(o: string, ast: any) { for (const r of storeFor(o).values()) if (matches(r, ast?.where)) return r; return null; },
-    async create(o: string, data: Record<string, unknown>) {
-      nextId += 1;
-      const id = (data.id as string) ?? `r_${nextId}`;
-      const row = { ...data, id }; storeFor(o).set(id, row); return row;
-    },
+    async create(o: string, data: Record<string, unknown>) { return put(o, data); },
+    /** Store `rows` exactly as `create` would, skipping the engine's insert path
+     *  (see `seedCeilingRows`). Synchronous: nothing here awaits. */
+    seed(o: string, rows: Record<string, unknown>[]) { for (const r of rows) put(o, r); },
     async update(o: string, id: string, data: Record<string, unknown>) {
       d.updateCalls += 1;
       const s = storeFor(o); const cur = s.get(id); if (!cur) return null;

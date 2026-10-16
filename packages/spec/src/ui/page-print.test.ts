@@ -128,10 +128,12 @@ describe('checkPagePrintComposition — a print page prints exactly the blocks i
     expect(issues[0].message).toMatch(/interfaceConfig\.allowPrinting/);
   });
 
-  it('refuses `print` on a `utility` page — a floating panel, not a document — and names the admitted types', () => {
+  it('refuses `print` on a `utility` page — a tool page, not a document — and names the admitted types', () => {
     const issues = issuesOf({ ...BASE, type: 'utility', regions: REGIONS, print: {} });
     expect(issues.map((i) => [i.path, i.code])).toEqual([['print', 'custom']]);
-    expect(issues[0].message).toMatch(/type: 'utility'.*floating panel.*not a document/s);
+    expect(issues[0].message).toMatch(/type: 'utility'.*holds a tool.*not a document/s);
+    // The console has no floating shell slot, so the refusal promises none.
+    expect(issues[0].message).not.toMatch(/floating/);
     expect(issues[0].message).toContain("`type: 'record'`, `'home'` or `'app'`");
   });
 
