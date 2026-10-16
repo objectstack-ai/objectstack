@@ -27,6 +27,13 @@
  * and names the value to fix. The plugin says so once at `start()`, and the
  * service refuses every render until it is fixed.
  *
+ * ## Credentials on the wire
+ *
+ * The minted session cookie travels to the browser in the DevTools protocol's
+ * own frames. On a `ws://` endpoint that is cleartext: use `wss://` for a
+ * remote browser off this host, and `ws://` only on loopback. The console URL
+ * carries no credentials of its own — one with `user:password@` is refused.
+ *
  * ## The remote endpoint may carry a secret
  *
  * A hosted browser commonly authenticates the WebSocket by a token in the
@@ -164,6 +171,17 @@ export function resolvePrintPlacement(
     parsedConsole = new URL(consoleUrl);
   } catch {
     parsedConsole = null;
+  }
+  if (parsedConsole && (parsedConsole.username !== '' || parsedConsole.password !== '')) {
+    // Credentials in the URL would ride every request the browser makes and
+    // every line that names the URL; the value is not echoed here either.
+    return {
+      state: 'misconfigured',
+      placement,
+      reason:
+        `${PRINT_CONSOLE_URL_ENV} (or consoleUrl) carries credentials (user:password@); the browser signs in with ` +
+        "the requesting user's own session, so the URL must carry none. Remove them.",
+    };
   }
   if (!parsedConsole || (parsedConsole.protocol !== 'http:' && parsedConsole.protocol !== 'https:')) {
     return {

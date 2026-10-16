@@ -324,7 +324,7 @@ export interface AttachmentParentVerdictDeps {
  * question the attach rule, the row rule's parent-editor limb and the
  * re-point's attach rule all ask — see "Parent EDIT" in the module header for
  * the composition and why each outcome lands where it does. Exported so the
- * caller-scoped attach verb (`FileAttachmentService.mayAttach`) asks the SAME
+ * caller-scoped attach check (`FileAttachmentService.assertMayAttach`) asks the SAME
  * question before a producer spends work on a file it could not attach.
  *
  * `recordId` is the value the limb holds (the degraded read probe keeps the

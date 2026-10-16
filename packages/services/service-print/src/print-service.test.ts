@@ -45,6 +45,7 @@ interface Harness {
   assertMayAttach: ReturnType<typeof vi.fn>;
   findOne: ReturnType<typeof vi.fn>;
   metadataGet: ReturnType<typeof vi.fn>;
+  loggerError: ReturnType<typeof vi.fn>;
 }
 
 interface Setup {
@@ -60,6 +61,7 @@ interface Setup {
   noAttachments?: boolean;
   noCallerAttach?: boolean;
   attachRefusal?: Error;
+  revokeError?: Error;
 }
 
 const configured: PrintPlacementResolution = {
@@ -69,7 +71,10 @@ const configured: PrintPlacementResolution = {
 
 async function harness(setup: Setup = {}): Promise<Harness> {
   const placement = setup.placement ?? configured;
-  const revoke = vi.fn(async () => undefined);
+  const revoke = vi.fn(async () => {
+    if (setup.revokeError) throw setup.revokeError;
+  });
+  const loggerError = vi.fn();
   const session: PrintSession = {
     token: TOKEN,
     cookie: { name: 'os.session_token', value: COOKIE_VALUE, path: '/', httpOnly: true, secure: false, sameSite: 'lax' },
@@ -121,9 +126,10 @@ async function harness(setup: Setup = {}): Promise<Harness> {
             ? { attachFile: systemAttachFile }
             : { attachFile: systemAttachFile, attachFileAs: attachFile, assertMayAttach }) as never),
     getMinter: () => (setup.noMint ? undefined : minter),
+    logger: { error: loggerError },
   });
   await service.probe();
-  return { service, driver, mint, revoke, attachFile, systemAttachFile, assertMayAttach, findOne, metadataGet };
+  return { service, driver, mint, revoke, attachFile, systemAttachFile, assertMayAttach, findOne, metadataGet, loggerError };
 }
 
 /** The refusal's ADR-0112 envelope: `code` and `status`. */
@@ -197,6 +203,36 @@ describe('PrintService — the engine (step ②)', () => {
     expect([r.code, r.status]).toEqual(['SERVICE_UNAVAILABLE', 503]);
     expect(h.driver.probe).toHaveBeenCalledTimes(2);
     expectNothingStarted(h);
+  });
+
+  it('an unreachable engine is re-probed only AFTER step 5: an unknown page is refused 404 with no browser started', async () => {
+    const h = await harness({ probeError: new Error('connect ECONNREFUSED'), page: undefined });
+    const r = await refusalOf(h.service.printRecordToFile(REQUEST, USER));
+    expect([r.code, r.status]).toEqual(['RESOURCE_NOT_FOUND', 404]);
+    expect(h.driver.probe).toHaveBeenCalledTimes(1); // the boot probe alone
+    expectNothingStarted(h);
+  });
+
+  it('an unreachable engine is re-probed only AFTER step 5: an attach refusal wins with no browser started', async () => {
+    const h = await harness({
+      probeError: new Error('connect ECONNREFUSED'),
+      attachRefusal: refusalError('ATTACHMENT_PARENT_ACCESS', 403, 'no edit'),
+    });
+    const r = await refusalOf(h.service.printRecordToFile(REQUEST, USER));
+    expect([r.code, r.status]).toEqual(['ATTACHMENT_PARENT_ACCESS', 403]);
+    expect(h.driver.probe).toHaveBeenCalledTimes(1);
+    expectNothingStarted(h);
+  });
+
+  it('an engine that answers its re-probe after step 5 serves the print', async () => {
+    const h = await harness({ probeError: new Error('connect ECONNREFUSED') });
+    h.driver.probe.mockResolvedValueOnce({ version: '141.0.7390.37' });
+    const out = await h.service.printRecordToFile(REQUEST, USER);
+    expect(out.fileId).toBe('file_1');
+    expect(h.driver.probe).toHaveBeenCalledTimes(2);
+    const order = (fn: ReturnType<typeof vi.fn>): number => fn.mock.invocationCallOrder[fn.mock.invocationCallOrder.length - 1]!;
+    expect(order(h.assertMayAttach)).toBeLessThan(order(h.driver.probe));
+    expect(order(h.driver.probe)).toBeLessThan(order(h.mint));
   });
 
   it('no principal-session mint on the auth service: unavailable, 503, and status says why', async () => {
@@ -393,6 +429,30 @@ describe('PrintService — mint, render, archive, revoke', () => {
     const r = await refusalOf(h.service.printRecordToFile(REQUEST, USER));
     expect([r.code, r.status]).toEqual(['PAYLOAD_TOO_LARGE', 413]);
     expect(h.revoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('a revoke that fails after a committed archive: the caller still gets the success, and the failure is logged at error by fingerprint', async () => {
+    const h = await harness({ revokeError: new Error(`session store down while revoking ${TOKEN}`) });
+    const out = await h.service.printRecordToFile(REQUEST, USER);
+    expect(out).toMatchObject({ fileId: 'file_1', attachmentId: 'att_1' });
+    expect(h.revoke).toHaveBeenCalledTimes(1);
+    expect(h.loggerError).toHaveBeenCalledTimes(1);
+    const line = String(h.loggerError.mock.calls[0]![0]);
+    expect(line).toMatch(/fingerprint [0-9a-f]{12}/);
+    expect(line).toContain('usr_alice');
+    expect(line).not.toContain(TOKEN);
+    expect(line).not.toContain(COOKIE_VALUE);
+  });
+
+  it('a revoke that fails after a refused print: the original refusal wins, and the failure is logged the same way', async () => {
+    const h = await harness({
+      renderError: refusalError('TIMEOUT', 504, 'the print page did not load'),
+      revokeError: new Error('session store down'),
+    });
+    const r = await refusalOf(h.service.printRecordToFile(REQUEST, USER));
+    expect([r.code, r.status]).toEqual(['TIMEOUT', 504]);
+    expect(h.loggerError).toHaveBeenCalledTimes(1);
+    expect(String(h.loggerError.mock.calls[0]![0])).not.toContain(TOKEN);
   });
 
   it('a mint refusal is passed on, and nothing is rendered', async () => {

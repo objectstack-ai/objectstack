@@ -59,6 +59,18 @@ read at startup unless noted otherwise. Boolean variables accept `true` / `false
 
 ---
 
+## Printing
+
+Read by `@objectstack/service-print` when `PrintServicePlugin` is composed; see [Print Pages](/docs/ui/print-pages). Configure **one** placement plus the console URL; a plugin option of the same purpose wins over its variable.
+
+| Variable | Type | Default | Description |
+|:---|:---|:---|:---|
+| `OS_PRINT_CHROMIUM_PATH` | path | — | **Local placement**: a Chromium executable on this host, launched per print (plugin option `chromiumPath`). |
+| `OS_PRINT_BROWSER_ENDPOINT` | url | — | **Remote placement**: a browser's DevTools WebSocket endpoint, connected per print (option `browserEndpoint`). The minted session cookie travels in its frames, so use `wss://` off this host and `ws://` only on loopback. Never logged beyond its scheme and host. Setting it together with `OS_PRINT_CHROMIUM_PATH` is refused. |
+| `OS_PRINT_CONSOLE_URL` | url | — | The console URL that browser loads, `/_console` included (option `consoleUrl`). A URL carrying credentials (`user:password@`) is refused: the browser signs in with the requesting user's own session. |
+
+---
+
 ## Secrets & Clustering
 
 | Variable | Type | Default | Description |

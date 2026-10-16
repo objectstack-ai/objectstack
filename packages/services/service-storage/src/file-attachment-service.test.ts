@@ -479,6 +479,19 @@ describe('the file-attachments writer AS THE REQUESTING USER: assertMayAttach an
     await expect(asCaller(attachments).assertMayAttach('att_case', 'case_a', ALICE as never)).resolves.toBeUndefined();
   });
 
+  it('an organizationId other than the caller’s own is refused PERMISSION_DENIED / 403 before anything is written', async () => {
+    const { ql, attachments, storage } = await boot();
+    for (const over of [
+      { parentId: 'case_global', organizationId: 'org_b' },
+      { parentId: 'case_a', organizationId: 'org_b' },
+      { parentId: 'case_global', organizationId: null },
+    ]) {
+      const r = await refusalOf(asCaller(attachments).attachFileAs(input(over), ALICE as never));
+      expect([r.code, r.status]).toEqual(['PERMISSION_DENIED', 403]);
+    }
+    await expectNothingLeft(ql, storage);
+  });
+
   it('a parent walled into another organization than the caller’s is refused as not found', async () => {
     const { ql, attachments, storage } = await boot();
     const r = await refusalOf(

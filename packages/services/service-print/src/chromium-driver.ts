@@ -191,25 +191,41 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
     const secrets = [this.resolved.target, input.cookie.value];
     const started = Date.now();
     const remaining = (): number => Math.max(1, input.timeoutMs - (Date.now() - started));
-    let browser: BrowserHandle | undefined;
-    let context: ContextHandle | undefined;
-    try {
-      browser = await this.open(remaining());
-      context = await browser.newContext();
-      await context.addCookies([cookieFor(input.url, input.cookie)]);
-      const page = await context.newPage();
+    const handles: { browser?: BrowserHandle; context?: ContextHandle } = {};
+    // Every step of the render — open, the context, the cookie, the page, the
+    // load, the ready wait, the fonts and the PDF — runs inside ONE deadline:
+    // a browser that stalls on any of them answers TIMEOUT within the budget.
+    const render = (async (): Promise<Buffer> => {
+      handles.browser = await this.open(remaining());
+      handles.context = await handles.browser.newContext();
+      await handles.context.addCookies([cookieFor(input.url, input.cookie)]);
+      const page = await handles.context.newPage();
       await page.goto(input.url, { waitUntil: 'load', timeout: remaining() });
       await page.waitForFunction(PRINT_READY_PREDICATE, undefined, { timeout: remaining(), polling: POLL_INTERVAL_MS });
       await page.evaluate(FONTS_READY);
-      return await page.pdf({ preferCSSPageSize: true, printBackground: true });
+      return page.pdf({ preferCSSPageSize: true, printBackground: true });
+    })();
+    // Once the deadline answers, a late rejection of the abandoned render is
+    // expected (the cleanup below closes what it was waiting on).
+    render.catch(() => undefined);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(Object.assign(new Error('the render budget ran out'), { name: 'TimeoutError' })),
+        input.timeoutMs,
+      );
+    });
+    try {
+      return await Promise.race([render, deadline]);
     } catch (err) {
       if (isTimeout(err)) {
         throw refusalError(
           'TIMEOUT',
           504,
-          `The print page did not finish loading within ${Math.round(input.timeoutMs / 1000)} s at ${input.url}: ` +
+          `The print page did not finish rendering within ${Math.round(input.timeoutMs / 1000)} s at ${input.url}: ` +
             'the console never showed a print page for the record (a root carrying data-print-page, with no request ' +
-            'in flight). Check that the console is served at that URL and reachable from the browser.',
+            'in flight), or the browser stalled. Check that the console is served at that URL and reachable from the ' +
+            'browser.',
         );
       }
       throw refusalError(
@@ -218,10 +234,11 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
         `The print engine failed at ${this.where()}: ${redact(String((err as Error)?.message ?? err), secrets)}`,
       );
     } finally {
+      clearTimeout(timer);
       // The context first: on the remote placement it holds the session cookie
       // inside a browser this process does not own.
-      if (context) await context.close().catch(() => undefined);
-      if (browser) await browser.close().catch(() => undefined);
+      if (handles.context) await handles.context.close().catch(() => undefined);
+      if (handles.browser) await handles.browser.close().catch(() => undefined);
     }
   }
 }

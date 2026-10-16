@@ -69,6 +69,7 @@ export class PrintServicePlugin implements Plugin {
       getEngine: () => optional<PrintEngine>('objectql'),
       getAttachments: () => optional<IFileAttachmentService>(FILE_ATTACHMENT_SERVICE),
       getMinter: () => principalSessionMinterOf(optional<IAuthService>('auth')),
+      logger: ctx.logger,
     });
     ctx.registerService(PRINT_SERVICE, this.service);
   }

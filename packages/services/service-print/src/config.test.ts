@@ -67,6 +67,15 @@ describe('resolvePrintPlacement — one engine, two placements', () => {
     }
   });
 
+  it('a console URL carrying credentials is misconfigured, and the credentials are not echoed', () => {
+    const r = resolvePrintPlacement({ chromiumPath: '/c', consoleUrl: 'http://print:hunter2-secret@127.0.0.1:3000/_console' }, {});
+    expect(r.state).toBe('misconfigured');
+    if (r.state === 'misconfigured') {
+      expect(r.reason).toContain(PRINT_CONSOLE_URL_ENV);
+      expect(r.reason).not.toContain('hunter2-secret');
+    }
+  });
+
   it('a console URL that is not http(s), or carries a query, is misconfigured', () => {
     for (const consoleUrl of ['ftp://host/_console', 'not a url', `${CONSOLE}?x=1`]) {
       expect(resolvePrintPlacement({ chromiumPath: '/c', consoleUrl }, {}).state).toBe('misconfigured');

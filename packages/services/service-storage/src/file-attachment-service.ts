@@ -111,7 +111,7 @@ export interface FileAttachmentServiceDeps {
   /** The `storage` namespace's Limits group as last read — the upload doors' own source. */
   getLimitsSnapshot(): StorageLimitsSnapshot | undefined;
   logger: { warn(message: string): void; debug?(message: string): void };
-  /** The sharing service, for the attach rule's verdict ({@link FileAttachmentService.mayAttach}). */
+  /** The sharing service, for the attach rule's verdict ({@link FileAttachmentService.assertMayAttach}). */
   getSharing?(): AttachmentSharingLike | null | undefined;
   /**
    * The security service: the attach rule's master-detail check, and `explain`
@@ -145,7 +145,9 @@ export interface ICallerFileAttachmentService {
   assertMayAttach(parentObject: string, parentId: string, context: ExecutionContext): Promise<void>;
   /**
    * {@link IFileAttachmentService.attachFile}, as `context`'s user. Refuses as
-   * `attachFile` does, plus: a parent the caller cannot read answers
+   * `attachFile` does, plus: an `organizationId` other than the caller's own
+   * (the context's `tenantId`, or `null` when it names none) answers
+   * `PERMISSION_DENIED` / `403`; a parent the caller cannot read answers
    * `RECORD_NOT_FOUND` / `404`, and the attach rule's refusal
    * (`ATTACHMENT_PARENT_ACCESS` / `403`) is the insert gate's own. A context
    * without a user, or the system context, is refused `PERMISSION_DENIED` /
@@ -265,6 +267,22 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
   /** The one write path: as the system (`caller` null), or as the caller. */
   private async attach(input: AttachFileInput, caller: ExecutionContext | null): Promise<AttachedFile> {
     const request = validateAttachFileInput(input);
+    // As the caller, the call acts in the caller's own organization and no
+    // other: an input naming another (or none, for a caller who acts in one)
+    // is refused before anything is read or written. Without this, a global
+    // parent would take the sys_file into the named organization while the
+    // caller's insert lands in theirs.
+    if (caller) {
+      const callerOrganization = nonEmptyString(caller.tenantId) ? caller.tenantId : null;
+      if (request.organizationId !== callerOrganization) {
+        refuse(
+          'PERMISSION_DENIED',
+          403,
+          "attachFileAs: 'organizationId' must be the organization the caller acts in (the context's tenantId, or " +
+            'null when it names none); a caller cannot attach a file in another organization.',
+        );
+      }
+    }
     const engine = this.deps.getEngine();
     const storage = this.deps.getStorage();
     if (!engine || !storage) refuse('SERVICE_UNAVAILABLE', 503, NOT_READY_MESSAGE);
@@ -352,10 +370,12 @@ export class FileAttachmentService implements IFileAttachmentService, ICallerFil
   }
 
   /**
-   * Read the parent as the system and answer the organization both rows are
-   * written in: the parent's own when it is walled into one, otherwise the
-   * caller's (`null` for none). A parent that does not exist, or that is walled
-   * into another organization than the caller's, is refused with one answer.
+   * Read the parent — as the system for `attachFile`, as the caller for
+   * `attachFileAs` — and answer the organization both rows are written in: the
+   * parent's own when it is walled into one, otherwise the call's (`null` for
+   * none). A parent that does not exist, that the caller cannot read, or that
+   * is walled into another organization than the call's, is refused with one
+   * answer.
    */
   private async organizationOfParent(
     engine: FileAttachmentEngine,

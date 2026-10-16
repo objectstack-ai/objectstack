@@ -64,8 +64,8 @@ one, plus the URL the browser loads the console from:
 | Setting | Plugin option | What it is |
 |:---|:---|:---|
 | `OS_PRINT_CHROMIUM_PATH` | `chromiumPath` | **Local placement**: a Chromium executable on this host, launched per print. |
-| `OS_PRINT_BROWSER_ENDPOINT` | `browserEndpoint` | **Remote placement**: a browser's DevTools WebSocket endpoint (`ws://` or `wss://`), connected per print. For hosts that cannot carry a browser of their own. |
-| `OS_PRINT_CONSOLE_URL` | `consoleUrl` | The console's URL as that browser reaches it, `/_console` included (`http://127.0.0.1:3000/_console`). |
+| `OS_PRINT_BROWSER_ENDPOINT` | `browserEndpoint` | **Remote placement**: a browser's DevTools WebSocket endpoint (`ws://` or `wss://`), connected per print. For hosts that cannot carry a browser of their own. The requesting user's session cookie travels in the endpoint's frames: use `wss://` for a browser off this host, and `ws://` only on loopback. |
+| `OS_PRINT_CONSOLE_URL` | `consoleUrl` | The console's URL as that browser reaches it, `/_console` included (`http://127.0.0.1:3000/_console`). A URL carrying credentials (`user:password@`) is refused. |
 
 A plugin option wins over its variable. At startup the plugin probes the engine
 — launches the executable or connects to the endpoint — and logs the placement
@@ -97,8 +97,10 @@ const file = await print.printRecordToFile(
 
 The page is rendered as the requesting user — never as the system — through a
 short-lived session minted for that user and revoked as soon as the print ends,
-whether it succeeded or not. A user can never archive a record they could not
-read.
+whether it succeeded or not. The PDF is archived as theirs: the attachment is
+written under their own permissions, and both the file and the attachment name
+them. A user can never archive a record they could not read, or attach a file
+where they could not attach one by hand.
 
 ## Refusals
 
@@ -113,7 +115,14 @@ before a session is minted or a browser is started, in this order:
 | 3 | The page is not the object's default record page, or declares no `print` | `VALIDATION_ERROR` / 400 |
 | 4 | The record does not exist, or the caller cannot read it | `RECORD_NOT_FOUND` / 404 |
 | 5 | The object does not declare `enable: { files: true }` | `FILES_DISABLED` / 403 |
+| 5 | The caller may not create attachments at all | `PERMISSION_DENIED` / 403 |
+| 5 | The caller may not attach a file to this record (attaching needs edit access to it) | `ATTACHMENT_PARENT_ACCESS` / 403 |
+
+An engine that did not answer its last probe is probed once more only after
+step 5, so no browser is started before every refusal above has had its say.
 
 After those, a print can still fail as the render or the archive does: the page
-not loading in time (`TIMEOUT` / 504), or the archive's own refusals, such as a
-file over the upload size limit (`PAYLOAD_TOO_LARGE` / 413).
+not rendering within the 30 s budget (`TIMEOUT` / 504), or the archive's own
+refusals, such as a file over the upload size limit (`PAYLOAD_TOO_LARGE` / 413).
+A failure to end the session afterwards never replaces the print's own outcome;
+it is logged, and the session expires on its own within 60 s.

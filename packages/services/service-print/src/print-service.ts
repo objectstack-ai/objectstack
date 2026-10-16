@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
+import { createHash } from 'node:crypto';
 import { recordNotFoundError } from '@objectstack/core';
 import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import type { EngineSchemaRegistryView, IDataEngine, IFileAttachmentService } from '@objectstack/spec/contracts';
@@ -27,6 +28,10 @@ import type { PrincipalSessionMinter, PrintSession } from './principal-session.j
  *     to: the PDF is what this user may see, rendered as this user.
  *  2. **The engine.** {@link PrintService.status} must be `ready`. Otherwise
  *     `SERVICE_UNAVAILABLE` / `503`, carrying the reason `status()` gives.
+ *     One exception keeps an engine recoverable without a restart: an engine
+ *     that failed its last probe, with everything else composed, is probed
+ *     once more AFTER step 5 — so even that probe never starts a browser
+ *     before every other refusal has had its say.
  *  3. **The page.** The request names the page it expects; it must exist
  *     (`RESOURCE_NOT_FOUND` / `404`), be bound to the record's object, declare
  *     `print`, and be the object's default record page — the one page the
@@ -47,7 +52,9 @@ import type { PrincipalSessionMinter, PrintSession } from './principal-session.j
  * Then the session is minted for the caller's own principal, the page is
  * rendered with it, the PDF is archived through the `file-attachments` service,
  * and the session is revoked in a `finally` — after a failed render or a
- * refused archive as much as after a success.
+ * refused archive as much as after a success. A revoke that itself fails never
+ * replaces the print's outcome: it is logged at `error` by a fingerprint of the
+ * session (never its token), and the session's 60 s TTL ends it.
  *
  * The archive is the one writer of `sys_file` and `sys_attachment`, run AS
  * THE CALLER (`attachFileAs`, `@objectstack/service-storage`): its size limit,
@@ -127,6 +134,8 @@ export interface PrintServiceDeps {
   getEngine(): PrintEngine | undefined;
   getAttachments(): (IFileAttachmentService & Partial<ICallerFileAttachmentService>) | undefined;
   getMinter(): PrincipalSessionMinter | undefined;
+  /** Where a failed revoke is reported. */
+  logger?: { error(message: string): void };
 }
 
 /** The whole render's time budget. */
@@ -234,11 +243,12 @@ export class PrintService implements IPrintService {
     // ① The principal.
     this.refuseUnlessHumanCaller(context);
 
-    // ② The engine. An engine that failed its probe is probed once more, so an
-    // endpoint that came up after boot serves without a restart.
-    let status = this.status();
-    if (status.state === 'unavailable' && this.lastProbe && !this.lastProbe.ok) status = await this.probe();
-    if (status.state !== 'ready') {
+    // ② The engine, as configured and composed. An engine whose last probe
+    // failed is probed once more — but only after step ⑤, so no browser is
+    // launched or connected before every other refusal has had its say.
+    const status = this.status();
+    const reprobe = status.state === 'unavailable' && this.lastProbe?.ok === false && !this.missingService();
+    if (status.state !== 'ready' && !reprobe) {
       printRefusal('SERVICE_UNAVAILABLE', 503, `Records cannot be printed to a file: ${status.reason}`);
     }
     const driver = this.deps.driver!;
@@ -257,6 +267,15 @@ export class PrintService implements IPrintService {
     // ⑤ The files opt-in, and the attach rule for the caller.
     this.refuseUnlessFilesEnabled(engine, req.object);
     await attachments.assertMayAttach(req.object, req.recordId, context);
+
+    // ② again, for an engine that failed its last probe: probe it now, so an
+    // endpoint that came up after boot serves without a restart.
+    if (reprobe) {
+      const probed = await this.probe();
+      if (probed.state !== 'ready') {
+        printRefusal('SERVICE_UNAVAILABLE', 503, `Records cannot be printed to a file: ${probed.reason}`);
+      }
+    }
 
     // Mint, render, archive — and revoke, whatever happened.
     const filename = req.filename ?? `${req.page}-${req.recordId}.pdf`;
@@ -279,7 +298,29 @@ export class PrintService implements IPrintService {
       );
       return { fileId: attached.fileId, attachmentId: attached.attachmentId, size: attached.size, filename };
     } finally {
+      await this.revokeQuietly(session, context);
+    }
+  }
+
+  /**
+   * End the minted session. A revoke that fails never replaces the print's own
+   * outcome — the committed archive or the refusal — and is not silent either:
+   * it is logged at `error`, naming the session by a fingerprint of its token
+   * (never the token or the cookie), and the session's own TTL ends it.
+   */
+  private async revokeQuietly(session: PrintSession, context: ExecutionContext): Promise<void> {
+    try {
       await session.revoke();
+    } catch (err) {
+      const fingerprint = createHash('sha256').update(session.token).digest('hex').slice(0, 12);
+      const why = [session.token, session.cookie.value].reduce(
+        (text, secret) => (secret ? text.split(secret).join('[redacted]') : text),
+        String((err as Error)?.message ?? err),
+      );
+      this.deps.logger?.error(
+        `[print] the session minted for user ${String(context.userId)} (fingerprint ${fingerprint}) could not be ` +
+          `revoked: ${why}. It stays valid until it expires, at most ${PRINT_SESSION_TTL_SECONDS} s after the mint.`,
+      );
     }
   }
 
