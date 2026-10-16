@@ -1199,7 +1199,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
       const one = JobSchema.safeParse(jobOf({ maxRetries: 1 }));
       expect(one.success).toBe(true);
       expect(one.data!.retryPolicy).toMatchObject({ maxRetries: 1, backoffMultiplier: 1 });
-      expect(() => defineStack({ jobs: [jobOf({ maxRetries: 1 }), bare] } as never)).not.toThrow();
+      expect(() => defineStack({ jobs: [jobOf({ maxRetries: 1 }), { ...bare, name: 'weekly_purge' }] } as never)).not.toThrow();
     });
 
     it('the same block on a `try_catch` node\'s `retry` is not this rule\'s — the shared schema is unchanged', () => {
