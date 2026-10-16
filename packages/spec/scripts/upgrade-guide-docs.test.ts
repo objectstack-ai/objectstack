@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — spawns the real producer once per single-cause fixture: the last block spawns the real build-upgrade-guide.ts once per mode or usage error it pins (twice for the determinism pin), and the rest are in-process; slowest CI reading 19.7 s (hourly run 38798542648) x 1.25, rounded up
 //
 // Pins the protocol upgrade guide's public address (#22449 B′, condition 2):
 // one docs-site page per protocol major plus an index, generated at docs build
