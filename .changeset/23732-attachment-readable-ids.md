@@ -4,7 +4,7 @@
 
 feat(service-storage): the `sys_attachment` read gate writes one `ReadableIds` leaf per parent object and does no pre-scan, so a broad read is judged over every row, not a 2,000-row window (ADR-0139 D4, D5)
 
-Clause-②: no
+Clause-②: yes
 
 The gate serves an attachment only when the caller may read the record it is attached to. Until now each read first scanned at most 2,000 candidate rows as the system, then asked which of those rows' parent records the caller could read. Past that window the gate failed closed: the unscanned rows were left out, the list's `total` agreed with the short answer, and a warning said so.
 
