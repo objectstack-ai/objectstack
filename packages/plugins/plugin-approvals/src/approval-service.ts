@@ -3571,11 +3571,11 @@ export class ApprovalService implements IApprovalService {
     };
     await this.engine.insert('sys_approval_request', row, { context: SYSTEM_CTX });
     await this.syncApproverIndex(id, approvers, requestOrg, now);
-    await this.appendAction(row, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(row, {
       id: uid('aact'), request_id: id, organization_id: requestOrg,
       step_name: input.nodeId, step_index: 0, action: 'submit',
       actor_id: input.submitterId ?? context.userId ?? null, comment: null, created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
 
     // [#22824] The request's display says why it is with the administrators:
     // one system note on its timeline (no person took it, so `actor_id` is
@@ -3583,13 +3583,13 @@ export class ApprovalService implements IApprovalService {
     // approver entries resolved to no one. The same reason rides
     // `__resolvedFrom` for the audit snapshot.
     if (routedToAdministrators) {
-      await this.appendAction(row, {
+      await this.engine.insert('sys_approval_action', await this.actionRow(row, {
         id: uid('aact'), request_id: id, organization_id: requestOrg,
         step_name: input.nodeId, step_index: 0, action: 'comment',
         actor_id: null,
         comment: `Routed to this organization's administrators because the approver slate named no one: ${routedToAdministrators}.`,
         created_at: now,
-      });
+      }), { context: SYSTEM_CTX });
     }
 
     // OOO substitution audit + notification (#1322 M4). Each hop that rerouted
@@ -3597,13 +3597,13 @@ export class ApprovalService implements IApprovalService {
     // audit trail (a system action, no human actor) and notified to both the
     // delegate — who now owns the slot — and the skipped approver.
     for (const sub of substitutions) {
-      await this.appendAction(row, {
+      await this.engine.insert('sys_approval_action', await this.actionRow(row, {
         id: uid('aact'), request_id: id, organization_id: requestOrg,
         step_name: input.nodeId, step_index: 0, action: 'ooo_substitute',
         actor_id: null,
         comment: `${sub.from} → ${sub.to}${sub.reason ? ` — ${sub.reason}` : ''}`,
         created_at: now,
-      });
+      }), { context: SYSTEM_CTX });
       await this.notify({
         topic: 'approval.ooo_substituted',
         organizationId: requestOrg,
@@ -3861,7 +3861,7 @@ export class ApprovalService implements IApprovalService {
     await this.assertRunResumable(runId, requestId);
 
     // Audit the decision first so the quorum/per_group tally below sees it.
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: input.decision,
       // Two facts (#21411): the PERSON who decided, and the slot the decision
@@ -3875,7 +3875,7 @@ export class ApprovalService implements IApprovalService {
       via_override: viaOverride,
       attachments: input.attachments?.length ? input.attachments : null,
       created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
 
     // Multi-approver aggregation on approve (#3266). A rejection always
     // finalizes the node (one veto), so only the approve path can hold it open.
@@ -4422,11 +4422,11 @@ export class ApprovalService implements IApprovalService {
     const runId: string | null = raw.flow_run_id ?? null;
     const now = this.clock.now().toISOString();
 
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'recall',
       actor_id: recordedActor(context), comment: input.comment ?? null, created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
 
     await this.engine.update('sys_approval_request', {
       id: requestId, status: 'recalled', pending_approvers: null, pending_approver_labels: null, completed_at: now, updated_at: now,
@@ -4652,13 +4652,13 @@ export class ApprovalService implements IApprovalService {
         // `actor_id` is null on purpose and is the point of the `cancel` kind:
         // no person did this. Attributing it to a submitter (`recall`) or an
         // approver (`reject`) would file a decision nobody made.
-        await this.appendAction(raw, {
+        await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
           id: uid('aact'), request_id: requestId, organization_id: org,
           step_name: nodeId, step_index: 0, action: 'cancel',
           actor_id: null,
           comment: `Auto-cancelled: the ${object} record '${record}' this request is about was deleted`,
           created_at: now,
-        });
+        }), { context: SYSTEM_CTX });
 
         await this.engine.update('sys_approval_request', {
           id: requestId,
@@ -4750,21 +4750,21 @@ export class ApprovalService implements IApprovalService {
     // Audit the revise intent first (audit-first, like decideNode) — on the
     // auto-reject path the trail then reads `revise → reject`, preserving
     // what the approver actually asked for.
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'revise',
       actor_id: recordedActor(context), acted_as: slot ?? null,
       comment: input.comment ?? null, created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
 
     if (priorSendBacks >= maxRevisions) {
       // Revision budget exhausted — auto-reject (ADR-0044 loop guard).
-      await this.appendAction(raw, {
+      await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
         id: uid('aact'), request_id: requestId, organization_id: org,
         step_name: nodeId, step_index: 0, action: 'reject',
         actor_id: recordedActor(context), acted_as: slot ?? null,
         comment: `Auto-rejected: revision limit (${maxRevisions}) exceeded`, created_at: now,
-      });
+      }), { context: SYSTEM_CTX });
       await this.engine.update('sys_approval_request', {
         id: requestId, status: 'rejected', pending_approvers: null, pending_approver_labels: null, completed_at: now, updated_at: now,
       }, { context: SYSTEM_CTX });
@@ -4903,11 +4903,11 @@ export class ApprovalService implements IApprovalService {
     // never open (#4420).
     await this.assertRunResumable(runId, requestId);
 
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: requestId, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'resubmit',
       actor_id: recordedActor(context), comment: input.comment ?? null, created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
 
     let resumed = false;
     let resumeError: string | undefined;
@@ -5059,7 +5059,7 @@ export class ApprovalService implements IApprovalService {
     const now = this.clock.now().toISOString();
     // Audit first, then mutate — mirrors decideNode(), so a failed audit
     // write can never leave a moved slot without a trail.
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'reassign',
       // The hand-off parties are STRUCTURED fields (#4365) — the old default
@@ -5075,7 +5075,7 @@ export class ApprovalService implements IApprovalService {
       reassign_from: from, reassign_to: to,
       via_override: viaOverride,
       comment: input.comment ?? null, created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
     // per_group / quorum (#3266): carry the delegated slot's group membership to
     // the new approver in the snapshot, so their approval still counts for the
     // original group.
@@ -5140,11 +5140,11 @@ export class ApprovalService implements IApprovalService {
 
     const pending = csvSplit(raw.pending_approvers);
     const nowIso = now.toISOString();
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'remind',
       actor_id: recordedActor(context), comment: input.comment ?? null, created_at: nowIso,
-    });
+    }), { context: SYSTEM_CTX });
 
     // Per-approver fan-out: concrete identities (user ids / emails) each get
     // their OWN one-tap approve/reject links (ADR-0043); `position:*`-style
@@ -5420,12 +5420,12 @@ export class ApprovalService implements IApprovalService {
     }
 
     const now = this.clock.now().toISOString();
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'request_info',
       actor_id: recordedActor(context), acted_as: slot ?? null,
       comment: input.comment.trim(), created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
 
     if (raw.submitter_id) {
       await this.notify({
@@ -5465,14 +5465,14 @@ export class ApprovalService implements IApprovalService {
     }
 
     const now = this.clock.now().toISOString();
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: requestId, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'comment',
       actor_id: recordedActor(context), acted_as: slot ?? null,
       comment: input.comment.trim(),
       attachments: input.attachments?.length ? input.attachments : null,
       created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
 
     // Notify the other side of the thread.
     const audience = isSubmitter ? pending : [String(raw.submitter_id ?? '')].filter(Boolean);
@@ -6451,7 +6451,7 @@ export class ApprovalService implements IApprovalService {
     const nodeId: string | null = raw.flow_node_id ?? raw.current_step ?? null;
     const now = this.clock.now().toISOString();
 
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: raw.id, organization_id: org,
       step_name: nodeId, step_index: 0, action: 'recall',
       // ADR-0118 D1: no person did this, so `actor_id` is null — never a
@@ -6461,7 +6461,7 @@ export class ApprovalService implements IApprovalService {
       actor_id: null,
       comment: `owning flow run ${runId} is ${runStatus} — request abandoned and record lock released`,
       created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
 
     await this.engine.update('sys_approval_request', {
       id: raw.id, status: 'recalled', pending_approvers: null, pending_approver_labels: null, completed_at: now, updated_at: now,
@@ -6510,13 +6510,13 @@ export class ApprovalService implements IApprovalService {
     // action is in the comment. The notifications below forward no actor for
     // the same reason, and the auto-decision runs under SYSTEM_CTX, which
     // vouches for nobody, so it records nobody either.
-    await this.appendAction(raw, {
+    await this.engine.insert('sys_approval_action', await this.actionRow(raw, {
       id: uid('aact'), request_id: raw.id, organization_id: raw.organization_id ?? null,
       step_name: raw.flow_node_id ?? raw.current_step ?? null, step_index: 0, action: 'escalate',
       actor_id: null,
       comment: `${action}${escalateTo ? ` → ${escalateTo}` : ''}`,
       created_at: now,
-    });
+    }), { context: SYSTEM_CTX });
 
     if (action === 'reassign' && escalatees.length) {
       await this.engine.update('sys_approval_request', {
@@ -6699,9 +6699,9 @@ export class ApprovalService implements IApprovalService {
   }
 
   /**
-   * [#23889] Append one `sys_approval_action` row for `request` — the ONE
-   * writer of the decision log. Beside the caller's columns it copies, from the
-   * request the action belongs to, what an action list shows without a join:
+   * [#23889] One `sys_approval_action` row for `request`: the caller's columns,
+   * plus what an action list shows without a join, copied from the request the
+   * action belongs to. Every writer of the decision log builds its row here:
    *
    *  - `step_label` — the request's `current_step_label`, the node label the
    *    engine snapshotted at open (a row opened before that column carries the
@@ -6715,18 +6715,18 @@ export class ApprovalService implements IApprovalService {
    * `bindRequestChildReadGates`), or a name the approvals door already serves
    * them for it.
    */
-  private async appendAction(request: any, action: Record<string, unknown>): Promise<void> {
+  private async actionRow(request: any, action: Record<string, unknown>): Promise<Record<string, unknown>> {
     const actedAs = typeof action.acted_as === 'string' && action.acted_as ? action.acted_as : null;
     const stepLabel = request?.current_step_label
       ?? parseJson<any>(request?.node_config_json, undefined)?.__nodeLabel
       ?? null;
-    await this.engine.insert('sys_approval_action', {
+    return {
       ...action,
       step_label: stepLabel,
       object_name: request?.object_name ?? null,
       record_id: request?.record_id ?? null,
       acted_as_label: actedAs ? (await this.slotLabels([actedAs]))[0] : null,
-    }, { context: SYSTEM_CTX });
+    };
   }
 
   /**

@@ -45,7 +45,7 @@ export const SysApprovalAction = ObjectSchema.create({
 
   // The display columns (`step_label`, `acted_as_label`) and the record pointer
   // (`object_name` + `record_id`) are written by `ApprovalService` with the row,
-  // copied from the request it belongs to (`appendAction`). The row is
+  // copied from the request it belongs to (`actionRow`). The row is
   // append-only, so each is the engine's fact at the moment of the action; a
   // list shows them as stored and never re-derives them.
   listViews: {
