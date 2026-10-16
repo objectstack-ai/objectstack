@@ -4057,6 +4057,12 @@ jobs:
         continue-on-error: true
         run: pnpm check:agent-test-spelling
 
+      # Rationale: `scripts/check-pnpm-flag-spellings.mjs` header (#23777).
+      - name: No committed pnpm call spells a flag the pnpm 11 frontend rejects
+        id: no-committed-pnpm-call-spells-a-rejected-flag
+        continue-on-error: true
+        run: pnpm check:pnpm-flag-spellings
+
       # Every `<pkg>#<task>` override in turbo.json must name a package the
       # workspace HAS and a script that package RUNS (#12046).
       #

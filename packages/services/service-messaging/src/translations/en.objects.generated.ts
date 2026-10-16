@@ -234,6 +234,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "Updated At"
       }
+    },
+    _views: {
+      all: {
+        label: "All",
+        emptyState: {
+          title: "No preferences yet",
+          message: "Nothing is muted until a preference is added; add one to mute or allow a topic on a channel, for one user or as the default for everyone."
+        }
+      }
     }
   },
   sys_notification_subscription: {
@@ -262,6 +271,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       created_at: {
         label: "Created At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All",
+        emptyState: {
+          title: "No subscriptions yet",
+          message: "A subscription records that a role, a team or a user follows a notification topic."
+        }
       }
     }
   },
@@ -313,6 +331,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       updated_at: {
         label: "Updated At"
+      }
+    },
+    _views: {
+      all: {
+        label: "All",
+        emptyState: {
+          title: "No templates yet",
+          message: "Add a template per topic, channel and locale; until then, a notification is sent with the title and body its sender provides."
+        }
       }
     }
   },

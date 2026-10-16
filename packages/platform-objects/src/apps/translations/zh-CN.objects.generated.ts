@@ -719,16 +719,32 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       pending: {
-        label: "待处理"
+        label: "待处理",
+        emptyState: {
+          title: "没有待处理的邀请",
+          message: "邀请会一直显示在这里，直到被接受、拒绝或取消，或者过期。"
+        }
       },
       accepted: {
-        label: "已接受"
+        label: "已接受",
+        emptyState: {
+          title: "没有已接受的邀请",
+          message: "对方接受邀请并加入组织后，邀请会移到这里。"
+        }
       },
       expired: {
-        label: "已过期 / 已取消"
+        label: "已过期 / 已取消",
+        emptyState: {
+          title: "没有已过期或已取消的邀请",
+          message: "已过期、被拒绝或已取消的邀请保留在这里。"
+        }
       },
       all_invitations: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "尚无邀请",
+          message: "加入组织的每一份邀请都列在这里，无论处于什么状态。"
+        }
       }
     },
     _actions: {
@@ -1024,19 +1040,47 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_keys: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "尚无 API 密钥",
+          message: "使用“创建密钥”为脚本和集成创建密钥；密钥只在创建时显示一次。"
+        }
       },
       mine: {
-        label: "我的密钥"
+        label: "我的密钥",
+        emptyState: {
+          title: "你还没有 API 密钥",
+          message: "使用“创建密钥”为你的脚本和集成创建密钥；密钥只在创建时显示一次。"
+        }
       },
       active: {
-        label: "启用"
+        label: "启用",
+        emptyState: {
+          title: "没有启用的 API 密钥",
+          message: "所有未被撤销的密钥都列在这里。"
+        }
       },
       revoked: {
-        label: "已撤销"
+        label: "已撤销",
+        emptyState: {
+          title: "没有已撤销的密钥",
+          message: "密钥被撤销后会移到这里；使用它的客户端会失去访问权限，直到它被恢复。"
+        }
       }
     },
     _actions: {
+      create_api_key: {
+        label: "创建密钥",
+        description: "为脚本或集成创建密钥。该密钥以你的身份、按你的访问权限，在你当前所在的组织中生效。",
+        resultDialog: {
+          title: "API 密钥已创建",
+          description: "请立即复制密钥——它只显示这一次，之后无法找回。如果泄露，请撤销它并创建新的密钥。",
+          acknowledge: "我已保存密钥",
+          fields: {
+            key: "API 密钥"
+          }
+        }
+      },
       revoke_api_key: {
         label: "撤销 API 密钥",
         confirmText: "要撤销该 API 密钥吗？所有使用该密钥的客户端都将立即失去访问权限。",
@@ -1388,16 +1432,32 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_apps: {
-        label: "全部"
+        label: "全部",
+        emptyState: {
+          title: "尚无 OAuth 应用",
+          message: "注册应用后，其客户端即可通过此环境让用户登录。"
+        }
       },
       mine: {
-        label: "我的应用"
+        label: "我的应用",
+        emptyState: {
+          title: "你还没有 OAuth 应用",
+          message: "你注册的应用会列在这里。"
+        }
       },
       active: {
-        label: "启用"
+        label: "启用",
+        emptyState: {
+          title: "没有启用的 OAuth 应用",
+          message: "应用在被停用之前一直处于启用状态；已停用的应用列在“已禁用”下。"
+        }
       },
       disabled_apps: {
-        label: "已禁用"
+        label: "已禁用",
+        emptyState: {
+          title: "没有已禁用的 OAuth 应用",
+          message: "应用被停用后会移到这里；在重新启用之前，其客户端无法登录。"
+        }
       }
     },
     _actions: {

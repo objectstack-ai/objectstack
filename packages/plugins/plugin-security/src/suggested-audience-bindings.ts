@@ -43,6 +43,19 @@
  * Organization> }` ({@link resolveDefaultOrganizationId}), and a row any
  * other organization owns — or none — is not this surface's.
  *
+ * ## Under a wall, the host may declare the acceptance instead (#23385)
+ *
+ * ADR-0131 D5 makes platform standing configuration under a walled posture,
+ * and §1.5 rejects a reserved organization that would own deployment-level
+ * rows. So a walled host may declare the accepted package defaults on the
+ * security plugin's `acceptedDefaultPermissionSets` option
+ * ({@link DeploymentAcceptance}). Declared, that list is the acceptance: the
+ * derivation reads it through the same catalog and high-risk checks a row
+ * passes, the sync reads and writes nothing, and the record's doors refuse,
+ * naming the option. Not declared, the record stands as described above, and
+ * a walled deployment with no organization to own it is told to declare the
+ * option — never to create the Default Organization. `single` is unchanged.
+ *
  * ## Rows written before the acceptance was deployment-level
  *
  * Until #22801 a TENANT administrator confirmed per organization, and that
@@ -91,6 +104,105 @@ const NO_RECORD_OWNER_MESSAGE =
   "than one organization. Remedy: create the Default Organization (slug 'default') — the organizations " +
   "plugin's bootstrap creates it for the platform administrator.";
 
+/**
+ * [ADR-0131 D5, #23385] The security plugin option a walled host declares its
+ * accepted package defaults on. Every walled-posture refusal names it.
+ */
+const ACCEPTED_DEFAULTS_OPTION = 'acceptedDefaultPermissionSets';
+
+/**
+ * Where the deployment-level acceptance lives (ADR-0131 D5, #23385).
+ *
+ * Under a walled posture platform standing is configuration, so a host may
+ * declare the accepted package defaults as configuration too — the security
+ * plugin's `acceptedDefaultPermissionSets` option. When it does, that list IS
+ * the acceptance: the record is not read, the sync writes no row, and the
+ * accept / dismiss / list doors refuse, naming the option. No organization —
+ * reserved or otherwise — owns anything for it (ADR-0131 §1.5).
+ *
+ * Otherwise — the `single` posture, or a walled host that declares nothing —
+ * the acceptance is the record, owned by the Default Organization, exactly as
+ * before. Omitted, it is read as that record under `single`: every caller that
+ * predates the option.
+ */
+export interface DeploymentAcceptance {
+  /** The deployment's tenancy posture (ADR-0105 D1). */
+  posture?: TenancyPosture;
+  /** The host's declaration — read only under a walled posture. */
+  acceptedDefaultPermissionSets?: readonly string[];
+}
+
+/**
+ * The security plugin's construction-time read of the option: a list of
+ * permission-set names, possibly empty, deduplicated and frozen. Anything else
+ * — `null`, a bare string, an empty or non-string entry — is refused loudly at
+ * construction rather than read as "nothing accepted".
+ */
+export function readAcceptedDefaultPermissionSetsOption(value: unknown): readonly string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((n) => typeof n !== 'string' || n.trim() === '')) {
+    throw new TypeError(
+      `[security] the SecurityPlugin option \`${ACCEPTED_DEFAULTS_OPTION}\` must be a list of permission-set ` +
+        `names — an empty list accepts none beyond the baseline; got ` +
+        `${Array.isArray(value) ? 'a list with an entry that is not a non-empty name' : value === null ? 'null' : typeof value}.`,
+    );
+  }
+  return Object.freeze([...new Set(value as string[])]);
+}
+
+/**
+ * Refuse the option under a posture that does not read it. Called by the
+ * security plugin once its posture is resolved: under `single` the record is
+ * the acceptance (ADR-0131 D5's Default-Organization row), so a declaration
+ * there would be configuration nothing enforces.
+ */
+export function refuseAcceptedDefaultsWithoutWall(
+  posture: TenancyPosture,
+  declared: readonly string[] | undefined,
+): void {
+  if (declared === undefined || postureEnforcesWall(posture)) return;
+  throw new Error(
+    `[security] the SecurityPlugin option \`${ACCEPTED_DEFAULTS_OPTION}\` is declared, and this deployment runs the ` +
+      `'${posture}' tenancy posture, which does not read it: without an organization wall the deployment-level ` +
+      'acceptance is the audience-binding suggestion record, owned by the Default Organization (ADR-0131 D5), ' +
+      `decided in Setup. Remedy: remove \`${ACCEPTED_DEFAULTS_OPTION}\`, or run a walled posture (group / isolated).`,
+  );
+}
+
+/** The host-declared acceptance, when it is the one in force (walled + declared). */
+function hostDeclaredAcceptance(deployment?: DeploymentAcceptance): readonly string[] | undefined {
+  if (!deployment?.posture || !postureEnforcesWall(deployment.posture)) return undefined;
+  return deployment.acceptedDefaultPermissionSets;
+}
+
+/**
+ * The refusal when no organization can own the record. Under `single` it is
+ * D5's Default-Organization row; under a wall it names the configuration path,
+ * never a reserved organization (ADR-0131 §1.5).
+ */
+function noRecordOwnerMessage(deployment?: DeploymentAcceptance): string {
+  const posture = deployment?.posture;
+  if (!posture || !postureEnforcesWall(posture)) return NO_RECORD_OWNER_MESSAGE;
+  return (
+    `The audience-binding acceptance is deployment-level, and this deployment runs the '${posture}' tenancy ` +
+    "posture with no organization that can own the record: no organization has slug 'default' and there is " +
+    'more than one organization. Under a walled posture the deployment-level acceptance is host configuration ' +
+    '(ADR-0131 D5), never a row a reserved organization owns (ADR-0131 §1.5). Remedy: declare the accepted ' +
+    `package defaults on the security plugin's \`${ACCEPTED_DEFAULTS_OPTION}\` option — an empty list when none ` +
+    'is accepted — and restart.'
+  );
+}
+
+/** The refusal of every record door when the host declared the acceptance. */
+function hostDeclaredMessage(deployment: DeploymentAcceptance): string {
+  return (
+    `This deployment runs the '${deployment.posture}' tenancy posture and declares its accepted package defaults ` +
+    `on the security plugin's \`${ACCEPTED_DEFAULTS_OPTION}\` option, so the deployment-level acceptance is host ` +
+    'configuration (ADR-0131 D5) and this door records none. Remedy: add or remove the permission set\'s name ' +
+    `in \`${ACCEPTED_DEFAULTS_OPTION}\` and restart.`
+  );
+}
+
 /** Thrown when the referenced suggestion row does not exist → HTTP 404. */
 export class SuggestionNotFoundError extends Error {
   readonly code = 'SUGGESTION_NOT_FOUND';
@@ -129,6 +241,11 @@ export interface SuggestionDeps {
    * owns this; an accept or a revoke calls it once the record is written.
    */
   rederiveEveryone: () => Promise<void>;
+  /**
+   * [ADR-0131 D5, #23385] The host's declared accepted package defaults —
+   * read only under a walled posture ({@link DeploymentAcceptance}).
+   */
+  acceptedDefaultPermissionSets?: readonly string[];
   logger?: { info?: (m: string, meta?: any) => void; warn?: (m: string, meta?: any) => void };
 }
 
@@ -176,6 +293,11 @@ export interface SuggestionReconcileOutcome extends SuggestionSyncOutcome {
 export interface SuggestionListFilter {
   status?: 'pending' | 'confirmed' | 'dismissed';
   packageId?: string;
+}
+
+/** The acceptance source the doors judge `deps` under. */
+function deploymentOf(deps: SuggestionDeps): DeploymentAcceptance {
+  return { posture: deps.posture(), acceptedDefaultPermissionSets: deps.acceptedDefaultPermissionSets };
 }
 
 function genId(prefix: string): string {
@@ -465,22 +587,32 @@ async function recordRows(ql: any, organizationId: string, where: Record<string,
 /** One accepted set the derivation leaves out, and why. */
 export interface WithheldAcceptance {
   set: string;
+  /** The accepting package (`record`), or the set's declaring package, `''` when none (`host-configuration`). */
   packageId: string;
   reason: string;
+  /**
+   * [#23385] Where the acceptance came from: a row of the record, or the
+   * host's `acceptedDefaultPermissionSets` declaration under a wall.
+   */
+  source: 'record' | 'host-configuration';
   /** The set carries a bit the `everyone` anchor forbids (ADR-0090 D7). */
   forbidden: boolean;
 }
 
 /**
- * The derivation's input: the permission sets a `manage_metadata` holder
- * ACCEPTED for `everyone`, as the security catalog serves them now.
+ * The derivation's input: the permission sets accepted for `everyone`, as the
+ * security catalog serves them now — the ones a `manage_metadata` holder
+ * ACCEPTED in the record or, under a walled posture whose host declares them
+ * ({@link DeploymentAcceptance}), the ones the host declared.
  *
- * An accepted row grants only while its set is served by the catalog under
- * the accepting package, still declares `isDefault: true`, and passes the
- * `everyone` anchor's high-risk gate (ADR-0090 D7, `describeAnchorForbiddenBits`
- * — the gate the acceptance itself ran, asked again of the definition as it
- * stands). A set failing any of these is WITHHELD and returned with its
- * reason, never dropped in silence: the caller reports it.
+ * An accepted set grants only while the catalog serves it under a package —
+ * the accepting one, for a row of the record — still declares `isDefault:
+ * true`, and passes the `everyone` anchor's high-risk gate (ADR-0090 D7,
+ * `describeAnchorForbiddenBits` — the gate the acceptance itself runs, asked
+ * again of the definition as it stands). A host-declared name answers the SAME
+ * questions: configuration is not a way past the gate. A set failing any of
+ * them is WITHHELD and returned with its reason, never dropped in silence: the
+ * caller reports it.
  *
  * Read errors propagate. An unreadable record is not an empty one, and the
  * caller decides what a derivation it could not complete leaves in force.
@@ -488,26 +620,41 @@ export interface WithheldAcceptance {
 export async function readAcceptedEveryoneSets(
   ql: any,
   metadata?: any,
+  deployment?: DeploymentAcceptance,
 ): Promise<{ accepted: string[]; withheld: WithheldAcceptance[] }> {
   const out = { accepted: [] as string[], withheld: [] as WithheldAcceptance[] };
-  const organizationId = await resolveDefaultOrganizationId(ql);
-  if (!organizationId) return out;
-  const rows = await ql.find(SUGGESTION_OBJECT, {
-    where: { status: 'confirmed', anchor: EVERYONE_POSITION },
-    limit: 1000,
-    context: scopedSystemCtx(organizationId),
-  });
-  const accepted = (Array.isArray(rows) ? rows : []).filter((r) => ownedBy(r, organizationId) && isDeploymentDecision(r));
-  if (accepted.length === 0) return out;
+  const declared = hostDeclaredAcceptance(deployment);
+  let candidates: Array<{ set: string; packageId?: string }>;
+  if (declared) {
+    candidates = declared.map((set) => ({ set }));
+  } else {
+    const organizationId = await resolveDefaultOrganizationId(ql);
+    if (!organizationId) return out;
+    const rows = await ql.find(SUGGESTION_OBJECT, {
+      where: { status: 'confirmed', anchor: EVERYONE_POSITION },
+      limit: 1000,
+      context: scopedSystemCtx(organizationId),
+    });
+    candidates = (Array.isArray(rows) ? rows : [])
+      .filter((r) => ownedBy(r, organizationId) && isDeploymentDecision(r))
+      .map((r) => ({ set: String(r.permission_set_name), packageId: String(r.package_id) }));
+  }
+  if (candidates.length === 0) return out;
+  const source: WithheldAcceptance['source'] = declared ? 'host-configuration' : 'record';
   const reader = securityCatalogReaderOf(ql);
   const capabilities = await readDeclaredCapabilityContext(ql, metadata);
-  for (const row of accepted) {
-    const set = String(row.permission_set_name);
-    const packageId = String(row.package_id);
-    const withhold = (reason: string, forbidden = false) => out.withheld.push({ set, packageId, reason, forbidden });
+  for (const { set, packageId: accepting } of candidates) {
     const entry = await reader?.resolve('permission', set);
+    const owner = entry ? declaredOwnerOf(entry) : undefined;
+    const withhold = (reason: string, forbidden = false) =>
+      out.withheld.push({ set, packageId: accepting ?? owner ?? '', reason, forbidden, source });
     if (!entry) { withhold('the security catalog serves no set of that name (package uninstalled or disabled)'); continue; }
-    if (declaredOwnerOf(entry) !== packageId) { withhold(`the set is declared by '${declaredOwnerOf(entry) ?? 'no package'}' now`); continue; }
+    // A row is the accepting package's; a declared name, like every suggestion,
+    // must be some package's (ADR-0086 D3 — an unowned default is not offered).
+    if (accepting !== undefined ? owner !== accepting : owner === undefined) {
+      withhold(`the set is declared by '${owner ?? 'no package'}' now`);
+      continue;
+    }
     if (entry.definition.isDefault !== true) { withhold('the set no longer declares isDefault: true'); continue; }
     const offending = describeAnchorForbiddenBits(entry.definition, EVERYONE_POSITION, capabilities);
     if (offending) { withhold(`it carries ${offending}, which the everyone anchor forbids (ADR-0090 D7)`, true); continue; }
@@ -605,21 +752,28 @@ function reportSuggestionWriteRefusals(
  * pruned; a decided one stays as audit history and grants nothing without
  * its declaration ({@link readAcceptedEveryoneSets}).
  *
+ * Under a walled posture whose host declares the acceptance
+ * ({@link DeploymentAcceptance}) there is no record to reconcile: nothing is
+ * read or written, and the outcome is zero.
+ *
  * Throws {@link SuggestionStateError} when something is declared and the
- * deployment has no Default Organization to own the rows.
+ * deployment has no Default Organization to own the rows — naming, under a
+ * wall, the configuration path instead.
  */
 export async function syncAudienceBindingSuggestions(
   ql: any,
   logger?: SuggestionDeps['logger'],
+  deployment?: DeploymentAcceptance,
 ): Promise<SuggestionSyncOutcome> {
   const out: SuggestionSyncOutcome = { created: 0, confirmedObserved: 0, pruned: 0, reopened: 0, refused: 0 };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
+  if (hostDeclaredAcceptance(deployment)) return out;
 
   const declared = await collectDeclaredSuggestions(ql, logger);
   const organizationId = await resolveDefaultOrganizationId(ql);
   if (!organizationId) {
     if (declared.length === 0) return out;
-    throw new SuggestionStateError(NO_RECORD_OWNER_MESSAGE);
+    throw new SuggestionStateError(noRecordOwnerMessage(deployment));
   }
 
   // [#12981] ONE refusal log for the whole pass, reported once at the end.
@@ -708,24 +862,36 @@ export async function syncAudienceBindingSuggestions(
  * administrator confirmed per organization before the acceptance was
  * deployment-level. Those rows grant nothing (they never did), are never
  * promoted and are not deleted; the count is reported once per call so an
- * operator knows the decisions they hold were not carried over.
+ * operator knows the decisions they hold were not carried over. When the host
+ * declares the acceptance under a wall ({@link DeploymentAcceptance}), no row
+ * is read, so every row is counted, and the line says why.
  */
 export async function reconcileAudienceBindingSuggestions(
   ql: any,
   logger?: SuggestionDeps['logger'],
+  deployment?: DeploymentAcceptance,
 ): Promise<SuggestionReconcileOutcome> {
   const out: SuggestionReconcileOutcome = {
     created: 0, confirmedObserved: 0, pruned: 0, reopened: 0, refused: 0, unread: 0,
   };
   if (!ql || typeof ql.find !== 'function' || typeof ql.insert !== 'function') return out;
-  Object.assign(out, await syncAudienceBindingSuggestions(ql, logger));
+  Object.assign(out, await syncAudienceBindingSuggestions(ql, logger, deployment));
 
-  const organizationId = await resolveDefaultOrganizationId(ql);
+  const hostDeclared = hostDeclaredAcceptance(deployment) !== undefined;
+  const organizationId = hostDeclared ? undefined : await resolveDefaultOrganizationId(ql);
   // A bare system context is deliberate: it is the only scope that reads every
   // organization's rows, and this read only counts them.
   const unread = (await tryFind(ql, SUGGESTION_OBJECT, {}, 1000)).filter((r) => !ownedBy(r, organizationId ?? ''));
   out.unread = unread.length;
-  if (unread.length > 0) {
+  if (unread.length > 0 && hostDeclared) {
+    logger?.warn?.(
+      `[security] ${unread.length} audience-binding suggestion row(s) are not read: this deployment runs the ` +
+        `'${deployment?.posture}' tenancy posture and declares its accepted package defaults on the security ` +
+        `plugin's \`${ACCEPTED_DEFAULTS_OPTION}\` option, which is the deployment-level acceptance (ADR-0131 D5). ` +
+        'The rows grant nothing and are not deleted. Remedy: name in that option every set the deployment accepts.',
+      { unread: unread.length, organizations: [...new Set(unread.map((r) => r?.organization_id ?? null))] },
+    );
+  } else if (unread.length > 0) {
     logger?.warn?.(
       `[security] ${unread.length} audience-binding suggestion row(s) are owned by an organization other than ` +
         'the Default Organization, or by none. They were confirmed or dismissed per organization by a tenant ' +
@@ -771,10 +937,14 @@ function assertDeploymentAuthority(deps: SuggestionDeps, callerCtx: any, action:
   }
 }
 
-/** The Default Organization, or the loud refusal when there is none. */
-async function requireRecordOwner(ql: any): Promise<string> {
+/**
+ * The Default Organization, or the loud refusal: the host declared the
+ * acceptance under a wall, or no organization can own the record.
+ */
+async function requireRecordOwner(ql: any, deployment: DeploymentAcceptance): Promise<string> {
+  if (hostDeclaredAcceptance(deployment)) throw new SuggestionStateError(hostDeclaredMessage(deployment));
   const organizationId = await resolveDefaultOrganizationId(ql);
-  if (!organizationId) throw new SuggestionStateError(NO_RECORD_OWNER_MESSAGE);
+  if (!organizationId) throw new SuggestionStateError(noRecordOwnerMessage(deployment));
   return organizationId;
 }
 
@@ -786,14 +956,18 @@ async function recordRow(ql: any, organizationId: string, id: string): Promise<a
 }
 
 /** List suggestions, reconciling first so a package installed a moment ago is
- *  already visible. Requires the deployment authority. */
+ *  already visible. Requires the deployment authority. Refused, naming the
+ *  option, when the host declared the acceptance under a wall: there is no
+ *  record to list ({@link DeploymentAcceptance}). */
 export async function listAudienceBindingSuggestions(
   deps: SuggestionDeps,
   callerCtx: any,
   filter: SuggestionListFilter = {},
 ): Promise<{ suggestions: any[]; synced: SuggestionSyncOutcome }> {
   assertDeploymentAuthority(deps, callerCtx, 'listing audience-binding suggestions');
-  const synced = await syncAudienceBindingSuggestions(deps.ql, deps.logger);
+  const deployment = deploymentOf(deps);
+  if (hostDeclaredAcceptance(deployment)) throw new SuggestionStateError(hostDeclaredMessage(deployment));
+  const synced = await syncAudienceBindingSuggestions(deps.ql, deps.logger, deployment);
   const organizationId = await resolveDefaultOrganizationId(deps.ql);
   if (!organizationId) return { suggestions: [], synced };
   const where: Record<string, unknown> = {};
@@ -807,7 +981,8 @@ export async function listAudienceBindingSuggestions(
  * `everyone` anchor's derived definition (module doc).
  *
  * Refuses, before anything is written: a caller without the deployment
- * authority (403); a `guest`-anchor row (409 — the `guest` anchor's sets are
+ * authority (403); a walled deployment whose host declares the acceptance, or
+ * one with no organization to own the record (409, naming the option); a `guest`-anchor row (409 — the `guest` anchor's sets are
  * not derived from acceptances, so recording one would grant nothing); a set
  * the security catalog does not serve under the suggesting package, or that
  * no longer declares `isDefault` (409); a set carrying a bit the `everyone`
@@ -823,7 +998,7 @@ export async function confirmAudienceBindingSuggestion(
 ): Promise<{ suggestion: any; bindingCreated: boolean }> {
   const { ql } = deps;
   assertDeploymentAuthority(deps, callerCtx, 'accepting an audience-binding suggestion');
-  const organizationId = await requireRecordOwner(ql);
+  const organizationId = await requireRecordOwner(ql, deploymentOf(deps));
 
   const row = await recordRow(ql, organizationId, id);
   if (row.status !== 'pending') {
@@ -907,7 +1082,7 @@ export async function dismissAudienceBindingSuggestion(
 ): Promise<{ suggestion: any }> {
   const { ql } = deps;
   assertDeploymentAuthority(deps, callerCtx, 'dismissing an audience-binding suggestion');
-  const organizationId = await requireRecordOwner(ql);
+  const organizationId = await requireRecordOwner(ql, deploymentOf(deps));
 
   const row = await recordRow(ql, organizationId, id);
   const revoke = row.status === 'confirmed' && isDeploymentDecision(row);

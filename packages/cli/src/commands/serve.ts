@@ -1030,6 +1030,24 @@ export function runtimeSeedSettlementChannels(
   };
 }
 
+/**
+ * Tell the `os dev` parent that the boot was refused for the v17
+ * organization-ownership shape, and wait until the message is handed to the
+ * channel — the child exits right after, and a message still queued would be
+ * lost. Answers whether it was sent; a closed channel is the ordinary
+ * `os serve` case.
+ */
+async function announceOrganizationOwnershipRequired(tables: string[]): Promise<boolean> {
+  const { ORGANIZATION_OWNERSHIP_REQUIRED_MESSAGE } = await import('../utils/dev-organization-ownership-upgrade.js');
+  return new Promise((resolve) => {
+    try {
+      process.send!({ type: ORGANIZATION_OWNERSHIP_REQUIRED_MESSAGE, tables }, undefined, {}, (error) => resolve(!error));
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
 const hostImporters = new Map<string, HostImporter>();
 
 /**
@@ -3926,7 +3944,10 @@ export default class Serve extends Command {
       );
       if (!hasOrganizationOwnershipGuard) {
         const { OrganizationOwnershipBootGuardPlugin } = await import('@objectstack/runtime');
-        await kernel.use(new OrganizationOwnershipBootGuardPlugin());
+        // A development boot's refusal names the ceremony with `--dev`, so the
+        // ceremony boots the way this one did (its secret, .env* files and
+        // `telemetry` sibling).
+        await kernel.use(new OrganizationOwnershipBootGuardPlugin({ dev: isDev }));
         trackPlugin('OrganizationOwnershipBootGuard');
       }
 
@@ -5580,6 +5601,19 @@ export default class Serve extends Command {
     } catch (error: any) {
       restoreOutput();
       printDiagnostic();
+      // [ADR-0131 D10, development exception] A development child of `os dev`
+      // refused for the v17 organization-ownership shape tells its parent,
+      // which copies the development database, upgrades it in place and boots
+      // it again (`utils/dev-organization-ownership-upgrade.ts`) — so the
+      // refusal is not printed as this boot's failure. Any other boot refuses
+      // as before, naming the ceremony.
+      if (isDev && typeof process.send === 'function') {
+        const { isOrganizationOwnershipBootRefusal } = await import('@objectstack/runtime');
+        if (isOrganizationOwnershipBootRefusal(error)) {
+          const sent = await announceOrganizationOwnershipRequired([...error.tables]);
+          if (sent) this.exit(1);
+        }
+      }
       printError(error.message || String(error));
       // A boot that died is when its warnings matter most, and the banner that
       // would normally carry them never printed (#4012).

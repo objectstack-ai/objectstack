@@ -2116,6 +2116,369 @@
           "ref": "#23169"
         }
       ]
+    },
+    {
+      "id": "identity-auth.auth-gate-held-session-raw-host-families",
+      "title": "A session held by the ADR-0069 credential policy (password expired, forced reset, MFA not enrolled) is refused with the gate's own 403 code on EVERY raw-host route family, and an API key whose owner holds an account-scope posture is refused too",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a member whose session the policy holds — the cheapest: create the member with POST /api/v1/auth/admin/create-user, which lands mustChangePassword:true, and sign it in BEFORE it changes its password (held with PASSWORD_RESET_REQUIRED); an expiry / MFA-required policy in auth settings holds it with the other two codes",
+          "an API key minted by the member before the hold (POST /api/v1/keys)"
+        ]
+      },
+      "steps": [
+        "sign the member in and confirm the hold server-side: GET /api/v1/auth/get-session carries the gate (never infer it from the console overlay)",
+        "with the held session, call one route of each raw-host family: GET /api/settings/NAMESPACE, GET /api/v1/datasources, GET /api/v1/share-links, POST /api/v1/storage/upload/presigned, POST /api/v1/webhooks/redeliver, POST /api/v1/packages/:id/publish",
+        "repeat one read with an unheld session (the admin) and confirm it is answered normally",
+        "with the member's API key (x-api-key) call GET /api/v1/data/showcase_task while the member holds MFA_REQUIRED (account scope), then while the member holds only PASSWORD_EXPIRED (credential scope)"
+      ],
+      "acceptance": [
+        {
+          "clause": "the auth gate runs before route logic on every raw-host family, outage answers 503, and the API-key account posture is enforced at REST, the dispatcher and install-local — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "every raw-host family answers the held session 403 with the gate's OWN code (PASSWORD_EXPIRED / PASSWORD_RESET_REQUIRED / MFA_REQUIRED) — never 200, never a route-specific 404/400 that ran logic first",
+          "oracle": "api",
+          "verify": "status + error.code per family from the held session; an unheld session gets the normal answer on the same call",
+          "evidence": "one status+code line per family for both sessions"
+        },
+        {
+          "clause": "an admin-forced change answers PASSWORD_RESET_REQUIRED (not PASSWORD_EXPIRED)",
+          "oracle": "api",
+          "verify": "error.code on the first held call after the admin forced the reset",
+          "evidence": "the refusal body"
+        },
+        {
+          "clause": "an API key whose owner holds MFA_REQUIRED is refused 403 MFA_REQUIRED; a credential-scope posture (PASSWORD_EXPIRED) does NOT hold the key",
+          "oracle": "api",
+          "verify": "the two x-api-key calls",
+          "evidence": "both status lines"
+        }
+      ],
+      "negative": [
+        "an unheld session or an anonymous caller must not see a 403 auth-gate code — anonymous keeps its own 401 floor"
+      ],
+      "traps": [
+        "auth-state-leak",
+        "wrong-persona"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-storage/src/storage-routes.auth-gate.pin.test.ts + packages/services/service-settings/src/settings-routes.auth-gate.pin.test.ts + packages/plugins/plugin-sharing/src/share-link-routes.auth-gate.pin.test.ts + packages/plugins/plugin-webhooks/src/webhook-redeliver-auth-gate.pin.test.ts + packages/services/service-datasource/src/__tests__/admin-routes-auth-gate.pin.test.ts + packages/cloud-connection/src/cloud-connection-auth-gate.pin.test.ts + packages/runtime/src/http-dispatcher.auth-gate-outage.pin.test.ts + packages/verify/src/held-session-vendor-admin-doors.pin.test.ts + packages/rest/src/rest-api-key-account-posture.pin.test.ts + packages/runtime/src/http-dispatcher.api-key-account-posture.pin.test.ts + packages/core/src/security/api-key-account-posture.test.ts"
+      },
+      "source": [
+        "packages/core/src/security/auth-gate.ts#evaluateAuthGate",
+        "packages/core/src/security/auth-gate.ts#normalizeAuthGate",
+        "packages/plugins/plugin-auth/src/platform-admin-gate.ts#judgePlatformAdmin",
+        "packages/spec/src/kernel/execution-context.zod.ts#AUTH_GATE_SCOPES",
+        "ADR-0069",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23178-auth-gate-raw-host-families, 23178-settings-auth-gate, 23190-auth-gate-cli-sites, 23245-dispatcher-auth-gate-outage, 23335-held-admin-vendor-doors-refused, 23335-held-platform-admin-refused, 23287-api-key-account-posture, 23455-key-admission-posture-required"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.api-key-expiry-lifecycle",
+      "title": "API-key lifecycle policy: a mint with no expiry gets the default (90 days) echoed back, an expiry past the ceiling is refused 400 API_KEY_EXPIRY_TOO_LONG, and an expired / inactive / revoked key is refused with its own 403 code",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "the four `auth` settings keys (api_key_default_expiry_days, api_key_max_expiry_days, api_key_inactivity_days, api_key_policy_started_at) at their defaults unless a step says otherwise"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/keys with no expires_at; read the response",
+        "POST /api/v1/keys with expires_at 400 days ahead",
+        "revoke a key (the admin key action) and call GET /api/v1/data/showcase_task with it",
+        "mint a key with a near expiry (or lower api_key_default_expiry_days through the settings door) and call with it after it lapses"
+      ],
+      "acceptance": [
+        {
+          "clause": "default expiry, ceiling refusal and the three distinct 403 codes — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "a mint with no expires_at returns an expires_at about 90 days ahead (the configured default), echoed in the response",
+          "oracle": "api",
+          "verify": "response expires_at minus the server clock",
+          "evidence": "the mint response"
+        },
+        {
+          "clause": "an expires_at beyond the ceiling (365 days by default) is refused 400 API_KEY_EXPIRY_TOO_LONG and no key is minted",
+          "oracle": "api",
+          "verify": "status + error.code; GET /api/v1/keys count unchanged",
+          "evidence": "refusal body + the two key counts"
+        },
+        {
+          "clause": "a revoked key answers 403 API_KEY_REVOKED and an expired one 403 API_KEY_EXPIRED — distinct codes, not one generic 401",
+          "oracle": "api",
+          "verify": "status + error.code per key",
+          "evidence": "both refusal bodies"
+        }
+      ],
+      "traps": [
+        "clock-skew"
+      ],
+      "automated": {
+        "kind": "dogfood",
+        "ref": "packages/rest/src/rest-api-key-lifecycle.pin.test.ts + packages/runtime/src/api-key-lifecycle.pin.test.ts + packages/qa/dogfood/test/api-key-lifecycle.dogfood.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/auth-manager.ts#resolveApiKeyLifecyclePolicy",
+        "packages/services/service-settings/src/manifests/auth.manifest.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23367-api-key-lifecycle"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it; identity-auth.api-key-ui-lifecycle covers mint/revoke/restore only, not expiry, ceiling or inactivity",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.cookie-session-renewal-in-process",
+      "title": "A cookie session past its updateAge is renewed ONLY by GET /auth/get-session: in-process reads (data, meta, me/permissions, SSO admin) leave sys_session.expires_at unchanged and set no cookie, while bearer-only calls still renew",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a session aged past `updateAge` — either a boot with a short session updateAge or a session row whose updated_at is moved back in the scratch DB"
+        ]
+      },
+      "steps": [
+        "read sys_session.expires_at for the session (GET /api/v1/data/sys_session as admin, or the scratch DB)",
+        "with the cookie only, call GET /api/v1/data/showcase_task and GET /api/v1/meta/object/showcase_task; re-read expires_at; inspect response headers for Set-Cookie",
+        "call GET /api/v1/auth/get-session with the cookie; re-read expires_at and headers"
+      ],
+      "acceptance": [
+        {
+          "clause": "in-process session reads never renew a cookie session; get-session does — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "cookie-carrying data/meta reads leave expires_at unchanged and return no Set-Cookie",
+          "oracle": "api",
+          "verify": "expires_at before/after + the response headers",
+          "evidence": "the two expires_at values and the header dump"
+        },
+        {
+          "clause": "GET /auth/get-session renews expires_at and re-issues the cookie",
+          "oracle": "api",
+          "verify": "expires_at moves forward and Set-Cookie is present",
+          "evidence": "the header dump + new expires_at"
+        }
+      ],
+      "traps": [
+        "clock-skew",
+        "eventual-consistency"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/in-process-session-renewal.pin.test.ts + packages/rest/src/in-process-session-read.pin.test.ts"
+      },
+      "source": [
+        "packages/types/src/in-process-session-read.ts#inProcessSessionReadInput",
+        "packages/types/src/in-process-session-read.ts#carriesSessionCookie",
+        "packages/plugins/plugin-auth/src/in-process-redispatch.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22258-in-process-session-read-no-renewal-behind-cookie, 22258-services-in-process-session-read, 22398-plugin-auth-session-redispatch, 22384-auth-session-api-getsession-input-query"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.default-organization-boot-invariant",
+      "title": "ADR-0131 single posture: the Default Organization exists from boot BEFORE any sign-up — the first sign-up becomes its owner, later sign-ups its members, every session carries it as active org, and seeded org-columned rows carry it instead of NULL",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)"
+        ]
+      },
+      "steps": [
+        "on a fresh DB, confirm the slug `default` sys_organization row exists before the first user: read the boot log ordering (the Default Organization is ensured before --seed-admin signs the admin up) or boot WITHOUT --seed-admin and read the scratch DB",
+        "let --seed-admin create the first user, then create a second with POST /api/v1/auth/admin/create-user (self-registration is closed on the stock showcase); GET /api/v1/auth/get-session for each",
+        "as admin GET /api/v1/data/sys_member?filter organization = default",
+        "as admin GET /api/v1/data/sys_business_unit and read organization_id on the seeded rows"
+      ],
+      "acceptance": [
+        {
+          "clause": "ensureDefaultOrganization runs at boot and the identity objects stamp the org — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the Default Organization exists before the first sign-up",
+          "oracle": "log",
+          "verify": "boot log line / sys_organization row read before any POST /auth/sign-up",
+          "evidence": "the row (id, slug) and the timestamp ordering against the first sign-up"
+        },
+        {
+          "clause": "the first user is owner, the second is member, and both sessions carry the Default Organization as activeOrganizationId",
+          "oracle": "api",
+          "verify": "sys_member roles + get-session payloads",
+          "evidence": "the two member rows and two session payloads"
+        },
+        {
+          "clause": "seeded rows of org-columned objects (sys_business_unit) carry the Default Organization id, never NULL",
+          "oracle": "api",
+          "verify": "organization_id on every seeded row",
+          "evidence": "the row list with organization_id"
+        }
+      ],
+      "negative": [
+        "a seeded org-columned row with organization_id NULL is a FAIL of ADR-0131 total ownership (it also unblocks access-security.crud-permission-matrix A1 — re-run that clause when this passes)"
+      ],
+      "traps": [
+        "first-boot-cold-start",
+        "seed-data-thin"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/ensure-default-organization.test.ts + packages/runtime/src/identity-objects-default-organization.pin.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-auth/src/default-organization-invariant.ts#ensureDefaultOrganizationExists",
+        "packages/plugins/plugin-auth/src/ensure-default-organization.ts#ensureDefaultOrganization",
+        "docs/adr/0131-total-organization-ownership-no-null-organization-id.md",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 15195-plugin-auth-default-organization-boot-invariant, 15195-objectql-no-organization-refused, 15195-metadata-protocol-seed-organization-stamp"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "identity-auth.import-invitation-and-sso-domain-answers",
+      "title": "Identity import sends the dedicated account-invitation mail whose link opens the console set-password page, and the SSO domain-verification doors answer 404 for an unknown provider when enabled and 400 DOMAIN_VERIFICATION_DISABLED when off",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "the dev mail transport (boot log mail capture) to read the sent message",
+          "OS_SSO_DOMAIN_VERIFICATION toggled per leg (two boots)"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/auth/admin/import-users with one new user under the automatic-invite policy; read the captured mail",
+        "open the mailed link: it must be /_console/reset-password?token=… and accept a new password",
+        "trigger a self-service password reset for an existing user and read that mail",
+        "POST /api/v1/auth/admin/sso/request-domain-verification with an unknown providerId on a boot with OS_SSO_DOMAIN_VERIFICATION on, then on one with it off"
+      ],
+      "acceptance": [
+        {
+          "clause": "import sends auth.account_invitation with a working link; the SSO domain doors answer by flag — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the import invite uses the auth.account_invitation template (inviter, address, set-password link, real expiry) — not auth.password_reset; a self-requested reset still uses password_reset",
+          "oracle": "log",
+          "verify": "the two captured mails: template id / subject",
+          "evidence": "both mail headers + the link"
+        },
+        {
+          "clause": "the invite link targets /_console/reset-password?token= and works (no ?error=INVALID_TOKEN)",
+          "oracle": "api",
+          "verify": "follow the link / POST the reset with its token",
+          "evidence": "the reset answer"
+        },
+        {
+          "clause": "unknown providerId: 404 RESOURCE_NOT_FOUND with the flag on, 400 DOMAIN_VERIFICATION_DISABLED with it off",
+          "oracle": "api",
+          "verify": "status + error.code per boot",
+          "evidence": "both refusal bodies"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/plugins/plugin-auth/src/sso-domain-verification-unknown-provider.pin.test.ts + packages/plugins/plugin-auth/src/admin-import-users-invite-link.test.ts + packages/plugins/plugin-email/src/auth-account-invitation-template.test.ts"
+      },
+      "source": [
+        "packages/plugins/plugin-email/src/templates/auth-templates.ts#AUTH_ACCOUNT_INVITATION_TEMPLATE",
+        "packages/plugins/plugin-auth/src/admin-import-users.ts#runAdminImportUsers",
+        "packages/plugins/plugin-auth/src/auth-manager.ts#isSsoDomainVerificationEnabled",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23343-plugin-auth-import-account-invitation, 23343-plugin-email-account-invitation-template, 23152-import-invite-redirect-to, 22463-sso-domain-verification-unknown-provider, 23598-plugin-auth-import-invite-delivery-failure"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

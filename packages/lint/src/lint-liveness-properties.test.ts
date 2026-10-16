@@ -29,6 +29,7 @@ import {
   lintLivenessPropertiesFromLedgerDir,
   resolveLivenessDir,
 } from './lint-liveness-properties.js';
+import { explainRule } from './rule-explanations.js';
 
 /**
  * These run against the REAL ledgers shipped by `@objectstack/spec` (the same
@@ -2107,5 +2108,26 @@ describe('#23710 — a page declaring `print` lints without a planned-property w
     // object's `dead` tombstone row, so the silence is a reading.
     expect(findings.filter((f) => f.message.includes('externalSharingModel'))).toHaveLength(1);
     expect(findings.filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE)).toEqual([]);
+  });
+});
+
+// [#22161] Slice 19: the ledger-fault `fix:` line is one remedy line; that it
+// is a packaging fault and what the rule's silence means is the explanation's.
+describe('[#22161] one-line fix — liveness-ledger-unreadable', () => {
+  it('a missing and an unreadable ledger both print the one remedy line, and `os explain` carries the rest', () => {
+    const missing = lintLivenessPropertiesFromLedgerDir(ledgerDirWith((dir) => rmSync(join(dir, 'object.json'))), {});
+    const unreadable = lintLivenessPropertiesFromLedgerDir(
+      ledgerDirWith((dir) => writeFileSync(join(dir, 'object.json'), '{ not json')),
+      {},
+    );
+    const hints = [...missing, ...unreadable].filter((f) => f.rule === LIVENESS_LEDGER_UNREADABLE).map((f) => f.hint);
+    expect(hints).toEqual([
+      'Reinstall or repair `@objectstack/spec` so its `liveness/` directory ships intact.',
+      'Reinstall or repair `@objectstack/spec` so its `liveness/` directory ships intact.',
+    ]);
+    const text = explainRule(LIVENESS_LEDGER_UNREADABLE)!.paragraphs.join('\n');
+    for (const fact of ['packaging fault in the platform, not an authoring error', 'silence about that type means nothing', 'once per run']) {
+      expect(text, fact).toContain(fact);
+    }
   });
 });

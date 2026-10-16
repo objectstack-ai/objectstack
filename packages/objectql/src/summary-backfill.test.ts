@@ -352,7 +352,7 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
       'Rows "with real child data" are why this run recomputes instead of writing 0:',
       'their correct value is the aggregate over their children, not the empty-set value.',
       '· Untouched by design (no empty-set value — a null there means "no child rows"): project.avg_estimate (avg), project.max_estimate (max), project.min_estimate (min)',
-      'Dry run — nothing was written. Re-run with --apply to backfill.',
+      'Dry run — no row or table was written. Re-run with --apply to backfill.',
     ];
     const BASE_APPLY_LINES = [
       'Scanned 2 parent row(s) across 1 object(s) for count/sum roll-up columns still stored as NULL.',

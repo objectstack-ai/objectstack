@@ -13,6 +13,9 @@ import {
   dismissAudienceBindingSuggestion,
   SuggestionNotFoundError,
   SuggestionStateError,
+  readAcceptedDefaultPermissionSetsOption,
+  refuseAcceptedDefaultsWithoutWall,
+  type DeploymentAcceptance,
   type SuggestionDeps,
 } from './suggested-audience-bindings';
 import { declareEveryoneBaseline } from './builtin-positions';
@@ -761,5 +764,177 @@ describe('[ADR-0086 D3] a set\'s owner is its binding — a body `packageId` on 
       ['agree_default', 'com.example.agree'],
       ['stray_default', 'com.example.bound'],
     ]);
+  });
+});
+
+// ── [ADR-0131 D5] Under a wall, the deployment-level acceptance may be host
+// configuration — `acceptedDefaultPermissionSets` on the security plugin's
+// options. No organization owns anything for it (ADR-0131 §1.5), and the
+// `single` posture's record is untouched: every block above runs with no
+// `DeploymentAcceptance`, which is read as that record.
+describe('[ADR-0131 D5] the walled posture: deployment-level acceptance is host configuration', () => {
+  const OPTION = 'acceptedDefaultPermissionSets';
+  /** Two organizations, neither with slug `default`: no record owner (a walled multi-organization deployment). */
+  const noRecordOwner = (ql: any) => {
+    ql.tables.sys_organization = [{ id: 'org_a', slug: 'a' }, { id: 'org_b', slug: 'b' }];
+    return ql;
+  };
+  const walled = (declared?: readonly string[]): DeploymentAcceptance => ({
+    posture: 'isolated',
+    ...(declared !== undefined ? { acceptedDefaultPermissionSets: declared } : {}),
+  });
+  /** The security plugin's composition under a wall: baseline + whatever the derivation accepts. */
+  const walledDeps = (ql: any, declared?: readonly string[]): SuggestionDeps => ({
+    ql,
+    posture: () => 'isolated',
+    acceptedDefaultPermissionSets: declared,
+    rederiveEveryone: async () => {
+      const { accepted } = await readAcceptedEveryoneSets(ql, undefined, walled(declared));
+      declareEveryoneBaseline(ql.registry, SECURITY_PACKAGE, [...new Set([...BASELINE, ...accepted])]);
+    },
+  });
+  const capture = () => {
+    const warns: string[] = [];
+    return { warns, logger: { warn: (m: string) => { warns.push(m); }, info: () => undefined } };
+  };
+
+  it('a declared EMPTY list: the boot reconcile neither throws nor warns, everyone is the baseline, and the door refuses naming the option', async () => {
+    const ql = noRecordOwner(makeQl([CRM_PACKAGE]));
+    const { warns, logger } = capture();
+
+    // The two `(non-fatal)` warn sites in the security plugin log exactly when this rejects.
+    await expect(reconcileAudienceBindingSuggestions(ql, logger, walled([]))).resolves.toMatchObject({ created: 0, unread: 0 });
+    expect(warns).toEqual([]);
+    expect(rows(ql)).toHaveLength(0);
+
+    const deps = walledDeps(ql, []);
+    await deps.rederiveEveryone();
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+    expect(await readAcceptedEveryoneSets(ql, undefined, walled([]))).toEqual({ accepted: [], withheld: [] });
+
+    for (const door of [
+      confirmAudienceBindingSuggestion(deps, OPERATOR_CTX, 'sug_any'),
+      dismissAudienceBindingSuggestion(deps, OPERATOR_CTX, 'sug_any'),
+      listAudienceBindingSuggestions(deps, OPERATOR_CTX, {}),
+    ]) {
+      const refusal = door.catch((e: unknown) => e);
+      await expect(refusal).resolves.toMatchObject({ code: 'SUGGESTION_STATE', statusCode: 409 });
+      const message = String(((await refusal) as Error).message);
+      expect(message).toMatch(/^This deployment runs the 'isolated' tenancy posture and declares its accepted package defaults/);
+      expect(message).toContain(`\`${OPTION}\``);
+      expect(message).not.toContain('create the Default Organization');
+    }
+    // The deployment authority still answers first: a non-operator is a 403, not a 409.
+    await expect(confirmAudienceBindingSuggestion(deps, ADMIN_CTX, 'sug_any'))
+      .rejects.toMatchObject({ code: 'PERMISSION_DENIED', statusCode: 403 });
+  });
+
+  it('a declared set is granted through everyone — and only through the declaration (anti-vacuity: absent before)', async () => {
+    const ql = noRecordOwner(makeQl([CRM_PACKAGE]));
+    expect(everyoneSets(ql)).not.toContain('crm_readonly');
+
+    const derived = await readAcceptedEveryoneSets(ql, undefined, walled(['crm_readonly']));
+    expect(derived).toEqual({ accepted: ['crm_readonly'], withheld: [] });
+
+    await walledDeps(ql, ['crm_readonly']).rederiveEveryone();
+    expect(everyoneSets(ql)).toEqual([...BASELINE, 'crm_readonly']);
+    expect(ql.registry.getItem('position', 'everyone')._packageId).toBe(SECURITY_PACKAGE);
+    expect(rows(ql)).toHaveLength(0);
+  });
+
+  it('a declared name passes the everyone anchor\'s high-risk gate — a forbidden set is withheld as forbidden, never granted (ADR-0090 D7)', async () => {
+    const evil = {
+      enabled: true,
+      manifest: {
+        id: 'com.example.evil',
+        permissions: [{ name: 'evil_default', isDefault: true, objects: { '*': { viewAllRecords: true } } }],
+      },
+    };
+    const ql = noRecordOwner(makeQl([evil]));
+    const derived = await readAcceptedEveryoneSets(ql, undefined, walled(['evil_default']));
+    expect(derived.accepted).toEqual([]);
+    expect(derived.withheld).toEqual([
+      expect.objectContaining({ set: 'evil_default', forbidden: true, source: 'host-configuration', packageId: 'com.example.evil' }),
+    ]);
+    await walledDeps(ql, ['evil_default']).rederiveEveryone();
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+  });
+
+  it('a declared name the catalog does not serve as a package\'s isDefault set is withheld with its reason, as an accepted row is', async () => {
+    const unowned = { enabled: true, manifest: { permissions: [{ name: 'loose_default', isDefault: true, objects: {} }] } };
+    const ql = noRecordOwner(makeQl([CRM_PACKAGE, unowned]));
+    const derived = await readAcceptedEveryoneSets(
+      ql, undefined, walled(['no_such_set', 'crm_admin', 'loose_default', 'crm_readonly']),
+    );
+    expect(derived.accepted).toEqual(['crm_readonly']);
+    expect(derived.withheld).toEqual([
+      { set: 'no_such_set', packageId: '', forbidden: false, source: 'host-configuration',
+        reason: 'the security catalog serves no set of that name (package uninstalled or disabled)' },
+      { set: 'crm_admin', packageId: 'com.example.crm', forbidden: false, source: 'host-configuration',
+        reason: 'the set no longer declares isDefault: true' },
+      { set: 'loose_default', packageId: '', forbidden: false, source: 'host-configuration',
+        reason: "the set is declared by 'no package' now" },
+    ]);
+  });
+
+  it('declared, the record is not read even where an organization could own it — one source, never two', async () => {
+    const ql = makeQl([CRM_PACKAGE]); // a `default` organization exists
+    const deps = makeDeps(ql);
+    const { suggestions } = await listAudienceBindingSuggestions(deps, ADMIN_CTX, {});
+    await confirmAudienceBindingSuggestion(deps, ADMIN_CTX, suggestions[0].id);
+    expect((await readAcceptedEveryoneSets(ql)).accepted).toEqual(['crm_readonly']);
+
+    expect(await readAcceptedEveryoneSets(ql, undefined, walled([]))).toEqual({ accepted: [], withheld: [] });
+    // The sync writes nothing; the rows it no longer reads are reported once, naming the option.
+    const { warns, logger } = capture();
+    const before = JSON.stringify(rows(ql));
+    await expect(reconcileAudienceBindingSuggestions(ql, logger, walled([]))).resolves.toMatchObject({ created: 0, unread: 1 });
+    expect(JSON.stringify(rows(ql))).toBe(before);
+    expect(warns).toHaveLength(1);
+    expect(warns[0]).toContain(`\`${OPTION}\``);
+  });
+
+  it('a walled boot with NO declaration keeps today\'s behaviour, and the refusal names the option, not the Default Organization', async () => {
+    const ql = noRecordOwner(makeQl([CRM_PACKAGE]));
+    const sync = reconcileAudienceBindingSuggestions(ql, undefined, walled()).catch((e: unknown) => e);
+    await expect(sync).resolves.toBeInstanceOf(SuggestionStateError);
+    await expect(sync).resolves.toMatchObject({ code: 'SUGGESTION_STATE', statusCode: 409 });
+    const message = String(((await sync) as Error).message);
+    expect(message).toMatch(/^The audience-binding acceptance is deployment-level, and this deployment runs the 'isolated' tenancy posture with no organization that can own the record/);
+    expect(message).toContain(`\`${OPTION}\``);
+    expect(message).toContain('ADR-0131 §1.5');
+    expect(message).not.toContain('create the Default Organization');
+
+    const door = confirmAudienceBindingSuggestion(walledDeps(ql), OPERATOR_CTX, 'sug_any').catch((e: unknown) => e);
+    await expect(door).resolves.toMatchObject({ code: 'SUGGESTION_STATE', statusCode: 409 });
+    expect(String(((await door) as Error).message)).toBe(message);
+    expect(everyoneSets(ql)).toEqual(BASELINE);
+  });
+
+  it('under `single` the refusal keeps D5\'s Default-Organization text, and the posture never reads a declaration', async () => {
+    for (const deployment of [undefined, { posture: 'single' as const }, { posture: 'single' as const, acceptedDefaultPermissionSets: ['crm_readonly'] }]) {
+      const ql = noRecordOwner(makeQl([CRM_PACKAGE]));
+      const sync = syncAudienceBindingSuggestions(ql, undefined, deployment).catch((e: unknown) => e);
+      await expect(sync).resolves.toMatchObject({ code: 'SUGGESTION_STATE', statusCode: 409 });
+      const message = String(((await sync) as Error).message);
+      expect(message).toMatch(/^The audience-binding acceptance is recorded once per deployment and owned by the Default Organization/);
+      expect(message).toContain("Remedy: create the Default Organization (slug 'default')");
+      expect((await readAcceptedEveryoneSets(ql, undefined, deployment)).accepted).toEqual([]);
+    }
+  });
+
+  it('the option is a closed list of names — anything else is refused at construction, and `single` refuses a declaration', () => {
+    expect(readAcceptedDefaultPermissionSetsOption(undefined)).toBeUndefined();
+    expect(readAcceptedDefaultPermissionSetsOption([])).toEqual([]);
+    expect(readAcceptedDefaultPermissionSetsOption(['a', 'b', 'a'])).toEqual(['a', 'b']);
+    for (const bad of [null, 'crm_readonly', [''], ['  '], [1], {}]) {
+      expect(() => readAcceptedDefaultPermissionSetsOption(bad)).toThrow(/`acceptedDefaultPermissionSets` must be a list of permission-set names/);
+    }
+    expect(() => refuseAcceptedDefaultsWithoutWall('single', [])).toThrow(
+      /`acceptedDefaultPermissionSets` is declared, and this deployment runs the 'single' tenancy posture, which does not read it/,
+    );
+    expect(() => refuseAcceptedDefaultsWithoutWall('single', undefined)).not.toThrow();
+    expect(() => refuseAcceptedDefaultsWithoutWall('isolated', [])).not.toThrow();
+    expect(() => refuseAcceptedDefaultsWithoutWall('group', ['crm_readonly'])).not.toThrow();
   });
 });

@@ -170,9 +170,18 @@ export interface ServeRestartCoordinatorOptions {
      * the restart loop forever.
      */
     forceKillAfterMs?: number;
+    /**
+     * A child that exited on its own may be recoverable: the parent repairs
+     * what made it exit (`os dev` upgrades a development database the boot
+     * refused) and answers `true` to boot a replacement, or `false` to follow
+     * the child out as before. Asked once per such exit; a rebuild arriving
+     * meanwhile is absorbed (the replacement boots the newest build), and a
+     * signal meanwhile ends the parent once the answer is in.
+     */
+    recover?: (exitCode: number | null, signal: NodeJS.Signals | null) => Promise<boolean> | boolean;
 }
 
-export type ServeRestartState = 'idle' | 'running' | 'stopping' | 'shutdown';
+export type ServeRestartState = 'idle' | 'running' | 'stopping' | 'recovering' | 'shutdown';
 
 /**
  * Supervises the single serve child of `objectstack dev` (#5148, nodemon
@@ -217,7 +226,7 @@ export class ServeRestartCoordinator {
      * running server matches `dist/objectstack.json` again.
      */
     requestRestart(reason: string): void {
-        if (this.state === 'shutdown' || this.state === 'idle') return;
+        if (this.state === 'shutdown' || this.state === 'idle' || this.state === 'recovering') return;
         if (this.state === 'stopping') {
             // Coalesce: the restart already in flight boots from disk, which
             // now holds the newer build.
@@ -311,10 +320,37 @@ export class ServeRestartCoordinator {
             this.spawn();
             return;
         }
-        // Exited on its own (crash, or killed externally). Keep the
-        // pre-#5148 contract — the parent follows the child — and say so
-        // when the dead child was a restarted one, so a rebuild that boots
-        // into a crash is loud instead of a silently vanished dev session.
+        // Exited on its own (crash, or killed externally). The parent may
+        // repair what stopped it and boot a replacement ({@link recover});
+        // otherwise keep the pre-#5148 contract — the parent follows the child.
+        const { recover } = this.opts;
+        if (recover) {
+            this.state = 'recovering';
+            void Promise.resolve()
+                .then(() => recover(code, signal))
+                .catch(() => false)
+                .then((recovered) => {
+                    if (this.state === 'shutdown') {
+                        this.opts.exitParent(code ?? 0);
+                        return;
+                    }
+                    if (recovered) {
+                        this.spawn();
+                        return;
+                    }
+                    this.followChildOut(code, signal);
+                });
+            return;
+        }
+        this.followChildOut(code, signal);
+    }
+
+    /**
+     * The pre-#5148 contract for a child that exited on its own — and say so
+     * when the dead child was a restarted one, so a rebuild that boots into a
+     * crash is loud instead of a silently vanished dev session.
+     */
+    private followChildOut(code: number | null, signal: NodeJS.Signals | null): void {
         this.state = 'shutdown';
         if (this.spawnCount > 1) {
             this.log(

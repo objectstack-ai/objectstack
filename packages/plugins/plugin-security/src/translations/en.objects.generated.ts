@@ -34,7 +34,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       permission_set: {
         label: "Permission Set",
-        help: "[ADR-0131 D4] Machine name of the permission set this grant holds, as the security catalog names it. A name the catalog does not hold is refused. NULL only on a grant written before the column existed."
+        help: "Machine name of the permission set this grant holds, as the security catalog names it. A name the catalog does not hold is refused. NULL only on a grant written before the column existed."
       },
       organization_id: {
         label: "Organization",
@@ -46,23 +46,23 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "[ADR-0091 D1] Grant is inactive before this instant. Null = active immediately. Enforced fail-closed at resolution time (D2) — never by a background job."
+        help: "Grant is inactive before this instant. Null = active immediately. Enforced fail-closed at resolution time — never by a background job."
       },
       valid_until: {
         label: "Valid Until",
-        help: "[ADR-0091 D1] Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires. Mandatory on break-glass activations (D4) and agent grants (D6). Enforced at resolution time (D2)."
+        help: "Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires. Mandatory on break-glass activations and agent grants. Enforced at resolution time."
       },
       reason: {
         label: "Reason",
-        help: "[ADR-0091 D1] Why this grant exists. Free text; REQUIRED on delegation (D3) and break-glass (D4) rows. Agent grants carry the task/run attribution here (D6)."
+        help: "Why this grant exists. Free text; REQUIRED on delegation and break-glass rows. Agent grants carry the task/run attribution here."
       },
       last_certified_at: {
         label: "Last Certified At",
-        help: "[ADR-0091 D5] Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives \"never certified\" or \"certification stale\" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed."
+        help: "Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives \"never certified\" or \"certification stale\" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed."
       },
       certified_by: {
         label: "Certified By",
-        help: "[ADR-0091 D5] Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — the platform checks nothing about it and grants nothing on the strength of it."
+        help: "Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — the platform checks nothing about it and grants nothing on the strength of it."
       },
       created_at: {
         label: "Created At"
@@ -80,7 +80,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_user_position: {
     label: "User Position",
     pluralLabel: "User Positions",
-    description: "Assigns a position, by name, to a user. Platform-owned (ADR-0057 D4, ADR-0090 D3).",
+    description: "Which positions each user holds, one row per assignment.",
     fields: {
       id: {
         label: "Assignment ID",
@@ -100,7 +100,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "Business Unit",
-        help: "[ADR-0090 Addendum] Assignment-level BU anchor: where this position assignment applies. Depth anchor for readScope/writeScope, delegated-admin boundary (D12), and audit fact. Null = unanchored (legacy/tenant-wide); delegated admins MUST anchor assignments inside their subtree."
+        help: "Assignment-level BU anchor: where this position assignment applies. Depth anchor for readScope/writeScope, delegated-admin boundary, and audit fact. Null = unanchored (legacy/tenant-wide); delegated admins MUST anchor assignments inside their subtree."
       },
       organization_id: {
         label: "Organization",
@@ -112,27 +112,27 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "[ADR-0091 D1] Grant is inactive before this instant. Null = active immediately. Enforced fail-closed at resolution time (D2) — never by a background job."
+        help: "Grant is inactive before this instant. Null = active immediately. Enforced fail-closed at resolution time — never by a background job."
       },
       valid_until: {
         label: "Valid Until",
-        help: "[ADR-0091 D1] Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires. Mandatory on delegation rows (D3). Enforced at resolution time (D2)."
+        help: "Grant is inactive AT and AFTER this instant (half-open [from, until), UTC). Null = never expires. Mandatory on delegation rows. Enforced at resolution time."
       },
       reason: {
         label: "Reason",
-        help: "[ADR-0091 D1] Why this grant exists. Free text; REQUIRED on delegation (D3) and break-glass (D4) rows."
+        help: "Why this grant exists. Free text; REQUIRED on delegation and break-glass rows."
       },
       delegated_from: {
         label: "Delegated From",
-        help: "[ADR-0091 D3] The delegator whose authority this row carries (职务代理). A row with delegated_from set is not itself delegatable and not self-renewable — chains are cut both ways."
+        help: "The delegator whose authority this row carries (职务代理). A row with delegated_from set is not itself delegatable and not self-renewable — chains are cut both ways."
       },
       last_certified_at: {
         label: "Last Certified At",
-        help: "[ADR-0091 D5] Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives \"never certified\" or \"certification stale\" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed."
+        help: "Reserved for a future access-recertification workflow, which would stamp here when this grant was last attested. Inert today: no platform code writes this column and none reads it — no resolution path, gate or lint consults it, and nothing derives \"never certified\" or \"certification stale\" from it. Null therefore means the workflow does not exist, not that this grant went unreviewed."
       },
       certified_by: {
         label: "Certified By",
-        help: "[ADR-0091 D5] Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — the platform checks nothing about it and grants nothing on the strength of it."
+        help: "Reserved for the same future access-recertification workflow: the reviewer who would attest this grant. Inert today: no platform code writes or reads it. A value written here by a client is an unverified annotation — the platform checks nothing about it and grants nothing on the strength of it."
       },
       created_at: {
         label: "Created At"
@@ -143,7 +143,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _validations: {
       reserved_identity_position: {
-        message: "'position' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are ADR-0068 built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
+        message: "'position' cannot spell a framework-reserved built-in identity name (platform_admin, org_owner, org_admin, org_member). These names are built-in identities: the platform projects them into current_user.positions from their own sources of truth, and a row spelling one is not an assignment of that identity. Choose a different name."
       }
     }
   }

@@ -530,8 +530,13 @@ export function formatSummaryBackfillReport(report: SummaryBackfillReport): stri
   if (report.truncated) {
     lines.push('⚠ Walk incomplete — some rows were not examined; re-run without the cap to finish.');
   }
+  // The dry-run line is the last one and claims no row or table, never that
+  // nothing was written: the command that prints it boots through the SQL
+  // driver's connect, which can switch a SQLite file's journal mode and so
+  // rewrite its header (no row). The command, which knows its target, appends
+  // the journal-mode note to this line on a SQLite file.
   if (!report.applied && report.nullRows > 0) {
-    lines.push('Dry run — nothing was written. Re-run with --apply to backfill.');
+    lines.push('Dry run — no row or table was written. Re-run with --apply to backfill.');
   }
   return lines;
 }

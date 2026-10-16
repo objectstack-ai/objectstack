@@ -719,16 +719,32 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       pending: {
-        label: "Pendientes"
+        label: "Pendientes",
+        emptyState: {
+          title: "No hay invitaciones pendientes",
+          message: "Una invitación permanece aquí hasta que se acepta, se rechaza o se cancela, o hasta que caduca."
+        }
       },
       accepted: {
-        label: "Aceptadas"
+        label: "Aceptadas",
+        emptyState: {
+          title: "No hay invitaciones aceptadas",
+          message: "Una invitación pasa aquí cuando la persona la acepta y se une a la organización."
+        }
       },
       expired: {
-        label: "Caducadas / canceladas"
+        label: "Caducadas / canceladas",
+        emptyState: {
+          title: "No hay invitaciones caducadas ni canceladas",
+          message: "Aquí se conservan las invitaciones que caducaron, se rechazaron o se cancelaron."
+        }
       },
       all_invitations: {
-        label: "Todas"
+        label: "Todas",
+        emptyState: {
+          title: "Aún no hay invitaciones",
+          message: "Aquí aparece cada invitación para unirse a una organización, sea cual sea su estado."
+        }
       }
     },
     _actions: {
@@ -1024,19 +1040,47 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_keys: {
-        label: "Todas"
+        label: "Todas",
+        emptyState: {
+          title: "Aún no hay claves de API",
+          message: "Crea una clave para scripts e integraciones con Crear clave; la clave se muestra una sola vez, al crearla."
+        }
       },
       mine: {
-        label: "Mis claves"
+        label: "Mis claves",
+        emptyState: {
+          title: "Aún no tienes claves de API",
+          message: "Crea una clave para tus scripts e integraciones con Crear clave; la clave se muestra una sola vez, al crearla."
+        }
       },
       active: {
-        label: "Activo"
+        label: "Activo",
+        emptyState: {
+          title: "No hay claves de API activas",
+          message: "Aquí aparece cada clave que no se ha revocado."
+        }
       },
       revoked: {
-        label: "Revocado"
+        label: "Revocado",
+        emptyState: {
+          title: "No hay claves revocadas",
+          message: "Una clave pasa aquí cuando se revoca; los clientes que la usan pierden el acceso hasta que se restaura."
+        }
       }
     },
     _actions: {
+      create_api_key: {
+        label: "Crear clave",
+        description: "Crea una clave para un script o una integración. La clave actúa como tú, con tu acceso, en la organización en la que trabajas ahora.",
+        resultDialog: {
+          title: "Clave de API creada",
+          description: "Copia la clave ahora: solo se muestra una vez y no se puede recuperar. Si se filtra, revócala y crea una nueva.",
+          acknowledge: "He guardado la clave",
+          fields: {
+            key: "Clave de API"
+          }
+        }
+      },
       revoke_api_key: {
         label: "Revocar clave de API",
         confirmText: "¿Revocar esta clave de API? Los clientes que la utilicen perderán el acceso inmediatamente.",
@@ -1388,16 +1432,32 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_apps: {
-        label: "Todas"
+        label: "Todas",
+        emptyState: {
+          title: "Aún no hay aplicaciones OAuth",
+          message: "Registra una aplicación para que sus clientes puedan iniciar la sesión de los usuarios con este entorno."
+        }
       },
       mine: {
-        label: "Mis aplicaciones"
+        label: "Mis aplicaciones",
+        emptyState: {
+          title: "Aún no tienes aplicaciones OAuth",
+          message: "Aquí aparecen las aplicaciones que registras."
+        }
       },
       active: {
-        label: "Activo"
+        label: "Activo",
+        emptyState: {
+          title: "No hay aplicaciones OAuth activas",
+          message: "Una aplicación sigue activa hasta que se deshabilita; las aplicaciones deshabilitadas aparecen en Deshabilitado."
+        }
       },
       disabled_apps: {
-        label: "Deshabilitado"
+        label: "Deshabilitado",
+        emptyState: {
+          title: "No hay aplicaciones OAuth deshabilitadas",
+          message: "Una aplicación pasa aquí cuando se deshabilita; sus clientes no pueden iniciar sesión hasta que se vuelva a habilitar."
+        }
       }
     },
     _actions: {
