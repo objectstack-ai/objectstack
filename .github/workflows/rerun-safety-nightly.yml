@@ -96,17 +96,18 @@ jobs:
     # task time (scripts/test-shard-timings.json) grew from 124 to 194 minutes
     # between the 09-28 and 10-13 refreshes, the CLI's alone from 733 to 2206
     # seconds. Not a hang: on 10-16 pass 2 was still printing when the job
-    # timeout cancelled it 68 minutes in. A night finished at all only because
+    # timeout cancelled it 67 minutes in. A night finished at all only because
     # pass 2 stopped at its first failure; one that did not fail was CANCELLED,
     # with no verdict and a conclusion the red-card filer does not read.
     #
     # So each pass now runs under the time the job has LEFT (JOB_TIMEOUT_MINUTES
     # below, which must equal this number, minus PASS_RESERVE_MINUTES for the
     # verdict), and a pass that runs out is stopped by `timeout` instead: the
-    # verdict step still runs, reads a pass log with no turbo summary as
-    # INCOMPLETE -- NOT MEASURED, and the job concludes `failure`, never a silent
-    # `cancelled`. That bound decides only WHO reports a slow night; how two full
-    # passes fit again is a capacity decision recorded on #23880.
+    # verdict step still runs, reads the pass's 124/137 exit (or a log with no
+    # turbo summary) as INCOMPLETE -- NOT MEASURED, and the job concludes
+    # `failure`, never a silent `cancelled`. That bound decides only WHO reports
+    # a slow night; how two full passes fit again is a capacity decision
+    # recorded on #23880.
     timeout-minutes: 170
     env:
       JOB_TIMEOUT_MINUTES: 170
@@ -212,7 +213,11 @@ jobs:
               pnpm turbo run test --only --concurrency=4 --force --log-order=stream || status=$?
           fi
           echo "PASS1_EXIT=$status" >> "$GITHUB_ENV"
-          if [ "$status" -ne 0 ]; then
+          if [ "$status" -eq 124 ] || [ "$status" -eq 137 ]; then
+            echo "::warning::Pass 1 ran out of the job's time (exit $status) before it finished."
+            echo "::warning::That is a capacity reading, not a suite reading; the verdict step"
+            echo "::warning::reports it as INCOMPLETE and will fail this job."
+          elif [ "$status" -ne 0 ]; then
             echo "::warning::Pass 1 exited $status — the suite is red on main. Recorded as the"
             echo "::warning::BASELINE and NOT failed here: pass 2 runs anyway so the rerun"
             echo "::warning::property still gets measured tonight. The verdict step owns the"
