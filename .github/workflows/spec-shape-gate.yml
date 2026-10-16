@@ -16,13 +16,15 @@ name: Spec Shape Gate
 # red. ⛔ Neither direction is re-adjudicated here.
 #
 # The objectui half -- `.github/workflows/spec-main-shape-gate.yml` there, its
-# script `scripts/spec-main-shape-gate.mjs` and its three pins -- is the
-# objectui `domain:devx` lane's card, filed once two consecutive hourly runs of
-# THIS workflow agree with objectui's hourly run; both run in parallel until
-# then. This file is the objectstack port of that workflow with the direction
-# reversed: the spec is built from the checkout the run is in, the CLONE is the
-# downstream, and there is no artifact reuse -- the spec is always the one from
-# the tree under test.
+# script `scripts/spec-main-shape-gate.mjs` and its three pins -- was deleted
+# in objectstack-ai/objectui PR #12596 (card objectstack-ai/objectui#12352), so
+# this is the only spec shape gate and nothing runs in parallel. Both files are
+# readable at objectui commit `7d0c174ba8383d08b8dd1d4f7d7845009f1bf2fd`, the
+# first parent of that PR's merge commit `c6a42be392` and the last objectui
+# `main` commit that has them. This file is the objectstack port of that
+# workflow with the direction reversed: the spec is built from the checkout the
+# run is in, the CLONE is the downstream, and there is no artifact reuse -- the
+# spec is always the one from the tree under test.
 #
 # ## Its place in the two speeds (#22998)
 #

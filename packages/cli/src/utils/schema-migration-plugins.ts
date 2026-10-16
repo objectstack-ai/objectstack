@@ -2350,12 +2350,18 @@ export function refuseWhenHostConfigUnloadable(
  *   (#22579): an object routed to the sibling is examined there, not reported
  *   as bound to a different datasource.
  * @param deferred whether this boot armed deferred DDL. `false` reports the
- *   coverage as UNMEASURED instead of syncing.
+ *   coverage as UNMEASURED instead of syncing, unless `ddlFree` is set.
+ * @param options.ddlFree [#23816] the boot SKIPPED schema sync instead
+ *   (`skipSchemaSync`, for a primary whose transport cannot defer DDL): each
+ *   object is bound through the driver's DDL-free `registerObjectMetadata`,
+ *   the binding the engine's own skip-sync `start()` uses, so nothing can run
+ *   DDL either way. A driver without that member counts as `unsupported`.
  */
 export async function measureComposedCoverage(
   kernel: unknown,
   plannedDrivers: readonly unknown[],
   deferred: boolean,
+  options: { ddlFree?: boolean } = {},
 ): Promise<{ coverage: SchemaMigrationCoverage; notes: string[] }> {
   const notes: string[] = [];
   const empty: SchemaMigrationCoverage = {
@@ -2365,7 +2371,8 @@ export async function measureComposedCoverage(
     reasons: { federated: 0, unbound: 0, unsupported: 0, otherDriver: 0, failed: 0 },
   };
 
-  if (!deferred) {
+  const ddlFree = !deferred && options.ddlFree === true;
+  if (!deferred && !ddlFree) {
     notes.push(
       'This boot did not defer schema DDL, so the declared object set was NOT bound to the driver here — '
       + 'binding it would have run DDL. Coverage below is UNMEASURED, not full.',
@@ -2418,9 +2425,14 @@ export async function measureComposedCoverage(
     const driver = engine.getDriverForObject(obj.name);
     if (!driver) { unbound++; continue; }
     if (!plannedDrivers.includes(driver)) { otherDriver++; continue; }
-    if (typeof (driver as { syncSchema?: unknown }).syncSchema !== 'function') { unsupported++; continue; }
+    const register = (driver as { registerObjectMetadata?: unknown }).registerObjectMetadata;
+    if (ddlFree ? typeof register !== 'function' : typeof (driver as { syncSchema?: unknown }).syncSchema !== 'function') {
+      unsupported++;
+      continue;
+    }
     try {
-      await engine.syncObjectSchema(obj.name);
+      if (ddlFree) (register as (objects: unknown[]) => void).call(driver, [obj]);
+      else await engine.syncObjectSchema(obj.name);
       examined++;
     } catch (e: unknown) {
       failed++;

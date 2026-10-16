@@ -339,6 +339,8 @@ import {
     type DiscoveryRouteHost,
     type OpenApiRouteHost,
 } from './discovery-routes.js';
+// [#23050 slice 8] The email route's body moved to its own module — see its header.
+import { registerEmailEndpoints, type EmailRouteHost } from './email-routes.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -1490,7 +1492,7 @@ export interface MountedRoute extends RouteEntry {
  * directions, so they are already symmetric and giving them a swallow would be
  * a new policy rather than a normalisation.
  */
-async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | undefined> {
+export async function seamOrUndefined<T>(call: () => T | PromiseLike<T>): Promise<T | undefined> {
     try {
         return await call();
     } catch {
@@ -9080,100 +9082,18 @@ export class RestServer {
      *   }
      */
     private registerEmailEndpoints(basePath: string): void {
-        const isScoped = basePath.includes('/environments/:environmentId');
-        this.routeManager.register({
-            method: 'POST',
-            path: `${basePath}/email/send`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const context = await this.resolveExecCtx(environmentId, req);
-                    if (this.enforceAuth(req, res, context)) return;
-
-                    if (!this.emailServiceProvider) {
-                        res.status(501).json({
-                            code: 'NOT_IMPLEMENTED',
-                            message: 'Email service is not configured on this deployment',
-                        });
-                        return;
-                    }
-                    // [#15405] `seamOrUndefined`, not the retired
-                    // `.catch(() => undefined)`. That handler attaches to the
-                    // promise the call RETURNS, so it can only ever see a
-                    // REJECTION: a host wiring a non-`async` provider — which
-                    // the seam's declared type cannot prevent, and
-                    // `RestServer`'s constructor is the public wiring point —
-                    // throws while the expression is still being evaluated, so
-                    // there is no promise to attach to and the handler is never
-                    // reached (commit add6a1b1c).
-                    //
-                    // ⚠️ NOT reachable from the SHIPPED wiring: the provider
-                    // `rest-api-plugin.ts` hands over is declared `async`.
-                    // Repaired because it is the same retired spelling at an
-                    // embedder-reachable seam, ⛔ not on a claim of live impact.
-                    //
-                    // The ANSWER is deliberately unchanged — absorb to
-                    // `undefined` and take the 501 below. ⛔ Unlike the engine
-                    // seam, this one must NOT go loud: the
-                    // `if (!this.emailServiceProvider)` guard above has already
-                    // answered the wiring question, and "not configured" and
-                    // "configured and unusable" both mean this deployment cannot
-                    // send mail — one 501, no fact lost by folding them.
-                    const emailService = await seamOrUndefined(() => this.emailServiceProvider!(environmentId));
-                    if (!emailService || typeof emailService.send !== 'function') {
-                        res.status(501).json({
-                            code: 'NOT_IMPLEMENTED',
-                            message: 'Email service is not configured on this deployment',
-                        });
-                        return;
-                    }
-
-                    const body = req.body ?? {};
-                    if (!body || typeof body !== 'object') {
-                        res.status(400).json({ code: 'INVALID_REQUEST', error: 'JSON body required' });
-                        return;
-                    }
-                    // Stamp sentBy from the authenticated context when caller didn't supply one.
-                    const input = {
-                        ...body,
-                        ...(body.sentBy === undefined && (context as any)?.userId
-                            ? { sentBy: (context as any).userId }
-                            : {}),
-                    };
-
-                    try {
-                        const result = await emailService.send(input);
-                        if (result?.status === 'sent') {
-                            res.status(200).json(result);
-                        } else {
-                            // failed / queued — still surface to client with 200 so clients can branch on status.
-                            res.status(200).json(result);
-                        }
-                    } catch (err: any) {
-                        // Validation errors from normalizeMessage are surfaced as 400.
-                        const message = String(err?.message ?? err ?? 'send failed');
-                        if (message.startsWith('VALIDATION_FAILED')) {
-                            res.status(400).json({
-                                code: 'VALIDATION_FAILED',
-                                error: message.replace(/^VALIDATION_FAILED:\s*/, ''),
-                            });
-                            return;
-                        }
-                        throw err;
-                    }
-                } catch (error: any) {
-                    logError('[REST] Email send unhandled error:', error);
-                    res.status(500).json({
-                        code: 'EMAIL_SEND_FAILED',
-                        error: String(error?.message ?? error ?? 'send failed').slice(0, 500),
-                    });
-                }
-            },
-            metadata: {
-                summary: 'Send a transactional email via the configured EmailService',
-                tags: ['email'],
-            },
-        });
+        // [#23050 slice 8] The body moved to `email-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `EmailRouteHost`, and that module's header for why
+        // `emailServiceProvider` is a getter).
+        const readEmailServiceProvider = () => this.emailServiceProvider;
+        const host: EmailRouteHost = {
+            routeManager: this.routeManager,
+            get emailServiceProvider() { return readEmailServiceProvider(); },
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+        };
+        registerEmailEndpoints.call(host, basePath);
     }
 
     /**
@@ -9434,6 +9354,10 @@ export class RestServer {
                     // now agree — but they agree by each enforcing the
                     // declaration itself, NOT by one deferring to the other.
                     let objectSchema: any = null;
+                    // [#23497] The form served below: the matched form, with its
+                    // sections' `label` / `description` localized beside the
+                    // schema's field labels (see the translation block).
+                    let servedForm: any = match.form;
                     try {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).getMetaItems === 'function') {
@@ -9469,9 +9393,10 @@ export class RestServer {
                                 }
                                 objectSchema = { name: obj.name, label: obj.label, fields };
                                 // Localize labels / help text / option labels so anonymous
-                                // clients render in the visitor's preferred language. The
-                                // form payload is otherwise un-translated (resolveFormBySlug
-                                // returns the raw view spec), so we hydrate the schema here.
+                                // clients render in the visitor's preferred language.
+                                // `resolveFormBySlug` returns the raw view spec, so both
+                                // halves of the payload are hydrated here: the schema, and
+                                // the form's section headings ([#23497], below).
                                 try {
                                     const i18n = await this.resolveI18nService(environmentId, req);
                                     const bundle = this.buildTranslationBundle(i18n);
@@ -9488,6 +9413,38 @@ export class RestServer {
                                             ...RestServer.translateOptionsFor(i18n, locale),
                                             packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
                                         });
+                                        // [#23497] The section headings. An anonymous
+                                        // visitor cannot load the bundle client-side (the
+                                        // `/i18n` domain answers it 401), so a section's
+                                        // `objects.OBJECT._sections.NAME` copy reaches it
+                                        // here or not at all. ONE call into the spec's view
+                                        // translator, which owns every rule: the key is the
+                                        // section's `name` (a nameless section is returned
+                                        // as authored), a missing key keeps the authored
+                                        // text, only authored copy is translated, and an
+                                        // explicit override beats the catalog against the
+                                        // packaged view, handed over exactly as the object
+                                        // call above hands its own base. ⛔ No walk of
+                                        // `_sections` and no locale chain here.
+                                        //
+                                        // The protocol's view list serves view ITEMS only
+                                        // (a container is dropped and served as the
+                                        // `viewKind: 'form'` items it expands to), so the
+                                        // matched form is the item's `config`, the address
+                                        // `translateView` translates sections at. A form
+                                        // matched in any other slot is served as matched,
+                                        // never swapped for the item's `config`. It runs
+                                        // BEFORE the strip below and returns each section's
+                                        // `fields` untouched, so it cannot re-introduce a
+                                        // stripped field. The top-level `label` keeps its
+                                        // own reading: the translator falls back to the
+                                        // view's machine name where this route falls back
+                                        // to the form's label.
+                                        const view = translateMetadataDocument('view', match.view, bundle, {
+                                            ...RestServer.translateOptionsFor(i18n, locale),
+                                            packagedBase: this.packagedObjectBase(p, 'view', match.view?.name),
+                                        });
+                                        if (match.form === match.view?.config) servedForm = view?.config;
                                     }
                                 } catch (e: any) {
                                     logError('[REST] Public form schema translation failed:', e);
@@ -9506,7 +9463,7 @@ export class RestServer {
                     // unconditional: no declaration can put record search on the
                     // internet through a public form.
                     const safeForm = (() => {
-                        if (!match.form || !Array.isArray(match.form.sections)) return match.form;
+                        if (!servedForm || !Array.isArray(servedForm.sections)) return servedForm;
                         const allow = (name: string): boolean => {
                             // [#3022] A declared server-managed anchor (e.g. a
                             // FormView listing `owner_id`) is a spec mistake —
@@ -9520,7 +9477,7 @@ export class RestServer {
                             // expose unrestricted user search to the internet.
                             return t !== 'lookup' && t !== 'master_detail' && t !== 'user';
                         };
-                        const sections = match.form.sections.map((sec: any) => {
+                        const sections = servedForm.sections.map((sec: any) => {
                             const fields = (sec?.fields ?? []).filter((f: any) => {
                                 const name = typeof f === 'string' ? f : f?.field;
                                 if (!name) return false;
@@ -9528,7 +9485,7 @@ export class RestServer {
                             });
                             return { ...sec, fields };
                         });
-                        return { ...match.form, sections };
+                        return { ...servedForm, sections };
                     })();
                     res.header('Vary', 'Accept-Language');
                     res.json({

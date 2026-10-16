@@ -5,6 +5,8 @@
 '@objectstack/platform-objects': patch
 ---
 
+**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+
 feat(spec): `referenceDeletedWhen` beside `referenceVia` marks a polymorphic pointer's target as platform-deleted
 
 Clause-②: yes

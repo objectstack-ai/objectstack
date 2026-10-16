@@ -2,6 +2,8 @@
 '@objectstack/spec': minor
 ---
 
+**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+
 feat(spec)!: a stack's `datasources` collection refuses a datasource named `default`, the name the host reserves for its primary datasource
 
 Clause-②: no (narrowing)

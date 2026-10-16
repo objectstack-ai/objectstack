@@ -421,8 +421,8 @@ sections:
 
 <Callout type="warn">
   **There is no section-level `visible` key — and no permission test belongs here.**
-  `FormSectionSchema` is `.strict()` and declares `visibleWhen` (plus the `@deprecated`
-  alias `visibleOn`); `visible` is refused *by name*, before any value shape is examined,
+  `FormSectionSchema` is `.strict()` and declares `visibleWhen` (the retired `visibleOn`
+  is refused by name since `@objectstack/spec` 18); `visible` is refused *by name*, before any value shape is examined,
   and the rejection points you back at `visibleWhen`. Neither a `{ field, value }` rule
   object nor a `{ permission }` name is a value `visibleWhen` accepts either — it takes a
   CEL predicate string, normalized to a `{ dialect: 'cel', source }` envelope at parse.
@@ -945,9 +945,11 @@ only.** Nothing on the write path evaluates a form-view field or section
 `visibleWhen`, and that is the whole list — so a `current_user.positions` test
 written here hides controls and protects no data.
 
-The legacy spellings `visibleOn` (view) and `visibility` (page) are `@deprecated`
-aliases: still accepted and folded into `visibleWhen` at parse time, so existing
-metadata keeps working. Author new metadata with `visibleWhen`.
+The legacy spellings `visibleOn` (view) and `visibility` (page) were removed in
+`@objectstack/spec` 18: the parse refuses each by name with the rename to
+`visibleWhen`, so rename the key (the CEL value is unchanged). Stored view and
+page rows written with the old key keep loading — rehydration renames it before
+the parse.
 
 Since `@objectstack/spec` 15 (ADR-0089 D3a) the form field/section and page
 component schemas are **strict**: a key they do not declare — a `visibleWhen`

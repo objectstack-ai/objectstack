@@ -31,12 +31,18 @@
 import {
   SqlDriver,
   GLOBAL_TENANT,
+  applyIndexKeyParts,
+  isIndexDriftOp,
+  parseIndexDdl,
+  type IntrospectedColumn,
   type IntrospectedSchema,
   type ManagedDriftEntry,
+  type PhysicalIndex,
   type SqlDriverConfig,
   type SqlWindowFunctionQuery,
 } from '@objectstack/driver-sql';
 import { StandardErrorCode } from '@objectstack/spec/api';
+import { StorageNameMapping } from '@objectstack/spec/system';
 import type { DriverQuery } from '@objectstack/spec/contracts';
 import type { DriverOptions, FilterCondition } from '@objectstack/spec/data';
 import type { Client } from '@libsql/client';
@@ -538,77 +544,155 @@ function refuseRemoteDeferredDdl(): never {
   throw err;
 }
 
-// ── Remote schema drift detection: refused, never "no drift" ─────────────────
+// ── Remote schema drift: read through the libSQL client ─────────────────────
 
 /**
- * [#19845] The Turso REMOTE face cannot detect schema drift, and now says so
- * instead of answering that there is none.
+ * [#23816] The Turso REMOTE face detects managed-schema drift and applies the
+ * index and column-drop entries of a drift report, through the libSQL client.
  *
- * # The defect this replaces
+ * # What it replaces
  *
- * `SqlDriver.detectManagedDrift` reads the physical schema through Knex: a
- * `hasTable` probe per table, then column and index introspection fed to the
- * shared differ. In remote mode that Knex instance was then the placeholder
- * `:memory:` database {@link TursoDriver.toKnexConfig} handed the base
- * constructor. It held none of this datasource's tables, so every table was
- * skipped as absent and the answer was `[]` whatever the remote database held.
- * The no-argument call had a second reason to answer `[]`: it iterates
- * `managedObjectFields`, which only the Knex `initObjects` fills and no remote
- * schema door reaches. [#20054] Remote mode's Knex has no connection at all
- * now, so an explicit-objects call would fail on its first `hasTable`; the
- * no-argument call would still answer `[]` from the empty registry, which is
- * why the refusal stays. Measured on the transport's SQLite-backed double
- * (`turso-remote-drift-detection-refusal.test.ts`): a synced table carrying an
- * extra physical column the declaration omits reads `unmapped_column` /
- * `drop_column` on the local face and `[]` on the remote one, with or without
- * explicit objects. The artifact-pinned boot gate of `os serve`, whose job is
- * to refuse a boot on destructive drift, therefore let every remote-Turso boot
- * through as never drifted.
+ * Both members refused here with `NOT_IMPLEMENTED` / 501 (#19845, #20055). The
+ * refusal replaced a worse answer: the inherited detector read the physical
+ * schema through a Knex instance remote mode builds with no connection, and
+ * walked a registry no remote schema door filled, so it answered "no drift"
+ * for every remote database. The refusal was honest, and it left the v18
+ * organization-ownership ceremony (`os migrate organization-ownership`) with
+ * no remote path at all: its column drops go through
+ * `detectManagedDrift` + `applyMigrationEntries`, so every hosted tenant on
+ * this transport stopped at its first v18 request.
  *
- * # Why a refusal rather than an implementation
+ * # How the detector answers here
  *
- * The shared differ would serve a remote table: a clean remote-synced table,
- * judged through a local Knex connection to the same SQLite file, reports no
- * entries, as the local face does. But every read that feeds the differ goes
- * through `this.knex` (table existence, column facts and order, the index set,
- * the NULL-safe duplicate probe), so a remote implementation is a second copy
- * of each of those SQLite arms. It also needs a remote answer for
- * `applyMigrationEntries`, which the gate calls on whatever it finds and which
- * runs through the same `this.knex`. Until that exists the refusal is the honest
- * answer, in the envelope and for the reason {@link refuseRemoteDeferredDdl}
- * records for its sibling gap on this transport: the call is spelled correctly
- * and the base class declares it, so the gap is the backend's.
- * `NOT_IMPLEMENTED`/501 is a {@link StandardErrorCode} member, so there is no
- * new code.
+ * The verdict is still the shared differ's (`SqlDriver.detectTableDrift`, the
+ * same `diffManagedTable` / `diffManagedIndexes` the local face runs). Only
+ * the READS that feed it are this face's own, and each sends the statement the
+ * local SQLite arm sends, to the remote database:
  *
- * # What a caller sees
+ *  - the columns: `pragma_table_info`, shaped as Knex's SQLite `columnInfo()`
+ *    shapes it ({@link remoteIntrospectedColumn});
+ *  - the indexes: `sqlite_master` and `pragma_index_list` / `pragma_index_info`,
+ *    parsed by the driver-sql parsers the local arm uses;
+ *  - the NULL-safe duplicate probe the ADR-0120 D4 pre-flight runs;
+ *  - and table existence, from `sqlite_master`.
  *
- * The boot gate already has a channel for "the check did not run": a throw
- * from `detectManagedDrift` becomes a warning carrying this message, and the
- * boot continues. That is the right reading of a driver that cannot judge. It
- * is neither a drift verdict that would refuse every remote boot nor a
- * silence. The `os migrate` commands that read drift never get this far on a
- * remote datasource, because they arm deferred DDL first and that is refused.
+ * The declared side is {@link TursoDriver.remoteDeclaredSchemas}: what each
+ * object that reached this face declares, recorded by every remote schema door
+ * and by the DDL-free registration a `skipSchemaSync` boot takes.
+ * `turso-remote-drift-detection.test.ts` holds the two faces to one answer
+ * over one SQLite file, both for a clean table and for each drifted shape.
+ * The no-argument call reads the whole catalog it needs in three round trips,
+ * whatever the number of tables (`readRemoteCatalog`), because a hosted
+ * tenant's first v18 request pays for this read.
+ *
+ * # What the apply door answers here
+ *
+ * The entries that are DDL this transport can send as it stands: `drop_index`,
+ * `create_index`, `recreate_index` and `replace_unique_index` (portable index
+ * DDL on every dialect), and `drop_column` (`ALTER TABLE … DROP COLUMN`, which
+ * SQLite and libSQL support since 3.35). A column's indexes go with it, in the
+ * same transaction, as they do on PostgreSQL and in the local face's SQLite
+ * table rebuild. Every other column entry (nullability, width, a dropped
+ * DEFAULT) needs that rebuild, which this transport has no copy of, so it is
+ * reported `skipped` and logged, as the in-place arm reports an op its dialect
+ * cannot perform. Each entry is reported `applied` only once a read-back shows
+ * the physical schema in its target state: the column gone, the index name
+ * gone, or the index present with the uniqueness and the key columns, in
+ * order, the entry asked for.
+ *
+ * # What this face does NOT claim: a boot may not act on its report
+ *
+ * The report is accurate about the database, but not every finding is real
+ * drift. A table this face's schema sync (`RemoteTransport`) created before
+ * #23847 has no NOT NULL constraint for the fields that declare one: the sync
+ * creates it now, but an additive sync never tightens a column that already
+ * exists. So such a table reads as `tighten_not_null`
+ * (destructive) against its own declaration. Nor is there a remedy for a
+ * destructive entry on this transport: `os migrate apply` arms deferred DDL,
+ * which this face refuses. So {@link TursoDriver.driftReportCaveat} says so,
+ * and a caller that would apply or refuse on the report unattended (the
+ * `OS_ARTIFACT_URL` boot gate) reads the caveat and does neither. The ceremony
+ * is not such a caller: it applies only the column and index drops it named.
  */
-function refuseRemoteDriftDetection(): never {
-  const err = new Error(
-    'Schema drift detection is not supported by the Turso REMOTE transport (this datasource\'s ' +
-    'transport mode is `remote`), so this driver cannot say whether the database\'s physical ' +
-    'schema matches the declared objects. Drift detection reads the physical schema through the ' +
-    'SQL driver\'s Knex connection, which remote mode does not have: every statement goes to the ' +
-    'remote database through the libSQL client instead. The objects it compares by default are the ' +
-    'ones the SQL driver\'s own schema sync registers, and remote mode registers none there, so ' +
-    'answering would report "no drift" for every remote database, whatever its tables hold; the ' +
-    'call refuses instead. The call is spelled ' +
-    'correctly and `SqlDriver` declares it, so this is a capability gap of the remote transport ' +
-    'rather than a mistake in the request, which is why it answers NOT_IMPLEMENTED/501 and not a ' +
-    '400. To check this database for drift, run `os migrate plan` against a local SQLite copy of it ' +
-    '(a `file:` URL), where the physical schema is introspected. Pointed at the remote URL, ' +
-    '`os migrate plan` refuses, because the remote transport cannot defer schema DDL.',
-  ) as Error & { code?: string; status?: number };
-  err.code = StandardErrorCode.enum.NOT_IMPLEMENTED;
-  err.status = 501;
-  throw err;
+
+/** [#23816] {@link TursoDriver.driftReportCaveat} on the REMOTE face. */
+const REMOTE_DRIFT_REPORT_CAVEAT =
+  'a table the Turso REMOTE transport\'s schema sync created in an earlier release has no NOT NULL ' +
+  'constraint on the fields that declare one (the sync creates it now, but never tightens an existing column), so ' +
+  'this driver\'s drift report can name a tightening its own sync produced, and a destructive entry has no ' +
+  'remedy on this transport (`os migrate apply` refuses against it). The report is for reading; nothing is ' +
+  'applied or refused on it unattended. To review the drift, run `os migrate plan` against a local SQLite ' +
+  'copy of this database (a `file:` URL)';
+
+/**
+ * One `pragma_table_info` row as Knex's SQLite `columnInfo()` reports it — the
+ * shape `SqlDriver.introspectColumns` reads its per-column facts from: the
+ * declared type lower-cased with any `(n)` split off into `maxLength` (a
+ * string, as Knex leaves it), `nullable` from `notnull`, and the raw DEFAULT.
+ */
+function remoteIntrospectedColumn(row: Record<string, unknown>): IntrospectedColumn {
+  const declared = String(row.type ?? '');
+  const width = declared.match(/.*\((\d+)\)/);
+  const type = (width ? declared.split('(')[0]! : declared).toLowerCase();
+  return {
+    name: String(row.name),
+    type: type || 'string',
+    nullable: !Number(row.notnull ?? 0),
+    defaultValue: row.dflt_value as IntrospectedColumn['defaultValue'],
+    primaryKey: false,
+    isUnique: false,
+    ...(width ? { maxLength: width[1] } : {}),
+  } as IntrospectedColumn;
+}
+
+/** A SQLite identifier, quoted, with any embedded quote doubled. */
+const quoteRemoteIdentifier = (name: string): string => `"${String(name).replace(/"/g, '""')}"`;
+
+/** [#23816] The catalog statements the remote drift reads send, one spelling each. */
+const REMOTE_TABLE_INFO_SQL = 'SELECT cid, name, type, "notnull", dflt_value FROM pragma_table_info(?) ORDER BY cid';
+const REMOTE_INDEX_LIST_SQL = 'SELECT name, "unique", origin, partial FROM pragma_index_list(?) ORDER BY seq';
+const REMOTE_INDEX_INFO_SQL = 'SELECT name FROM pragma_index_info(?) ORDER BY seqno';
+/** [#23816] Statements per catalog `read` batch: a bound on one request, not a tuning knob. */
+const REMOTE_CATALOG_BATCH = 200;
+
+/** [#23816] What one remote drift detection reads, keyed by table and by index name. */
+interface RemoteCatalogSnapshot {
+  /** `pragma_table_info` rows per table the database holds. */
+  columns: Map<string, Array<Record<string, unknown>>>;
+  /** `pragma_index_list` rows per table the database holds. */
+  indexList: Map<string, Array<Record<string, unknown>>>;
+  /** Each index's DDL, from `sqlite_master`, where SQLite keeps one. */
+  indexDdl: Map<string, string>;
+  /** `pragma_index_info` rows per index whose DDL does not parse. */
+  indexInfo: Map<string, Array<Record<string, unknown>>>;
+}
+
+/**
+ * [#23816] A table's indexes from its `pragma_index_list` rows, built as the
+ * local SQLite arm of `SqlDriver.introspectIndexes` builds them: the key from
+ * the parsed DDL where it parses (an expression key or a predicate survives
+ * only there), else from `pragma_index_info`.
+ */
+function remotePhysicalIndexes(
+  list: ReadonlyArray<Record<string, unknown>>,
+  ddlOf: (name: string) => string | undefined,
+  infoOf: (name: string) => ReadonlyArray<Record<string, unknown>>,
+): PhysicalIndex[] {
+  const byName = new Map<string, PhysicalIndex>();
+  for (const r of list) {
+    const name = String(r.name);
+    let entry = byName.get(name);
+    if (!entry) byName.set(name, (entry = { name, columns: [], unique: Number(r.unique) === 1, primary: r.origin === 'pk' }));
+    const parsed = parseIndexDdl(ddlOf(name) ?? '');
+    if (parsed) {
+      applyIndexKeyParts(entry, parsed.keyParts);
+      if (parsed.partial) entry.partial = true;
+    } else {
+      for (const c of infoOf(name)) if (c.name != null) entry.columns.push(String(c.name));
+    }
+    if (Number(r.partial) === 1) entry.partial = true;
+  }
+  return [...byName.values()];
 }
 
 // ── Remote media column move planning: refused, never "nothing to move" ──────
@@ -641,10 +725,10 @@ function refuseRemoteDriftDetection(): never {
  *
  * # Why a refusal rather than an implementation
  *
- * Planning remotely needs a remote copy of the SQLite arms the planner reads
- * through Knex (table existence and column introspection), which is the same
- * second copy {@link refuseRemoteDriftDetection} declines for drift. It would
- * also need a remote answer to the step after the plan: the command stamps
+ * Planning remotely needs remote answers to the SQLite reads the planner makes
+ * through Knex (table existence and column introspection). [#23816] The remote
+ * drift detector now has those reads (see "Remote schema drift" above), but the
+ * planner would also need a remote answer to the step after the plan: the command stamps
  * `columns_moved_at` so the driver writes bare ids from its next boot, and the
  * remote face never asks for that stamp. The ADR-0104 resolver is supplied to
  * this driver, but only `SqlDriver.initObjects` asks it, and none of the three
@@ -653,7 +737,7 @@ function refuseRemoteDriftDetection(): never {
  * times on every remote door, and a remote write stored `"file_abc"` (the JSON
  * encoding) and read it back as `file_abc`. So until both halves exist the
  * refusal is the honest answer, in the envelope and for the reason
- * {@link refuseRemoteDriftDetection} records for its sibling gap on this
+ * {@link refuseRemoteDeferredDdl} records for its sibling gap on this
  * transport: the call is spelled correctly and the base class declares it, so
  * the gap is the backend's. `NOT_IMPLEMENTED`/501 is a
  * {@link StandardErrorCode} member, so there is no new code.
@@ -690,7 +774,7 @@ function refuseRemoteMediaColumnMove(): never {
 
 /**
  * [#20055] The refusal for a `SqlDriver` member the REMOTE face cannot answer,
- * in the envelope and the shape of {@link refuseRemoteDriftDetection} and
+ * in the envelope and the shape of {@link refuseRemoteDeferredDdl} and
  * {@link refuseRemoteMediaColumnMove}: the operation, what the caller cannot
  * have, why this face cannot give it, the 501 rationale, and where the answer
  * does exist.
@@ -921,7 +1005,9 @@ export const REMOTE_FACE_ANSWERS = {
   // the table it records (`remoteTableFor`), as `getBuilder` does locally.
   registerExternalObject: 'inherited',
   // In-memory bookkeeping with no Knex, by its own contract (`skipSchemaSync`).
-  registerObjectMetadata: 'inherited',
+  // [#23816] Redeclared: the remote face also records what each object
+  // declares, the input its drift detector diffs against.
+  registerObjectMetadata: 'remote',
   // Deferred DDL: arming is refused, so nothing is ever deferred here, and the
   // three inherited members answer that truthfully without reaching Knex.
   setDeferredDdl: 'refused',
@@ -931,9 +1017,11 @@ export const REMOTE_FACE_ANSWERS = {
   // `{ created: 0, existing: 0 }`: the remote doors count nothing, and both
   // counts at zero is the `IDataDriver` contract's "cannot say".
   getSchemaSyncStats: 'inherited',
-  // Drift and migration: every read and write goes through Knex.
-  detectManagedDrift: 'refused',
-  applyMigrationEntries: 'refused',
+  // [#23816] Drift and migration: the shared differ over the remote catalog,
+  // and the index / column-drop entries applied through the libSQL client (see
+  // "Remote schema drift" above for which entries, and why only those).
+  detectManagedDrift: 'remote',
+  applyMigrationEntries: 'remote',
   planMediaColumnMove: 'refused',
   // `false`, the method's own "not taken" answer: only the Knex `initObjects`
   // asks the resolver, so on this face it would never be asked.
@@ -1699,6 +1787,36 @@ export class TursoDriver extends SqlDriver {
   private readonly remoteManagedObjects = new Set<string>();
 
   /**
+   * [#23816] What each object that reached this REMOTE face declares, keyed by
+   * its table: the field set and `indexes` the remote drift detector
+   * ({@link detectManagedDrift}) diffs the physical schema against.
+   *
+   * The local faces keep the same fact in `managedObjectFields` /
+   * `managedObjectIndexes`, which `SqlDriver.registerObjectMetadata` fills on
+   * the way into the Knex `initObjects`. The remote schema doors never reach
+   * that method, so this face records it at the two places an object reaches
+   * it: every remote schema door ({@link registerRemoteFieldMetadata}) and the
+   * DDL-free {@link registerObjectMetadata} a `skipSchemaSync` boot takes. It is
+   * kept apart from `managedObjectFields` on purpose: that map answers other
+   * questions on this class too (the cross-field column set, the pagination
+   * tie-breaker), and filling it from the schema doors would change those
+   * remote answers as well.
+   */
+  private readonly remoteDeclaredSchemas = new Map<string, { fields: Record<string, any>; indexes?: any[] }>();
+
+  /**
+   * Record one object in {@link remoteDeclaredSchemas}. Overwritten on every
+   * registration, as the local registry is: a re-registration that drops
+   * `indexes` must stop the detector expecting them.
+   */
+  private recordRemoteDeclaredSchema(obj: { name: string; fields?: Record<string, any>; indexes?: unknown }): void {
+    this.remoteDeclaredSchemas.set(StorageNameMapping.resolveTableName(obj), {
+      fields: obj.fields ?? {},
+      ...(Array.isArray(obj.indexes) ? { indexes: obj.indexes } : {}),
+    });
+  }
+
+  /**
    * [#19868] Remote `date` / json columns whose storage backfill found nothing
    * left to do in THIS process, so later schema syncs skip them. In memory
    * only: the next process probes again, at one round-trip for all columns.
@@ -1959,11 +2077,20 @@ export class TursoDriver extends SqlDriver {
     // as `introspectSchema()` did with "no tables". Now knex refuses to run it
     // (`Unable to acquire a connection`), because there is no connection to
     // run it on. That failure is loud; it never adds a silent answer.
+    //
+    // [#23816] `url` names the DECLARED target, which `SqlDriver` keeps in
+    // `this.config` so `describeDriverConnection` can render it (the CLI's
+    // "which database" label, credential-free: it drops userinfo and the query,
+    // where a libSQL token can ride). Knex reads no `url` key, so it opens
+    // nothing. Without it every remote database was labelled `better-sqlite3`,
+    // and the organization-ownership ceremony's refusal of a plan reviewed
+    // against another database could not tell two remote databases apart.
     if (mode === 'remote') {
       return {
         client: 'better-sqlite3',
         useNullAsDefault: true,
-      };
+        url: config.url,
+      } as SqlDriverConfig;
     }
 
     if (config.url === ':memory:') {
@@ -3225,8 +3352,9 @@ export class TursoDriver extends SqlDriver {
    * `id` primary key whether or not the best-effort coercion registration below
    * does.
    */
-  private registerRemoteFieldMetadata(obj: { name: string; fields?: Record<string, any>; tenancy?: any }): void {
+  private registerRemoteFieldMetadata(obj: { name: string; fields?: Record<string, any>; tenancy?: any; indexes?: unknown }): void {
     this.remoteManagedObjects.add(obj.name);
+    this.recordRemoteDeclaredSchema(obj);
     try {
       this.registerExternalObject({ name: obj.name, fields: obj.fields, tenancy: obj.tenancy });
     } catch {
@@ -3261,7 +3389,7 @@ export class TursoDriver extends SqlDriver {
    * steady state at one round-trip per backfill.
    */
   private async completeRemoteSchemaSync(
-    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any }>,
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: unknown }>,
   ): Promise<void> {
     if (objects.length === 0) return;
     for (const obj of objects) this.registerRemoteFieldMetadata(obj);
@@ -3668,13 +3796,27 @@ export class TursoDriver extends SqlDriver {
   }
 
   /**
-   * Detect managed-schema drift — refused on the REMOTE face, see
-   * {@link refuseRemoteDriftDetection}. The inherited detector reads the
-   * physical schema through `this.knex`, which remote mode builds with no
-   * connection; with no `objects` it walks a registry no remote schema door
-   * fills and answers `[]`. Refused with or without explicit `objects`, because
-   * neither can judge the remote database. Local and replica modes inherit the
-   * Knex detector unchanged.
+   * Why this driver's drift report must not be ACTED ON unattended, or `null`
+   * when it may be. [#23816] A sentence on the REMOTE face (see "Remote schema
+   * drift" at the top of this file); `null` on the local and embedded-replica
+   * faces, whose report is the Knex detector's. A caller that would apply or
+   * refuse on the report with nobody watching (the `OS_ARTIFACT_URL` boot gate)
+   * reads this first; a caller that applies only the entries it named itself
+   * (the organization-ownership ceremony's column drops) does not need to.
+   */
+  get driftReportCaveat(): string | null {
+    return this.isRemote ? REMOTE_DRIFT_REPORT_CAVEAT : null;
+  }
+
+  /**
+   * Detect managed-schema drift. [#23816] On the REMOTE face: the shared
+   * differ, fed by the remote catalog (see "Remote schema drift" at the top of
+   * this file). With no `objects` it walks {@link remoteDeclaredSchemas}, which
+   * every remote schema door and the DDL-free {@link registerObjectMetadata}
+   * fill, as the local face walks `managedObjectFields`. A table the database
+   * does not hold is skipped, as the local face skips it. The catalog is read
+   * once for the call ({@link readRemoteCatalog}), not per table. Local and
+   * replica modes inherit the Knex detector unchanged.
    *
    * The parameter repeats the base's declared shape key for key rather than
    * deriving it (`check:object-def-param-keys` arm C), so the keys a caller may
@@ -3683,8 +3825,198 @@ export class TursoDriver extends SqlDriver {
   override async detectManagedDrift(
     objects?: Array<{ name: string; fields?: Record<string, any>; indexes?: any[] }>,
   ): ReturnType<SqlDriver['detectManagedDrift']> {
-    if (this.isRemote) refuseRemoteDriftDetection();
-    return super.detectManagedDrift(objects);
+    if (!this.isRemote) return super.detectManagedDrift(objects);
+    const tables = new Map<string, { fields: Record<string, any>; indexes?: any[] }>();
+    if (objects) {
+      for (const o of objects) {
+        tables.set(StorageNameMapping.resolveTableName(o), { fields: o.fields ?? {}, indexes: o.indexes });
+      }
+    } else {
+      for (const [table, declared] of this.remoteDeclaredSchemas) tables.set(table, declared);
+    }
+    const catalog = await this.readRemoteCatalog([...tables.keys()]);
+    const previous = this.remoteCatalogSnapshot;
+    this.remoteCatalogSnapshot = catalog;
+    try {
+      const out: ManagedDriftEntry[] = [];
+      for (const [table, declared] of tables) {
+        if (!catalog.columns.has(table)) continue; // not a table this database holds
+        out.push(...(await this.detectTableDrift(table, declared.fields, declared.indexes)));
+      }
+      // The base detector's order: by table, then by column.
+      out.sort((a, b) => (a.table === b.table ? (a.column ?? '').localeCompare(b.column ?? '') : a.table.localeCompare(b.table)));
+      return out;
+    } finally {
+      if (this.remoteCatalogSnapshot === catalog) this.remoteCatalogSnapshot = previous;
+    }
+  }
+
+  /**
+   * [#23816] The catalog one {@link detectManagedDrift} call diffs, while it
+   * runs, so {@link introspectColumns} and {@link introspectIndexes} answer from
+   * it instead of a round trip per read. `null` outside a detection. The apply
+   * door never reads it: its read-backs are live ({@link remoteLiveColumns},
+   * {@link remoteLiveIndexes}).
+   */
+  private remoteCatalogSnapshot: RemoteCatalogSnapshot | null = null;
+
+  /**
+   * [#23816] Read, for `tables`, everything the differ reads, in three round
+   * trips whatever the number of tables: `sqlite_master` (which tables exist,
+   * and each index's DDL); one `read` batch of `pragma_table_info` and
+   * `pragma_index_list` per existing table; one `read` batch of
+   * `pragma_index_info` for each index whose DDL does not parse (the
+   * autoindexes SQLite keeps no DDL for among them). A table the database does
+   * not hold has no `columns` entry.
+   */
+  private async readRemoteCatalog(tables: readonly string[]): Promise<RemoteCatalogSnapshot> {
+    const catalog: RemoteCatalogSnapshot = { columns: new Map(), indexList: new Map(), indexDdl: new Map(), indexInfo: new Map() };
+    const present = new Set<string>();
+    for (const r of await this.remoteCatalogRead(`SELECT type, name, tbl_name, sql FROM sqlite_master WHERE type IN ('table', 'index')`)) {
+      if (r.type === 'table') present.add(String(r.name));
+      else if (typeof r.sql === 'string' && r.sql) catalog.indexDdl.set(String(r.name), r.sql);
+    }
+    const existing = tables.filter((t) => present.has(t));
+    const reads: Array<{ sql: string; args: unknown[] }> = [];
+    for (const t of existing) {
+      reads.push({ sql: REMOTE_TABLE_INFO_SQL, args: [t] }, { sql: REMOTE_INDEX_LIST_SQL, args: [t] });
+    }
+    const answers = await this.remoteCatalogBatch(reads);
+    existing.forEach((t, i) => {
+      catalog.columns.set(t, answers[2 * i]!);
+      catalog.indexList.set(t, answers[2 * i + 1]!);
+    });
+    const needInfo = [...catalog.indexList.values()]
+      .flat()
+      .map((r) => String(r.name))
+      .filter((name) => !parseIndexDdl(catalog.indexDdl.get(name) ?? ''));
+    const infos = await this.remoteCatalogBatch(needInfo.map((name) => ({ sql: REMOTE_INDEX_INFO_SQL, args: [name] })));
+    needInfo.forEach((name, i) => catalog.indexInfo.set(name, infos[i]!));
+    return catalog;
+  }
+
+  /**
+   * [#23816] One catalog read on the REMOTE database, in the raw-statement
+   * fault envelope `execute()` answers with. An answer that is not a row list
+   * is a fault too, never read as an empty catalog: an empty catalog is "no
+   * drift".
+   */
+  private async remoteCatalogRead(sql: string, args: unknown[] = []): Promise<Array<Record<string, unknown>>> {
+    let rows: unknown;
+    try {
+      rows = await this.remoteTransport!.execute(sql, args);
+    } catch (error) {
+      throw this.rawStatementFault(sql, error);
+    }
+    if (!Array.isArray(rows)) throw this.rawStatementFault(sql, new Error('the remote database answered no row list'));
+    return rows as Array<Record<string, unknown>>;
+  }
+
+  /** [#23816] {@link remoteCatalogRead} for several statements, as one `read` batch (chunked). */
+  private async remoteCatalogBatch(reads: ReadonlyArray<{ sql: string; args: unknown[] }>): Promise<Array<Array<Record<string, unknown>>>> {
+    const out: Array<Array<Record<string, unknown>>> = [];
+    for (let i = 0; i < reads.length; i += REMOTE_CATALOG_BATCH) {
+      const chunk = reads.slice(i, i + REMOTE_CATALOG_BATCH);
+      let answers: unknown[];
+      try {
+        answers = await this.remoteTransport!.batch(chunk.map((r) => ({ sql: r.sql, args: r.args as never })), 'read');
+      } catch (error) {
+        throw this.rawStatementFault(chunk[0]!.sql, error);
+      }
+      chunk.forEach((r, j) => {
+        if (!Array.isArray(answers[j])) throw this.rawStatementFault(r.sql, new Error('the remote database answered no row list'));
+        out.push(answers[j] as Array<Record<string, unknown>>);
+      });
+    }
+    return out;
+  }
+
+  /**
+   * The table's columns, in declared order. [#23816] On the REMOTE face, from
+   * `pragma_table_info` (a detection's catalog while one runs, else a live
+   * read), shaped as Knex's SQLite `columnInfo()` shapes it
+   * ({@link remoteIntrospectedColumn}); the cid is the ordinal, as
+   * `introspectColumnOrder` reads it locally.
+   */
+  protected override async introspectColumns(tableName: string): Promise<IntrospectedColumn[]> {
+    if (!this.isRemote) return super.introspectColumns(tableName);
+    const held = this.remoteCatalogSnapshot?.columns.get(tableName);
+    return held ? held.map(remoteIntrospectedColumn) : this.remoteLiveColumns(tableName);
+  }
+
+  /** [#23816] The table's columns, read live from the remote catalog. */
+  private async remoteLiveColumns(tableName: string): Promise<IntrospectedColumn[]> {
+    return (await this.remoteCatalogRead(REMOTE_TABLE_INFO_SQL, [tableName])).map(remoteIntrospectedColumn);
+  }
+
+  /**
+   * The table's indexes. [#23816] On the REMOTE face, the statements the local
+   * SQLite arm sends, sent to the remote database (a detection's catalog while
+   * one runs, else live reads): `sqlite_master` for each index's DDL (the only
+   * place an expression key or a `WHERE` predicate survives),
+   * `pragma_index_list` for the set, and `pragma_index_info` for an index whose
+   * DDL does not parse. The DDL goes through the driver-sql parsers the local
+   * arm uses, so an index reads alike on both faces.
+   */
+  protected override async introspectIndexes(
+    tableName: string,
+    opts: { onFailure?: 'throw' | 'partial' } = {},
+  ): Promise<PhysicalIndex[]> {
+    if (!this.isRemote) return super.introspectIndexes(tableName, opts);
+    const held = this.remoteCatalogSnapshot;
+    const list = held?.indexList.get(tableName);
+    if (held && list) {
+      return remotePhysicalIndexes(list, (name) => held.indexDdl.get(name), (name) => held.indexInfo.get(name) ?? []);
+    }
+    return this.remoteLiveIndexes(tableName, opts);
+  }
+
+  /** [#23816] The table's indexes, read live from the remote catalog. */
+  private async remoteLiveIndexes(tableName: string, opts: { onFailure?: 'throw' | 'partial' } = {}): Promise<PhysicalIndex[]> {
+    const ddlByName = new Map<string, string>();
+    const info = new Map<string, Array<Record<string, unknown>>>();
+    let list: Array<Record<string, unknown>> = [];
+    try {
+      for (const r of await this.remoteCatalogRead(
+        `SELECT name, sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ?`,
+        [tableName],
+      )) {
+        if (typeof r.sql === 'string' && r.sql) ddlByName.set(String(r.name), r.sql);
+      }
+      list = await this.remoteCatalogRead(REMOTE_INDEX_LIST_SQL, [tableName]);
+      for (const r of list) {
+        const name = String(r.name);
+        if (!parseIndexDdl(ddlByName.get(name) ?? '')) info.set(name, await this.remoteCatalogRead(REMOTE_INDEX_INFO_SQL, [name]));
+      }
+    } catch (e) {
+      // Only a caller that can CORRECT a short read may ask for one (#7332).
+      if (opts.onFailure !== 'partial') throw e;
+    }
+    return remotePhysicalIndexes(list, (name) => ddlByName.get(name), (name) => info.get(name) ?? []);
+  }
+
+  /**
+   * The ADR-0120 D4 duplicate pre-flight. [#23816] On the REMOTE face, the
+   * statement the local face builds, with SQLite's own identifier quoting,
+   * sent to the remote database.
+   */
+  protected override async probeNullSafeUniqueDuplicates(
+    table: string,
+    columns: string[],
+    nullSafeColumns: string[],
+  ): Promise<Array<{ key: string; rows: number }>> {
+    if (!this.isRemote) return super.probeNullSafeUniqueDuplicates(table, columns, nullSafeColumns);
+    const nullSafe = new Set(nullSafeColumns);
+    const parts = columns.map((c) =>
+      nullSafe.has(c) ? `COALESCE(${quoteRemoteIdentifier(c)}, '${GLOBAL_TENANT}')` : quoteRemoteIdentifier(c),
+    );
+    const sql =
+      `SELECT ${parts.map((p, i) => `${p} AS k${i}`).join(', ')}, COUNT(*) AS n FROM ${quoteRemoteIdentifier(table)} ` +
+      `GROUP BY ${parts.join(', ')} HAVING COUNT(*) > 1 ORDER BY n DESC LIMIT 20`;
+    return (await this.remoteCatalogRead(sql)).map((r) => ({
+      key: columns.map((c, i) => `${c}=${JSON.stringify(r[`k${i}`])}`).join(', '),
+      rows: Number(r.n ?? 0),
+    }));
   }
 
   /**
@@ -3793,6 +4125,21 @@ export class TursoDriver extends SqlDriver {
     this.assertRemoteTransactionUnsupported(options, 'dropTable');
     if (this.isRemote) return this.remoteTransport!.dropTable(object);
     return super.dropTable(object, options);
+  }
+
+  /**
+   * The DDL-free registration a `skipSchemaSync` boot takes — inherited
+   * unchanged, and [#23816] on the REMOTE face it also records each object in
+   * {@link remoteDeclaredSchemas}, so a boot that ran no schema door still
+   * gives the drift detector the declarations to diff against. Still no
+   * statement and no round-trip. The parameter repeats the base's declared
+   * shape key for key (`check:object-def-param-keys` arm C).
+   */
+  override registerObjectMetadata(
+    objects: Array<{ name: string; fields?: Record<string, any>; tenancy?: any; indexes?: any[] }>,
+  ): void {
+    super.registerObjectMetadata(objects);
+    if (this.isRemote) for (const obj of objects) this.recordRemoteDeclaredSchema(obj);
   }
 
   // ===================================
@@ -3941,9 +4288,10 @@ export class TursoDriver extends SqlDriver {
   /**
    * Schema introspection — refused on the REMOTE face. The inherited member
    * reads every table's columns, foreign keys, primary keys and unique
-   * constraints through Knex (`columnInfo()` and the SQLite pragmas), so a
-   * remote answer would be a second copy of those four readers, the copy
-   * {@link refuseRemoteDriftDetection} declines for drift. Its callers already
+   * constraints through Knex (`columnInfo()` and the SQLite pragmas). The
+   * remote drift detector (#23816) reads two of those four (the columns and
+   * the indexes) and no caller of this member has asked for the other two on
+   * this face, so the member is still refused. Its callers already
    * treat a throw as "could not introspect": the datasource connection test
    * answers `ok: false` with this message, and the federation validation sweep
    * rows the datasource `unreachable`.
@@ -4067,30 +4415,172 @@ export class TursoDriver extends SqlDriver {
   }
 
   /**
-   * Apply drift entries — refused on the REMOTE face. Every entry is applied
-   * through Knex. The inherited member resolved here, reporting a destructive
-   * entry its caller had allowed as `skipped` (its SQLite rebuild caught the
-   * connection failure), so the answer read like a policy decision. The entries
-   * come from {@link detectManagedDrift}, which this face refuses too. The
-   * option parameter repeats the base's declared shape (`check:object-def-param-keys`).
+   * Apply drift entries. [#23816] On the REMOTE face, through the libSQL
+   * client: the index entries and `drop_column`, each in one `write` batch so
+   * it lands whole or not at all, and each reported `applied` only once a
+   * read-back shows its target state (see "Remote schema drift" at the top of
+   * this file for which entries, and why only those). The contract is the
+   * base's: a destructive entry is skipped unless `allowDestructive`, column
+   * entries run before index entries, and an entry this transport cannot
+   * perform, or whose DDL fails, is reported `skipped` and logged. The option
+   * parameter repeats the base's declared shape (`check:object-def-param-keys`).
    */
   override async applyMigrationEntries(
     entries: ManagedDriftEntry[],
     opts: { allowDestructive?: boolean } = {},
   ): ReturnType<SqlDriver['applyMigrationEntries']> {
-    if (this.isRemote) {
-      refuseRemoteInheritedMember(
-        'Applying schema migration entries (`applyMigrationEntries()`)',
-        'this driver cannot change the physical schema of the remote database from a drift report.',
-        `The entries are applied through the SQL driver's Knex connection. ${REMOTE_HAS_NO_KNEX_CONNECTION} ` +
-          'Until this change the call answered as if it had run, with every entry reported ' +
-          '`skipped`, including a destructive entry that `allowDestructive` permitted.',
-        'An ordinary boot against this datasource (`os serve` / `os start`) performs the additive ' +
-          'schema sync directly. A change that needs a table rebuild or a dropped column has no ' +
-          'remote path in this driver.',
-      );
+    if (!this.isRemote) return super.applyMigrationEntries(entries, opts);
+    this.assertSchemaMutable('reconcileManagedSchema');
+    const allowDestructive = opts.allowDestructive === true;
+    const applied: ManagedDriftEntry[] = [];
+    const skipped: ManagedDriftEntry[] = [];
+    const candidates = entries.filter((d) => {
+      if (d.category === 'destructive' && !allowDestructive) {
+        skipped.push(d);
+        return false;
+      }
+      return true;
+    });
+    // Column entries FIRST, as the base runs them: a dropped column takes its
+    // indexes with it, which may already satisfy an index entry below.
+    const ordered = [
+      ...candidates.filter((d) => !isIndexDriftOp(d.op)),
+      ...candidates.filter((d) => isIndexDriftOp(d.op)),
+    ];
+    for (const d of ordered) {
+      try {
+        const ok = isIndexDriftOp(d.op) ? await this.applyRemoteIndexDriftOp(d.op) : await this.applyRemoteColumnDriftOp(d.op);
+        (ok ? applied : skipped).push(d);
+      } catch (e: any) {
+        this.logger.warn(`[schema-drift] failed to reconcile '${d.table}' on the Turso REMOTE transport`, e?.message ?? e);
+        skipped.push(d);
+      }
     }
-    return super.applyMigrationEntries(entries, opts);
+    return { applied, skipped };
+  }
+
+  /**
+   * [#23816] One column drift entry on the REMOTE face. `drop_column` only:
+   * `ALTER TABLE … DROP COLUMN`, preceded in the same transaction by a
+   * `DROP INDEX` of every index keyed on the column, since SQLite refuses to
+   * drop a column an index still uses. That is the outcome the other dialects
+   * reach by themselves (PostgreSQL drops the column's indexes, the local
+   * SQLite rebuild re-creates only the declared ones). A column SQLite still
+   * refuses to drop (a primary key, a UNIQUE or foreign-key constraint, a
+   * view or trigger that names it) fails the batch, which rolls the dropped
+   * indexes back with it. Every other column entry needs the SQLite table
+   * rebuild, which this transport does not run, so it is skipped.
+   */
+  private async applyRemoteColumnDriftOp(op: ManagedDriftEntry['op']): Promise<boolean> {
+    const column = (op as { column?: string }).column;
+    if (op.type !== 'drop_column' || !column) {
+      this.logger.warn(
+        `[schema-drift] ${op.type} on ${op.table}.${column ?? ''} is unsupported on the Turso REMOTE transport — ` +
+          'skipped: it needs the SQLite table rebuild, which this transport does not run',
+      );
+      return false;
+    }
+    const hasColumn = async () => (await this.remoteLiveColumns(op.table)).some((c) => c.name === column);
+    if (!(await hasColumn())) return false;
+    const keyed = (await this.remoteLiveIndexes(op.table)).filter(
+      (i) => !i.primary && !i.name.startsWith('sqlite_autoindex_') && i.columns.includes(column),
+    );
+    await this.remoteTransport!.batch(
+      [
+        ...keyed.map((i) => `DROP INDEX IF EXISTS ${quoteRemoteIdentifier(i.name)}`),
+        `ALTER TABLE ${quoteRemoteIdentifier(op.table)} DROP COLUMN ${quoteRemoteIdentifier(column)}`,
+      ],
+      'write',
+    );
+    return !(await hasColumn());
+  }
+
+  /**
+   * [#23816] One index drift entry on the REMOTE face, mirroring
+   * `SqlDriver.applyIndexDriftOp` op for op. A drop-and-create pair runs as
+   * one `write` batch, so a create that fails (duplicates under a new UNIQUE,
+   * a column that is not there) leaves the old index exactly as it was. The
+   * `CREATE INDEX` is the schema sync's own ({@link RemoteTransport.createIndexSql}).
+   * A created index counts as applied only when a live read finds it with the
+   * uniqueness and the key columns, in order, the entry asked for; a name
+   * alone would also match a stale index the `IF NOT EXISTS` left in place.
+   */
+  private async applyRemoteIndexDriftOp(op: ManagedDriftEntry['op']): Promise<boolean> {
+    const live = () => this.remoteLiveIndexes(op.table);
+    const names = async () => new Set((await live()).map((i) => i.name));
+    const built = async (name: string, columns: readonly string[], unique: boolean) => {
+      const found = (await live()).find((i) => i.name === name);
+      return !!found && found.unique === unique && found.columns.length === columns.length
+        && found.columns.every((c, i) => c === columns[i]);
+    };
+    const create = (name: string, columns: string[], unique: boolean, nullSafeColumns?: string[]) =>
+      this.remoteTransport!.createIndexSql(op.table, { name, columns, unique, ...(nullSafeColumns ? { nullSafeColumns } : {}) });
+    const drop = (name: string) => `DROP INDEX IF EXISTS ${quoteRemoteIdentifier(name)}`;
+    switch (op.type) {
+      case 'drop_index':
+        // Applied once the name is gone, whether or not it was there: a re-run
+        // after a half-applied migration must find the index's step done.
+        await this.remoteTransport!.batch([drop(op.indexName)], 'write');
+        return !(await names()).has(op.indexName);
+      case 'create_index': {
+        if (!(await this.remoteIndexColumnsPresent(op.table, op.indexName, op.columns))) return false;
+        await this.remoteTransport!.batch([create(op.indexName, op.columns, op.unique, op.nullSafeColumns)], 'write');
+        return built(op.indexName, op.columns, op.unique);
+      }
+      case 'recreate_index': {
+        // ADR-0120 D4: the NULL-safe tightening re-runs the duplicate pre-flight
+        // immediately before the drop, as the local face does.
+        if (op.unique && (op.nullSafeColumns?.length ?? 0) > 0) {
+          const duplicates = await this.probeNullSafeUniqueDuplicates(op.table, op.columns, op.nullSafeColumns!);
+          if (duplicates.length > 0) {
+            this.logDurabilityFailure(
+              `[schema-drift] REFUSING to rebuild '${op.indexName}' on '${op.table}' as a NULL-safe unique — ` +
+                `${duplicates.length} duplicate group(s) violate it (e.g. ${duplicates[0].key} × ${duplicates[0].rows} rows). ` +
+                `The existing index is left in place; deduplicate and re-run "os migrate plan" (ADR-0120 D4).`,
+            );
+            return false;
+          }
+        }
+        if (!(await this.remoteIndexColumnsPresent(op.table, op.indexName, op.columns))) return false;
+        await this.remoteTransport!.batch(
+          [drop(op.indexName), create(op.indexName, op.columns, op.unique, op.nullSafeColumns)],
+          'write',
+        );
+        return built(op.indexName, op.columns, op.unique);
+      }
+      case 'replace_unique_index': {
+        // CREATE before DROP, in one transaction: uniqueness is never
+        // unenforced in between, and a create that fails drops nothing.
+        if (!(await this.remoteIndexColumnsPresent(op.table, op.createIndexName, op.createColumns))) return false;
+        await this.remoteTransport!.batch(
+          [create(op.createIndexName, op.createColumns, true, op.nullSafeColumns), ...op.dropIndexNames.map(drop)],
+          'write',
+        );
+        const after = await names();
+        return (await built(op.createIndexName, op.createColumns, true)) && op.dropIndexNames.every((n) => !after.has(n));
+      }
+      default:
+        // `unbuildable_index` is report-only: no column to build it over.
+        return false;
+    }
+  }
+
+  /**
+   * [#23816] Whether every key column of an index the remote apply door would
+   * create is a physical column, as `SqlDriver.syncDeclaredIndexes` asks
+   * before it creates one. A missing column is the same durability failure
+   * there and here: the index the metadata declares is not created.
+   */
+  private async remoteIndexColumnsPresent(table: string, indexName: string, columns: readonly string[]): Promise<boolean> {
+    const physical = new Set((await this.remoteLiveColumns(table)).map((c) => c.name));
+    const missing = columns.filter((c) => !physical.has(c));
+    if (missing.length === 0) return true;
+    this.logDurabilityFailure(
+      `[schema-drift] index '${indexName}' on '${table}' was NOT created: no column for ` +
+        `${missing.map((c) => `'${c}'`).join(', ')} on the remote database. The constraint or access path it ` +
+        'declares does not exist; fix the metadata so every key column is a stored field, then re-run "os migrate plan".',
+    );
+    return false;
   }
 
   /**

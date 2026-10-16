@@ -8,6 +8,27 @@ Solutions to the most common issues encountered when working with ObjectStack.
 
 ---
 
+## Installation Issues
+
+### "Cannot read properties of null (reading 'edgesOut')" from npm install
+
+**Symptom:** npm exits 1 with `npm error Cannot read properties of null (reading 'edgesOut')` while installing `@objectstack/cli` or `@objectstack/plugin-auth`. This includes the install step of `npm create objectstack` and `npm install -g @objectstack/cli`.
+
+**Cause:** npm 10, the npm that Node 22 ships, crashes on an optional `vitest` peer in the auth library's dependency tree: the newest vitest 4 has no matching `@vitest/browser-webdriverio` release. npm 11 and pnpm install the same packages, and `npm ci` from a committed lockfile is not affected.
+
+**Fix** (either one):
+
+1. **Use npm 11** (it needs Node 22.9+): run `npm install -g npm@11`, then repeat the install. This is the only fix for `npm install -g`, because a global install reads no `overrides`. In a Dockerfile, install under a pinned npm 11, as the [self-built runtime recipe](/docs/deployment/self-hosting#docker-official-image--the-standard-path) does.
+2. **Stay on npm 10 and pin vitest** in your project's root `package.json`. Then run `npm install` again and commit the lockfile:
+
+   ```json title="package.json"
+   "overrides": { "vitest": "~4.0.0" }
+   ```
+
+This entry, the npm 11 steps in [Self-hosting](/docs/deployment/self-hosting), and the npm 10 notes in [Getting Started](/docs/getting-started#prerequisites) and [Your First Project](/docs/getting-started/your-first-project#prerequisites) can be removed once `@vitest/browser-webdriverio` publishes the version that `npm view vitest dist-tags` lists as `V4`, and a plain npm 10 install of `@objectstack/plugin-auth` passes.
+
+---
+
 ## Validation Errors
 
 ### "Invalid enum value" for field type

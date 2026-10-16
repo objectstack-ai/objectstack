@@ -25,6 +25,11 @@
  *   - **nothing is skipped silently** — the third state, "shrug and serve", is
  *     the one this gate exists to delete.
  *
+ * One driver-declared exception, and it is loud: a driver whose
+ * `driftReportCaveat` says its report must not be acted on unattended (the
+ * Turso REMOTE face, #23816) gets a warning naming that reason, and the gate
+ * applies and refuses nothing — as when the report cannot be read at all.
+ *
  * `needs_confirm` drift is applied along with `safe`: `os migrate apply`'s own
  * split is `category !== 'destructive' || allowDestructive`, so "the
  * `--allow-destructive` class" the acceptance names is exactly
@@ -119,6 +124,18 @@ export async function runArtifactBootMigrationGate(opts: {
     // No SQL driver (memory / mongo) — nothing issues managed DDL, so there is
     // no drift to classify and nothing for this policy to decide.
     if (!driver) return { ok: true, applied: [], skipped: [], destructive: [] };
+
+    // [#23816] A driver that declares its report must not be acted on
+    // unattended gets this gate's "did not run" answer: warn, apply nothing,
+    // refuse nothing. The Turso REMOTE face declares one: its schema sync does
+    // not create a declared NOT NULL, so a healthy remote database reads as
+    // destructive drift, and the refusal's remedy cannot run on that transport.
+    // Read from the driver's declaration, never from its transport name.
+    const caveat = driver.driftReportCaveat;
+    if (typeof caveat === 'string' && caveat) {
+        warn(`  ⚠ Did not check the physical schema against the artifact: ${caveat}. Boot continues.`);
+        return { ok: true, applied: [], skipped: [], destructive: [] };
+    }
 
     let drift: ManagedDriftEntry[];
     try {

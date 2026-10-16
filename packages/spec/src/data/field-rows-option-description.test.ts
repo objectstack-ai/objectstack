@@ -299,12 +299,13 @@ describe('the object.form options repeater offers only keys the door accepts', (
     expect(offeredOptionKeys()).not.toContain('icon');
   });
 
-  it('still offers the four inputs that survived, in order', () => {
+  it('still offers the four inputs that survived, in order, then `kind`', () => {
     // The positive control for the assertion above: an empty or mangled list
     // would satisfy `not.toContain('icon')` while having removed the whole
     // repeater. `description` is here because PR #13669 declared it — ⛔ do
-    // not drop it while editing this list.
-    expect(offeredOptionKeys()).toEqual(['label', 'value', 'color', 'description']);
+    // not drop it while editing this list. `kind` joined with #23809, the
+    // option's lifecycle category.
+    expect(offeredOptionKeys()).toEqual(['label', 'value', 'color', 'description', 'kind']);
   });
 
   it('offers no input naming a key the publish door refuses — the general invariant', () => {

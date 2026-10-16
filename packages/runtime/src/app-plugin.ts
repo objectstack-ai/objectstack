@@ -150,6 +150,16 @@ export class AppPlugin implements Plugin {
      */
     requiresServices: string[] = ['manifest'];
 
+    /**
+     * Private to the type checker only: three readers outside this class read
+     * `bundle` structurally off a plugin entry, with no type to break when it
+     * changes. `stackDeclaresOrganizationRecordPage` (`@objectstack/core`,
+     * `stack-organization-record-page.ts`) looks for an app's own
+     * `sys_organization` record page; `@objectstack/cli`'s `serve.ts` looks for
+     * declared translations, and its `graft-runtime-hooks.ts` finds an app's
+     * bundle by manifest id to graft hooks onto. Renaming or reshaping this
+     * field silently blinds all three; change them together.
+     */
     private bundle: any;
     /** Memoized backing store for {@link collections}. */
     private resolvedCollections?: any;

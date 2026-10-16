@@ -15,7 +15,7 @@
 // owner-only `member_default`.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createStandaloneStack } from './standalone-stack.js';
@@ -395,6 +395,27 @@ describe('createStandaloneStack — default datasource declared, built via the s
     expect(r.driverId).toBe('sqlite');
     expect(r.kind).toMatch(/SqlDriver$/);
     expect(r.titles).toContain('hello-driver');
+  }, BOOT_TIMEOUT);
+
+  // An upper-case `FILE:` is the same file as `file:`, and the boot's directory
+  // preparation creates no `FILE:` directory on the way. Run from an empty cwd:
+  // the prefix used to survive into the relative filename, so the directory it
+  // made landed beside the process.
+  it('FILE: → declares the same file as file: and creates no FILE: directory', async () => {
+    const cwd = process.cwd();
+    const work = mkdtempSync(join(tmpdir(), 'os-file-url-case-'));
+    process.chdir(work);
+    try {
+      const upper = defaultDefOf(await createStandaloneStack({ databaseUrl: 'FILE:./upper/x.db' })).def;
+      const lower = defaultDefOf(await createStandaloneStack({ databaseUrl: 'file:./upper/x.db' })).def;
+      expect(upper.driver).toBe('sqlite');
+      expect(upper.config?.filename).toBe('./upper/x.db');
+      expect(upper.config?.filename).toBe(lower.config?.filename);
+      expect(readdirSync(work).filter((name) => /^file:/i.test(name))).toEqual([]);
+    } finally {
+      process.chdir(cwd);
+      rmSync(work, { recursive: true, force: true });
+    }
   }, BOOT_TIMEOUT);
 
   it('databaseDriver:sqlite-wasm → declares driver "sqlite-wasm"; factory builds SqliteWasmDriver that round-trips', async () => {

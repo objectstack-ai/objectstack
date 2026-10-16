@@ -100,6 +100,17 @@ const DEFAULT_ID_LENGTH = 16;
 const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
 
 /**
+ * [#23847] ADR-0113's physical column constraint: does this field declare a
+ * NOT NULL column? Asked exactly as the local face's `declaresColumnNotNull`
+ * (`driver-sql`'s `sql-driver.ts`) asks it — truthiness of `storage.notNull`,
+ * whatever the field's type, `multiple: true` included, and never `required`.
+ * See {@link RemoteTransport.columnDeclarationSQL}, its one reader here.
+ */
+function declaresColumnNotNull(field: unknown): boolean {
+  return Boolean((field as { storage?: { notNull?: unknown } } | null | undefined)?.storage?.notNull);
+}
+
+/**
  * [#17609] Every index name the database already carries — ONE statement for a
  * whole schema sync, read beside the column probe. SQLite index names are
  * unique per database, so a name hit is the same "already exists" answer
@@ -1307,6 +1318,21 @@ export class RemoteTransport {
     return result.rows;
   }
 
+  /**
+   * [#23816] Run statements as one libSQL batch and answer each one's rows.
+   *
+   * A `'write'` batch runs inside one transaction on the server: a statement
+   * that fails rolls back every statement before it, so the batch lands whole
+   * or not at all. That is what the remote migration doors rely on to drop an
+   * index and the column it keys, or to drop and re-create an index under one
+   * name, without ever leaving the half-applied state between the two.
+   */
+  async batch(statements: InStatement[], mode: 'read' | 'write'): Promise<Array<ResultSet['rows']>> {
+    const client = await this.ensureConnected();
+    const results = await client.batch(statements, mode);
+    return results.map((result) => result.rows);
+  }
+
   // ===================================
   // CRUD Operations
   // ===================================
@@ -2083,8 +2109,7 @@ export class RemoteTransport {
           const type = (field as any).type || 'string';
           if (type === 'formula') continue; // Virtual — no column
           this.assertSafeIdentifier(name);
-          const colType = this.mapFieldTypeToSQL(field);
-          await this.client!.execute(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${colType}`);
+          await this.executeAddColumn(`ALTER TABLE "${tableName}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field)}`);
           materialized.add(name);
         }
       }
@@ -2215,8 +2240,7 @@ export class RemoteTransport {
           const type = (field as any).type || 'string';
           if (type === 'formula') continue;
           this.assertSafeIdentifier(name);
-          const colType = this.mapFieldTypeToSQL(field);
-          ddlStatements.push(`ALTER TABLE "${object}" ADD COLUMN "${name}" ${colType}`);
+          ddlStatements.push(`ALTER TABLE "${object}" ADD COLUMN "${name}" ${this.columnDeclarationSQL(field)}`);
           materialized.add(name);
         }
 
@@ -2381,13 +2405,84 @@ export class RemoteTransport {
         const type = (field as any).type || 'string';
         if (type === 'formula') continue; // Virtual — no column
         this.assertSafeIdentifier(name);
-        const colType = this.mapFieldTypeToSQL(field);
-        sql += `, "${name}" ${colType}`;
+        sql += `, "${name}" ${this.columnDeclarationSQL(field)}`;
       }
     }
 
     sql += ')';
     return sql;
+  }
+
+  /**
+   * [#23847] What follows a declared field's column NAME in this transport's
+   * DDL: the storage type {@link mapFieldTypeToSQL} decides, then ` NOT NULL`
+   * when the field declares `storage: { notNull: true }`. The ONE renderer for
+   * every statement that materializes a declared field's column here — the
+   * `CREATE TABLE` {@link buildCreateTableSQL} builds and the `ALTER TABLE …
+   * ADD COLUMN` of {@link syncSchema} and {@link syncSchemasBatch} — so no door
+   * can create the column without the constraint another door creates it with.
+   *
+   * # The reference: `SqlDriver.createColumn`, this driver's local face
+   *
+   * ADR-0113: the physical NOT NULL comes from the EXPLICIT storage
+   * constraint, never from `required` (the write-time contract the record
+   * validator enforces). `createColumn` asks one question for it,
+   * `declaresColumnNotNull` — truthiness of `storage.notNull` — on BOTH of its
+   * exits, the multi-value JSON column included (#17231), and runs on `CREATE
+   * TABLE` and on `ALTER TABLE ADD COLUMN` alike. {@link declaresColumnNotNull}
+   * below asks the same question, the same way, on the same two statements.
+   * `turso-remote-not-null.test.ts` holds the two faces to one answer: the
+   * columns a remote sync creates carry the `notnull` flag the local face's
+   * columns carry for the same declarations.
+   *
+   * Until this renderer the remote face never emitted the constraint, so every
+   * `storage.notNull` was unenforced on a Turso remote database, and the shared
+   * drift differ read each such column as DESTRUCTIVE `tighten_not_null` drift
+   * against a table this transport had itself just created.
+   *
+   * # ADD COLUMN on a table that already holds rows
+   *
+   * SQLite refuses `ADD COLUMN … NOT NULL` without a non-NULL `DEFAULT` once
+   * the table has a row (`Cannot add a NOT NULL column with default value
+   * NULL`); an empty table accepts it. The local face sends the same
+   * statement and gets the same refusal, so the sync of that object fails
+   * loudly on both faces, and the engine reports it per object. ⛔ Never drop
+   * the ` NOT NULL` to let such a statement through: a nullable column under a
+   * `storage.notNull` declaration is exactly the silent, unenforced state this
+   * renderer replaced. Imposing NOT NULL on a column that already exists is
+   * not done here at all — that is `tighten_not_null`, destructive, and
+   * belongs to the migration path, not to an additive sync.
+   *
+   * ⚠️ One case still differs, and it is a DEFAULT question, not a nullability
+   * one: this transport emits no declared column DEFAULT for any field, while
+   * `createColumn` emits a literal `defaultValue` (`applyDeclaredColumnDefault`).
+   * So a `storage.notNull` field that also declares a literal `defaultValue`,
+   * added to a populated table, is accepted locally (existing rows take the
+   * default) and refused here. `turso-remote-not-null.test.ts` records that
+   * asymmetry; closing it means deciding whether, and from which shared source,
+   * this face emits declared defaults.
+   */
+  private columnDeclarationSQL(field: any): string {
+    const colType = this.mapFieldTypeToSQL(field);
+    return declaresColumnNotNull(field) ? `${colType} NOT NULL` : colType;
+  }
+
+  /**
+   * [#23847] Send one `ALTER TABLE … ADD COLUMN`, and when the database refuses
+   * it, say which statement was refused. The local face's error already names
+   * it — knex prefixes the failing SQL to the driver's message — while libSQL's
+   * own message (`Cannot add a NOT NULL column with default value NULL`) names
+   * no table and no column, and the engine's per-object report says only which
+   * object failed. Same error object, same class and code; only its message
+   * gains the statement, in knex's `<sql> - <message>` form.
+   */
+  private async executeAddColumn(ddl: string): Promise<void> {
+    try {
+      await this.client!.execute(ddl);
+    } catch (e) {
+      if (e instanceof Error) e.message = `${ddl} - ${e.message}`;
+      throw e;
+    }
   }
 
   /**
@@ -2488,36 +2583,50 @@ export class RemoteTransport {
         continue;
       }
       if (emitted.has(index.name)) continue;
-      // The KEY columns are references and stay gated. The index NAME is not a
-      // reference but one name by definition — the class #14113 escapes for an
-      // alias rather than refuses. It is the one position here an author types
-      // freely (`IndexSchema.name` is any string, and the local face quotes
-      // whatever it is given), so refusing it would fail this face's WHOLE
-      // schema sync over a declaration the other face accepts.
-      for (const column of index.columns) this.assertSafeIdentifier(column);
-      const nameSql = this.aliasIdentifierSql(index.name);
-
-      const nullSafe = new Set(index.nullSafeColumns ?? []);
-      const parts = index.columns.map((c) =>
-        nullSafe.has(c) ? organizationKeyPartSql(`"${c}"`) : `"${c}"`,
-      );
-      // `IF NOT EXISTS` is what makes a concurrent creator (two instances
-      // booting against one database) a no-op rather than an error — and it is
-      // also what makes the per-statement retry in
-      // {@link retrofitDeclaredIndexes} safe under EITHER libsql batch semantic
-      // (transactional: nothing was applied; non-transactional: re-applying is
-      // a no-op).
       planned.push({
         name: index.name,
         table: tableName,
         unique: index.unique,
-        sql:
-          `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${nameSql} ` +
-          `ON "${tableName}" (${parts.join(', ')})`,
+        sql: this.createIndexSql(tableName, index),
       });
       emitted.add(index.name);
     }
     return planned;
+  }
+
+  /**
+   * The `CREATE INDEX` this face issues for one index: the schema sync's
+   * declared indexes ({@link buildDeclaredIndexDDL}) and, since #23816, the
+   * `create_index` / `recreate_index` drift entries `TursoDriver` applies on
+   * the remote face. One emitter for both, so an index the migration door
+   * re-creates is byte-for-byte the one the sync would have created, and the
+   * drift differ reads the two alike.
+   */
+  createIndexSql(
+    tableName: string,
+    index: { name: string; columns: readonly string[]; unique: boolean; nullSafeColumns?: readonly string[] },
+  ): string {
+    // The table and KEY columns are references and stay gated. The index NAME
+    // is not a reference but one name by definition — the class #14113 escapes
+    // for an alias rather than refuses. It is the one position here an author
+    // types freely (`IndexSchema.name` is any string, and the local face quotes
+    // whatever it is given), so refusing it would fail this face's WHOLE schema
+    // sync over a declaration the other face accepts.
+    this.assertSafeIdentifier(tableName);
+    for (const column of index.columns) this.assertSafeIdentifier(column);
+    const nameSql = this.aliasIdentifierSql(index.name);
+
+    const nullSafe = new Set(index.nullSafeColumns ?? []);
+    const parts = index.columns.map((c) =>
+      nullSafe.has(c) ? organizationKeyPartSql(`"${c}"`) : `"${c}"`,
+    );
+    // `IF NOT EXISTS` is what makes a concurrent creator (two instances
+    // booting against one database) a no-op rather than an error — and it is
+    // also what makes the per-statement retry in
+    // {@link retrofitDeclaredIndexes} safe under EITHER libsql batch semantic
+    // (transactional: nothing was applied; non-transactional: re-applying is
+    // a no-op).
+    return `CREATE ${index.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS ${nameSql} ON "${tableName}" (${parts.join(', ')})`;
   }
 
   /**

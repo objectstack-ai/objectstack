@@ -2,6 +2,8 @@
 '@objectstack/service-storage': minor
 ---
 
+**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+
 feat(service-storage): the `sys_attachment` read gate writes one `ReadableIds` leaf per parent object and does no pre-scan, so a broad read is judged over every row, not a 2,000-row window (ADR-0139 D4, D5)
 
 Clause-②: yes

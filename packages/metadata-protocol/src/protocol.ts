@@ -1873,8 +1873,9 @@ export function graftFoldedFormSections(authored: unknown, parsed: unknown): unk
 /**
  * How many verify-and-restore rounds {@link projectStorableViewBody} may take.
  * One round per level of key-moved nesting is what convergence costs: a
- * `groups` → `sections` fold whose sections carry a `visibleOn` →
- * `visibleWhen` fold is two levels. A `view` body is a bounded document, so a
+ * `groups` → `sections` fold whose sections carried a moved key of their own
+ * (the `visibleOn` → `visibleWhen` fold, until that alias retired at 18) is
+ * two levels. A `view` body is a bounded document, so a
  * body still diverging after this many rounds is not converging at all.
  */
 const STORABLE_VIEW_MAX_ROUNDS = 8;
@@ -1937,7 +1938,7 @@ function soleMovedFrom(dropped: readonly string[], authored: Record<string, unkn
  *   the parse applies it by itself — a schema DEFAULT, left to the parse
  *   (ADR-0087's `storable` rule). If the re-parse did NOT reproduce it, the value
  *   came from something the author wrote under another key — a MOVED key
- *   (`groups` → `sections`, `visibleOn` → `visibleWhen`) — and it is stored,
+ *   (`groups` → `sections`) — and it is stored,
  *   projected against the authored key it moved from when that key is the only
  *   one of its shape, and stored whole otherwise. Once stored it stays stored
  *   in later rounds, so the rounds only ever add.
@@ -1965,9 +1966,9 @@ function buildStorableViewNode(authored: unknown, parsed: unknown, reparsed: unk
             const storedBefore = prev !== undefined && prev[key] !== undefined;
             if (!storedBefore && (r === undefined || storableEqual(r[key], value))) continue;
             // Projected against the key it moved from when that key is the only
-            // one of its shape; otherwise (a `visibleOn` string folded into a
-            // `visibleWhen` expression object) the parsed value is the moved
-            // key's value, and it is stored whole.
+            // one of its shape; otherwise (a string folded into an expression
+            // object, as the retired `visibleOn` → `visibleWhen` fold did) the
+            // parsed value is the moved key's value, and it is stored whole.
             const from = soleMovedFrom(dropped, a, value);
             out[key] = from === undefined ? value : buildStorableViewNode(a[from], value, r?.[key], prev?.[key]);
         }
@@ -1993,8 +1994,9 @@ function buildStorableViewNode(authored: unknown, parsed: unknown, reparsed: unk
  * {@link graftNormalizedOperators} (a value normalised in place) and
  * {@link graftFoldedFormSections} (a key moved). Both are special cases of it:
  * a parsed value is stored for every authored key, and a moved key is found by
- * evidence rather than by name, so `visibleOn` → `visibleWhen` (never grafted)
- * is covered too. Every other type keeps the two grafts over its verbatim body.
+ * evidence rather than by name, so a move no graft names (the
+ * `visibleOn` → `visibleWhen` fold did, until that alias retired at 18) is
+ * covered too. Every other type keeps the two grafts over its verbatim body.
  *
  * ## Why a re-parse, and what it proves
  *
@@ -21757,7 +21759,7 @@ export class ObjectStackProtocolImplementation implements
         const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
         const remedy = unique.some((h) => h.shipped)
             ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
-              + `deployment is composed without that package.`
+              + `deployment is composed without that package's page.`
             : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
               + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
         const err = new Error(

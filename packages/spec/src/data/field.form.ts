@@ -181,6 +181,7 @@ export const fieldForm = defineForm({
             { field: 'color', label: 'Color' },
             { field: 'default', label: 'Default' },
             { field: 'visibleWhen', label: 'Visible When' },
+            { field: 'kind', label: 'Kind' },
           ],
         },
         // Reference field options

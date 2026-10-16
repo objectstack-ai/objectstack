@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 import { describe, it, expect } from 'vitest';
-import type { IAutomationService, AutomationResult, FlowRuntimeState } from './automation-service';
+import type { IAutomationService, AutomationResult, FlowRuntimeState, FlowUnboundCause } from './automation-service';
+import { FLOW_UNBOUND_CAUSES } from './automation-service';
 import type { FlowParsed } from '../automation/flow.zod';
 import { FlowSchema } from '../automation/flow.zod';
 import type { ExecutionLog } from '../automation/execution.zod';
@@ -48,6 +49,18 @@ export type FlowRuntimeStateCarriesAnOptionalReason = Assert<Eq<FlowRuntimeState
  */
 export type FlowRuntimeStateReasonIsOptional = Assert<
   { name: string; enabled: boolean; bound: boolean } extends FlowRuntimeState ? true : false
+>;
+/**
+ * [#23842] The classifier beside the sentence: optional, and CLOSED over the
+ * exported tuple, so a consumer can enumerate it and a producer cannot stamp a
+ * value the tuple does not list. The identity fails if the key is dropped,
+ * widened to `string`, or drifts from `FLOW_UNBOUND_CAUSES`.
+ */
+export type FlowRuntimeStateUnboundCauseIsTheClosedTuple = Assert<
+  Eq<FlowRuntimeState['unboundCause'], (typeof FLOW_UNBOUND_CAUSES)[number] | undefined>
+>;
+export type FlowUnboundCauseIsTheTupleUnion = Assert<
+  Eq<FlowUnboundCause, 'deployment_policy' | 'disabled_subflow' | 'missing_trigger' | 'binding_failure'>
 >;
 
 describe('Automation Service Contract', () => {
@@ -456,5 +469,28 @@ describe('FlowRuntimeState — carries the reason a flow is unbound', () => {
     // environment read (the defect the producing round already caught once).
     expect(doc).toContain('RECORDED refusal');
     expect(doc).toContain('getTriggerBindingAudit()');
+  });
+
+  it('[#23842] classifies through a closed tuple beside the sentence, and the sentence stays render-only', () => {
+    // One machine value per cause, snake_case, no duplicates, no catch-all.
+    expect(new Set(FLOW_UNBOUND_CAUSES).size).toBe(FLOW_UNBOUND_CAUSES.length);
+    for (const cause of FLOW_UNBOUND_CAUSES) expect(cause).toMatch(/^[a-z]+(_[a-z]+)*$/);
+    expect(FLOW_UNBOUND_CAUSES).not.toContain('other');
+    const policyRow: FlowRuntimeState = {
+      name: 'daily_digest',
+      enabled: true,
+      bound: false,
+      triggerType: 'schedule',
+      reason: 'disabled by deployment policy',
+      unboundCause: 'deployment_policy',
+    };
+    expect(FLOW_UNBOUND_CAUSES).toContain(policyRow.unboundCause);
+
+    const source = readFileSync(fileURLToPath(new URL('./automation-service.ts', import.meta.url)), 'utf8');
+    const block = source.slice(source.indexOf('export interface FlowRuntimeState'));
+    const doc = block.slice(0, block.indexOf('\n}'));
+    // `reason` still forbids parsing, and now names where classification lives.
+    expect(doc).toContain('do not parse it');
+    expect(doc).toContain('{@link FlowRuntimeState.unboundCause}');
   });
 });

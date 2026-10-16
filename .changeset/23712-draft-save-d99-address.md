@@ -2,6 +2,8 @@
 '@objectstack/metadata-protocol': minor
 ---
 
+**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+
 fix(metadata-protocol)!: a draft save naming no package of an object its package-less definition owns is refused when its draft address is a package's draft, with a way out to the package-less draft (ADR-0029 D9.9)
 
 Clause-②: no (narrowing)

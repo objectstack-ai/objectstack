@@ -28,7 +28,10 @@ export const SysBusinessUnit = ObjectSchema.create({
   icon: 'building',
   isSystem: true,
   managedBy: 'platform',
-  description: 'Canonical Business Unit tree — hierarchical org/data-partition node (company / division / department / region / office). ADR-0057 D2.',
+  // Admin-facing copy: what the records are and what an admin does here. The
+  // design reference (canonical org/data-partition tree, ADR-0057 D2) lives in
+  // the docblock above, never in this string.
+  description: 'Your company structure — divisions, departments, regions and offices — used to scope data and reports.',
   displayNameField: 'name',
   nameField: 'name', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{name}',
@@ -267,6 +270,9 @@ export const SysBusinessUnit = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
+    // Setup's identity records are not discussion surfaces (objectui#12614 item 1):
+    // no Discussion feed, and a comment create on one answers 403 FEEDS_DISABLED.
+    feeds: false,
     // No `apiMethods` — default-open (#3543 audit). The HRIS org-tree sync
     // scenario (#3025) needs every primitive, and a whitelist naming all six is
     // equivalent to no whitelist while NOT tracking future primitives; the P1

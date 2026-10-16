@@ -202,7 +202,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       thread_id: {
         label: "スレッド",
-        help: "スレッド識別子 — 通常は `{object}:{record_id}`（例: `sys_user:abc123`）"
+        help: "スレッド識別子 — 通常は `{object}:{record_id}`（例: `account:9001`）"
       },
       parent_id: {
         label: "親コメント",

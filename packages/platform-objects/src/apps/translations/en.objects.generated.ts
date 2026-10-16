@@ -35,7 +35,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "Platform Role",
-        help: "Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2). To grant platform-admin standing, list the user's verified email in `OS_PLATFORM_OWNER_EMAIL`; under the `single` tenancy posture an unscoped `admin_full_access` assignment in `sys_user_permission_set` also confers it."
+        help: "Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it. To grant platform-admin standing, list the user's verified email in `OS_PLATFORM_OWNER_EMAIL`; under the `single` tenancy posture an unscoped `admin_full_access` assignment in `sys_user_permission_set` also confers it."
       },
       banned: {
         label: "Banned",
@@ -97,11 +97,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "Manager",
-        help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise)."
+        help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks."
       },
       primary_business_unit_id: {
         label: "Primary Business Unit",
-        help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
+        help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing. Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
       },
       source: {
         label: "Identity Source",
@@ -537,7 +537,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "Parent Organization",
-        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
+        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference."
       },
       sort_order: {
         label: "Sort Order",
@@ -710,11 +710,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "Placement Business Unit",
-        help: "Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer's delegated subtree."
+        help: "Business unit the invitee is placed under on acceptance. Must lie inside the issuer's delegated subtree."
       },
       positions: {
         label: "Placement Positions",
-        help: "Position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
+        help: "Position names assigned on acceptance. Every position's permission sets must be allowlisted by the issuer's adminScope."
       }
     },
     _views: {
@@ -848,7 +848,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "Business Unit",
     pluralLabel: "Business Units",
-    description: "Canonical Business Unit tree — hierarchical org/data-partition node (company / division / department / region / office). ADR-0057 D2.",
+    description: "Your company structure — divisions, departments, regions and offices — used to scope data and reports.",
     fields: {
       name: {
         label: "Name"
@@ -1797,7 +1797,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "Domain Verified",
-        help: "Whether DNS ownership of the email domain has been proven (ADR-0135 D6). Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment."
+        help: "Whether DNS ownership of the email domain has been proven. Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment."
       },
       oidc_config: {
         label: "OIDC Config",
@@ -2356,7 +2356,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "Notification Event",
     pluralLabel: "Notification Events",
-    description: "Notification events — one row per emit() (ADR-0030 Layer 2 ingress)",
+    description: "Every notification the platform sent, one row per event.",
     fields: {
       id: {
         label: "Notification ID"
@@ -2984,7 +2984,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       environment_id: {
         label: "Environment (deprecated)",
-        help: "DEPRECATED. Overlays are environment rows (ADR-0131 D6); no tenant column."
+        help: "DEPRECATED. Overlays are environment rows; no tenant column."
       },
       version: {
         label: "Version"
@@ -3090,7 +3090,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_audit: {
     label: "Metadata Audit",
     pluralLabel: "Metadata Audit",
-    description: "Append-only audit trail of metadata write decisions (ADR-0010).",
+    description: "Append-only audit trail of metadata write decisions.",
     fields: {
       id: {
         label: "ID"

@@ -139,6 +139,8 @@ model: opus
 - 仅 diff 改该项目测试或派生清单点名它时本地跑,否则 `deviations` 写明;席位 ACCEPT 读其 CI。
 - ③ 读到改动文件的门禁族 = `--commands` 派生清单(按 diff 收窄);派发词清单与全农场归 CI。
 - 新 fake engine ⇒ `check:engine-double-contract`;新错误码 ⇒ `check:error-code-casing`。
+- 改名或删除导出符号 ⇒ push 前跑 `node scripts/check-platform-checklist.mjs --changed-from origin/main`。
+- 判定行原样记 `gates`;它非派生族,不在 `--commands` 清单,`--ran` 只把它列为派生外、不报错。
 - ④ 报告 `gates`:CI 跑的每族引 PR check-runs(名+结论),⛔ 不本地重跑;`--ran` 只对账本地子集。
 - 推导用 `node scripts/pm/dispatch-gates.mjs --commands` 不传路径,脚本自己从 merge-base 取变更集。
 - 变更集含未提交与未跟踪;跑完把已跑清单交给 `--ran <file>` 对账,未跑的本地族它会点名。
@@ -291,8 +293,8 @@ model: opus
 - 行数为准,姊妹门禁定义 token 计数后同报 token。
 - 净增预算装不下 ⇒ 按 `blocked` 报缺口;⛔ 不自行扩写或抬预算:预算归 PM,抬它归维护者。
 - 付行数棘轮的唯一合法货币是删内容:⛔ 不拿 re-wrap(折行合并)当筹行,新增以删减付账。
-- 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行。
-- ⛔ 不把不买内容的密度修复当筹行拒掉;删不出等量内容 ⇒ 报 `blocked`,⛔ 不抬 ceiling。
+- 密度优化只随净减内容的 PR;分界只问折行有没有为新增内容买行;不买者 ⛔ 不当筹行拒。
+- 删不出等量内容 ⇒ 报 `blocked`,⛔ 不自抬 ceiling;裁决记录下令写入者除外(见棘轮头部)。
 - 例外:派发令点名测量优先的零余量受管账本 ⇒ 落行、不动上限行、红着报实测行数。
 - 发布面动了要 changeset;`skip-changeset` 判据是没动:已发布 = 各包 `files[]` 实际发运内容。
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。

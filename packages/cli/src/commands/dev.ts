@@ -91,6 +91,69 @@ export async function resolveDevDatabase(opts: {
 }
 
 /**
+ * Make the directory of `os dev`'s unified-default SQLite database
+ * (`<state dir>/data/`), bounded — or reject at once, naming the database
+ * file, the directory and the operating system's code (#23737).
+ *
+ * Only the `unified-default` source is prepared here; every other source is
+ * the serve child's to open (and its standalone host prepares the directory
+ * with the same bounded walk).
+ *
+ * ## Why not `fs.mkdirSync(dir, { recursive: true })`
+ *
+ * Node's recursive mkdir (v22.22.0, measured; sync and async alike) never
+ * returns when a level answers `ENOENT` although its parent exists. Under
+ * `OS_HOME=/proc/os-23737` this command looped `mkdir("/proc/os-23737")` ↔
+ * `mkdir("/proc")` in its own process (64,440 failing calls in 25 s) and never
+ * reached its next line.
+ *
+ * The walk is the one `driver-sql`'s connect and the runtime's standalone host
+ * run (neither is on a package entry, hence this module-level copy): find the
+ * nearest level that exists, create the missing ones top-down with a
+ * NON-recursive `mkdir`, accept `EEXIST` on a created level (a concurrent
+ * creator), and reject on anything else.
+ */
+export async function prepareDevDatabaseDirectory(
+  resolved: Pick<ResolvedProjectDatabaseUrl, 'url' | 'source'>,
+): Promise<void> {
+  if (resolved.source !== 'unified-default') return;
+  const filename = resolved.url.replace(/^file:/, '');
+  const directory = path.resolve(path.dirname(filename));
+  try {
+    const missing: string[] = [];
+    let level = directory;
+    for (;;) {
+      try {
+        if (!(await fs.promises.stat(level)).isDirectory() && missing.length === 0) await fs.promises.mkdir(level);
+        break;
+      } catch (e) {
+        if ((e as { code?: unknown } | null)?.code !== 'ENOENT') throw e;
+        missing.push(level);
+        const parent = path.dirname(level);
+        if (parent === level) break;
+        level = parent;
+      }
+    }
+    for (const each of missing.reverse()) {
+      try {
+        await fs.promises.mkdir(each);
+      } catch (e) {
+        if ((e as { code?: unknown } | null)?.code !== 'EEXIST') throw e;
+      }
+    }
+  } catch (e) {
+    const code = (e as { code?: unknown } | null)?.code;
+    const reason = e instanceof Error ? e.message : String(e);
+    throw Object.assign(
+      new Error(
+        `The default database '${filename}' cannot be created: its directory '${directory}' could not be made: ${reason}`,
+      ),
+      { code: typeof code === 'string' ? code : undefined, filename, directory, cause: e },
+    );
+  }
+}
+
+/**
  * The `os dev` MCP connect hint — the three lines a reader PASTES (#3167,
  * #16734).
  *
@@ -573,8 +636,15 @@ export default class Dev extends Command {
         // prompt (CI-safe), never silent (#6469).
         console.log(chalk.yellow(`  ⚠ ${resolvedDb.notice}`));
       }
-      if (resolvedDb.source === 'unified-default') {
-        fs.mkdirSync(path.dirname(resolvedDb.url.replace(/^file:/, '')), { recursive: true });
+      // Bounded, and refused at once when the directory cannot be made (#23737).
+      try {
+        await prepareDevDatabaseDirectory(resolvedDb);
+      } catch (error: any) {
+        printError(error?.message ?? String(error));
+        console.error(chalk.yellow(
+          '  Point OS_HOME at a directory that can be created, or choose the database with --database.',
+        ));
+        process.exit(1);
       }
       const effectiveDb = resolvedDb.url;
       // `dev` has a resolved artifact by this point (it compiled one, or was
@@ -927,15 +997,40 @@ export default class Dev extends Command {
           : `${changed.length} files`;
         console.log(chalk.dim(`\n  ↻ recompiling (${label})...`));
         const t0 = Date.now();
+        // BOTH streams are captured, and both are printed when the compile
+        // fails (#23820). `compile` renders its text face — refusals included — on
+        // STDOUT through `printError`, the convention `utils/format.ts` states
+        // for a command rendering its own text face; only the shared helpers
+        // that cannot see `--json` use stderr. Capturing stderr alone dropped
+        // the one message that says what to fix: a refused save printed a bare
+        // `✗ compile failed`, while `pnpm build` on the same tree printed the
+        // refusal. What is shown is the compile's whole output, unfiltered —
+        // the lines `pnpm build` prints, in the same words — because picking
+        // "the refusal" out of it would mean parsing another command's text
+        // face here. A successful compile's output is still discarded, so that
+        // path prints exactly what it did. `--verbose` keeps inheriting both
+        // streams, so the output is already on screen and nothing is repeated.
+        // `maxBuffer` is raised because a pipe that fills spawnSync's 1 MiB
+        // default kills the child: a large but successful compile would turn
+        // into a failed one.
         const r = spawnSync(
           process.execPath,
           [opts.binPath, 'compile', '--output', opts.artifactPath],
-          { stdio: opts.verbose ? 'inherit' : ['ignore', 'ignore', 'pipe'], env: process.env },
+          {
+            stdio: opts.verbose ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+            env: process.env,
+            maxBuffer: 64 * 1024 * 1024,
+          },
         );
         const dt = Date.now() - t0;
         if (r.status !== 0) {
-          const stderr = r.stderr?.toString().trim();
-          console.log(chalk.red(`  ✗ compile failed (${dt}ms)${stderr ? '\n' + stderr : ''}`));
+          // stdout first, then stderr: the two pipes are read separately, so
+          // their interleaving is not recoverable.
+          const output = [r.stdout, r.stderr]
+            .map((b) => b?.toString().replace(/^\s*\n/, '').trimEnd())
+            .filter(Boolean)
+            .join('\n');
+          console.log(chalk.red(`  ✗ compile failed (${dt}ms)${output ? '\n' + output : ''}`));
           // A failed compile writes no artifact — the running server still
           // matches dist/objectstack.json, so no restart and no warning.
         } else {
