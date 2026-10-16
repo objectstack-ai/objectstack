@@ -18,6 +18,7 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 /** The probe's identity, site spelling and direction — what a notice carries. */
 export const LIVE_PROBE = {
   conversionId: 'cli-live-conversion-probe',
+  surface: 'flow.node.type (test probe)',
   from: 'probe_old_callout',
   to: 'http',
 } as const;

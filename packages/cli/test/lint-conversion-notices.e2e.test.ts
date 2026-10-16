@@ -48,8 +48,8 @@
  * `conversions: []` hard-coded at the exit — the defect with a lid on it. So:
  *
  *   - every positive fixture drives a LIVE conversion
- *     (`flow-node-http-callout-rename`, ADR-0087 D2, protocol 11, on
- *     `flows[0].nodes[1].type: 'http_request'`), and the notice is
+ *     (a test-only probe loaded with `--import`, ADR-0087 D2 shape, on
+ *     `flows[0].nodes[1].type: 'probe_old_callout'`), and the notice is
  *     asserted by IDENTITY — `conversionId` plus the converted path — over the
  *     WHOLE array, so "and NO MORE" is asserted too;
  *   - `converts nothing` runs the identical shape with the canonical spelling
@@ -78,16 +78,20 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { childEnv } from './helpers/serve-process.js';
+import { LIVE_PROBE, liveProbeNodeOptions } from './helpers/live-conversion-probe.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
 
 /**
- * The live ADR-0087 D2 conversion these fixtures drive (protocol 11). It was
- * `page-kind-jsx-to-html` until `jsx` retired as a page kind at 18.
+ * The live ADR-0087 D2 conversion these fixtures drive: a TEST-ONLY probe the
+ * child loads with `--import` (`helpers/live-conversion-probe.ts`). It was a
+ * real entry before — `page-kind-jsx-to-html` until `jsx` retired as a page
+ * kind at 18, then `flow-node-http-callout-rename` until #23543 F5-http
+ * reserved its old names, the last real entry left live.
  */
-const CONVERSION_ID = 'flow-node-http-callout-rename';
+const CONVERSION_ID = LIVE_PROBE.conversionId;
 
 interface Run {
   code: number;
@@ -100,7 +104,7 @@ function runCli(args: string[], cwd: string): Promise<Run> {
     execFile(
       TSX,
       [CLI, ...args],
-      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1' }) },
+      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', NODE_OPTIONS: liveProbeNodeOptions() }) },
       (err, stdout, stderr) => {
         resolvePromise({
           code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,
@@ -126,7 +130,7 @@ function payloadOf(run: Run, label: string): Record<string, unknown> {
  * with the CANONICAL spelling, where there is nothing to convert.
  */
 function stack(ns: string, opts: { nodeType?: string } = {}): string {
-  const { nodeType = 'http_request' } = opts;
+  const { nodeType = LIVE_PROBE.from as string } = opts;
   return `
 export default {
   manifest: { id: 'com.example.${ns}', name: '${ns}', version: '1.0.0', type: 'app', namespace: '${ns}' },
@@ -169,9 +173,9 @@ function conversionsOf(payload: Record<string, unknown>): unknown[] {
  */
 const THE_NOTICE = {
   conversionId: CONVERSION_ID,
-  surface: 'flow.node.type',
-  from: 'http_request',
-  to: 'http',
+  surface: LIVE_PROBE.surface,
+  from: LIVE_PROBE.from,
+  to: LIVE_PROBE.to,
   path: 'flows[0].nodes[1].type',
 };
 
@@ -249,7 +253,7 @@ describe('#12297 — `os lint` surfaces ADR-0087 conversion notices in both face
     const run = await runCli(['lint'], dirs.converts);
     expect(run.stdout, 'the converted path').toContain('flows[0].nodes[1].type');
     expect(run.stdout, 'the conversion identity').toContain(CONVERSION_ID);
-    expect(run.stdout, 'the from → to rewrite').toMatch(/'http_request'.*'http'/);
+    expect(run.stdout, 'the from → to rewrite').toMatch(new RegExp(`'${LIVE_PROBE.from}'.*'http'`));
     expect(run.stdout, 'the EXPIRY — the part that makes it actionable').toMatch(/retires in protocol \d+/);
   }, 120_000);
 
