@@ -342,6 +342,31 @@ export const SysApiKey = ObjectSchema.create({
       group: 'Lifecycle',
     }),
 
+    // Why the key was revoked, recorded only where the reason changes WHO may
+    // restore it. An administrator's forced password reset revokes the user's
+    // keys by default because the reset may answer a compromise, so the owner
+    // must not be the one to reopen such a key: only a platform administrator
+    // restores it, and the owner creates a new key instead.
+    //
+    // One writer stamps it (plugin-auth `forced-reset-revocation.ts`, beside
+    // `revoked: true`), and one hook keeps it in step with `revoked`
+    // (plugin-auth `api-key-restore-guard.ts`): it refuses the owner's restore
+    // of a key carrying this reason, clears the reason on every restore it
+    // admits, and leaves it alone when a revoked key is revoked again.
+    // `readonly` for ADR-0092 D4's form-rendering reason: it is not on the D2
+    // whitelist, so no data-API write may set or clear it.
+    revoked_reason: Field.select({
+      label: 'Revoke Reason',
+      required: false,
+      readonly: true,
+      options: [
+        { label: 'Administrator password reset', value: 'admin_password_reset' },
+      ],
+      description:
+        'Set when an administrator\'s forced password reset revoked this key. Only a platform administrator can restore such a key; its owner creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.',
+      group: 'Lifecycle',
+    }),
+
     // ── Secret (hidden by default) ──────────────────────────────
     //
     // [#7728] `internal: true` is what makes the description below TRUE. It was

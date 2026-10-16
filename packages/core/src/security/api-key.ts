@@ -308,14 +308,21 @@ function lifecycleRefusalOf(
       code: API_KEY_REVOKED_REFUSAL.code,
       // Revocation is the `revoked` flag, and `restore_api_key` clears it again
       // (`sys_api_key`'s own row action): the key works at once, no re-issue.
-      // Who may clear it is who may set it — the key's owner (own rows, `revoked`
-      // alone) and a platform administrator (any row) — so the text names those
-      // two and never claims the key is gone for good. Rotation stays the other
-      // road, for a key that should not come back.
-      message:
-        `${label} was revoked. Its owner or a platform administrator can restore it (the Restore API Key action `
-        + 'on the API Keys list); otherwise create a new key (POST /api/v1/keys, or the API Keys page) and replace '
-        + 'this one wherever it is configured.',
+      // Who may clear it depends on why it was set, read off the row's
+      // `revoked_reason`: a key an administrator's forced password reset
+      // revoked (`admin_password_reset`) is restored by a platform
+      // administrator only (plugin-auth `api-key-restore-guard.ts` refuses its
+      // owner); any other revoked key by its owner or a platform administrator.
+      // The text names exactly those restorers and never claims the key is
+      // gone for good. Rotation stays the other road, for a key that should
+      // not come back.
+      message: row.revoked_reason === 'admin_password_reset'
+        ? `${label} was revoked by an administrator's forced password reset. Only a platform administrator can `
+          + 'restore it (the Restore API Key action on the API Keys list); otherwise create a new key '
+          + '(POST /api/v1/keys, or the API Keys page) and replace this one wherever it is configured.'
+        : `${label} was revoked. Its owner or a platform administrator can restore it (the Restore API Key action `
+          + 'on the API Keys list); otherwise create a new key (POST /api/v1/keys, or the API Keys page) and replace '
+          + 'this one wherever it is configured.',
       ...ids,
     };
   }

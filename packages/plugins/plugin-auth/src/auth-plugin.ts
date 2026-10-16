@@ -63,6 +63,7 @@ import {
   type SecondaryStorageLike,
 } from './identity-write-guard.js';
 import { registerLastAdminGuard } from './last-admin-guard.js';
+import { registerApiKeyRestoreGuard } from './api-key-restore-guard.js';
 import { registerMembershipEndedSessionTrigger } from './membership-ended-session.js';
 import { registerMemberRoleCanonicalization } from './member-role-canonical.js';
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
@@ -1575,6 +1576,15 @@ export class AuthPlugin implements Plugin {
           logger: ctx.logger,
           getSecondaryStorage: () =>
             this.effectiveSecondaryStorage as SecondaryStorageLike | undefined,
+        });
+        // A key an administrator's forced password reset revoked is restored
+        // by a platform administrator only, and `revoked_reason` is kept in
+        // step with `revoked` in that one hook. It runs AFTER the D2 guard
+        // above, which would otherwise strip the reason it clears. See
+        // api-key-restore-guard.ts.
+        registerApiKeyRestoreGuard(engine, {
+          packageId: 'com.objectstack.plugin-auth.api-key-restore-guard',
+          logger: ctx.logger,
         });
         // [cloud ADR-0024 D5.2] Break-glass — the same identity write
         // chokepoints, guarding a different question: not "may this caller
