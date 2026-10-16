@@ -2633,8 +2633,27 @@ export class RestServer {
     ): Promise<boolean> {
         const objectName = req?.params?.object;
         if (!objectName) return false;
-        const items = await this.loadObjectItems(p, environmentId);
-        const obj = items.find((o: any) => o?.name === objectName);
+        // [#24031] The ONE object this gate judges, read by name — never the
+        // whole object list, whose decoration diagnosed every object on every
+        // request. Same env-scoped request shape the list read sends
+        // (`metaListSource`); a protocol with no by-name read is asked the list.
+        const listSource = this.metaListSource(p, environmentId);
+        const obj = await metaReadGate.loadObjectItem(
+            typeof p.getMetaItem === 'function'
+                ? {
+                    ...listSource,
+                    getObjectItem: (name) => {
+                        const itemRequest: TransportScopedMetaRequest<GetMetaItemRequest> = {
+                            type: 'object',
+                            name,
+                            ...(environmentId ? { environmentId } : {}),
+                        };
+                        return p.getMetaItem(itemRequest);
+                    },
+                }
+                : listSource,
+            objectName,
+        );
         // [#3770] Unknown object → no declared exposure policy to enforce here;
         // the data path's registry gate 404s it. See the doc comment above.
         if (!obj) return false;
