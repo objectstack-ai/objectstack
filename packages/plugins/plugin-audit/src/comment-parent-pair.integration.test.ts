@@ -140,6 +140,7 @@ const commentOn = (object: string, id: string, body: string): Row => ({
 describe('[ADR-0139 E7] the comment-thread read gate over the stamped parent pair', () => {
   let kernel: ObjectKernel;
   let engine: ObjectQL;
+  let driver: SqliteWasmDriver;
   const seenWhere: unknown[] = [];
   const ids: Record<string, string> = {};
 
@@ -169,7 +170,7 @@ describe('[ADR-0139 E7] the comment-thread read gate over the stamped parent pai
   const atRest = async (id: string): Promise<Row> => (await engine.findOne(COMMENT, { where: { id }, context: SYS })) as Row;
 
   beforeAll(async () => {
-    ({ kernel, engine } = await bootKernel(new SqliteWasmDriver({ filename: ':memory:' })));
+    ({ kernel, engine } = await bootKernel((driver = new SqliteWasmDriver({ filename: ':memory:' }))));
     const warehouse = new WarehouseDriver({ filename: ':memory:' });
     await warehouse.connect();
     engine.registerDriver(warehouse);
@@ -317,7 +318,8 @@ describe('[ADR-0139 E7] the comment-thread read gate over the stamped parent pai
     // The state after the upgrade, for three rows: no pair at rest.
     const firstComment = ((await engine.find(COMMENT, { where: { thread_id: `${DOC}:${ids.firstDoc}` }, limit: 1, context: SYS })) as Row[])[0];
     const rowIds = [String(firstComment.id), ids.onVault, ids.onGatedA];
-    for (const id of rowIds) await engine.update(COMMENT, { id, object_name: null, record_id: null }, { context: SYS });
+    // Planted below the engine: every engine write of the pair is re-derived.
+    for (const id of rowIds) await driver.update(COMMENT, id, { object_name: null, record_id: null });
     for (const id of rowIds) expect((await atRest(id)).object_name ?? null).toBeNull();
 
     seenWhere.length = 0;
@@ -352,6 +354,14 @@ describe('[ADR-0139 E7] the comment-thread read gate over the stamped parent pai
     // Naming the pair without a thread: the engine strips a member's readonly value.
     await engine.update(COMMENT, { object_name: VAULT, record_id: ids.vault, body: 'still mine' }, { where: { id }, context: MEMBER_A });
     expect(await atRest(id)).toMatchObject({ body: 'still mine', object_name: DOC, record_id: other });
+
+    // ...and under `preserveAudit` (a REST historical import puts it on an
+    // ordinary caller's write), where the engine's strip keeps a readonly
+    // value, the stamp re-derives the pair from the row's own thread.
+    await engine.update(COMMENT, { object_name: VAULT, record_id: ids.vault }, { where: { id }, context: { ...MEMBER_A, preserveAudit: true } });
+    expect(await atRest(id)).toMatchObject({ thread_id: `${DOC}:${other}`, object_name: DOC, record_id: other });
+    await engine.update(COMMENT, { record_id: ids.vault }, { where: { id }, context: { ...MEMBER_A, preserveAudit: true } });
+    expect(await atRest(id)).toMatchObject({ object_name: DOC, record_id: other });
   });
 
   it('D5.2: the reaction gate keeps the bounded probe — a literal comment-id list, no leaf', async () => {
@@ -387,7 +397,8 @@ describe('[ADR-0139 E7] backfillCommentParentPair', () => {
   const logger = () => ({ info: vi.fn(), warn: vi.fn() });
 
   beforeAll(async () => {
-    ({ kernel, engine } = await bootKernel(new SqliteWasmDriver({ filename: ':memory:' })));
+    const driver = new SqliteWasmDriver({ filename: ':memory:' });
+    ({ kernel, engine } = await bootKernel(driver));
     engine.registry.registerObject(objectOf(DOC) as any, HARNESS_PACKAGE);
     await engine.syncSchemas();
     for (let i = 0; i < 5; i++) {
@@ -395,9 +406,11 @@ describe('[ADR-0139 E7] backfillCommentParentPair', () => {
       rowIds.push(String((await engine.insert(COMMENT, commentOn(DOC, doc, `c${i}`), { context: SYS })).id));
     }
     rowIds.push(String((await engine.insert(COMMENT, { thread_id: 'free-form', body: 'x', author_id: 'u' }, { context: SYS })).id));
-    // The state after the upgrade: every row at rest, unstamped, with an updated_at of its own.
+    // The state after the upgrade: every row at rest, unstamped, with an
+    // updated_at of its own — planted below the engine, which re-derives any
+    // pair an engine write names.
     for (const id of rowIds) {
-      await engine.update(COMMENT, { id, object_name: null, record_id: null, updated_at: '2020-01-01T00:00:00.000Z' }, { context: { ...SYS, preserveAudit: true } });
+      await driver.update(COMMENT, id, { object_name: null, record_id: null, updated_at: '2020-01-01T00:00:00.000Z' });
       stampedAt.set(id, (await engine.findOne(COMMENT, { where: { id }, context: SYS }) as Row).updated_at);
     }
   }, 120_000);

@@ -21,8 +21,12 @@
  * ## As the platform, through the migration door
  *
  * Rows are read and updated as the platform (a SYSTEM context), the shape of
- * `stored-metadata-body-migration.ts` and E6's activity backfill. The update
- * names the pair and the row's stored `updated_at` under `preserveAudit`, so
+ * `stored-metadata-body-migration.ts` and E6's activity backfill. The pair the
+ * update names is re-derived by the update stamp from the row's thread as it
+ * is stored at write time (`comment-access-hooks.ts`), so a re-point landing
+ * between this page's read and the row's write cannot leave the pair naming
+ * the thread the comment left. The update names the row's stored
+ * `updated_at` under `preserveAudit`, so
  * the backfill changes no comment's `updated_at` and names no `thread_id` or
  * `body` (no re-point, no edit stamp). A row whose thread names no record is
  * not stamped (its pair stays `null`, and it stays hidden from every

@@ -333,14 +333,20 @@ function stampCommentParentPair(row: Record<string, unknown>): void {
  *    `readonly` strip leaves `sys_` objects to their own guards
  *    (`staticReadonlyInsertSubject`), so this assignment is the guard, as the
  *    create hook is for `is_edited`.
- *  - the re-point rule (`beforeUpdate`): an update that names `thread_id` —
- *    the write the update gate authorizes as an insert into the new thread —
- *    re-stamps the pair from it. The payload is shared by every row a
+ *  - update (`beforeUpdate`), for every caller: an update that names
+ *    `thread_id` — the re-point the update gate authorizes as an insert into
+ *    the new thread — is stamped from it. The payload is shared by every row a
  *    predicate update matches, so every row gets the same pair, as it gets the
- *    same `thread_id`. An update that names no `thread_id` stamps nothing: a
- *    non-system caller's own pair is stripped by the engine (both columns are
- *    `readonly`, and the update-side strip keeps only a value a hook
- *    assigned), and the system's own write is the backfill's.
+ *    same `thread_id`. An update that names either pair column WITHOUT a
+ *    thread is re-derived from the row's own stored thread (`previous`), so no
+ *    writer's value lands, the backfill's included. ⛔ The engine's update-side
+ *    `readonly` strip is not the guard here: under `preserveAudit` (a REST
+ *    historical import puts it on an ordinary caller's write) it keeps a
+ *    readonly value. A predicate update naming the pair re-derives a pair per
+ *    row, and one whose rows hold different threads is refused whole by the
+ *    engine (`MULTI_UPDATE_HOOK_KEY_DIVERGENCE`): one SET clause cannot carry
+ *    two pairs. With no stored row to derive from, the pair is dropped from the
+ *    write. An update naming none of the three columns stamps nothing.
  */
 function installCommentParentPairStamp(engine: CommentAccessEngine): void {
   engine.registerHook(
@@ -359,9 +365,25 @@ function installCommentParentPairStamp(engine: CommentAccessEngine): void {
     (ctx: any) => {
       const data: unknown = ctx?.input?.data;
       if (!data || typeof data !== 'object' || Array.isArray(data)) return;
-      if (!Object.prototype.hasOwnProperty.call(data, 'thread_id')) return;
+      const payload = data as Record<string, unknown>;
+      const names = (key: string) => Object.prototype.hasOwnProperty.call(payload, key);
+      if (!names('thread_id') && !COMMENT_PARENT_PAIR_COLUMNS.some(names)) return;
       if (!declaresCommentParentPair(engine)) return;
-      stampCommentParentPair(data as Record<string, unknown>);
+      if (names('thread_id')) {
+        stampCommentParentPair(payload);
+        return;
+      }
+      // The pair named without a thread: derive it from the row's own thread.
+      const previous: unknown = ctx?.previous;
+      const storedThread =
+        previous && typeof previous === 'object' ? (previous as Record<string, unknown>).thread_id : undefined;
+      if (typeof storedThread !== 'string') {
+        for (const column of COMMENT_PARENT_PAIR_COLUMNS) delete payload[column];
+        return;
+      }
+      const pair = planCommentParentPair(storedThread);
+      payload[COMMENT_PARENT_OBJECT_COLUMN] = pair.object_name;
+      payload[COMMENT_PARENT_RECORD_COLUMN] = pair.record_id;
     },
     { object: COMMENT_OBJECT, packageId: PACKAGE_ID },
   );

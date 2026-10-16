@@ -55,7 +55,7 @@ async function confirm(question: string): Promise<boolean> {
  * unstamped rows are read, so a second run stamps nothing — re-running and
  * reading a clean report is the verification. No `sys_migration` flag is
  * recorded: nothing gates irreversible behaviour on it. The flags are
- * `os migrate comment-parent-pair`'s, one for one.
+ * `os migrate activity-changed-fields`'s, one for one.
  */
 export default class MigrateCommentParentPair extends Command {
   static override description =

@@ -109,9 +109,11 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  *   (the re-point the update gate authorizes as an insert into the new
  *   thread), the pair is re-stamped from it. A thread naming no record stamps
  *   `null` / `null`.
- * - **Read-only to authors.** Both declare `readonly: true`: a non-system
- *   update's own value is stripped by the engine; the create side is the
- *   stamp's assignment.
+ * - **Read-only to authors.** Both declare `readonly: true`, and no writer's
+ *   value lands: on create the stamp is assigned over it, and an update that
+ *   names either column without a thread has the pair re-derived from the
+ *   row's stored thread — for every caller, because under `preserveAudit` (a
+ *   historical import) the engine's update-side strip keeps a readonly value.
  * - **Stored rows.** Rows written before the pair existed carry `null` until
  *   `os migrate comment-parent-pair --apply` stamps them; until then the read
  *   gate answers them with the bounded thread probe (fail closed), never a

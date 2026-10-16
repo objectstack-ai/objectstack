@@ -219,9 +219,9 @@ describe('[ADR-0139 E7] the parent pair: one planner, stamped on create and on t
     };
     installCommentAccessHooks(engine, () => null, silentLogger());
     // The stamp is the one handler that exempts no caller: drive every handler as the system.
-    const run = async (event: string, data: unknown) => {
+    const run = async (event: string, data: unknown, previous: unknown = { body: 'b' }) => {
       for (const h of registered.filter((r) => r.event === event)) {
-        await h.handler({ object: 'sys_comment', event, input: { data, options: {} }, session: { isSystem: true }, previous: { body: 'b' } });
+        await h.handler({ object: 'sys_comment', event, input: { data, options: {} }, session: { isSystem: true }, previous });
       }
       return data;
     };
@@ -247,6 +247,27 @@ describe('[ADR-0139 E7] the parent pair: one planner, stamped on create and on t
       record_id: 'd1',
     });
     expect(await run('beforeUpdate', { body: 'b' })).toEqual({ body: 'b' });
+  });
+
+  it('update: a pair named without a thread is re-derived from the stored thread, or dropped when there is none', async () => {
+    const run = hooks();
+    const stored = { body: 'b', thread_id: 'crm_case:c9' };
+    expect(await run('beforeUpdate', { object_name: 'vault', record_id: 'v1' }, stored)).toEqual({
+      object_name: 'crm_case',
+      record_id: 'c9',
+    });
+    expect(await run('beforeUpdate', { record_id: 'v1', body: 'x' }, stored)).toMatchObject({
+      body: 'x',
+      object_name: 'crm_case',
+      record_id: 'c9',
+    });
+    expect(await run('beforeUpdate', { object_name: null, record_id: null }, { thread_id: 'watercooler' })).toEqual({
+      object_name: null,
+      record_id: null,
+    });
+    const dropped = (await run('beforeUpdate', { object_name: 'vault', body: 'x' }, undefined)) as Record<string, unknown>;
+    expect(dropped).toMatchObject({ body: 'x' });
+    expect(dropped).not.toHaveProperty('object_name');
   });
 
   it('a sys_comment that declares no pair is never stamped (no unknown column is written)', async () => {

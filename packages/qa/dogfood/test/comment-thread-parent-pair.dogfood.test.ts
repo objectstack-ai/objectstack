@@ -279,7 +279,10 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
 
   it('a row the backfill has not reached is probed by its thread, not leafed: still served when readable, still hidden when not', async () => {
     const cleared = [...bulk.mine.slice(0, UNSTAMPED), ...bulk.other.slice(0, UNSTAMPED)];
-    for (const rowId of cleared) await ql.update(COMMENT, { id: rowId, object_name: null, record_id: null }, { context: { ...SYS } });
+    // Planted below the engine, as a row from before the upgrade is: every
+    // engine write of the pair is re-derived from the row's thread.
+    const driver = ql.getDriver(COMMENT);
+    for (const rowId of cleared) await driver.update(COMMENT, rowId, { object_name: null, record_id: null });
     try {
       commentReads.length = 0;
       const { ids, totals } = await walk('member', bothThreads());
@@ -289,11 +292,10 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
       expect(probes.length).toBeGreaterThan(0);
       expect(probes.every((r) => r.where.includes('"object_name":{"$null":true}'))).toBe(true);
     } finally {
-      for (const rowId of cleared) {
-        const row = await ql.findOne(COMMENT, { where: { id: rowId }, context: { ...SYS } });
-        const [object, recordId] = String(row.thread_id).split(':');
-        await ql.update(COMMENT, { id: rowId, object_name: object, record_id: recordId }, { context: { ...SYS } });
-      }
+      // The engine write re-derives each row's pair from its thread: the backfill's own write path.
+      for (const rowId of cleared) await ql.update(COMMENT, { id: rowId, object_name: null, record_id: null }, { context: { ...SYS } });
+      const restored: Row[] = await ql.find(COMMENT, { where: { id: { $in: cleared } }, context: { ...SYS } });
+      expect(restored.every((r) => r.thread_id === `${r.object_name}:${r.record_id}`)).toBe(true);
     }
   });
 });
