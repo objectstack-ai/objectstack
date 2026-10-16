@@ -642,11 +642,12 @@ function scanFilterForDateEquality(
         message:
           `filter matches \`${key}\` by ${hit.op} against a time value (\`${hit.src}\`) — a date field carries a ` +
           `time component, so exact equality against \`${hit.src}\` (re-computed each run) silently matches nothing.`,
+        // [#22161] One remedy line. Why the windows tile, and the declared
+        // `timeRelative` sweep a T-minus rule can use instead, are
+        // `os explain flow-date-equality-filter`.
         hint:
           `Use a one-day window instead: \`${key}: { $gte: daysFromNow(N), $lt: daysFromNow(N+1) }\` ` +
-          `(wrap multiple tiers in \`$or\`). The abutting windows tile the timeline so each row matches exactly once. ` +
-          `A T-minus rule can declare the sweep instead: a \`schedule\` flow whose start node carries a ` +
-          `\`config.timeRelative\` descriptor with \`offsetDays\` runs once per record on each offset day.`,
+          `(wrap multiple tiers in \`$or\`).`,
         rule: FLOW_DATE_EQUALITY_FILTER,
       });
     }
@@ -1070,10 +1071,9 @@ function scanErrorLabelledEdges(
         `so it is an ORDINARY out-edge. Unconditional out-edges all run in parallel, so '${String(e.target)}' ` +
         `executes on every SUCCESSFUL run of '${src}' and never on a failure. The error path the label ` +
         `describes does not exist, and the run still aborts when '${src}' fails.`,
-      hint:
-        `Add \`type: 'fault'\` to this edge. Only runtime failures route — a guard refusal (a filter token ` +
-        `that resolved to nothing, a missing required config key, an unscoped run) stays fatal by design and ` +
-        `must be fixed in the metadata, not handled.`,
+      // [#22161] One remedy line. Which failures a `fault` edge routes (a guard
+      // refusal never does) is `os explain flow-error-label-not-fault`.
+      hint: `Add \`type: 'fault'\` to this edge: only a \`fault\` edge runs when its source fails.`,
       rule: FLOW_ERROR_LABEL_NOT_FAULT,
     });
   }
@@ -1268,11 +1268,11 @@ function scanBranchRouting(
         findings.push({
           where: `${at} · decision '${nid}' · config.mode`,
           message: issue.message,
+          // [#22161] One remedy line. That `registerFlow` refuses the same
+          // sentence is `os explain flow-decision-mode-invalid`.
           hint:
-            `\`registerFlow\` refuses this flow with the same sentence, so it can never arm. Fix the node ` +
-            `in the flow definition: an omitted \`mode\` is exclusive (the first true out-edge wins), ` +
-            `\`mode: 'inclusive'\` takes every true out-edge, and a \`conditions\` list is first-match ` +
-            `on its own and takes no \`mode\`.`,
+            `Omit \`mode\` (the first true out-edge wins) or set \`mode: 'inclusive'\` (every true ` +
+            `out-edge runs); a \`conditions\` list takes no \`mode\`.`,
           rule: FLOW_DECISION_MODE_INVALID,
           // Gating: the engine refuses the same declaration at registration.
           severity: 'error',
@@ -1295,12 +1295,12 @@ function scanBranchRouting(
             `(${conditioned.map((e) => `'${String(e.target)}'`).join(', ')}) — EVERY one whose condition ` +
             `holds runs, one after another, so where the conditions overlap more than one branch runs ` +
             `for one record. Nothing checks that they partition.`,
+          // [#22161] One remedy line. When to keep `inclusive`, and where
+          // `os migrate meta --from 17` left the key, are
+          // `os explain flow-decision-inclusive-overlap`.
           hint:
-            `If exactly one branch was meant, delete \`mode\`: an omitted \`mode\` is exclusive, and the ` +
-            `first out-edge whose condition holds, in declaration order, wins (mark the fallback ` +
-            `\`isDefault: true\`). Keep \`mode: 'inclusive'\` only where running every matching branch is ` +
-            `the intent. A flow migrated by \`os migrate meta --from 17\` carries this key wherever two ` +
-            `or more conditioned out-edges left a decision — delete it where the branches partition.`,
+            `If exactly one branch was meant, delete \`mode\`: the first out-edge whose condition holds ` +
+            `then wins, in declaration order (mark the fallback \`isDefault: true\`).`,
           rule: FLOW_DECISION_INCLUSIVE_OVERLAP,
         });
       }
@@ -1318,10 +1318,11 @@ function scanBranchRouting(
           `carries — out-edge labels are [${[...edgeLabels].map((l) => `'${l}'`).join(', ') || 'none'}]. ` +
           `Traversal cannot honour a label nothing claims, so it falls back to considering EVERY ` +
           `out-edge and the branch the decision computed is ignored.`,
+        // [#22161] One remedy line. How a label selects its out-edge, and the
+        // one-mechanism rule, are `os explain flow-branch-label-unmatched`.
         hint:
           `Make an out-edge's \`label\` match the declared branch exactly, or drop \`config.conditions\` ` +
-          `and branch on the edges instead (\`condition\` per branch + \`isDefault: true\` on the ` +
-          `fallback) — one mechanism per decision, never both.`,
+          `and branch on the edges instead.`,
         rule: FLOW_BRANCH_LABEL_UNMATCHED,
         // Gating: a label nothing claims cannot route under ANY reading, on
         // every run. See the severity policy at the top of this file.
@@ -1351,11 +1352,11 @@ function scanBranchRouting(
             `\`isDefault\`, and the decision declares no \`config.conditions[]\`. With no branch to ` +
             `select, EVERY out-edge is traversed on EVERY pass, in parallel — the node is typed ` +
             `\`decision\` but routes exactly as a non-decision step would, so the gateway is decoration.`,
+          // [#22161] One remedy line. What to do when the fan-out is meant
+          // is `os explain flow-decision-unconditional-branch`.
           hint:
-            `Declare the branching one way and one way only: a \`condition\` per branch plus ` +
-            `\`isDefault: true\` on the fallback, or \`config.conditions[]\` whose \`label\` matches an ` +
-            `out-edge's. If the unconditional fan-out is what you meant, drop \`type: 'decision'\` and ` +
-            `use the node it already behaves as.`,
+            `Gate the branches: a \`condition\` per out-edge plus \`isDefault: true\` on the fallback, or a ` +
+            `\`config.conditions[]\` whose \`label\` matches an out-edge's.`,
           rule: FLOW_DECISION_UNCONDITIONAL_BRANCH,
         });
       }
@@ -1543,16 +1544,10 @@ function scanUnboundedBulkWrites(
         `\`${consequence.engineCall}\` bounded by nothing — a filter that reduces to TRUE constrains no row. ` +
         `Nothing refuses it at run time, so the only feedback is the step's \`acted\` row count — reported ` +
         `AFTER the rows are gone.`,
-      hint:
-        `Write the constraint you mean into \`filter\` (e.g. \`{ status: 'closed' }\` — see ` +
-        `examples/app-showcase \`showcase_inquiry_purge\`, bulk intent bounded by a predicate). If emptying ` +
-        `'${objectName}' really is the intent, keep it: \`multi: true\` is how a flow declares bulk intent, and ` +
-        `the engine admits a whole-object write declared that way, so this is a warning, not a gate, and the ` +
-        `run-time path stays open. Distinct from the run-time erased-condition guard, which REFUSES this node ` +
-        `at run time when ` +
-        `a condition you WROTE evaluated to nothing — that guard is keyed on "a written condition is gone" ` +
-        `and deliberately not on "the filter is empty", which is the fact this rule judges at authoring ` +
-        `time.`,
+      // [#22161] One remedy line. The worked example, keeping a whole-object
+      // write that is meant, and how this differs from the run-time
+      // erased-condition guard are `os explain flow-multi-write-unfiltered`.
+      hint: `Write the constraint you mean into \`filter\`, e.g. \`{ status: 'closed' }\`.`,
       // Warning, not `error`: see the severity policy at the top of this file.
       // The shape has a legitimate reading the engine grants on purpose, so it is
       // not provably wrong — unlike the gating members of this family.
@@ -1612,12 +1607,10 @@ function scanApprovalReviseLoops(
           `record is unlocked, and only the approvals service may continue it (submitter-only, audited, and ` +
           `refusing a colliding pending request); \`sendBack\` refuses any other target, so this flow's ` +
           `revise branch cannot run.`,
-        hint:
-          `Set node '${target}' to \`type: '${APPROVAL_REVISE_NODE_TYPE}'\` (drop any \`waitEventConfig\` \u2014 the ` +
-          `window is ended by POST /api/v1/approvals/requests/:id/resubmit, not by a signal). ADR-0044 D3 ` +
-          `originally said 'wait' here; its 2026-07-28 amendment reversed that, because a 'wait' is ` +
-          `resumable by anyone with the run id, while the run-resume route continues a pause on a ` +
-          `service-owned node type only through the service that owns it.`,
+        // [#22161] One remedy line. What ends the window, and why ADR-0044's
+        // amendment moved it off `wait`, are
+        // `os explain flow-approval-revise-target-not-service-owned`.
+        hint: `Set node '${target}' to \`type: '${APPROVAL_REVISE_NODE_TYPE}'\` and drop any \`waitEventConfig\`.`,
         rule: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED,
       });
     }
@@ -1684,8 +1677,7 @@ function scanApprovalReviseLoops(
 
 /**
  * The minimal `catch` region, measured end to end on the real `AutomationEngine`
- * (commit 8ed9c54b4) and quoted verbatim by both containment rules and by
- * `content/docs/automation/flows.mdx`.
+ * (commit 8ed9c54b4) and prescribed by both containment rules' `fix:` lines.
  *
  * `catch` cannot be empty: `FlowRegionSchema.nodes` is `.min(1)`
  * (`control-flow.zod.ts:142`), so `catch: {}` and `catch: { nodes: [] }` are
@@ -1694,16 +1686,13 @@ function scanApprovalReviseLoops(
  * `required` keys and its executor with no assignments sets nothing and returns
  * success. `edges` may be omitted (it defaults to `[]`), and `errorVariable` may
  * be omitted (it defaults to `$error`).
+ *
+ * [#22161] Only the spelling rides the `fix:` line. Why it is the shortest, the
+ * two empty spellings the parse refuses, and what may be omitted are the two
+ * rules' `os explain` entries, which spell the same region (the containment
+ * tests hold each entry to this constant).
  */
-const MINIMAL_CATCH_SPELLING =
-  "`catch: { nodes: [ { id: 'handled', type: 'assignment', label: 'Handled' } ] }` — one bare " +
-  '`assignment` node with no `config` is the shortest handler that works; `edges` and ' +
-  '`errorVariable` may both be omitted';
-
-/** `catch` cannot be empty — the two spellings the schema refuses. */
-const EMPTY_CATCH_REFUSALS =
-  'A `catch` region cannot be empty: its `nodes` is `.min(1)`, so `catch: {}` and ' +
-  '`catch: { nodes: [] }` are both refused by the parse.';
+const MINIMAL_CATCH_REGION = "`catch: { nodes: [ { id: 'handled', type: 'assignment', label: 'Handled' } ] }`";
 
 /**
  * Is this value a region dictionary — `{ nodes: [...] }` — as authored?
@@ -1771,17 +1760,15 @@ function scanUncontainedLoopBodies(
               `The first failing item therefore ends the whole run: every later item is never processed, and ` +
               `the work already done is not even reported (measured on the real engine — a 5-item sweep ` +
               `failing at item 3 touched 3 items and reported \`acted: 0\`).`,
+            // [#22161] One remedy line: where the node goes and the minimal
+            // `catch`. The empty spellings the parse refuses, the measurement,
+            // fail-fast as a legitimate reading and the docs section are
+            // `os explain flow-loop-body-uncontained`. The tracker ids stay OUT
+            // of the runtime string and the entry (`check:doc-authoring`); the
+            // docblock on {@link FLOW_LOOP_BODY_UNCONTAINED} carries them.
             hint:
-              `Contain the failure per iteration: put a \`try_catch\` INSIDE the body and move this node into ` +
-              `its \`try\` region — \`loop { body: { nodes: [ { type: 'try_catch', config: { try, catch } } ] } }\`. ` +
-              `${EMPTY_CATCH_REFUSALS} The minimal handler is ${MINIMAL_CATCH_SPELLING}. Measured: with it, all ` +
-              `5 items are processed and the run completes. If this loop is MEANT to stop at the first failure, ` +
-              `that is a legitimate reading and this stays a warning. ` +
-              // The tracker ids stay OUT of the runtime string (`check:doc-authoring`):
-              // an author reading this hint cannot resolve `#NNNN`. The measurement
-              // and the ruling behind this rule are commit 8ed9c54b4 / #14394; the docblock on
-              // {@link FLOW_LOOP_BODY_UNCONTAINED} carries them for the reader who can.
-              `See content/docs/automation/flows.mdx §"Per-iteration containment".`,
+              `Move this node into the \`try\` region of a \`type: 'try_catch'\` node inside the loop body, ` +
+              `with ${MINIMAL_CATCH_REGION}.`,
             // Warning, not `error`: see the severity policy at the top of this
             // file. Fail-fast on the first bad row is a real intent this rule
             // cannot distinguish from an oversight.
@@ -1849,12 +1836,10 @@ function scanTryCatchWithoutCatch(
           : '') +
         ` Inside a \`loop\` body this is the silent one: the author has recognised the hazard, wrapped the ` +
         `node, and still loses every item after the first failure.`,
-      hint:
-        `Add the handler: ${MINIMAL_CATCH_SPELLING}. ${EMPTY_CATCH_REFUSALS} If failing loudly really is the ` +
-        `intent, a \`try_catch\` with only \`try\` (and optionally \`retry\`) is a legitimate retry-then-fail ` +
-        `shape — this is a warning, not a gate. ` +
-        // Tracker ids stay out of the runtime string — see the sibling rule above.
-        `See content/docs/automation/flows.mdx §"Per-iteration containment".`,
+      // [#22161] One remedy line. Retry-then-fail as a legitimate reading, the
+      // empty spellings the parse refuses and the docs section are
+      // `os explain flow-try-catch-without-catch`.
+      hint: `Add a \`catch\` region; the shortest handler that works is ${MINIMAL_CATCH_REGION}.`,
       // Warning, not `error`: retry-then-fail is a real reading of this shape.
       rule: FLOW_TRY_CATCH_WITHOUT_CATCH,
     });
@@ -1904,12 +1889,12 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
           message:
             `record-change trigger uses a date-EQUALITY time condition (\`${src}\`) — it only fires if the ` +
             `record happens to be written on that exact day, so unattended "N days before" rules never run.`,
+          // [#22161] One remedy line: the declared sweep. The hand-written
+          // alternative (a daily schedule plus a range query) is
+          // `os explain flow-time-relative-antipattern`.
           hint:
-            `Use a SCHEDULE trigger (daily cron) + a range query instead — e.g. a scheduled flow whose ` +
-            `get_record filters \`end_date\` BETWEEN {TODAY()} and {TODAY()+N}. Or declare the sweep ` +
-            `instead: a \`schedule\` flow whose start node carries a \`config.timeRelative\` descriptor (the ` +
-            `object, the date field, and \`withinDays\` or \`offsetDays\`) is swept daily and runs once per ` +
-            `record whose date falls in the window.`,
+            `Use a \`schedule\` flow instead: a start-node \`config.timeRelative\` descriptor with ` +
+            `\`withinDays\` or \`offsetDays\` runs once per record whose date falls in the window.`,
           rule: FLOW_TIME_RELATIVE_ANTIPATTERN,
         });
       }
@@ -1960,12 +1945,12 @@ export function lintFlowPatterns(stack: AnyRec): FlowLintFinding[] {
             `${userLessKind}-triggered flow runs under ${RUNAS_EFFECTIVE_IDENTITY}, but a ${userLessKind} run ` +
             `has no trigger user — so its data node '${dataNode.node.id}' (${dataNode.node.type})${at} has no identity to scope to and ` +
             `will be REFUSED at run time.`,
+          // [#22161] One remedy line. Why a user-less run is refused rather
+          // than run unscoped, and the anonymous-endpoint exception, are
+          // `os explain flow-runas-unscoped`.
           hint:
             `Declare \`runAs:'system'\` to make the elevation explicit and intended (the run reads/writes ` +
-            `every record). A ${userLessKind} flow cannot scope to a user — there is none, and \`runAs\` is ` +
-            `enforced: \`'user'\` scopes each data operation to the triggering user's grants, and with no ` +
-            `trigger user the runtime refuses the operation rather than run it unscoped. ` +
-            `(ADR-0049, ADR-0073 D5)`,
+            `every record).`,
           rule: FLOW_RUNAS_UNSCOPED,
           severity: 'error',
         });
