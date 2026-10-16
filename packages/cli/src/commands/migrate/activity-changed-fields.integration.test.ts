@@ -200,8 +200,16 @@ beforeAll(async () => {
     shard = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name GLOB 'sys_activity__r*'").get() as
       { name: string } | undefined)?.name ?? '';
     if (!shard) throw new Error('the fixture has no sys_activity shard: the rotation did not run');
+    // The base name is a view naming every column, as the rotation writes it:
+    // the previous version's view names neither stamp column.
+    const view = (db.prepare("SELECT sql FROM sqlite_master WHERE type = 'view' AND name = 'sys_activity'").get() as
+      { sql: string } | undefined)?.sql;
+    if (!view) throw new Error('the fixture has no sys_activity view');
+    db.exec('DROP VIEW sys_activity');
     db.exec(`ALTER TABLE "${shard}" DROP COLUMN changed_fields`);
     db.exec(`ALTER TABLE "${shard}" DROP COLUMN milestone_key`);
+    const previous = view.replace(/,\s*"?changed_fields"?/g, '').replace(/,\s*"?milestone_key"?/g, '');
+    db.exec(previous);
     for (const row of PLANTED) {
       plant(db, shard, {
         id: row.id, timestamp: new Date().toISOString(), type: 'updated', summary: row.id,
@@ -229,7 +237,6 @@ describe('os migrate activity-changed-fields stamps the activity rows the previo
 
   it('1. a dry run on the not-yet-synced database writes nothing, adds no column, and does not report a clean table', async () => {
     const { payload, exitCode } = await runJson(invoke(MigrateActivityChangedFields), ['--database-url', db(), '--json']);
-    process.stderr.write(`[diag 1] exit=${exitCode} ${JSON.stringify(payload).slice(0, 600)}\n`);
     expect(columnsOf(shard)).not.toContain('changed_fields');
     expect(exitCode).toBe(1);
     expect(payload).toMatchObject({ apply: false, report: { stamped: 0, failures: 1 } });
@@ -239,7 +246,6 @@ describe('os migrate activity-changed-fields stamps the activity rows the previo
     const { payload, exitCode } = await runJson(
       invoke(MigrateActivityChangedFields), ['--apply', '--yes', '--database-url', db(), '--json'],
     );
-    process.stderr.write(`[diag 2] exit=${exitCode} ${JSON.stringify(payload).slice(0, 600)}\n`);
     expect(exitCode).toBe(0);
     expect(columnsOf(shard)).toEqual(expect.arrayContaining(['changed_fields', 'milestone_key']));
     expect(payload.report).toMatchObject({ apply: true, stamped: PLANTED.length - 1, milestones: 1, unjudged: 1, failures: 0 });
