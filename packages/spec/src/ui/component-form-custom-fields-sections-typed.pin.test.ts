@@ -398,7 +398,7 @@ describe('§2 off-shape values are refused with the code and the path', () => {
     expect(firstMessage(parse('object-form', { sections: [{ fields: ['a'], columns: '2' }] })))
       .toMatch(/write `2`, not `'2'`/);
     expect(messages(parse('object-form', { sections: [{ fields: [{ field: 'a', visibleOn: 'record.b == 1' }] }] })))
-      .toMatch(/takes the\s+canonical spelling only: write `visibleWhen`/);
+      .toMatch(/retired spelling of `visibleWhen`.*Write `visibleWhen`; the value \(a CEL predicate\) is unchanged/s);
     expect(messages(parse('object-form', { sections: [{ fields: [{ field: 'a', name: 'a' }] }] })))
       .toMatch(/keyed by `field`, or an inline form field keyed by `name` — not both/);
   });
@@ -444,15 +444,16 @@ describe('§3 the declared members, and one shape for both rows', () => {
     expect(Object.keys(runtimeField().shape).filter((k) => /_/.test(k))).toEqual([]);
   });
 
-  it('a section declares exactly the form view\'s section keys, without the deprecated `visibleOn`', () => {
-    // `FormSectionSchema` is its object piped into the `visibleOn` fold; read the object half.
-    const viewKeys = Object.keys((FormSectionSchema as unknown as { in: { shape: Record<string, unknown> } }).in.shape);
+  it('a section declares exactly the form view\'s section keys, without the retired `visibleOn`', () => {
+    // The view's section keeps `visibleOn` as a tombstone (#23543 F4); the page
+    // block answers the key with its own refusal instead.
+    const viewKeys = Object.keys((FormSectionSchema as unknown as { shape: Record<string, unknown> }).shape);
     expect(viewKeys).toContain('visibleOn');
     expect(Object.keys(section().shape).sort()).toEqual(viewKeys.filter((k) => k !== 'visibleOn').sort());
   });
 
   it('the `{ field }` arm\'s members are the form view\'s entry\'s own, def by def, but for the four the page block reads differently', () => {
-    const view = (FormFieldSchema as unknown as { in: { shape: Record<string, { _zod: { def: unknown } }> } }).in.shape;
+    const view = (FormFieldSchema as unknown as { shape: Record<string, { _zod: { def: unknown } }> }).shape;
     const arm = (entryArms()[1] as { shape: Record<string, { _zod: { def: unknown } }> }).shape;
     const own = ['label', 'placeholder', 'helpText', 'span', 'fields'];
     expect(Object.keys(arm).sort()).toEqual(Object.keys(view).filter((k) => k !== 'visibleOn').sort());
