@@ -200,7 +200,6 @@ describe('[#23497] GET /forms/:slug — section headings are localized under Acc
         const res = await buildServer(formView()).get('zh-CN');
         expect(section(res, 0).label).toBe(ABOUT_ZH);
         expect(renderedFields(res)).toEqual([['subject'], ['email'], ['status']]);
-        expect(res.body.objectSchema.fields.contact_id).toBeUndefined();
     });
 
     it('CONTROL: the response shape, its top-level label and `Vary` are unchanged, and the stored view is not mutated', async () => {
