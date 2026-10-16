@@ -191,8 +191,9 @@ export function organizationOwnershipRefusalMessage(
   return (
     `This database is still in the v17 organization-ownership shape: ${tables.join(', ')} still carr` +
     `${tables.length === 1 ? 'ies' : 'y'} a physical organization_id column, and ${state}. The server refuses to ` +
-    `start rather than serve v17 data with v18 semantics. Run '${ceremony}' (review its plan), then ` +
-    `'${ceremony} --apply', and start again. To keep 17.x semantics, run a 17.x runtime.`
+    `start rather than serve v17 data with v18 semantics. Run '${ceremony} --out PLAN' to write and review its ` +
+    `plan, take a backup, then run '${ceremony} --apply --plan-file PLAN --backup-taken', and start again. ` +
+    'To keep 17.x semantics, run a 17.x runtime.'
   );
 }
 
@@ -240,7 +241,8 @@ export async function assertOrganizationOwnershipMigrated(
     throw new OrganizationOwnershipBootRefusal(
       `The server refuses to start: it could not read whether this database is still in the v17 organization-ownership ` +
         `shape (${error instanceof Error ? error.message : String(error)}), and an unread answer is never taken for a ` +
-        `migrated database. Fix the read, or run '${ceremony} --apply', then start again.`,
+        `migrated database. Fix the read, or run the ceremony ('${ceremony} --out PLAN', then ` +
+        `'${ceremony} --apply --plan-file PLAN --backup-taken'), then start again.`,
       [],
     );
   }

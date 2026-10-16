@@ -90,14 +90,18 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5)', () => {
     expect(err.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
     expect(err.tables).toEqual(['sys_job', 'sys_metadata']);
     expect(err.message).toMatch(/still in the v17 organization-ownership shape: sys_job, sys_metadata/);
-    expect(err.message).toMatch(/os migrate organization-ownership --apply/);
+    // The apply the refusal names is one the ceremony accepts: a reviewed plan file and the backup acknowledged.
+    expect(err.message).toMatch(/os migrate organization-ownership --apply --plan-file PLAN --backup-taken/);
     expect(err.message).toMatch(/the ceremony has not run on it/);
   });
 
   it('a development boot names the ceremony with --dev, so it boots the way the refused boot did', async () => {
     v17Shape();
     const dev = await refusalOf(() => assertOrganizationOwnershipMigrated(engine(), undefined, { dev: true }));
-    expect(dev.message).toContain("Run 'os migrate organization-ownership --dev' (review its plan), then 'os migrate organization-ownership --dev --apply'");
+    expect(dev.message).toContain(
+      "Run 'os migrate organization-ownership --dev --out PLAN' to write and review its plan, take a backup, then run " +
+        "'os migrate organization-ownership --dev --apply --plan-file PLAN --backup-taken'",
+    );
     const served = await refusalOf(() => assertOrganizationOwnershipMigrated(engine()));
     expect(served.message).not.toContain('--dev');
   });
