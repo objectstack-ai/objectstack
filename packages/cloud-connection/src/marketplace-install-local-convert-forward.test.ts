@@ -103,13 +103,13 @@ async function bootPlugin() {
     };
 
     const handed: Array<{ reader: string; body: Bag }> = [];
-    const realManifest = kernel.getService<{ register(m: unknown): unknown }>('manifest');
+    const realManifest = kernel.getService<{ register(m: unknown, options?: unknown): unknown }>('manifest');
     const manifest = {
-        register: async (body: Bag) => {
+        register: async (body: Bag, options?: unknown) => {
             // The plugin also registers its own Setup UI bundle at
             // `kernel:ready`; only the package under test is recorded.
             if (body?.id === HOTCRM_ID) handed.push({ reader: 'register', body });
-            await realManifest.register(body);
+            await realManifest.register(body, options);
         },
     };
     const routes = new Map<string, Handler>();
@@ -184,7 +184,8 @@ describe('the marketplace install converts a body once and every reader of the l
         const { ql, handed, conversionWarnings } = await bootPlugin();
 
         expectOneConvertedBody(handed, ['register', 'bindArtifactHandlers', 'applySideEffects', 'heal']);
-        expect(ql.registry.getPackage(HOTCRM_ID)).toBeDefined();
+        // The converted body still registers as a marketplace install.
+        expect(ql.registry.getPackage(HOTCRM_ID)?.source).toBe('marketplace');
         // Converted once: `register` met the entry point again with the
         // converted body, and no second warning was printed.
         expect(conversionWarnings.filter((w) => w.includes(`conversion '${IS_DEFAULT_CONVERSION}'`))).toHaveLength(1);
@@ -199,7 +200,7 @@ describe('the marketplace install converts a body once and every reader of the l
 
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expectOneConvertedBody(handed, ['register', 'bindArtifactHandlers', 'applySideEffects']);
-        expect(ql.registry.getPackage(HOTCRM_ID)).toBeDefined();
+        expect(ql.registry.getPackage(HOTCRM_ID)?.source).toBe('marketplace');
         expect(conversionWarnings.filter((w) => w.includes(`conversion '${IS_DEFAULT_CONVERSION}'`))).toHaveLength(1);
         expect(homePage(new LocalManifestSource(dir).read(HOTCRM_ID).entry!.manifest as Bag)).toMatchObject({ isDefault: true });
     });

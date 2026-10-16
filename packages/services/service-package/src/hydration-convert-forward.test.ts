@@ -204,6 +204,8 @@ describe('sys_packages boot hydration converts a stored body forward before the 
 
     const record = ql.registry.getPackage(HOTCRM_ID);
     expect(record, 'the stored HotCRM body was not hydrated').toBeDefined();
+    // The converted body is still recorded as the authored package it was installed as.
+    expect(record!.source).toBe('authored');
     const home = ((record!.manifest as Bag).pages as Bag[]).find((p) => p.name === 'sales_home_page')!;
     expect(home).toMatchObject({ type: 'home' });
     expect(home).not.toHaveProperty('isDefault');
