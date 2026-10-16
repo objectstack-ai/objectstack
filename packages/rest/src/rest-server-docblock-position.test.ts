@@ -175,6 +175,13 @@ describe('rest-server.ts docblock position', () => {
  * the module header, the host interface's block and the function's. The global
  * search body held no TSDoc block of its own, so `rest-server.ts` keeps every
  * block it had (164).
+ *
+ * [#23050 slice 10] `ui-routes.ts` carries four, as `data-action-routes.ts`
+ * does: the module header, the moved alias's block (`TransportScopedMetaRequest`
+ * went with the UI view body, as `ServerScopedDataRequest` went with slice 1's),
+ * the host interface's block and the function's. The UI view body held no TSDoc
+ * block of its own, so `rest-server.ts` gives up only the alias's block
+ * (164 → 163 there, still far above its floor).
  */
 const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
     'data-action-routes.ts': 4,
@@ -186,6 +193,7 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     'discovery-routes.ts': 5,
     'email-routes.ts': 3,
     'search-routes.ts': 3,
+    'ui-routes.ts': 4,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -219,9 +227,10 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // [#23050 slice 7] 4 + 3 + 3 + 8 + 3 + 8 + 5 = 34 over seven, length 7 → 8.
         // [#23050 slice 8] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 = 37 over eight, length 8 → 9.
         // [#23050 slice 9] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 = 40 over nine, length 9 → 10.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(10);
+        // [#23050 slice 10] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 = 44 over ten, length 10 → 11.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(40);
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(44);
     });
 });
