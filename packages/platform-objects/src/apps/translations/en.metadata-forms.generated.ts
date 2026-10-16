@@ -1012,7 +1012,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       end_user_controls: {
         label: "End-user controls",
-        description: "What end users can do on this view — quick filters, filter tabs, visualization switching (ADR-0047, Airtable Interface parity)."
+        description: "What end users can do on this view — quick filters, filter tabs, visualization switching."
       },
       navigation_sharing: {
         label: "Navigation & sharing",
@@ -2323,15 +2323,15 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       isDefault: {
         label: "Is Default",
-        helpText: "App baseline for the everyone position (ADR-0090 D5): an app-level set is auto-bound at boot; a package-level set becomes an install-time suggestion an admin confirms. Default false."
+        helpText: "Gives this set to everyone who signs in, through the built-in everyone position. A set the app itself declares is granted at startup; a set from an installed package becomes a suggestion an admin confirms in Setup. A set with high-privilege permissions is never granted this way. Default false."
       },
       managedBy: {
         label: "Managed By",
-        helpText: "Record provenance (ADR-0086 D3): who owns this set across upgrades."
+        helpText: "Who owns this set: Package means it ships with a package and package upgrades update it; Platform and User mean it was created in this environment and upgrades leave it alone."
       },
       packageId: {
         label: "Package Id",
-        helpText: "Owning package id for a package-shipped set (ADR-0086 D3). Leave empty for an environment-authored set."
+        helpText: "The package that ships this set; a value naming any other package is refused. Leave empty for a set created in this environment."
       },
       systemPermissions: {
         label: "System Permissions",
@@ -2339,7 +2339,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       adminScope: {
         label: "Admin Scope",
-        helpText: "Delegated administration (ADR-0090 D12): lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments defaults to false and lets the holder assign people to positions, and grant sets directly, inside that subtree; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing."
+        helpText: "Delegated administration: lets holders of this set administer one business-unit subtree. businessUnit is the subtree root (sys_business_unit.name) and is required, non-blank; includeSubtree defaults to true; manageAssignments defaults to false and lets the holder assign people to positions, and grant sets directly, inside that subtree; a delegate may hand out only the sets named in assignablePermissionSets. Leave empty for a set that delegates nothing."
       },
       objects: {
         label: "Objects",
@@ -2384,7 +2384,7 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       delegatable: {
         label: "Delegatable",
-        helpText: "Holders may delegate this position themselves, time-boxed and with a reason (ADR-0091 D3). Default false — delegation is admin-only."
+        helpText: "Holders may delegate this position themselves, time-boxed and with a reason. Default false — delegation is admin-only."
       }
     }
   },
