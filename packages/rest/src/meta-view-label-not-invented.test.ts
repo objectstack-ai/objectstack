@@ -305,19 +305,22 @@ describe('#23967 §2 translateMetaEnvelope / translateMetaList — the dispatche
 // ---------------------------------------------------------------------------
 
 describe('#23967 §3 CONTROL — the view container read is unchanged', () => {
-    const grid = (label?: string) => ({
+    const grid = (label?: string, columns: string[] = ['name']) => ({
         type: 'grid',
         ...(label !== undefined ? { label } : {}),
         data: { provider: 'object', object: OBJ },
-        columns: ['name'],
+        columns,
     });
 
     it('translates each slot it has a string for, and invents no label for the container or a slot without one', async () => {
-        const container = { object: OBJ, list: grid(), listViews: { named: grid('All gates'), tagged: grid() } };
+        // The default `list` differs from every named list, so the composer keeps it its own item
+        // (`recheck_gate.default`), which the catalog does not carry.
+        const ownList = () => grid(undefined, ['name', 'kind']);
+        const container = { object: OBJ, list: ownList(), listViews: { named: grid('All gates'), tagged: grid() } };
         const out = (await translateMetaDocument(sources('zh-CN'), 'view', container)) as any;
         expect(out).toEqual({
             object: OBJ,
-            list: grid(),
+            list: ownList(),
             listViews: { named: grid('全部闸门'), tagged: grid('已标记') },
         });
         expect(container.listViews.named.label).toBe('All gates');
