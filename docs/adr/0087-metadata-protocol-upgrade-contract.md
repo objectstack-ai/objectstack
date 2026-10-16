@@ -710,6 +710,8 @@ re-entering `saveMetaItem` with already-canonical bodies pay nothing.
 Reads still skip flows, and now the loop is closed from the other side: a
 served legacy body is healed the moment it is saved back.
 
+> **2026-10-16 note** (#24001) — the conflict guard this addendum, the 2026-08-01 one and the 2026-07-31 one describe is retired, and with it the conversion-conflict channel: protocol 18 reserved the old callout node types (`FLOW_RESERVED_NODE_TYPES`, #23543 F5-http), so the engine refuses an executor under one, the guard inside `flow-node-http-callout-rename` went, and with no producer left the `reservedNodeTypes` / `onConflict` options, `ConversionConflictNotice` / `ConversionConflictDetail`, the `conflicts` arrays and `409 FLOW_CONVERSION_CONFLICT` left the published surface (D3 entry `conversion-conflict-channel-removed`). No save, duplication, import or stored-pass row refuses a rename any more. Flows still canonicalize at the engine rather than at the generic metadata seams, now because the engine's registration checks judge a plugin node against the live registry.
+
 ## Addendum (2026-08-13) — the changeset disposition vocabulary, and its fifth category (#8299)
 
 Everything above is about the ledger itself. This addendum records the **question
