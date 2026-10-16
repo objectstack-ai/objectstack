@@ -110,8 +110,8 @@ const thrownDatabaseError: StoreDelete = async () => {
 function boot(world: World, storeDelete: StoreDelete = landed, opts: { uninstallRefusal?: Error } = {}) {
   const rows = new Map<string, { manifest: Record<string, unknown>; status: string; enabled: boolean }>();
   const registry = {
-    installPackage(manifest: Record<string, unknown>) {
-      const row = { manifest: { ...manifest }, status: 'installed', enabled: true };
+    installPackage(manifest: Record<string, unknown>, source: string) {
+      const row = { manifest: { ...manifest }, source, status: 'installed', enabled: true };
       rows.set(String(manifest.id), row);
       return row;
     },

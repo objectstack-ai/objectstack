@@ -504,7 +504,7 @@ describe('SchemaRegistry', () => {
          * Latent by grade: no in-tree caller reaches the refusal path today.
          */
         it('[#7970] a refused uninstall leaves the namespace still resolving', () => {
-            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any);
+            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any, 'code');
             registry.registerObject({ name: 'contact', fields: {} }, 'com.crm', 'crm', 'own');
             registry.registerObject({ name: 'contact', fields: {} }, 'com.analytics', undefined, 'extend');
 
@@ -520,7 +520,7 @@ describe('SchemaRegistry', () => {
         });
 
         it('[#7970] a refused uninstall leaves the whole package intact, not just the namespace', () => {
-            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any);
+            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any, 'code');
             // Registered ahead of the extended object, so the object walk reaches
             // this one before it can refuse.
             registry.registerObject({ name: 'account', fields: {} }, 'com.crm', 'crm', 'own');
@@ -539,7 +539,7 @@ describe('SchemaRegistry', () => {
         });
 
         it('[#7970] the successful path still releases the namespace after the object verb', () => {
-            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any);
+            registry.installPackage({ id: 'com.crm', name: 'CRM', namespace: 'crm', version: '1.0.0' } as any, 'code');
             registry.registerObject({ name: 'contact', fields: {} }, 'com.crm', 'crm', 'own');
 
             expect(registry.uninstallPackage('com.crm')).toBe(true);
@@ -550,7 +550,7 @@ describe('SchemaRegistry', () => {
         });
 
         it('updatePackageManifest merges editable fields, preserving lifecycle state', () => {
-            registry.installPackage({ id: 'com.test', name: 'Old', version: '1.0.0' } as any);
+            registry.installPackage({ id: 'com.test', name: 'Old', version: '1.0.0' } as any, 'code');
             registry.disablePackage('com.test'); // lifecycle state that must survive an edit
 
             const updated = registry.updatePackageManifest('com.test', {
@@ -568,7 +568,7 @@ describe('SchemaRegistry', () => {
         });
 
         it('updatePackageManifest only overwrites the fields present in the patch', () => {
-            registry.installPackage({ id: 'com.test', name: 'Keep', version: '1.0.0' } as any);
+            registry.installPackage({ id: 'com.test', name: 'Keep', version: '1.0.0' } as any, 'code');
             const updated = registry.updatePackageManifest('com.test', { description: 'only this' });
             expect(updated?.manifest.name).toBe('Keep');
             expect(updated?.manifest.version).toBe('1.0.0');

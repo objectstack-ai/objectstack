@@ -43,7 +43,7 @@ interface InstalledPackageView {
     enabled?: boolean;
 }
 interface TestRegistry {
-    installPackage(manifest: Record<string, unknown>): unknown;
+    installPackage(manifest: Record<string, unknown>, source: 'code' | 'marketplace' | 'authored'): unknown;
     getPackage(id: string): InstalledPackageView | undefined;
 }
 

@@ -175,7 +175,7 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
     registry.installPackage(baseManifest({ plugins: [plugin] }), 'code');
     registry.installPackage({
       id: 'com.objectstack.setup', name: 'Setup', namespace: 'setup', version: '9.3.0',
-    } as any);
+    } as any, 'code');
 
     expect(() => JSON.stringify(registry.getAllPackages())).not.toThrow();
     expect(registry.getAllPackages()).toHaveLength(2);

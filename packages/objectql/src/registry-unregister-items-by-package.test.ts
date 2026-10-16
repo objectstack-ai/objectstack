@@ -192,7 +192,7 @@ describe('#7221 — SchemaRegistry.unregisterItemsByPackage', () => {
 describe('#7221 — SchemaRegistry.uninstallPackage closes the same gap', () => {
   it('removes the package’s generic items, not just its objects and record', () => {
     const reg = quiet();
-    reg.installPackage({ id: 'crm', name: 'CRM', version: '1.0.0' } as any);
+    reg.installPackage({ id: 'crm', name: 'CRM', version: '1.0.0' } as any, 'code');
     reg.registerItem('page', { name: 'home' }, 'name', 'crm');
     reg.registerItem('flow', { name: 'onboard' }, 'name', 'crm');
     reg.registerObject(objectBody('contact'), 'crm');
@@ -209,7 +209,7 @@ describe('#7221 — SchemaRegistry.uninstallPackage closes the same gap', () => 
 
   it('removes NOTHING when the object half refuses (ADR-0029 extenders)', () => {
     const reg = quiet();
-    reg.installPackage({ id: 'crm', name: 'CRM', version: '1.0.0' } as any);
+    reg.installPackage({ id: 'crm', name: 'CRM', version: '1.0.0' } as any, 'code');
     reg.registerItem('page', { name: 'home' }, 'name', 'crm');
     reg.registerObject(objectBody('contact'), 'crm');
     reg.registerObject(objectBody('contact', 'extra'), 'analytics', undefined, 'extend');
@@ -224,7 +224,7 @@ describe('#7221 — SchemaRegistry.uninstallPackage closes the same gap', () => 
 
   it('keeps the package’s own `package` record addressable by its bare id', () => {
     const reg = quiet();
-    reg.installPackage({ id: 'crm', name: 'CRM', version: '1.0.0' } as any);
+    reg.installPackage({ id: 'crm', name: 'CRM', version: '1.0.0' } as any, 'code');
     // The sweep is prefix-scoped to `crm:`, so the bare-keyed package record is
     // not collateral — `uninstallPackage` still owns removing it, and reports
     // `true` because it found it.

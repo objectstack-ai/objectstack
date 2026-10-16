@@ -201,7 +201,7 @@ function realRegistry(): SchemaRegistry {
         objects: [{ name: 'invoice', fields: { total: { type: 'currency' } } }],
         apps: [{ name: 'showcase', label: 'Showcase' }],
         plugins: [plugin],
-    } as never);
+    } as never, 'code');
     // Init AFTER install — the measured ordering: the manifest serialised
     // cleanly during boot and only became cyclic once the plugins came up.
     plugin.init(cyclicEngine());
@@ -209,11 +209,11 @@ function realRegistry(): SchemaRegistry {
     registry.installPackage({
         id: SYSTEM_SCOPED, name: 'Setup', namespace: 'setup', version: '9.3.0',
         type: 'plugin', scope: 'system',
-    } as never);
+    } as never, 'code');
 
     registry.installPackage({
         id: DB_BASE, name: 'My Base', namespace: 'mybase', version: '1.0.0', type: 'app',
-    } as never);
+    } as never, 'code');
 
     // Every declared field carries a value from here on — see
     // `seatDeclaredFields` for the measurement that made this necessary.

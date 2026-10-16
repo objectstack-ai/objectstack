@@ -307,9 +307,9 @@ export function searchResultIsNotTheGlobalSearchShape(): void {
 export async function returnTypePrecisionPins11925(): Promise<void> {
     // ── bound 1/3: both surfaces agree on this envelope ──────────────────
     // `runtime`'s `/packages` domain and `rest`'s `GET {base}/packages` both
-    // send `{ packages, total: packages.length }`. The REST rows also carry a
-    // `source` discriminator the dispatcher rows lack, so it stays undeclared
-    // — the same treatment #8140 gave the scoped sibling directly above.
+    // send `{ packages, total: packages.length }`. (The REST twin's
+    // `source: 'registry' | 'database' | 'both'` stamp left with its routes in
+    // #14503; the `source` the rows carry now is the declared origin, #23972.)
     // ⚠️ [#17536] The ELEMENT moved, the envelope did not — this pin is still
     // #11925's statement that both mounted surfaces agree on
     // `{ packages, total }`, and that half is unchanged.
@@ -645,8 +645,10 @@ export async function returnTypePrecisionPins12034(): Promise<void> {
     void (await scoped.packages.get('com.acme.crm')).package;
 }
 
-declare const authoringRow: InstalledPackage;
-declare const assembledRow: AssembledInstalledPackage;
+// A SERVED row is the registry record plus the read door's own verdict,
+// `writable` (#23972 declared it on the served row, not on the record).
+declare const authoringRow: InstalledPackage & { writable: boolean };
+declare const assembledRow: AssembledInstalledPackage & { writable: boolean };
 
 /**
  * [#17536] The four `/packages` READ members declare the stage the DOOR is

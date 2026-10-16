@@ -126,7 +126,7 @@ function registryWith(): SchemaRegistry {
         type: 'app',
         scope: 'user',
         objects: [{ name: 'lead', fields: { title: { type: 'text' } } }],
-    } as any);
+    } as any, 'code');
     return registry;
 }
 

@@ -108,10 +108,10 @@ describe('#18877 — installPackage preserves an existing row\'s lifecycle state
         // ⛔ The scope leg: 「preserve」 is about lifecycle state only. A
         // re-install is still an install, and the row it writes is still the
         // new manifest's.
-        registry.installPackage({ ...manifest('com.acme.scope'), version: '1.0.0' } as any);
+        registry.installPackage({ ...manifest('com.acme.scope'), version: '1.0.0' } as any, 'code');
         registry.disablePackage('com.acme.scope');
 
-        const again = registry.installPackage({ ...manifest('com.acme.scope'), version: '2.0.0' } as any);
+        const again = registry.installPackage({ ...manifest('com.acme.scope'), version: '2.0.0' } as any, 'code');
 
         expect(again.manifest.version, 'the re-install really replaced the manifest').toBe('2.0.0');
         expect(again.enabled, 'and did so without touching the lifecycle state').toBe(false);
