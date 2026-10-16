@@ -45,7 +45,6 @@
     "ui/FormField:span = \"auto\"",
     "ui/FormSection:collapsed = false",
     "ui/FormSection:collapsible = false",
-    "ui/FormSection:columns = 1",
     "ui/FormView:type = \"simple\"",
     "ui/GalleryConfig:cardSize = \"medium\"",
     "ui/GalleryConfig:coverFit = \"cover\"",
