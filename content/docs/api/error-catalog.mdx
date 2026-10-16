@@ -446,7 +446,7 @@ result set — a response indistinguishable from a successful query.
 
 ### `API_KEY_REVOKED`
 **Cause:** The API key was revoked by its owner or an administrator.  
-**Fix:** Create a new key and replace this one wherever it is configured. A revoked key never works again.  
+**Fix:** Ask the key's owner or a platform administrator to restore it (the Restore API Key action on the API Keys list); the same key then works again at once. Otherwise create a new key and replace this one wherever it is configured.  
 **Retry:** `no_retry`
 
 These three are answered on every endpoint that accepts an API key: the endpoints the runtime serves (the MCP HTTP endpoint among them), the REST data API, the settings, file-download, datasource admin and share-link routes, the marketplace install routes and the MCP stdio transport. An unknown key is always the generic 401.

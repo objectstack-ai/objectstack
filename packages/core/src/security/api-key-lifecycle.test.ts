@@ -17,7 +17,9 @@
  *    stamped onto `expires_at` when admitted, and refused with that date after;
  *  - an admitted (or held) call stamps `last_used_at`, at most once an hour,
  *    and a stamp failure never fails the request and is said once;
- *  - each number is the source's, so a changed setting changes the verdict.
+ *  - each number is the source's, so a changed setting changes the verdict;
+ *  - the revoked refusal names the declared restore action beside the new-key
+ *    road and never claims the key is gone for good.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -296,5 +298,35 @@ describe('[#23367] resolveAuthzContext raises the refusal, branded, and never fa
       apiKeyLifecycle: policy(),
     });
     expect({ userId: ctx.userId, credential: ctx.credential }).toEqual({ userId: OWNER, credential: 'api_key' });
+  });
+});
+
+describe('[#23944] the revoked refusal agrees with the declared restore action', () => {
+  let warn: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined); });
+  afterEach(() => { warn.mockRestore(); });
+
+  it('names the restore road and the new-key road, and never says the key is gone for good', async () => {
+    const err = await resolveAuthzContext({
+      ql: makeQl({ revoked: true }),
+      headers: headers(),
+      nowMs: NOW,
+      userAuthGates: undefined,
+      apiKeyLifecycle: policy(),
+    }).catch((e) => e);
+
+    // The envelope is untouched; only the prose moved.
+    expect(isApiKeyLifecycleRefusalError(err)).toBe(true);
+    expect({ code: err.code, status: err.status }).toEqual({ code: 'API_KEY_REVOKED', status: 403 });
+
+    // `sys_api_key` declares `restore_api_key`, whose PATCH `{ revoked: false }`
+    // brings the same key back: a refusal that says "never works again" is
+    // contradicted by the product's own action. Name the action by its label,
+    // name who may run it, and keep rotation as the other road.
+    expect(err.message).toContain('osk_lifecycl');
+    expect(err.message).toContain('Restore API Key');
+    expect(err.message).toMatch(/owner or a platform administrator can restore it/);
+    expect(err.message).toContain('POST /api/v1/keys');
+    expect(err.message).not.toMatch(/never|permanent|forever|for good/i);
   });
 });

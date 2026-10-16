@@ -2332,10 +2332,6 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
         label: "Is Default",
         helpText: "Gives this set to everyone who signs in, through the built-in everyone position. A set the app itself declares is granted at startup; a set from an installed package becomes a suggestion an admin confirms in Setup. A set with high-privilege permissions is never granted this way. Default false."
       },
-      managedBy: {
-        label: "Managed By",
-        helpText: "Who owns this set: Package means it ships with a package and package upgrades update it; Platform and User mean it was created in this environment and upgrades leave it alone."
-      },
       packageId: {
         label: "Package Id",
         helpText: "The package that ships this set; a value naming any other package is refused. Leave empty for a set created in this environment."
