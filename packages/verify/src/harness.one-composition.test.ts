@@ -25,8 +25,15 @@ import { join } from 'node:path';
 import { afterAll, afterEach, describe, expect, it } from 'vitest';
 import { defineStack } from '@objectstack/spec';
 import { bootStack, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 const BOOT_TIMEOUT = 120_000;
+
+// The boot's first load, paid during collection rather than in the first
+// case's clock (see `boot-warm-up.testkit.ts`). The first boot below uses the
+// default options.
+await warmUpBoot();
+
 const PROBE = 'com.example.one-composition.probe';
 const PROBE_SERVICE = 'one-composition.probe';
 
