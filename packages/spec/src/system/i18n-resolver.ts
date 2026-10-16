@@ -21,6 +21,12 @@
  *   objects.<object>._actions.<action_name>.params.<param_name>.placeholder
  *   objects.<object>._actions.<action_name>.params.<param_name>.options.<value>
  *   objects.<object>._tabs.<tab_name>.label
+ *   objects.<object>._sections.<section_name>.label
+ *   objects.<object>._sections.<section_name>.description
+ *
+ * `<section_name>` is a form section's own `name` — the served form view's
+ * `config.sections[]`, see {@link translateView}. A section authored without a
+ * `name` has no key and keeps its authored text.
  *
  * `<view_key>` is the BARE authoring key (`listViews.<key>`, or the default
  * list/form key) — never the `<object>.<key>` identity the registry assigns a
@@ -121,8 +127,26 @@ export interface ViewLike {
    * puts the whole `ListViewSchema` under `config`, and `expandViewContainer`
    * does the same for a container-authored view, so `config.bulkActionDefs` is
    * the ONE address a served def has. See {@link translateView}.
+   *
+   * A served FORM view's `sections[]` live here too, for the same reason:
+   * `ViewItemSchema`'s form arm puts the whole `FormViewSchema` under
+   * `config`, so `config.sections` is where a section's heading is served.
    */
   config?: { data?: { object?: string }; bulkActionDefs?: unknown; [key: string]: unknown };
+}
+
+/**
+ * Minimal form-section shape consumed by {@link translateView} —
+ * `FormSectionSchema` (`ui/view.zod.ts`) narrowed to what the overlay reads.
+ * `label` stays `unknown` because the schema declares it an `I18nLabel`: a
+ * plain string or an inline locale map, both of them authored text.
+ */
+interface FormSectionLike {
+  /** `FormSectionSchema.name` — the `_sections` key. */
+  name?: unknown;
+  label?: unknown;
+  description?: unknown;
+  [key: string]: unknown;
 }
 
 /**
@@ -980,6 +1004,104 @@ function translateBulkActionDefs(
 }
 
 /**
+ * One string off a form section's `objects.<object>._sections.<section>` node,
+ * across the locale chain — `undefined` when no locale carries it, and the
+ * caller then leaves the authored value in place.
+ */
+function lookupSectionText(
+  bundle: TranslationBundle,
+  objectName: string,
+  sectionName: string,
+  attr: 'label' | 'description',
+  opts: ResolveOptions | undefined,
+): string | undefined {
+  for (const code of localeChain(opts)) {
+    const candidate = pickData(bundle, code)?.objects?.[objectName]?._sections?.[sectionName]?.[attr];
+    if (typeof candidate === 'string' && candidate.length > 0) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * Whether a section authored this piece of copy — a non-empty string, or (for
+ * an `I18nLabel` heading) an inline locale map.
+ */
+function sectionCopyAuthored(value: unknown): boolean {
+  return (typeof value === 'string' && value.length > 0) || asRecord(value) !== undefined;
+}
+
+/**
+ * The object a form view's section headings are keyed under: the form's OWN
+ * binding (`config.data.object`) first, then the view's.
+ *
+ * That is the order the two surfaces that WRITE and CHECK `_sections` keys
+ * already use — the i18n extractor (`walkObjectSections`,
+ * `packages/cli/src/utils/i18n-extract.ts`) and the translation linter
+ * (`collectViewRecord`, `packages/lint/src/validate-translation-references.ts`)
+ * both bind a form's sections to the form's own `data.object` before the
+ * container's — so the key read here is the key they scaffold and accept.
+ */
+function formSectionObjectName(config: Record<string, unknown>, viewObject: string): string {
+  const own = asRecord(config.data)?.object;
+  return typeof own === 'string' && own.length > 0 ? own : viewObject;
+}
+
+/**
+ * Overlay `objects.<object>._sections.<section>.{label,description}` onto a
+ * form view's authored `sections[]`, returning the SAME array reference when
+ * nothing matched (so {@link translateView} rebuilds `config` only when a
+ * section moved).
+ *
+ * Three rules, each the one its sibling translators already follow:
+ *
+ *  - **The key is the section's own `name`**, ⛔ never a slug of its label: a
+ *    section without a `name` has no `_sections` key (`FormSectionSchema.name`
+ *    exists for that lookup), so it is returned exactly as authored.
+ *  - **Only authored copy is translated.** A section that authors no `label`
+ *    is an untitled section and one that authors no `description` draws
+ *    nothing under its heading, so the catalog never ADDS either: the public
+ *    form renderer draws a heading only where one was authored, and a heading
+ *    conjured here would draw on the anonymous route alone.
+ *  - **The catalog loses to an explicit override** (#20731, ADR-0029 D9.2a):
+ *    each section is found in the packaged base's `config.sections` by the
+ *    `name` the bundle addresses it by ({@link packagedPart}), and a string
+ *    that diverged from its packaged counterpart keeps its value
+ *    ({@link valueOverridesPackagedBase}; ⛔ never a second comparison). A
+ *    section the base does not carry was authored after the fact.
+ */
+function translateFormSections(
+  sections: unknown,
+  bundle: TranslationBundle,
+  objectName: string,
+  opts: ResolveOptions | undefined,
+  packagedConfig: Record<string, unknown> | undefined,
+): unknown {
+  if (!Array.isArray(sections)) return sections;
+  let changed = false;
+  const next = sections.map((raw) => {
+    const section = asRecord(raw) as FormSectionLike | undefined;
+    if (section === undefined || typeof section.name !== 'string' || section.name.length === 0) return raw;
+    const sectionName = section.name;
+    const packagedSection = packagedPart(packagedConfig, 'sections', (candidate) => candidate.name === sectionName);
+    const text = (attr: 'label' | 'description', authored: unknown): string | undefined =>
+      !sectionCopyAuthored(authored) || valueOverridesPackagedBase(packagedSection, attr, authored)
+        ? undefined
+        : lookupSectionText(bundle, objectName, sectionName, attr, opts);
+
+    const label = text('label', section.label);
+    const description = text('description', section.description);
+    if (label === undefined && description === undefined) return raw;
+    changed = true;
+    return {
+      ...section,
+      ...(label !== undefined ? { label } : {}),
+      ...(description !== undefined ? { description } : {}),
+    };
+  });
+  return changed ? next : sections;
+}
+
+/**
  * Apply the active locale to a view metadata document by overwriting `label`
  * and `description` with translated values when available, and overlaying the
  * selection-bar copy of the view's `config.bulkActionDefs[]`. The original
@@ -1033,6 +1155,21 @@ function translateBulkActionDefs(
  * param the base does not carry was authored after the fact and counts as
  * diverged. No base supplied is the pre-#20731 behaviour, unchanged: the
  * catalog applies.
+ *
+ * ## [#23632] A form view's `sections` are translated HERE too
+ *
+ * A served form view carries its sections at `config.sections` — the form arm
+ * of `ViewItemSchema` nests the whole `FormViewSchema` under `config`, as the
+ * list arm nests its `bulkActionDefs` — and each section's heading and
+ * description are addressed at `objects.<object>._sections.<name>`, the
+ * convention `TranslationDataSchema` declares, the i18n extractor scaffolds and
+ * objectui's form renderers resolve client-side. A caller that cannot load the
+ * bundle itself — the anonymous public form — had no exported reading of that
+ * key, so its section titles stayed in the source language beside translated
+ * field labels. {@link translateFormSections} is that reading, on the same
+ * locale chain and the same override rule as every other string here; a
+ * container's form slot receives it through the same `config` projection its
+ * bulk-action defs do.
  */
 export function translateView<T extends ViewLike>(
   view: T,
@@ -1051,7 +1188,7 @@ export function translateView<T extends ViewLike>(
   const objectName = viewObjectName(view);
   if (config && typeof config === 'object' && bundle && objectName) {
     // The base's own `config` — `{}` when the base is known but carries none,
-    // so every def on the served view then counts as authored.
+    // so every def and section on the served view then counts as authored.
     const packagedConfig = base === undefined ? undefined : asRecord(base.config) ?? {};
     const defs = translateBulkActionDefs(
       config.bulkActionDefs,
@@ -1061,7 +1198,20 @@ export function translateView<T extends ViewLike>(
       opts,
       packagedConfig,
     );
-    if (defs !== config.bulkActionDefs) config = { ...config, bulkActionDefs: defs };
+    const sections = translateFormSections(
+      config.sections,
+      bundle,
+      formSectionObjectName(config, objectName),
+      opts,
+      packagedConfig,
+    );
+    if (defs !== config.bulkActionDefs || sections !== config.sections) {
+      config = {
+        ...config,
+        ...(defs !== config.bulkActionDefs ? { bulkActionDefs: defs } : {}),
+        ...(sections !== config.sections ? { sections } : {}),
+      };
+    }
   }
 
   return {
@@ -1388,8 +1538,8 @@ function isOptionValue(value: unknown): value is string | number | boolean {
 /**
  * [#20680] The packaged counterpart of one addressable part of a translated
  * document — a dashboard's widget, global filter or filter option; a view's
- * bulk-action def or its param (#20731) — found in `parent[key]` (an array) by
- * the key the bundle addresses it by.
+ * bulk-action def or its param (#20731), or a form view's section (#23632) —
+ * found in `parent[key]` (an array) by the key the bundle addresses it by.
  *
  * Three answers, and the difference between the first two is the point:
  *
@@ -1407,7 +1557,7 @@ function isOptionValue(value: unknown): value is string | number | boolean {
  */
 function packagedPart(
   parent: Record<string, unknown> | undefined,
-  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params',
+  key: 'widgets' | 'globalFilters' | 'options' | 'bulkActionDefs' | 'params' | 'sections',
   matches: (candidate: Record<string, any>) => boolean,
 ): Record<string, unknown> | undefined {
   if (parent === undefined) return undefined;
@@ -3012,7 +3162,8 @@ export function scalarOverridesPackagedBase(
  * object scalars its two callers ask about, and the dashboard translator
  * ({@link translateDashboard}) asks the same question of `title`, which that
  * union does not carry; the view translator ({@link translateView}, #20731)
- * asks it of a bulk-action def's `confirmText` and its params' `help`. One
+ * asks it of a bulk-action def's `confirmText`, its params' `help` and a form
+ * section's `label` / `description` (#23632). One
  * implementation, so the three conservative edges documented on the exported
  * predicate hold for every caller alike; ⛔ never a second copy of the
  * comparison.

@@ -46,6 +46,7 @@ import {
 } from '../ui/view.zod.js';
 import { ASSEMBLED_VIEW_ITEMS_KEY } from '../ui/assembled-views.zod.js';
 import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
+import { CONNECTOR_CONFIG_LOOSE_KEYS, WAIT_EVENT_CONFIG_LOOSE_KEYS } from '../automation/flow-sibling-block-loose-keys.js';
 
 /**
  * Flow callout node type rename (protocol 11.0).
@@ -1277,18 +1278,12 @@ const flowNodeNotifyConfigAliases: MetadataConversion = {
 /**
  * The loose `config` keys the `wait` executor used to also accept, in the exact
  * precedence order of the `??` chains it carried, keyed by the declared
- * `waitEventConfig` property each one feeds.
- *
- * `duration` and `signal` are not declared names anywhere in the spec — they
- * only ever existed as the tail of an executor fallback, which is why the
- * declared spelling is listed first in each group.
+ * `waitEventConfig` property each one feeds. Declared once in
+ * `automation/flow-sibling-block-loose-keys.ts`, the table the flow parse's
+ * loose-key refusal reads too (#23543 F3), so the keys refused at authoring and
+ * the keys lifted at rehydration are one set.
  */
-const WAIT_EVENT_CONFIG_LIFTS: ReadonlyArray<readonly [target: string, candidates: readonly string[]]> = [
-  ['eventType', ['eventType']],
-  ['timerDuration', ['timerDuration', 'duration']],
-  ['signalName', ['signalName', 'signal']],
-  ['timeoutMs', ['timeoutMs']],
-];
+const WAIT_EVENT_CONFIG_LIFTS = WAIT_EVENT_CONFIG_LOOSE_KEYS;
 
 /**
  * Lift `wait`'s loose `config.*` event keys onto the declared `waitEventConfig`
@@ -1312,16 +1307,20 @@ const WAIT_EVENT_CONFIG_LIFTS: ReadonlyArray<readonly [target: string, candidate
  * and the example that demonstrates `wait` was itself on the retiring spelling.
  *
  * Precedence mirrors those `??` chains, so the rewrite is behaviour-preserving:
- * a value already on `waitEventConfig` WINS and its loose counterpart is left
- * shadowed in place, and among loose candidates the first one present decides.
+ * a value already on `waitEventConfig` WINS, and among loose candidates the
+ * first one present decides.
  *
- * This is a LIFT between two locations, not an alias pair in one dict, so
- * #4923's by-value split (delete a redundant twin, keep a disagreeing one)
- * deliberately does NOT apply — {@link renameConfigKey} judges two spellings of
- * one slot, while here the loose `config` location is itself the retired thing
- * and `WAIT_EVENT_CONFIG_LIFTS` may map several candidate names onto one
- * target. Extending the rule here would be a separate ruling on a different
- * question; the shadowed loose key is left for the strict contract to reject.
+ * A loose key that does not lift is DELETED (#23543 F3): one the block already
+ * shadows, a later candidate the first present one shadowed, and a `null` the
+ * `??` chain skipped. None of them was ever read — the `??` chain never looked
+ * past the value that won — and since 18 the flow parse refuses every named
+ * loose key under `config` (`siblingBlockLooseConfigRefusals`), so a stored
+ * flow that kept one would stop loading at the rehydration seam that replays
+ * this entry. This is a LIFT between two locations, not an alias pair in one
+ * dict, so #4923's by-value split (keep a disagreeing twin for the author to
+ * decide) does not apply: the loose location is itself the retired thing, its
+ * value lost to the block's under every reading that ever ran, and a stored
+ * row has no author to decide.
  *
  * `eventType` is defaulted to `'timer'` whenever lifting would otherwise leave
  * the block without one. That is load-bearing, not tidiness: the loader parses
@@ -1340,45 +1339,63 @@ function liftWaitEventConfig(stack: Dict, emit: Emit): Dict {
     const wec: Dict = isDict(node.waitEventConfig) ? { ...node.waitEventConfig } : {};
     const nextConfig: Dict = { ...config };
     let lifted = false;
+    let dropped = false;
 
     for (const [target, candidates] of WAIT_EVENT_CONFIG_LIFTS) {
+      let decided = false;
       for (const from of candidates) {
-        if (nextConfig[from] == null) continue;
-        if (wec[target] == null) {
-          wec[target] = nextConfig[from];
-          delete nextConfig[from];
-          emit({ from: `config.${from}`, to: `waitEventConfig.${target}`, path: `${path}.waitEventConfig.${target}` });
-          lifted = true;
-        }
+        if (!(from in nextConfig)) continue;
+        const value = nextConfig[from];
+        delete nextConfig[from];
         // The first candidate PRESENT decides, lifted or shadowed — the `??`
         // chain never looked past it either.
-        break;
+        if (!decided && value != null && wec[target] == null) {
+          wec[target] = value;
+          emit({ from: `config.${from}`, to: `waitEventConfig.${target}`, path: `${path}.waitEventConfig.${target}` });
+          lifted = true;
+        } else {
+          const by = value == null ? 'it carried no value' : `\`waitEventConfig.${target}\` already set, so it was never read`;
+          emit({ from: `config.${from}`, to: `(removed — ${by})`, path: `${path}.config` });
+          dropped = true;
+        }
+        if (value != null) decided = true;
       }
     }
 
-    if (!lifted) return node;
-    if (wec.eventType == null) wec.eventType = 'timer';
-    return { ...node, config: nextConfig, waitEventConfig: wec };
+    if (!lifted && !dropped) return node;
+    if (lifted && wec.eventType == null) wec.eventType = 'timer';
+    return lifted ? { ...node, config: nextConfig, waitEventConfig: wec } : { ...node, config: nextConfig };
   });
 }
 
 /**
  * Wait flow-node loose `config` keys → the declared `waitEventConfig` sibling
- * (protocol 17, #4045). See {@link liftWaitEventConfig} for the precedence rules
- * and why `eventType` is defaulted.
+ * (protocol 17, #4045; retired from the load path at 18, #23543 F3). See
+ * {@link liftWaitEventConfig} for the precedence rules, why `eventType` is
+ * defaulted, and why a loose key that does not lift is deleted.
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `wait` has no
- * `config` contract (its contract is the sibling block), so retired, a loose
- * key beside a declared `waitEventConfig` would be silently ignored, and a node
- * with only loose keys would meet the missing-block refusal, which does not
- * name the move. Refusing the loose keys under `config` would also refuse
- * stored flows whose loose key the block shadows, because the rehydration seam
- * parses the same schema and this entry leaves a shadowed key in place; it can
- * retire once that shadowed shape has a ruling.
+ * ## Retired from the load path at 18 (#23543, ruling F3 A)
+ *
+ * Through 17 it stayed live because `wait` has no `config` contract (its
+ * contract is the sibling block), so retired alone, a loose key beside a
+ * declared `waitEventConfig` would have been silently ignored (the verdict
+ * #23487 recorded). The ruling closed both halves: the flow parse refuses every
+ * named loose key under a `wait` node's `config` with the prescription naming
+ * its `waitEventConfig` key (`siblingBlockLooseConfigRefusals`,
+ * `automation/flow-sibling-block-loose-keys.ts`, which owns the key table this
+ * lift reads), and this lift deletes the loose keys the block shadows, so a
+ * stored flow the refusal would reject keeps loading. The authoring funnel
+ * (`defineStack`, `os validate` / `os build` / `os lint`) no longer replays it.
+ * Stored flows are the `includeRetired` seams: the automation engine's flow
+ * rehydration, stored-row rehydration (`applyConversionsToStoredItem`), the
+ * metadata save door's flow fallback, the artifact-ingestion door inside its
+ * window, and `os migrate meta --from 16` (a step-17 member).
  */
 const flowNodeWaitEventConfigLift: MetadataConversion = {
   id: 'flow-node-wait-event-config-lift',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.wait.waitEventConfig',
   summary:
     "wait flow-node loose config keys → the declared `waitEventConfig` block: 'eventType', " +
@@ -1400,7 +1417,7 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
             // Loose `signal` alongside an explicit eventType: both lift.
             { id: 'n3', type: 'wait', config: { eventType: 'signal', signal: 'order_paid' } },
             // Partially shadowed: `timerDuration` is already declared, so the
-            // loose `duration` stays put untouched; only `eventType` lifts.
+            // loose `duration` is deleted (#23543 F3); only `eventType` lifts.
             // (Deliberately not `timeoutMs` — protocol 17 retires that key
             // (#4158), and the fixture harness replays the WHOLE table, so an
             // `after` naming it would describe an end state that no longer
@@ -1427,16 +1444,16 @@ const flowNodeWaitEventConfigLift: MetadataConversion = {
               id: 'n4',
               type: 'wait',
               waitEventConfig: { timerDuration: 'PT5M', eventType: 'signal' },
-              config: { duration: 'PT9M' },
+              config: {},
             },
           ],
         },
       ],
     },
     // n2: `duration` → `timerDuration`. n3: `eventType` + `signal` → `signalName`.
-    // n4: only `eventType` (its `duration` is shadowed by a declared
-    // `timerDuration` → no notice, and the key is left in place).
-    expectedNotices: 4,
+    // n4: `eventType` lifts, and its `duration`, shadowed by a declared
+    // `timerDuration`, is deleted with its own notice.
+    expectedNotices: 5,
   },
 };
 
@@ -1577,8 +1594,12 @@ const flowNodeSubflowFlowAlias: MetadataConversion = {
   },
 };
 
-/** The `config` keys a mis-taught `connector_action` node carries, in declared-block order. */
-const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
+/**
+ * The `config` keys a mis-taught `connector_action` node carries, in
+ * declared-block order — the one table the flow parse's loose-key refusal reads
+ * too (`automation/flow-sibling-block-loose-keys.ts`, #23543 F3).
+ */
+const CONNECTOR_CONFIG_LIFTS = CONNECTOR_CONFIG_LOOSE_KEYS;
 
 /**
  * Lift `connector_action`'s loose `config.*` keys onto the declared
@@ -1597,7 +1618,12 @@ const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
  * conversion is what makes the flows it mis-taught start working.
  *
  * Precedence matches every other lift here: a key already on the declared
- * block WINS and its loose counterpart is left shadowed in place.
+ * block WINS. Its loose counterpart, never read, is DELETED (#23543 F3), and so
+ * is a loose `null`: since 18 the flow parse refuses every named loose key
+ * under `config`, so a stored flow that kept one would stop loading at the
+ * rehydration seam that replays this entry. The reason it is a deletion and
+ * not #4923's keep-the-disagreeing-twin is the one under
+ * {@link liftWaitEventConfig}.
  *
  * One completeness guard is load-bearing, mirroring `wait`'s `eventType`
  * default: the loader parses the CONVERTED flow, and `connectorConfig` requires
@@ -1607,7 +1633,9 @@ const CONNECTOR_CONFIG_LIFTS = ['connectorId', 'actionId', 'input'] as const;
  * the refusal onto a key the author never wrote. The flow parse then refuses
  * the node for its missing `connectorConfig` block, whose prescription names
  * the move out of `config` (#20418); before the parse required the block, such
- * a node registered and failed every run at the executor's guard.
+ * a node registered and failed every run at the executor's guard. Nothing is
+ * deleted on that path either: the node fails to load whatever happens to its
+ * loose keys, and the refusal names each of them.
  */
 function liftConnectorConfigShape(stack: Dict, emit: Emit): Dict {
   return mapFlowNodes(stack, (node, path) => {
@@ -1618,40 +1646,58 @@ function liftConnectorConfigShape(stack: Dict, emit: Emit): Dict {
     const cc: Dict = isDict(node.connectorConfig) ? { ...node.connectorConfig } : {};
     const nextConfig: Dict = { ...config };
     const lifts: Array<(typeof CONNECTOR_CONFIG_LIFTS)[number]> = [];
+    const drops: Array<{ key: (typeof CONNECTOR_CONFIG_LIFTS)[number]; empty: boolean }> = [];
     for (const key of CONNECTOR_CONFIG_LIFTS) {
-      if (nextConfig[key] == null) continue;
-      if (cc[key] != null) continue; // declared block wins; the loose key stays shadowed
-      cc[key] = nextConfig[key];
+      if (!(key in nextConfig)) continue;
+      const value = nextConfig[key];
       delete nextConfig[key];
-      lifts.push(key);
+      if (value != null && cc[key] == null) {
+        cc[key] = value;
+        lifts.push(key);
+      } else {
+        drops.push({ key, empty: value == null }); // declared block wins, or nothing to carry
+      }
     }
-    if (lifts.length === 0) return node;
+    if (lifts.length === 0 && drops.length === 0) return node;
     // Completeness guard — never materialize a block the loader would reject.
     if (cc.connectorId == null || cc.actionId == null) return node;
 
     for (const key of lifts) {
       emit({ from: `config.${key}`, to: `connectorConfig.${key}`, path: `${path}.connectorConfig.${key}` });
     }
-    return { ...node, config: nextConfig, connectorConfig: cc };
+    for (const { key, empty } of drops) {
+      const by = empty ? 'it carried no value' : `\`connectorConfig.${key}\` already set, so it was never read`;
+      emit({ from: `config.${key}`, to: `(removed — ${by})`, path: `${path}.config` });
+    }
+    return lifts.length > 0 ? { ...node, config: nextConfig, connectorConfig: cc } : { ...node, config: nextConfig };
   });
 }
 
 /**
  * Connector flow-node loose `config` keys → the declared `connectorConfig`
- * sibling (protocol 17, #4045). See {@link liftConnectorConfigShape} for the
- * precedence rules and the completeness guard.
+ * sibling (protocol 17, #4045; retired from the load path at 18, #23543 F3).
+ * See {@link liftConnectorConfigShape} for the precedence rules, the
+ * completeness guard, and why a shadowed loose key is deleted.
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** Like `wait`,
- * `connector_action` has no `config` contract, so retired, a loose key beside
- * a complete `connectorConfig` would be silently ignored: a loose `input` next
- * to a declared pair would dispatch the action with no input. Refusing the
- * loose keys under `config` would also refuse stored flows whose loose key the
- * block shadows (the rehydration seam parses the same schema), so it can retire
- * once that shadowed shape has a ruling.
+ * ## Retired from the load path at 18 (#23543, ruling F3 A)
+ *
+ * Through 17 it stayed live because, like `wait`, `connector_action` has no
+ * `config` contract, so retired alone, a loose key beside a complete
+ * `connectorConfig` would have been silently ignored: a loose `input` next to a
+ * declared pair would dispatch the action with no input (the verdict #23487
+ * recorded). The ruling closed both halves: the flow parse refuses
+ * `config.connectorId` / `config.actionId` / `config.input` on a
+ * `connector_action` node with the prescription naming `connectorConfig`
+ * (`siblingBlockLooseConfigRefusals`), and this lift deletes the loose keys the
+ * block shadows, so a stored flow the refusal would reject keeps loading. The
+ * seams that still replay it are the ones listed on
+ * `flow-node-wait-event-config-lift`.
  */
 const flowNodeConnectorConfigLift: MetadataConversion = {
   id: 'flow-node-connector-config-lift',
   toMajor: 17,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.connector_action.connectorConfig',
   summary:
     "connector_action flow-node loose config keys 'connectorId' / 'actionId' / 'input' → " +
@@ -1677,8 +1723,8 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
                 input: { channel: 'C0WINS000', text: 'Task done: {record.title}' },
               },
             },
-            // A declared block WINS: `config.connectorId` stays shadowed in
-            // place, and since nothing else lifts, the node is untouched.
+            // A declared block WINS: the shadowed `config.connectorId` is
+            // deleted (#23543 F3) and the block is untouched.
             {
               id: 'n3',
               type: 'connector_action',
@@ -1725,7 +1771,7 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
               id: 'n3',
               type: 'connector_action',
               connectorConfig: { connectorId: 'rest', actionId: 'get', input: {} },
-              config: { connectorId: 'ignored' },
+              config: {},
             },
             {
               id: 'n4',
@@ -1742,9 +1788,9 @@ const flowNodeConnectorConfigLift: MetadataConversion = {
         },
       ],
     },
-    // n2: the full trio lifts. n3: shadowed → no lift, no notice. n4: guard —
+    // n2: the full trio lifts. n3: shadowed → deleted, one notice. n4: guard —
     // nothing materializes. n5: the single unshadowed `input`.
-    expectedNotices: 4,
+    expectedNotices: 5,
   },
 };
 

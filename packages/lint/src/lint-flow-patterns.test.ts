@@ -287,7 +287,7 @@ describe('lintFlowPatterns — approval revise loop (ADR-0044)', () => {
   ) => {
     const stack = approvalFlow(edges) as any;
     stack.flows[0].nodes = stack.flows[0].nodes.map((n: any) =>
-      n.id === 'wait' ? { id: 'wait', type: 'wait', config: { eventType: 'signal' } } : n,
+      n.id === 'wait' ? { id: 'wait', type: 'wait', waitEventConfig: { eventType: 'signal' } } : n,
     );
     return stack;
   };
@@ -2089,7 +2089,7 @@ describe('per-iteration containment (#13681 / #14394)', () => {
         { id: 'n4', type: 'delete_record', label: 'Delete', config: { objectName: 'task', filter: { case_id: CEL('currentCase.id') } } },
         { id: 'n5', type: 'http', label: 'Call', config: { url: 'https://example.test' } },
         { id: 'n6', type: 'notify', label: 'Notify', config: { title: 'x' } },
-        { id: 'n7', type: 'connector_action', label: 'Connector', config: { connectorId: 'c', action: 'a' } },
+        { id: 'n7', type: 'connector_action', label: 'Connector', connectorConfig: { connectorId: 'c', actionId: 'a' } },
         { id: 'n8', type: 'script', label: 'Script', config: { function: 'f' } },
         { id: 'n9', type: 'subflow', label: 'Subflow', config: { flowName: 'child' } },
         { id: 'n10', type: 'map', label: 'Map', config: { collection: { dialect: 'cel', source: 'items' } } },
