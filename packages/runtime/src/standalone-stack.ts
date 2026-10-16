@@ -674,9 +674,21 @@ export function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wa
         // (`OS_DATABASE_DRIVER=sqlite` beside a `postgres://user:password@…`),
         // so the URL it would otherwise echo is exactly the credentialed kind.
         const why = scheme ? `its scheme is "${scheme}"` : 'it names no file after "file:"';
+        // The remedy names what the reader can change, and assumes no door:
+        // the kind may have come from OS_DATABASE_DRIVER (which
+        // `--database-driver` sets), the `databaseDriver` option, or the URL
+        // itself (`file:` alone). Over a scheme, keep the kind with a file
+        // path, or hand the URL a driver it matches. Over a `file:` that names
+        // no file, only the file helps: a `file:` URL selects the `sqlite`
+        // kind on its own, so no driver change gets past this rule.
+        const remedy = scheme
+            ? `Use file:/path/to/db.sqlite to keep the ${kind} driver, or use a driver that matches the URL: ` +
+              `unset the driver selection (OS_DATABASE_DRIVER, --database-driver or the databaseDriver option) ` +
+              `so the URL selects it, or set the selection to the URL's driver.`
+            : 'Name the file after "file:", as in file:/path/to/db.sqlite.';
         throw new Error(
             `[StandaloneStack] ${kind} driver was selected but the URL does not look like a file path (${why}). ` +
-            `Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.`
+            remedy
         );
     }
     return filename;

@@ -397,6 +397,41 @@ export interface ManagedDriftEntry extends SchemaDiffEntry {
   message: string;
 }
 
+/**
+ * [#23925] The remedy sentence {@link diffManagedTable} ends each destructive
+ * COLUMN entry's message with: `os migrate apply --allow-destructive`, the
+ * command that performs the entry wherever the reporting driver's apply door
+ * can. Spelled once, here, so the module that writes the sentence is the one
+ * that takes it off again ({@link driftFindingWithoutRemedy}).
+ *
+ * Why it must come off somewhere: the finding is the same on every face (the
+ * report is this differ's), but whether that command can perform the entry is
+ * the reporting driver's to declare. The Turso REMOTE face runs no SQLite
+ * table rebuild, so a `tighten_not_null` there is not applied by the command
+ * its message names, and `os migrate plan` shows the finding with the
+ * driver's declared limit instead of a remedy that database does not have.
+ * Every other reader keeps the message as written, byte for byte.
+ */
+const DESTRUCTIVE_COLUMN_REMEDY = {
+  tighten_not_null: ' Run "os migrate apply --allow-destructive".',
+  narrow_varchar: ' "os migrate apply --allow-destructive".',
+  drop_column: ' — "os migrate apply --allow-destructive" to drop it.',
+} as const satisfies Partial<Record<DriftOp['type'], string>>;
+
+/**
+ * [#23925] A drift entry's finding without the `os migrate apply
+ * --allow-destructive` remedy sentence {@link diffManagedTable} ends a
+ * destructive column entry with ({@link DESTRUCTIVE_COLUMN_REMEDY}); any other
+ * entry's message, unchanged. For a renderer whose database's driver declares
+ * it cannot apply the entry, so that remedy is never offered there.
+ */
+export function driftFindingWithoutRemedy(entry: Pick<ManagedDriftEntry, 'message' | 'op'>): string {
+  const remedy: string | undefined = (DESTRUCTIVE_COLUMN_REMEDY as Partial<Record<DriftOp['type'], string>>)[entry.op.type];
+  return remedy !== undefined && entry.message.endsWith(remedy)
+    ? entry.message.slice(0, -remedy.length)
+    : entry.message;
+}
+
 /** Columns the driver creates unconditionally — never metadata fields. */
 export const BUILTIN_COLUMNS = new Set(['id', 'created_at', 'updated_at']);
 
@@ -967,7 +1002,7 @@ export function diffManagedTable(args: {
         op: { type: 'tighten_not_null', table, column: fieldName },
         message:
           `${table}.${fieldName}: metadata declares \`storage.notNull\` but the column is ` +
-          `nullable — existing nulls must be backfilled. Run "os migrate apply --allow-destructive".`,
+          `nullable — existing nulls must be backfilled.${DESTRUCTIVE_COLUMN_REMEDY.tighten_not_null}`,
       });
     }
 
@@ -1265,7 +1300,7 @@ export function diffManagedTable(args: {
           severity: 'error',
           category: 'destructive',
           op: { type: 'narrow_varchar', table, column: fieldName, to: declaredMaxLength, from: col.maxLength },
-          message: `${table}.${fieldName}: metadata caps at ${declaredMaxLength} chars but the column allows ${col.maxLength} — narrowing may truncate. "os migrate apply --allow-destructive".`,
+          message: `${table}.${fieldName}: metadata caps at ${declaredMaxLength} chars but the column allows ${col.maxLength} — narrowing may truncate.${DESTRUCTIVE_COLUMN_REMEDY.narrow_varchar}`,
         });
       }
     }
@@ -1377,8 +1412,8 @@ export function diffManagedTable(args: {
       category: 'destructive',
       op: { type: 'drop_column', table, column: col.name },
       message:
-        `${table}.${col.name}: column exists in the database but not in metadata (orphaned) ` +
-        `— "os migrate apply --allow-destructive" to drop it.`,
+        `${table}.${col.name}: column exists in the database but not in metadata (orphaned)` +
+        DESTRUCTIVE_COLUMN_REMEDY.drop_column,
     });
   }
 

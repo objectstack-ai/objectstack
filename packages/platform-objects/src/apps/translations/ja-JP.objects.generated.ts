@@ -142,7 +142,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました"
+        successMessage: "${result.email} に招待を送信しました",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理者",
+              delegated_admin: "委任管理者",
+              member: "メンバー"
+            }
+          }
+        }
       },
       ban_user: {
         label: "利用停止",
@@ -633,7 +643,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました"
+        successMessage: "${result.email} に招待を送信しました",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理者",
+              delegated_admin: "委任管理者",
+              member: "メンバー"
+            }
+          }
+        }
       },
       add_member: {
         label: "メンバーを追加",
@@ -751,7 +771,17 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "ユーザーを招待",
         description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
-        successMessage: "${result.email} に招待を送信しました"
+        successMessage: "${result.email} に招待を送信しました",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理者",
+              delegated_admin: "委任管理者",
+              member: "メンバー"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "招待をキャンセル",

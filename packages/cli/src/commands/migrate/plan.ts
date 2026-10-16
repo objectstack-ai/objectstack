@@ -15,6 +15,8 @@ import {
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
+  collectDriftApplyLimits,
+  describeWithApplyLimits,
   describeDatabaseSource,
   describeTelemetryDatabase,
   renderPlan,
@@ -69,6 +71,16 @@ import {
  * transport) used to refuse the plan at its boot. It now boots with schema sync
  * skipped: still nothing written, the drift half read from the database, and
  * the additive half reported as not examined in both faces.
+ *
+ * [#23925] Nor does the plan offer a remedy that database does not have. The
+ * driver that reported each entry declares what its apply door cannot perform
+ * (`SchemaStack.driftApplyLimit`); such an entry is listed with its finding and
+ * that limit instead of `--allow-destructive`, and the footer offers
+ * `--allow-destructive` only for a destructive entry the database can apply.
+ * Read from the declaration, never from the dialect or the transport name. A
+ * driver that declares nothing (every database but a Turso REMOTE one) gets
+ * the plan it always got, byte for byte. The `--json` document is the report
+ * and is unchanged.
  */
 export default class MigratePlan extends Command {
   static override description =
@@ -360,12 +372,40 @@ export default class MigratePlan extends Command {
         return;
       }
 
+      // [#23925] What the driver that reported each entry declares its apply
+      // door cannot perform: on the Turso REMOTE transport, every column entry
+      // but a drop (it runs no SQLite table rebuild). Empty for a driver that
+      // declares nothing, and then everything below reads as it always has.
+      const limits = collectDriftApplyLimits(stack, drift);
+
       await renderPendingSchemaWork(pending);
-      renderPlan(drift);
+      if (limits.size === 0) {
+        renderPlan(drift);
+      } else {
+        // Still listed, still counted: it IS drift. Only the remedy changes,
+        // from a command that cannot perform it here to the reason it cannot.
+        renderPlan(drift, await describeWithApplyLimits(limits));
+      }
       if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
       printInfo(summarize(drift));
-      console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') +
-        chalk.dim(' (add --allow-destructive for drops / tightenings)'));
+      if (limits.size === 0) {
+        console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') +
+          chalk.dim(' (add --allow-destructive for drops / tightenings)'));
+      } else {
+        // `--allow-destructive` only for a destructive entry this database can
+        // apply; no apply line at all when it can apply nothing listed here.
+        const appliable = drift.filter((d) => !limits.has(d));
+        const appliableDestructive = appliable.filter((d) => d.category === 'destructive').length;
+        if (appliable.length > 0 || pending.length > 0) {
+          console.log(chalk.dim('  Apply with: ') + chalk.white('os migrate apply') + (appliableDestructive > 0
+            ? chalk.dim(` (add --allow-destructive for the ${appliableDestructive} destructive change(s) it can apply on this database)`)
+            : ''));
+        }
+        printWarning(
+          `${limits.size} change(s) above cannot be applied on this database by "os migrate apply" (each says why), `
+          + 'so they remain drift after it runs.',
+        );
+      }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
     } catch (error: any) {

@@ -63,6 +63,7 @@ import {
     isSandboxOrigin,
     isSandboxOwnFault,
     mapDataError,
+    resolveThrownHttpError,
     sandboxBusinessMessage,
     structuredCodeAnswer,
     thrownCodeFields,
@@ -878,11 +879,82 @@ function isExpectedQueryRejection(body: Record<string, unknown> | undefined): bo
  * previous lap of exactly this drift: the filter and sort codes shipped without
  * joining the list, so every rejection they produced was logged as an unhandled
  * error too. One predicate, one door, so there is no third lap.
+ *
+ * [#23932] ⛔ A refusal the PRODUCER declared does not join this list by name.
+ * `ERR_FILE_CONSTRAINT` (400) and `INVALID_METADATA` (422) were the third lap:
+ * both declared, both registered, both logged until this card. The log verdict
+ * reads that declaration off the thrown error instead
+ * ({@link isDeclaredClientRefusal}, in {@link logUnexpectedRouteError}), so the
+ * next declared refusal is quiet the day it ships. This list keeps what that
+ * read cannot see — the statuses above, and the codes the classifier's own
+ * heuristic arms assign to an UNDECLARED throw (`INVALID_FIELD` for a driver's
+ * unknown column, `VALIDATION_FAILED` for a NOT NULL violation) — and the
+ * declared query-rejection codes it already named, which the declaration read
+ * now also covers, are left in place rather than moved in this change.
  */
 export function isExpectedRouteError(status: number, body: Record<string, unknown> | undefined): boolean {
     return isExpectedDataStatus(status)
         || isExpectedQueryRejection(body)
         || body?.code === 'VALIDATION_FAILED';
+}
+
+/**
+ * [#23932] Is this answer a CLIENT refusal its producer declared — the ADR-0112
+ * envelope in the 4xx band — delivered to the caller exactly as declared?
+ *
+ * ## Why a declaration and not two more names
+ *
+ * `service-storage`'s `FileConstraintError` declares `code: 'ERR_FILE_CONSTRAINT'`
+ * and `status: 400`; `metadata-protocol`'s spec-validation refusal declares
+ * `code: 'INVALID_METADATA'`, `status: 422` and `issues`. Both reached the wire
+ * correctly and both printed "[REST] Unhandled error" plus a stack per request,
+ * because {@link isExpectedRouteError} names codes and neither had joined it —
+ * the drift lap its docblock already records once. Measured on the same tree,
+ * the list also missed other registered codes this repository's producers throw
+ * with a declared 400 (`FILE_FIELD_BULK_WRITE_REFUSED`, `FILTER_TOKEN_UNKNOWN`,
+ * `FILTER_TOKEN_UNRESOLVED`, `ANALYTICS_DATE_RANGE_UNRECOGNIZED`). Reading the
+ * declaration ends the laps; adding names schedules the next one.
+ *
+ * ## The three conditions, each load-bearing
+ *
+ *  1. **The answer is in the 4xx band.** The 5xx band has its own ruled
+ *     declaration ({@link declaredRefusalMessage}, `refusal: true`), and is
+ *     untouched. A sandboxed body that CRASHED while declaring a 4xx envelope is
+ *     answered `UNCLASSIFIED_FAULT`'s 500 by {@link resolveErrorResponse}'s crash
+ *     terminal, so it fails here and stays loud.
+ *  2. **The producer DECLARED that status** — `declaredStatus` from
+ *     `resolveThrownHttpError`, the one rule every door reads (`status` or
+ *     `statusCode`, or the 400 a validation-shaped throw declares by shape).
+ *     A status the DOOR supplied is not a declaration: the sandbox unwrap's
+ *     default 400 fails here, so the un-coded business-rule 400s the predicate
+ *     above stays narrow for are still logged, and so is a registered code that
+ *     arrived with no status (half an envelope).
+ *  3. **The producer's own code is the wire `code`.** That holds exactly when
+ *     the spelling is a member of `StandardErrorCode` ∪ the ADR-0112 ledger —
+ *     anything else is demoted to `declaredCode` beside a status-derived `code`
+ *     ({@link thrownCodeFields}) — and no arm replaced it. It is read off the
+ *     already-narrowed answer, ⛔ not by a fourth `ErrorCode.safeParse`.
+ *
+ * ⚠️ Registration alone is not the test, and condition 3 is not asked alone:
+ * the ledger records codes by owning package with no client/fault axis, and it
+ * registers fault-shaped codes (`INTERNAL`). The STATUS the producer declared is
+ * the classification; the registered code is what makes it a declaration
+ * rather than a bare number.
+ *
+ * Still logged, and pinned so in `rest-declared-client-refusal-log.test.ts`: a
+ * handler bug (500), an un-coded 4xx, a coded 4xx whose code is not
+ * registered, a registered code on a status the producer did not declare, a
+ * registered code on a declared 5xx without `refusal: true`, and a crash.
+ */
+function isDeclaredClientRefusal(
+    error: any,
+    resolved: { status: number; body: Record<string, unknown> },
+): boolean {
+    if (resolved.status < 400 || resolved.status >= 500) return false;
+    const thrown = resolveThrownHttpError(error, resolved.status);
+    return thrown.declaredStatus === resolved.status
+        && thrown.declaredCode !== undefined
+        && resolved.body?.code === thrown.declaredCode;
 }
 
 /**
@@ -906,9 +978,18 @@ export function isExpectedRouteError(status: number, body: Record<string, unknow
  * `logWithheldServerFault` below then no-ops by its own rule — the resolved
  * body carries the error's own message — so a relayed refusal costs no line at
  * all, and a TRUNCATED one still hands the operator the full text.
+ *
+ * [#23932] The same ruling's 4xx half: {@link isDeclaredClientRefusal}. The
+ * 5xx band needs `refusal: true` because a declared 5xx is a fault by default;
+ * a declared 4xx needs nothing beyond its ADR-0112 envelope, because the 4xx
+ * band is already the caller's — `ApiErrorSchema.refusal`'s own table says the
+ * field is "redundant on a 4xx". Two declarations, one per band, each read off
+ * the thrown error; neither is a list of codes or of statuses.
  */
 export function logUnexpectedRouteError(error: any, resolved: { status: number; body: Record<string, unknown> }): void {
-    if (!isExpectedRouteError(resolved.status, resolved.body) && declaredRefusalMessage(error) === undefined) {
+    if (!isExpectedRouteError(resolved.status, resolved.body)
+        && declaredRefusalMessage(error) === undefined
+        && !isDeclaredClientRefusal(error, resolved)) {
         logError('[REST] Unhandled error:', error);
         return;
     }
