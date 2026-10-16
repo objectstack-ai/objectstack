@@ -1318,9 +1318,10 @@ describe('visibility-predicate-unknown-function (#13594)', () => {
     const page = { pages: [{ name: 'p', regions: [{ components: [{ type: 'element:text', visibleWhen: 'bogusFn(1)' }] }] }] };
     expect(unknownFnFindings(page).map((f) => f.path)).toEqual(['pages[0].regions[0].components[0]']);
 
-    // The deprecated alias VALUE is still read (#6318 retired the KEY rule only).
+    // The retired alias is not read at all since 18 (#23543 F4): the parse
+    // refuses it before any door runs this rule.
     const alias = { views: [{ name: 'f', sections: [{ visibleOn: 'bogusFn(1)', fields: [] }] }] };
-    expect(unknownFnFindings(alias)).toHaveLength(1);
+    expect(unknownFnFindings(alias)).toHaveLength(0);
   });
 
   it('the verdict is layer-agnostic — the environment registers the same names on both', () => {
