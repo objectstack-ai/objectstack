@@ -63,6 +63,9 @@ type Entry = {
   category: 'safe' | 'needs_confirm' | 'destructive'; op: Record<string, unknown> & { type: string }; message: string;
 };
 
+/** [#23925] What a driver declares for an op its apply door cannot perform (the REMOTE face's sentence). */
+const APPLY_LIMIT = 'it needs the SQLite table rebuild, which the Turso REMOTE transport does not run';
+
 const entry = (column: string, type: string, category: Entry['category']): Entry => ({
   kind: 'nullability_mismatch', remoteName: 't23848', table: 't23848', column, severity: 'warning', category,
   op: { type, table: 't23848', column }, message: `t23848.${column}: ${type}`,
@@ -74,8 +77,17 @@ const entry = (column: string, type: string, category: Entry['category']): Entry
  * asked to apply comes back skipped, as a driver reports one its transport
  * cannot perform. A destructive entry without `allowDestructive` is skipped
  * unattempted, as the base contract says.
+ *
+ * [#23925] `limited` names the op types the reporting driver declares its apply
+ * door cannot perform (`SchemaStack.driftApplyLimit`); empty is a driver that
+ * declares nothing.
  */
-function stackWith(drift: Entry[], applies: Entry[], schemaSync: 'skipped' | 'deferred') {
+function stackWith(
+  drift: Entry[],
+  applies: Entry[],
+  schemaSync: 'skipped' | 'deferred',
+  limited: ReadonlySet<string> = new Set(),
+) {
   const applyMigrationEntries = vi.fn(async (entries: Entry[], opts: { allowDestructive?: boolean }) => {
     const applied: Entry[] = [];
     const skipped: Entry[] = [];
@@ -96,6 +108,7 @@ function stackWith(drift: Entry[], applies: Entry[], schemaSync: 'skipped' | 'de
       drivers: [],
       detectManagedDrift: vi.fn(async () => drift),
       applyMigrationEntries,
+      driftApplyLimit: (e: Entry): string | null => (limited.has(e.op.type) ? APPLY_LIMIT : null),
       pendingSchemaWork: [],
       flushSchemaDdl: vi.fn(async () => []),
       managedTableCount: 1,
@@ -246,5 +259,94 @@ describe('a boot that skipped schema sync never reads as "in sync"', () => {
     expect(human.lines).toContain(SKIPPED_SCHEMA_SYNC_NOTE);
     expect(human.lines).toMatch(/PARTIAL plan: it is not evidence that every declared table and column exists/);
     expect(human.lines).not.toMatch(/in sync with metadata — nothing to migrate/);
+  }, CASE_TIMEOUT_MS);
+});
+
+/**
+ * [#23925] The apply's listing before its prompt reads the reporting driver's
+ * declaration, as `os migrate plan` does: an entry its database cannot apply
+ * shows its finding and the driver's limit, never `--allow-destructive`, and
+ * the held-back count offers a re-run only for the destructive entries that
+ * re-run could apply. Its `notApplied` report, exit code and `--json` are
+ * not this card's, and are pinned unchanged.
+ */
+describe('apply\'s listing reads the driver\'s apply limit', () => {
+  const T = 't23925';
+  const DROP: Entry = {
+    kind: 'unmapped_column', remoteName: T, table: T, column: 'legacy', severity: 'warning', category: 'destructive',
+    op: { type: 'drop_column', table: T, column: 'legacy' },
+    message: `${T}.legacy: column exists in the database but not in metadata (orphaned) — "os migrate apply --allow-destructive" to drop it.`,
+  };
+  const TIGHTEN: Entry = {
+    kind: 'nullability_mismatch', remoteName: T, table: T, column: 'code', severity: 'error', category: 'destructive',
+    op: { type: 'tighten_not_null', table: T, column: 'code' },
+    message: `${T}.code: metadata declares \`storage.notNull\` but the column is nullable — existing nulls must be backfilled. Run "os migrate apply --allow-destructive".`,
+  };
+  const RELAX: Entry = {
+    kind: 'nullability_mismatch', remoteName: T, table: T, column: 'memo', severity: 'warning', category: 'needs_confirm',
+    op: { type: 'relax_not_null', table: T, column: 'memo' },
+    message: `${T}.memo: the column is NOT NULL but the metadata declares no storage constraint. Ratify it by declaring \`storage: { notNull: true }\` yourself — nothing supplies it for you, and \`required: true\` does not imply it (ADR-0113) — or deliberately relax the column via "os migrate".`,
+  };
+  const LIMITED = new Set(['tighten_not_null', 'relax_not_null']);
+  const LIMIT_SENTENCE = `"os migrate apply" cannot apply it on this database: ${APPLY_LIMIT}.`;
+
+  /** The line the listing prints under an entry's `[op]` heading. */
+  const entryLine = (lines: string, op: string): string => {
+    const all = lines.split('\n');
+    const at = all.findIndex((l) => l.includes(`[${op}]`));
+    expect(at, `no [${op}] entry in:\n${lines}`).toBeGreaterThanOrEqual(0);
+    return all[at + 1]!;
+  };
+  const skippedLines = (lines: string) => lines.split('\n').filter((l) => /will be SKIPPED|re-run with --allow-destructive cannot/.test(l));
+
+  it('without --allow-destructive: the limited entries name the limit; only the drop is offered a re-run, the tightening is named as drift no re-run applies', async () => {
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped', LIMITED).stack);
+    const { lines, exitCode } = await run(MigrateApply, ['--yes']);
+    expect(exitCode, lines).toBe(0);
+
+    const tighten = entryLine(lines, 'tighten_not_null');
+    expect(tighten).not.toContain('--allow-destructive');
+    expect(tighten).toContain(`${T}.code: metadata declares \`storage.notNull\` but the column is nullable — existing nulls must be backfilled. ${LIMIT_SENTENCE}`);
+    expect(entryLine(lines, 'relax_not_null')).toContain(LIMIT_SENTENCE);
+    expect(entryLine(lines, 'drop_column')).toBe(`        ${DROP.message}`);
+
+    expect(skippedLines(lines)).toEqual([
+      '  ⚠ 1 destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).',
+      '  ⚠ 1 destructive change(s) remain drift that a re-run with --allow-destructive cannot apply on this database either (each says why above).',
+    ]);
+    // Unchanged after the prompt: the needs-confirm entry the driver could not apply is still named.
+    expect(lines).toContain('t23925.memo — relax_not_null');
+  }, CASE_TIMEOUT_MS);
+
+  it('with --allow-destructive: the listing names the limit, and the notApplied report, PARTIAL and exit 1 are unchanged', async () => {
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped', LIMITED).stack);
+    const { lines, exitCode } = await run(MigrateApply, ['--allow-destructive', '--yes']);
+    expect(exitCode, lines).toBe(1);
+    expect(entryLine(lines, 'tighten_not_null')).toContain(LIMIT_SENTENCE);
+    expect(entryLine(lines, 'tighten_not_null')).not.toContain('--allow-destructive');
+    expect(skippedLines(lines)).toEqual([]);
+    expect(lines).toContain('t23925.code — tighten_not_null (destructive)');
+    expect(lines).toMatch(/PARTIAL apply: 1 destructive change\(s\)/);
+  }, CASE_TIMEOUT_MS);
+
+  it('--json: the document is the one a driver that declares nothing gets, key for key and entry for entry', async () => {
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped', LIMITED).stack);
+    const limited = await run(MigrateApply, ['--yes', '--json']);
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped').stack);
+    const declaresNothing = await run(MigrateApply, ['--yes', '--json']);
+    const withoutDuration = (p: Record<string, unknown>) => Object.fromEntries(Object.entries(p).filter(([k]) => k !== 'duration'));
+    expect(limited.exitCode).toBe(declaresNothing.exitCode);
+    expect(withoutDuration(limited.payload)).toEqual(withoutDuration(declaresNothing.payload));
+  }, CASE_TIMEOUT_MS);
+
+  it('CONTROL: a driver that declares nothing gets the listing and the held-back line it always got', async () => {
+    boot.mockResolvedValueOnce(stackWith([DROP, TIGHTEN, RELAX], [DROP], 'skipped').stack);
+    const { lines, exitCode } = await run(MigrateApply, ['--yes']);
+    expect(exitCode, lines).toBe(0);
+    expect(entryLine(lines, 'tighten_not_null')).toBe(`        ${TIGHTEN.message}`);
+    expect(entryLine(lines, 'relax_not_null')).toBe(`        ${RELAX.message}`);
+    expect(entryLine(lines, 'drop_column')).toBe(`        ${DROP.message}`);
+    expect(skippedLines(lines)).toEqual(['  ⚠ 2 destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).']);
+    expect(lines).not.toContain('cannot apply it on this database');
   }, CASE_TIMEOUT_MS);
 });
