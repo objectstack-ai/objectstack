@@ -55,7 +55,6 @@ import { closedObject, strictObject, strictObjectError } from '../shared/strict-
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
-import { normalizeVisibleWhen } from '../shared/visibility';
 import { VISIBILITY_STRICT_OPTIONS } from '../shared/visibility-strict-options';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 // [#13855] The section → field-group reference form, shared with the
@@ -3299,6 +3298,38 @@ const FORM_FIELD_PUBLIC_PICKER_RETIRED =
   + 'to let them pick an existing record, put the form behind sign-in. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
+/**
+ * [#23543 F4] Prescriptions for the retired `visibleOn` key on a form field and
+ * on a form section (ADR-0089 D2, retired at 18 by the maintainer's ruling F4 A).
+ *
+ * `visibleOn` was the form view's first spelling of the conditional-visibility
+ * predicate. ADR-0089 unified the predicate under `visibleWhen`, and through 17
+ * both shapes declared `visibleOn` as a deprecated alias that a `.transform`
+ * folded onto `visibleWhen` at parse — so the old spelling was accepted without
+ * a word, and the D2 conversion `view-visibleOn-to-visibleWhen` (protocol 15)
+ * that should have expired it could not retire alone. The ruling retired the
+ * key: both shapes carry a {@link retiredKey} tombstone, `tsc` types it `never`,
+ * the parse refuses it with this text, and the fold is gone. Stored form views
+ * keep loading: every stored-row rehydration seam replays the retired
+ * conversion, so a `sys_metadata` row written with `visibleOn` reaches this
+ * schema as `visibleWhen`. No `os migrate meta` sentence, on purpose: the
+ * rename belongs to protocol 15, below `MIGRATION_SUPPORT_FLOOR`, so the tool
+ * lists no edit for it.
+ */
+const FORM_FIELD_VISIBLE_ON_RETIRED =
+  '`view.form.sections[].fields[].visibleOn` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was '
+  + 'the form view\'s deprecated spelling of the conditional-visibility predicate, which the parse folded '
+  + 'into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate) '
+  + 'is unchanged. Where a field writes both, `visibleWhen` is the one that was in effect: delete `visibleOn`.';
+
+/** {@link FORM_FIELD_VISIBLE_ON_RETIRED}'s section counterpart. */
+const FORM_SECTION_VISIBLE_ON_RETIRED =
+  '`view.form.sections[].visibleOn` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the form '
+  + 'view\'s deprecated spelling of a section\'s conditional-visibility predicate, which the parse folded '
+  + 'into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate, '
+  + 'which hides the whole section when false) is unchanged. Where a section writes both, `visibleWhen` is '
+  + 'the one that was in effect: delete `visibleOn`.';
+
 const FormFieldBaseSchema = lazySchema(() => {
   const shape = {
   /** Field name (snake_case) */
@@ -3508,8 +3539,9 @@ const FormFieldBaseSchema = lazySchema(() => {
    * the ruling and the scanner.
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse: the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
-  /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
+  // `visibleOn` REMOVED at 18 (#23543 F4, ADR-0089 D2): the tombstone carries
+  // the prescription; the fold onto `visibleWhen` went with it.
+  visibleOn: retiredKey(FORM_FIELD_VISIBLE_ON_RETIRED),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
   };
   const base = z.object(shape, {
@@ -3569,9 +3601,10 @@ const FormFieldBaseSchema = lazySchema(() => {
 /**
  * A parsed form field — the TYPE half of {@link FormFieldSchema}.
  *
- * `visibleOn` is absent by construction: ADR-0089 D2 folds it into
- * `visibleWhen` at the schema boundary, so it is accepted on input and never
- * present on output.
+ * `visibleOn` is absent by construction: the key is a {@link retiredKey}
+ * tombstone (#23543 F4), so no parse ever outputs it, and a reader of parsed
+ * output that still reaches for it fails `tsc` here rather than reading an
+ * always-absent value.
  */
 export type FormField = Omit<z.infer<typeof FormFieldBaseSchema>, 'visibleOn'> & {
   /**
@@ -3592,8 +3625,8 @@ export type FormField = Omit<z.infer<typeof FormFieldBaseSchema>, 'visibleOn'> &
  *
  * Differs from {@link FormField} in both directions, which is exactly why it
  * has to be declared: `span` is `.default('auto')` so it is optional here and
- * required there, and the deprecated `visibleOn` is accepted here and stripped
- * by the ADR-0089 D2 transform before it reaches the output.
+ * required there, and the retired `visibleOn` is a tombstone here (typed so
+ * that no value is assignable) and absent there.
  *
  * Without this, `z.input<typeof FormFieldSchema>` was `unknown` — so a form
  * section's `fields` were unchecked at every authoring site.
@@ -3624,7 +3657,7 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
   FormFieldBaseSchema.extend({
     fields: z.array(z.lazy(() => FormFieldSchema)).optional()
       .describe('Sub-fields for composite/repeater/record types'),
-  }).strict().transform(normalizeVisibleWhen));
+  }).strict());
 
 /**
  * Form Layout Section
@@ -3634,8 +3667,9 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
  * converting it meant re-expressing `strictVisibilityError` as `guidance`, and
  * `guidance` could not express a family of keys; #6619 gave the channel a
  * set-keyed form and the conversion became the same one call every other closed
- * shape in this package makes. The `.transform()` that folds
- * `visibleOn` → `visibleWhen` is unchanged and still runs after the parse.
+ * shape in this package makes. The `.transform()` that folded the deprecated
+ * `visibleOn` onto `visibleWhen` went with the key at 18 (#23543 F4): `visibleOn`
+ * is a {@link retiredKey} tombstone.
  *
  * ## A section gates VISIBILITY, not editability (#7887 — boundary, not gap)
  *
@@ -3790,8 +3824,9 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * {@link checkFormViewPredicateFeaturesRoot}).
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse: unbound on the standalone form routes, where the predicate would fault open.'),
-  /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
+  // `visibleOn` REMOVED at 18 (#23543 F4, ADR-0089 D2) — see
+  // FORM_SECTION_VISIBLE_ON_RETIRED.
+  visibleOn: retiredKey(FORM_SECTION_VISIBLE_ON_RETIRED),
   /**
    * Section density, two meanings and no default:
    *
@@ -3888,7 +3923,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   // nothing: `false` declares exactly what a group with `collapse: 'none'`
   // delivers. Only `true` declares presentation the group owns.
   trueOnlyDerivedKeys: ['collapsible', 'collapsed'],
-})).transform(normalizeVisibleWhen));
+})));
 
 /**
  * A single form action button (submit / cancel / reset): visibility + label.
@@ -4382,7 +4417,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
    *   is the only authorable progress surface — no progress object, no
    *   percentages, no custom step-state text.
    * - **Wizard steps carry no predicate slot and do not collapse (D2).**
-   *   `visibleWhen` (and its deprecated `visibleOn` alias) and
+   *   `visibleWhen` and
    *   `collapsible` / `collapsed: true` on a wizard section are refused at
    *   parse — see the superRefine below; it is the spec-door upgrade of
    *   objectui#6237's ruled `FormSectionConfig` split ("WizardForm steps =
@@ -4662,11 +4697,10 @@ export const FormViewSchema = lazySchema(() => strictObject({
       // ruled 2026-08-31). Breadth is ruled NARROW: exactly this step-key
       // family — no per-type presentation-key matrix.
       //
-      // Post-parse observability decides the spellings checked here:
-      // `FormSectionSchema` folds `visibleOn` → `visibleWhen` (its
-      // `.transform(normalizeVisibleWhen)`) before this refinement runs, so
-      // one check answers both spellings (the message says so, since the
-      // reported path can only name the canonical key). `collapsible` /
+      // Post-parse observability decides the spellings checked here: the
+      // retired `visibleOn` never reaches this refinement (its tombstone on
+      // `FormSectionSchema` refuses it at the section, #23543 F4), so the
+      // canonical key is the one spelling to check. `collapsible` /
       // `collapsed` carry `.default(false)`, so an authored `false` is
       // indistinguishable from the default here — and needs no refusal: it
       // declares exactly the behavior a wizard delivers. Only `true` declares
@@ -4680,8 +4714,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
               '`visibleWhen` on a wizard step is refused: wizard steps carry no predicate slot '
               + '— steps are entered in array order behind the step gate, '
               + 'never conditionally. Put the predicate on the fields inside the step, or use a '
-              + "`simple`/`tabbed` form for section-level visibility. (The deprecated `visibleOn` "
-              + 'alias folds into `visibleWhen` and is refused the same way.)',
+              + '`simple`/`tabbed` form for section-level visibility.',
           });
         }
         for (const collapseKey of ['collapsible', 'collapsed'] as const) {

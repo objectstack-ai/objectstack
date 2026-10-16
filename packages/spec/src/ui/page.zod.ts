@@ -3,7 +3,6 @@
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
-import { normalizeVisibleWhen } from '../shared/visibility';
 import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { SortItemSchema } from '../shared/enums.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -682,8 +681,19 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * `component.zod.ts` rather than assuming either environment carries over.
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record`. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
-  /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibility: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
+  // `visibility` REMOVED at 18 (#23543 F4, ADR-0089 D2): through 17 it was the
+  // page component's deprecated spelling of `visibleWhen`, folded onto it at
+  // parse by a `.transform` that went with the key. The tombstone carries the
+  // prescription; stored pages keep loading because every stored-row
+  // rehydration seam replays the retired `page-component-visibility-to-visibleWhen`
+  // conversion. No `os migrate meta` sentence: that rename belongs to protocol
+  // 15, below `MIGRATION_SUPPORT_FLOOR`, so the tool lists no edit for it.
+  visibility: retiredKey(
+    '`page.components[].visibility` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the page '
+    + 'component\'s deprecated spelling of the conditional-visibility predicate, which the parse folded into '
+    + '`visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate) is '
+    + 'unchanged. Where a component writes both, `visibleWhen` is the one that was in effect: delete `visibility`.',
+  ),
 
   /**
    * Per-element data binding — one of two shapes:
@@ -730,14 +740,14 @@ export const PageComponentSchema = lazySchema(() => strictObject({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-}).transform(normalizeVisibleWhen));
+}));
 
 /**
  * Page Variable Schema
  * Local, in-memory page state. Runtime-live (ADR-0049): the renderer mounts the
  * declared variables, exposes them to expressions as `page.<name>`, and lets an
  * interactive element write one via `source`. A write re-evaluates dependent
- * `visibility` / binding predicates immediately — the master/detail and
+ * `visibleWhen` / binding predicates immediately — the master/detail and
  * filtered-dashboard pattern with no custom code.
  *
  * Binding direction: a variable names the **writer** component, not the other
@@ -1826,7 +1836,7 @@ export const PageSchema = lazySchema(() => strictObject({
    * declared variables, exposes each to expressions as `page.<name>`, and lets an
    * interactive element write one via its `source` binding (e.g.
    * `element:record_picker` → `source`). A write re-evaluates dependent
-   * `visibility` / binding predicates immediately — the master/detail and
+   * `visibleWhen` / binding predicates immediately — the master/detail and
    * filtered-dashboard pattern, with no custom code. See {@link PageVariableSchema}.
    */
   variables: z.array(PageVariableSchema).optional()
