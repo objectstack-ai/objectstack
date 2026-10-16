@@ -184,6 +184,7 @@ import { resolveAllowDriverConnectFailure } from '@objectstack/types';
 // vocabulary of "benign driver error" is the exact debt that module exists to
 // retire, and `check:durability-log-level` exempts only this declared name.
 import { isMissingTableError } from '@objectstack/metadata/errors';
+import { applyArtifactForwardConversions, resolveDeclaredRange } from '@objectstack/metadata-core';
 // [#6806] The ONE shared "is this driver error a unique-constraint violation?"
 // predicate, and its narrower companion "which column conflicted" (#6250 /
 // #6544, both landed in `@objectstack/types`). The engine's autonumber
@@ -7772,6 +7773,88 @@ export class ObjectQL implements IObjectQLEngine {
   }
 
   /**
+   * The (package id, conversion id) pairs this engine has already warned
+   * about at the registration door — one line per pair per process, as the
+   * artifact door prints its summaries (`MetadataPlugin`).
+   */
+  private registrationConversionWarned = new Set<string>();
+
+  /**
+   * ADR-0087 D2 at the kernel's package REGISTRATION door: a package body that
+   * declares its protocol range replays the versioned forward conversion
+   * before anything of it registers.
+   *
+   * ## Why this door converts
+   *
+   * A compiled artifact is data at rest with a version stamp, and the
+   * artifact FILE doors replay the conversion chain inside the window its
+   * `engines.protocol` opens (`loadArtifactBundle`, the metadata plugin's
+   * artifact door, `AppPlugin`). An INSTALLED package reaches this engine by
+   * other roads too: a hosted environment's kernel registers the package
+   * bodies it holds through `manifest.register` / {@link registerApp} with no
+   * parse and no file door in between, and a marketplace install hands the
+   * fetched bundle straight to `manifest.register`. On those roads the registry
+   * was the first and only judge, so a declaration a newer spec retires —
+   * `isDefault: true` on a `home` page, say — stopped the kernel build of every
+   * environment holding a package built before the retirement, with no operator
+   * remedy short of upgrading each one. This is the one door every package
+   * registration reaches (`SchemaRegistry.installPackage` and the per-item
+   * seam both sit behind it), so the window is opened here, once.
+   *
+   * ## Why only a body that declares a range
+   *
+   * The policy function reads the body's own `engines.protocol` (the manifest
+   * half of a package body carries it; every `os build` stamps it). A body
+   * with NO declared range is, at this door, a manifest a plugin built in code
+   * (`manifest.register({ … })` in its `init`), not data at rest: it has an
+   * author, and it meets the registry's refusals exactly as before — nothing
+   * is replayed for it. That keeps the registry's own refusals the authority
+   * for code-registered metadata while an installed body converts under the
+   * same versioned window every artifact door opens, decided by the same
+   * function (`applyArtifactForwardConversions`, `@objectstack/metadata-core`),
+   * never by a second table.
+   *
+   * Idempotent: a body an artifact door already converted comes back by
+   * reference with no notice, so the two doors never print one conversion
+   * twice. Copy-on-write: untouched branches (`plugins`, code) are shared.
+   *
+   * Loud: one `warn` per (package, conversion) names the conversion id, the
+   * sites and the remedy, the way the artifact door's summary does — the named
+   * warning an operator reads in the boot log. The notices themselves are the
+   * structured `OS_METADATA_CONVERTED` record every conversion emits.
+   */
+  convertPackageBodyForward(body: any): any {
+      if (!body || typeof body !== 'object' || Array.isArray(body)) return body;
+      if (resolveDeclaredRange(body) === null) return body;
+      const result = applyArtifactForwardConversions(body);
+      if (result.notices.length === 0) return result.definition;
+
+      const id = String(body.id || body.name || '(unnamed)');
+      const byConversion = new Map<string, { count: number; firstPath: string; message: string }>();
+      for (const n of result.notices) {
+          const existing = byConversion.get(n.conversionId);
+          if (existing) existing.count += 1;
+          else byConversion.set(n.conversionId, { count: 1, firstPath: n.path, message: n.message });
+      }
+      const retiredAfter = new Map(result.replayedRetirements.map((r) => [r.conversionId, r.retiredAfter]));
+      for (const [conversionId, agg] of byConversion) {
+          const key = `${id}|${conversionId}`;
+          if (this.registrationConversionWarned.has(key)) continue;
+          this.registrationConversionWarned.add(key);
+          const pastFloor = retiredAfter.get(conversionId);
+          this.logger.warn(
+              `[ObjectQL] package '${id}' registered with declared protocol floor ${result.authoredFloor ?? '(unreadable)'} `
+              + `on @objectstack/spec ${result.runtimeSpecVersion ?? '(unknown)'} (${result.verdict}) — ADR-0087 conversion `
+              + `'${conversionId}'${pastFloor !== undefined ? ` (a retirement this runtime enforces past the body's floor; the shape was last accepted by @objectstack/spec ${pastFloor})` : ''} `
+              + `converted ${agg.count} site(s) forward (first at ${agg.firstPath}). ${agg.message} `
+              + `The installed body itself is unchanged, so it converts again at every registration until the package `
+              + `is rebuilt ('os build') and re-published with tooling from a release that ships this retirement.`,
+          );
+      }
+      return result.definition;
+  }
+
+  /**
    * Register contribution (Manifest)
    * 
    * Installs the manifest as a Package (the unit of installation),
@@ -7781,7 +7864,10 @@ export class ObjectQL implements IObjectQLEngine {
    * Key: Package ≠ App. The manifest is the package. The apps[] array inside
    * the manifest contains UI navigation definitions (AppSchema).
    */
-  registerApp(manifest: any, scope?: ArtifactInstallScope) {
+  registerApp(registeredBody: any, scope?: ArtifactInstallScope) {
+      // The CONVERTED body, for everything below — the package record, the
+      // live manifest, every item it registers (see {@link convertPackageBodyForward}).
+      const manifest = this.convertPackageBodyForward(registeredBody);
       const id = manifest.id || manifest.name;
       const namespace = manifest.namespace as string | undefined;
       // Stamped beside `id` on every item below ({@link stampPackage}), so an

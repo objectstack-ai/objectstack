@@ -1,0 +1,1380 @@
+{
+  "manifest": {
+    "id": "app.objectstack.hotcrm",
+    "name": "HotCRM",
+    "version": "4.0.1",
+    "namespace": "crm",
+    "type": "app",
+    "engines": {
+      "protocol": "^17.7.0"
+    }
+  },
+  "packages": [
+    {
+      "manifest": {
+        "id": "app.objectstack.hotcrm.service",
+        "name": "HotCRM Service",
+        "version": "4.0.1",
+        "namespace": "crm",
+        "type": "module",
+        "engines": {
+          "protocol": "^17.7.0"
+        },
+        "dependencies": {
+          "app.objectstack.hotcrm": "^4.0.1"
+        },
+        "pages": [
+          {
+            "name": "case_detail_page",
+            "label": "Case Detail",
+            "description": "Service-agent case record: highlights, SLA path, details and activity timeline.",
+            "type": "record",
+            "variables": [
+              {
+                "name": "activeTab",
+                "type": "string",
+                "defaultValue": "details"
+              }
+            ],
+            "object": "crm_case",
+            "template": "full-width",
+            "regions": [
+              {
+                "name": "header",
+                "width": "full",
+                "components": [
+                  {
+                    "type": "page:header",
+                    "id": "case_header",
+                    "label": "Case Information",
+                    "properties": {
+                      "title": "{case_number} \u00b7 {subject}",
+                      "subtitle": "{crm_account}",
+                      "actions": [
+                        "escalate_case",
+                        "close_case",
+                        "log_call"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "record:highlights",
+                    "id": "case_highlights",
+                    "label": "Key Information",
+                    "properties": {
+                      "fields": [
+                        "status",
+                        "priority",
+                        "sla_due_date",
+                        "is_sla_violated",
+                        "owner_id",
+                        "crm_account"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "record:path",
+                    "id": "case_status_path",
+                    "label": "Case Status Path",
+                    "properties": {
+                      "statusField": "status",
+                      "stages": [
+                        {
+                          "value": "new",
+                          "label": "New"
+                        },
+                        {
+                          "value": "in_progress",
+                          "label": "In Progress"
+                        },
+                        {
+                          "value": "waiting_customer",
+                          "label": "Waiting on Customer"
+                        },
+                        {
+                          "value": "escalated",
+                          "label": "Escalated"
+                        },
+                        {
+                          "value": "resolved",
+                          "label": "Resolved"
+                        },
+                        {
+                          "value": "closed",
+                          "label": "Closed"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "main",
+                "width": "large",
+                "components": [
+                  {
+                    "type": "page:tabs",
+                    "id": "case_main_tabs",
+                    "properties": {
+                      "tabStyle": "line",
+                      "position": "top",
+                      "items": [
+                        {
+                          "value": "details",
+                          "label": "Details",
+                          "children": [
+                            {
+                              "type": "record:details",
+                              "id": "case_details",
+                              "label": "Case Details",
+                              "properties": {
+                                "columns": "2",
+                                "sections": [
+                                  {
+                                    "group": "basic"
+                                  },
+                                  {
+                                    "group": "origin",
+                                    "hideEmpty": false
+                                  },
+                                  {
+                                    "group": "sla"
+                                  },
+                                  {
+                                    "group": "escalation"
+                                  },
+                                  {
+                                    "group": "resolution"
+                                  },
+                                  {
+                                    "group": "system"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "value": "related",
+                          "label": "Related",
+                          "children": [
+                            {
+                              "type": "page:accordion",
+                              "id": "case_related_accordion",
+                              "properties": {
+                                "items": [
+                                  {
+                                    "label": "Open Tasks",
+                                    "children": [
+                                      {
+                                        "type": "record:related_list",
+                                        "id": "case_tasks",
+                                        "properties": {
+                                          "objectName": "crm_task",
+                                          "relationshipField": "related_to_case",
+                                          "columns": [
+                                            "subject",
+                                            "status",
+                                            "priority",
+                                            "due_date",
+                                            "owner_id"
+                                          ],
+                                          "filter": [
+                                            {
+                                              "field": "status",
+                                              "operator": "not_equals",
+                                              "value": "completed"
+                                            }
+                                          ],
+                                          "limit": 10
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "value": "activity",
+                          "label": "Activity",
+                          "children": [
+                            {
+                              "type": "record:activity",
+                              "id": "case_activity",
+                              "properties": {
+                                "filterMode": "all",
+                                "showFilterToggle": true,
+                                "limit": 25,
+                                "unifiedTimeline": true,
+                                "showCommentInput": true,
+                                "enableMentions": true,
+                                "enableReactions": true,
+                                "enableThreading": true
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ],
+            "isDefault": true,
+            "aria": {
+              "ariaLabel": "Case Detail Page",
+              "ariaDescribedBy": "Service-agent case detail view with SLA path, details, related items and activity timeline."
+            },
+            "kind": "full"
+          }
+        ]
+      }
+    },
+    {
+      "manifest": {
+        "id": "app.objectstack.hotcrm",
+        "name": "HotCRM",
+        "version": "4.0.1",
+        "namespace": "crm",
+        "type": "app",
+        "engines": {
+          "protocol": "^17.7.0"
+        },
+        "pages": [
+          {
+            "name": "account_detail_page",
+            "label": "Account Detail",
+            "description": "Slotted account record page \u2014 custom header + persistent discussion feed.",
+            "type": "record",
+            "object": "crm_account",
+            "template": "default",
+            "regions": [],
+            "isDefault": false,
+            "kind": "slotted",
+            "slots": {
+              "header": {
+                "type": "page:header",
+                "id": "account_header_slotted",
+                "label": "Account Header (slotted)",
+                "properties": {
+                  "title": "{name}",
+                  "subtitle": "{industry} \u00b7 {type}",
+                  "actions": [
+                    "log_call",
+                    "log_meeting",
+                    "schedule_meeting"
+                  ]
+                }
+              },
+              "discussion": {
+                "type": "record:chatter",
+                "id": "account_chatter",
+                "label": "Discussion",
+                "properties": {}
+              }
+            }
+          },
+          {
+            "name": "account_workbench",
+            "label": "Account Workbench",
+            "description": "Curated account list for the sales team: quick filters only, no view management.",
+            "type": "list",
+            "object": "crm_account",
+            "template": "default",
+            "regions": [],
+            "isDefault": false,
+            "interfaceConfig": {
+              "source": "crm_account",
+              "sourceView": "all_accounts",
+              "appearance": {
+                "showDescription": true,
+                "allowedVisualizations": [
+                  "grid"
+                ]
+              },
+              "userFilters": {
+                "element": "dropdown",
+                "fields": [
+                  {
+                    "field": "industry",
+                    "showCount": true
+                  },
+                  {
+                    "field": "type"
+                  },
+                  {
+                    "field": "owner_id"
+                  }
+                ]
+              },
+              "userActions": {
+                "sort": true,
+                "search": true,
+                "filter": false,
+                "refresh": true,
+                "rowHeight": false,
+                "group": true,
+                "addRecordForm": false,
+                "editInline": false,
+                "hideFields": false,
+                "rowColor": false
+              },
+              "showRecordCount": true
+            },
+            "kind": "full"
+          },
+          {
+            "name": "app_launcher_page",
+            "label": "App Launcher",
+            "description": "Central hub for accessing all applications",
+            "type": "app",
+            "template": "centered",
+            "regions": [
+              {
+                "name": "header",
+                "width": "full",
+                "components": [
+                  {
+                    "type": "global:search",
+                    "id": "app_search",
+                    "label": "Search Apps",
+                    "properties": {}
+                  }
+                ]
+              },
+              {
+                "name": "main",
+                "width": "large",
+                "components": [
+                  {
+                    "type": "page:header",
+                    "id": "launcher_header",
+                    "label": "App Launcher Header",
+                    "properties": {
+                      "title": "App Launcher",
+                      "subtitle": "Select an app to get started"
+                    }
+                  },
+                  {
+                    "type": "app:launcher",
+                    "id": "app_grid",
+                    "label": "Application Grid",
+                    "properties": {}
+                  }
+                ]
+              }
+            ],
+            "isDefault": false,
+            "aria": {
+              "ariaLabel": "App Launcher Page",
+              "ariaDescribedBy": "Central application launcher for accessing all apps"
+            },
+            "kind": "full"
+          },
+          {
+            "name": "lead_detail_page",
+            "label": "Lead Detail",
+            "description": "Comprehensive lead detail page with highlights, details, and related information",
+            "type": "record",
+            "variables": [
+              {
+                "name": "showHistory",
+                "type": "boolean",
+                "defaultValue": false
+              },
+              {
+                "name": "activeTab",
+                "type": "string",
+                "defaultValue": "details"
+              }
+            ],
+            "object": "crm_lead",
+            "template": "full-width",
+            "regions": [
+              {
+                "name": "header",
+                "width": "full",
+                "components": [
+                  {
+                    "type": "page:header",
+                    "id": "lead_header",
+                    "label": "Lead Information",
+                    "properties": {
+                      "title": "{first_name} {last_name}",
+                      "subtitle": "{company}",
+                      "actions": [
+                        "convert_lead",
+                        "schedule_followup",
+                        "log_call",
+                        "log_meeting",
+                        "schedule_meeting"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "record:alert",
+                    "id": "lead_duplicate_alert_suspected",
+                    "label": "Suspected Duplicate Alert",
+                    "properties": {
+                      "severity": "warning",
+                      "visible": {
+                        "dialect": "cel",
+                        "source": "has(record.duplicate_status) && record.duplicate_status == \"suspected\""
+                      },
+                      "title": {
+                        "en": "Suspected duplicate \u2014 compare before you convert",
+                        "zh-CN": "\u7591\u4f3c\u91cd\u590d\u2014\u2014\u8f6c\u6362\u524d\u8bf7\u5148\u6bd4\u5bf9",
+                        "ja-JP": "\u91cd\u8907\u306e\u7591\u3044 \u2014 \u5909\u63db\u3059\u308b\u524d\u306b\u7167\u5408\u3057\u3066\u304f\u3060\u3055\u3044",
+                        "es-ES": "Duplicado Sospechoso: compare antes de convertir"
+                      },
+                      "body": {
+                        "en": "Intake matched this lead to a record this app already has. Duplicate Management below links that record \u2014 open it and compare. You can still convert this lead: this is the match intake guessed at, not a reviewer's decision. But if it is the same buyer, disqualify it instead, because converting creates a second account, contact and opportunity for them.",
+                        "zh-CN": "\u5f55\u5165\u65f6\u53d1\u73b0\u8be5\u7ebf\u7d22\u4e0e\u7cfb\u7edf\u4e2d\u5df2\u6709\u8bb0\u5f55\u5339\u914d\u3002\u4e0b\u65b9\u300c\u91cd\u590d\u7ebf\u7d22\u7ba1\u7406\u300d\u4e2d\u662f\u5b83\u91cd\u590d\u7684\u90a3\u6761\u8bb0\u5f55\uff0c\u8bf7\u5148\u6253\u5f00\u6bd4\u5bf9\u3002\u8be5\u7ebf\u7d22\u4ecd\u7136\u53ef\u4ee5\u8f6c\u6362\uff1a\u8fd9\u662f\u5f55\u5165\u65f6\u7684\u81ea\u52a8\u5224\u65ad\uff0c\u4e0d\u662f\u5ba1\u6838\u4eba\u7684\u7ed3\u8bba\u3002\u4f46\u82e5\u786e\u5c5e\u540c\u4e00\u5ba2\u6237\uff0c\u8bf7\u6539\u4e3a\u53d6\u6d88\u8d44\u683c\u2014\u2014\u8f6c\u6362\u4f1a\u4e3a\u540c\u4e00\u5ba2\u6237\u518d\u521b\u5efa\u4e00\u5957\u5ba2\u6237\u3001\u8054\u7cfb\u4eba\u548c\u5546\u673a\u3002",
+                        "ja-JP": "\u767b\u9332\u6642\u306b\u3001\u3053\u306e\u30ea\u30fc\u30c9\u304c\u65e2\u5b58\u30ec\u30b3\u30fc\u30c9\u3068\u4e00\u81f4\u3057\u307e\u3057\u305f\u3002\u4e0b\u306e\u300c\u91cd\u8907\u7ba1\u7406\u300d\u306b\u91cd\u8907\u5148\u306e\u30ec\u30b3\u30fc\u30c9\u304c\u3042\u308a\u307e\u3059\u3002\u307e\u305a\u958b\u3044\u3066\u7167\u5408\u3057\u3066\u304f\u3060\u3055\u3044\u3002\u3053\u306e\u30ea\u30fc\u30c9\u306f\u307e\u3060\u5909\u63db\u3067\u304d\u307e\u3059\u3002\u3053\u308c\u306f\u767b\u9332\u6642\u306e\u81ea\u52d5\u5224\u5b9a\u3067\u3042\u308a\u3001\u62c5\u5f53\u8005\u306e\u7d50\u8ad6\u3067\u306f\u3042\u308a\u307e\u305b\u3093\u3002\u305f\u3060\u3057\u540c\u3058\u76f8\u624b\u3067\u3042\u308c\u3070\u3001\u5909\u63db\u305b\u305a\u4e0d\u9069\u683c\u306b\u3057\u3066\u304f\u3060\u3055\u3044\u3002\u5909\u63db\u3059\u308b\u3068\u540c\u3058\u76f8\u624b\u306b\u53d6\u5f15\u5148\u30fb\u53d6\u5f15\u5148\u8cac\u4efb\u8005\u30fb\u5546\u8ac7\u304c\u3082\u3046\u4e00\u7d44\u4f5c\u6210\u3055\u308c\u307e\u3059\u3002",
+                        "es-ES": "La captura encontr\u00f3 que este prospecto coincide con un registro que ya existe. Gesti\u00f3n de Duplicados, m\u00e1s abajo, enlaza ese registro: \u00e1bralo y comp\u00e1relo. Todav\u00eda puede convertir este prospecto, porque se trata de una coincidencia autom\u00e1tica de la captura y no del veredicto de una persona. Pero si es el mismo comprador, descalif\u00edquelo en su lugar: convertirlo crea una segunda cuenta, contacto y oportunidad para \u00e9l."
+                      }
+                    }
+                  },
+                  {
+                    "type": "record:alert",
+                    "id": "lead_duplicate_alert_confirmed",
+                    "label": "Confirmed Duplicate Alert",
+                    "properties": {
+                      "severity": "error",
+                      "visible": {
+                        "dialect": "cel",
+                        "source": "has(record.duplicate_status) && record.duplicate_status == \"confirmed\""
+                      },
+                      "title": {
+                        "en": "Confirmed duplicate \u2014 conversion will be refused",
+                        "zh-CN": "\u5df2\u786e\u8ba4\u91cd\u590d\u2014\u2014\u8f6c\u6362\u5c06\u88ab\u62d2\u7edd",
+                        "ja-JP": "\u91cd\u8907\u78ba\u5b9a \u2014 \u5909\u63db\u306f\u62d2\u5426\u3055\u308c\u307e\u3059",
+                        "es-ES": "Duplicado Confirmado: la conversi\u00f3n ser\u00e1 rechazada"
+                      },
+                      "body": {
+                        "en": "A reviewer checked this lead and recorded that it repeats a record this app already has, so Convert Lead refuses it \u2014 this banner is the only warning you get before you press the button. Disqualify this lead instead, naming the surviving record from Duplicate Management below. If the verdict is wrong, a reviewer revises Duplicate Status; there is no override here.",
+                        "zh-CN": "\u5ba1\u6838\u4eba\u5df2\u6838\u5b9e\u8be5\u7ebf\u7d22\u4e0e\u7cfb\u7edf\u4e2d\u5df2\u6709\u8bb0\u5f55\u91cd\u590d\uff0c\u56e0\u6b64\u300c\u8f6c\u6362\u7ebf\u7d22\u300d\u4f1a\u62d2\u7edd\u6267\u884c\u2014\u2014\u672c\u63d0\u793a\u662f\u4f60\u6309\u4e0b\u6309\u94ae\u524d\u552f\u4e00\u7684\u9884\u8b66\u3002\u8bf7\u6539\u4e3a\u53d6\u6d88\u8be5\u7ebf\u7d22\u7684\u8d44\u683c\uff0c\u5e76\u5728\u4e0b\u65b9\u300c\u91cd\u590d\u7ebf\u7d22\u7ba1\u7406\u300d\u4e2d\u6ce8\u660e\u4fdd\u7559\u7684\u90a3\u6761\u8bb0\u5f55\u3002\u82e5\u5224\u5b9a\u6709\u8bef\uff0c\u5e94\u7531\u5ba1\u6838\u4eba\u4fee\u6539\u300c\u91cd\u590d\u72b6\u6001\u300d\uff0c\u6b64\u5904\u4e0d\u63d0\u4f9b\u5f3a\u5236\u8f6c\u6362\u7684\u5165\u53e3\u3002",
+                        "ja-JP": "\u62c5\u5f53\u8005\u304c\u78ba\u8a8d\u3057\u3001\u3053\u306e\u30ea\u30fc\u30c9\u306f\u65e2\u5b58\u30ec\u30b3\u30fc\u30c9\u306e\u91cd\u8907\u3067\u3042\u308b\u3068\u8a18\u9332\u3055\u308c\u307e\u3057\u305f\u3002\u305d\u306e\u305f\u3081\u300c\u30ea\u30fc\u30c9\u5909\u63db\u300d\u306f\u62d2\u5426\u3055\u308c\u307e\u3059\u3002\u3053\u306e\u901a\u77e5\u304c\u3001\u30dc\u30bf\u30f3\u3092\u62bc\u3059\u524d\u306b\u5f97\u3089\u308c\u308b\u552f\u4e00\u306e\u8b66\u544a\u3067\u3059\u3002\u3053\u306e\u30ea\u30fc\u30c9\u306f\u4e0d\u9069\u683c\u306b\u3057\u305f\u3046\u3048\u3067\u3001\u4e0b\u306e\u300c\u91cd\u8907\u7ba1\u7406\u300d\u3067\u6b8b\u3059\u30ec\u30b3\u30fc\u30c9\u3092\u660e\u8a18\u3057\u3066\u304f\u3060\u3055\u3044\u3002\u5224\u5b9a\u304c\u8aa4\u3063\u3066\u3044\u308b\u5834\u5408\u306f\u62c5\u5f53\u8005\u304c\u300c\u91cd\u8907\u30b9\u30c6\u30fc\u30bf\u30b9\u300d\u3092\u4fee\u6b63\u3057\u307e\u3059\u3002\u3053\u3053\u306b\u5f37\u5236\u5909\u63db\u306e\u624b\u6bb5\u306f\u3042\u308a\u307e\u305b\u3093\u3002",
+                        "es-ES": "Una persona verific\u00f3 que este prospecto repite un registro que ya existe, por lo que Convertir Prospecto lo rechazar\u00e1: este aviso es la \u00fanica advertencia antes de pulsar el bot\u00f3n. Descalifique el prospecto e indique el registro que sobrevive desde Gesti\u00f3n de Duplicados, m\u00e1s abajo. Si el veredicto es incorrecto, una persona debe cambiar el Estado del Duplicado; aqu\u00ed no hay forma de forzar la conversi\u00f3n."
+                      }
+                    }
+                  },
+                  {
+                    "type": "record:highlights",
+                    "id": "lead_highlights",
+                    "label": "Key Information",
+                    "properties": {
+                      "fields": [
+                        "status",
+                        "rating",
+                        "lead_source",
+                        "owner_id",
+                        "email",
+                        "phone"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "record:path",
+                    "id": "lead_path",
+                    "label": "Lead Status Path",
+                    "properties": {
+                      "statusField": "status",
+                      "stages": [
+                        {
+                          "value": "new",
+                          "label": "New"
+                        },
+                        {
+                          "value": "contacted",
+                          "label": "Contacted"
+                        },
+                        {
+                          "value": "qualified",
+                          "label": "Qualified"
+                        },
+                        {
+                          "value": "converted",
+                          "label": "Converted"
+                        },
+                        {
+                          "value": "unqualified",
+                          "label": "Unqualified"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "main",
+                "width": "large",
+                "components": [
+                  {
+                    "type": "page:tabs",
+                    "id": "main_tabs",
+                    "label": "Lead Information Tabs",
+                    "properties": {
+                      "tabStyle": "line",
+                      "position": "top",
+                      "items": [
+                        {
+                          "label": "Details",
+                          "icon": "info-circle",
+                          "children": [
+                            {
+                              "type": "record:details",
+                              "id": "lead_details",
+                              "label": "Lead Details",
+                              "properties": {
+                                "columns": "2",
+                                "sections": [
+                                  {
+                                    "group": "identity"
+                                  },
+                                  {
+                                    "group": "company_info"
+                                  },
+                                  {
+                                    "group": "contact_info",
+                                    "hideEmpty": false
+                                  },
+                                  {
+                                    "group": "preferences"
+                                  },
+                                  {
+                                    "group": "qualification"
+                                  },
+                                  {
+                                    "group": "assignment"
+                                  },
+                                  {
+                                    "group": "address",
+                                    "hideEmpty": false
+                                  },
+                                  {
+                                    "group": "conversion"
+                                  },
+                                  {
+                                    "group": "duplicates"
+                                  },
+                                  {
+                                    "group": "additional",
+                                    "hideEmpty": false
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "label": "Related",
+                          "icon": "link",
+                          "children": [
+                            {
+                              "type": "page:accordion",
+                              "id": "related_accordion",
+                              "label": "Related Records",
+                              "properties": {
+                                "allowMultiple": true,
+                                "items": [
+                                  {
+                                    "label": "Tasks",
+                                    "icon": "list-checks",
+                                    "collapsed": false,
+                                    "children": [
+                                      {
+                                        "type": "record:related_list",
+                                        "id": "related_tasks",
+                                        "label": "Tasks",
+                                        "properties": {
+                                          "objectName": "crm_task",
+                                          "relationshipField": "related_to_lead",
+                                          "columns": [
+                                            "subject",
+                                            "status",
+                                            "priority",
+                                            "due_date",
+                                            "owner_id"
+                                          ],
+                                          "sort": [
+                                            {
+                                              "field": "due_date",
+                                              "order": "asc"
+                                            }
+                                          ],
+                                          "limit": 10,
+                                          "title": "Open Tasks",
+                                          "filter": [
+                                            {
+                                              "field": "status",
+                                              "operator": "not_equals",
+                                              "value": "completed"
+                                            }
+                                          ],
+                                          "showViewAll": true
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "label": "Activity",
+                          "icon": "clock",
+                          "children": [
+                            {
+                              "type": "record:activity",
+                              "id": "lead_activity",
+                              "label": "Activity Timeline",
+                              "properties": {
+                                "types": [
+                                  "task"
+                                ],
+                                "limit": 20,
+                                "showCompleted": true
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "label": "History",
+                          "icon": "history",
+                          "children": [
+                            {
+                              "type": "record:history",
+                              "id": "lead_history",
+                              "label": "Field History",
+                              "properties": {
+                                "limit": 25
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ],
+            "isDefault": true,
+            "aria": {
+              "ariaLabel": "Lead Detail Page",
+              "ariaDescribedBy": "Detailed view of lead information with related records and activity"
+            },
+            "kind": "full"
+          },
+          {
+            "name": "opportunity_detail_page",
+            "label": "Opportunity Detail",
+            "description": "Comprehensive opportunity detail page with path, highlights, details, and related lists",
+            "type": "record",
+            "variables": [
+              {
+                "name": "activeTab",
+                "type": "string",
+                "defaultValue": "details"
+              }
+            ],
+            "object": "crm_opportunity",
+            "template": "full-width",
+            "regions": [
+              {
+                "name": "header",
+                "width": "full",
+                "components": [
+                  {
+                    "type": "page:header",
+                    "id": "opp_header",
+                    "label": "Opportunity Information",
+                    "properties": {
+                      "title": "{name}",
+                      "subtitle": "{crm_account}",
+                      "actions": [
+                        "generate_quote",
+                        "clone_opportunity",
+                        "log_call",
+                        "log_meeting",
+                        "schedule_meeting"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "record:highlights",
+                    "id": "opp_highlights",
+                    "label": "Key Information",
+                    "properties": {
+                      "fields": [
+                        "amount",
+                        "close_date",
+                        "probability",
+                        "expected_revenue",
+                        "owner_id",
+                        "crm_account"
+                      ]
+                    }
+                  },
+                  {
+                    "type": "record:path",
+                    "id": "opp_stage_path",
+                    "label": "Opportunity Stage Path",
+                    "properties": {
+                      "statusField": "stage",
+                      "stages": [
+                        {
+                          "value": "prospecting",
+                          "label": "Prospecting"
+                        },
+                        {
+                          "value": "qualification",
+                          "label": "Qualification"
+                        },
+                        {
+                          "value": "needs_analysis",
+                          "label": "Needs Analysis"
+                        },
+                        {
+                          "value": "proposal",
+                          "label": "Proposal"
+                        },
+                        {
+                          "value": "negotiation",
+                          "label": "Negotiation"
+                        },
+                        {
+                          "value": "closed_won",
+                          "label": "Closed Won"
+                        },
+                        {
+                          "value": "closed_lost",
+                          "label": "Closed Lost"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "main",
+                "width": "large",
+                "components": [
+                  {
+                    "type": "page:tabs",
+                    "id": "opp_main_tabs",
+                    "properties": {
+                      "tabStyle": "line",
+                      "position": "top",
+                      "items": [
+                        {
+                          "value": "details",
+                          "label": "Details",
+                          "children": [
+                            {
+                              "type": "record:details",
+                              "id": "opp_details",
+                              "label": "Opportunity Details",
+                              "properties": {
+                                "columns": "2",
+                                "sections": [
+                                  {
+                                    "group": "basic"
+                                  },
+                                  {
+                                    "group": "financials"
+                                  },
+                                  {
+                                    "group": "classification",
+                                    "hideEmpty": false
+                                  },
+                                  {
+                                    "group": "campaign",
+                                    "hideEmpty": false
+                                  },
+                                  {
+                                    "group": "sales_process"
+                                  },
+                                  {
+                                    "group": "qualification",
+                                    "hideEmpty": false
+                                  },
+                                  {
+                                    "group": "narrative",
+                                    "hideEmpty": false
+                                  },
+                                  {
+                                    "group": "crm_forecast"
+                                  },
+                                  {
+                                    "group": "notes",
+                                    "hideEmpty": false
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "value": "related",
+                          "label": "Related",
+                          "children": [
+                            {
+                              "type": "page:accordion",
+                              "id": "opp_related_accordion",
+                              "properties": {
+                                "items": [
+                                  {
+                                    "label": "Quotes",
+                                    "collapsed": false,
+                                    "children": [
+                                      {
+                                        "type": "record:related_list",
+                                        "id": "opp_quotes",
+                                        "properties": {
+                                          "objectName": "crm_quote",
+                                          "relationshipField": "crm_opportunity",
+                                          "columns": [
+                                            "quote_number",
+                                            "name",
+                                            "status",
+                                            "total_price",
+                                            "expiration_date"
+                                          ],
+                                          "limit": 10
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "label": "Products",
+                                    "children": [
+                                      {
+                                        "type": "record:related_list",
+                                        "id": "opp_products",
+                                        "properties": {
+                                          "objectName": "crm_opportunity_line_item",
+                                          "relationshipField": "crm_opportunity",
+                                          "columns": [
+                                            "crm_product",
+                                            "quantity",
+                                            "unit_price",
+                                            "total_price"
+                                          ],
+                                          "limit": 10,
+                                          "add": {
+                                            "picker": {
+                                              "object": "crm_product",
+                                              "filter": [
+                                                {
+                                                  "field": "is_active",
+                                                  "operator": "equals",
+                                                  "value": true
+                                                }
+                                              ]
+                                            },
+                                            "linkField": "crm_product"
+                                          }
+                                        }
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "label": "Open Tasks",
+                                    "children": [
+                                      {
+                                        "type": "record:related_list",
+                                        "id": "opp_tasks",
+                                        "properties": {
+                                          "objectName": "crm_task",
+                                          "relationshipField": "related_to_opportunity",
+                                          "columns": [
+                                            "subject",
+                                            "status",
+                                            "priority",
+                                            "due_date",
+                                            "owner_id"
+                                          ],
+                                          "filter": [
+                                            {
+                                              "field": "status",
+                                              "operator": "not_equals",
+                                              "value": "completed"
+                                            }
+                                          ],
+                                          "limit": 10
+                                        }
+                                      }
+                                    ]
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "value": "activity",
+                          "label": "Activity",
+                          "children": [
+                            {
+                              "type": "record:activity",
+                              "id": "opp_activity",
+                              "properties": {
+                                "limit": 25
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "aside",
+                "width": "small",
+                "components": [
+                  {
+                    "type": "record:reference_rail",
+                    "id": "opp_reference_rail",
+                    "properties": {
+                      "entries": [
+                        {
+                          "objectName": "crm_quote",
+                          "relationshipField": "crm_opportunity",
+                          "limit": 3
+                        },
+                        {
+                          "objectName": "crm_opportunity_line_item",
+                          "relationshipField": "crm_opportunity",
+                          "limit": 3
+                        },
+                        {
+                          "objectName": "crm_task",
+                          "relationshipField": "related_to_opportunity",
+                          "limit": 3
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ],
+            "isDefault": true,
+            "aria": {
+              "ariaLabel": "Opportunity Detail Page",
+              "ariaDescribedBy": "Detailed view of opportunity information with related records and activity"
+            },
+            "kind": "full"
+          },
+          {
+            "name": "sales_home_page",
+            "label": "Sales Home",
+            "description": "Sales team home page with key metrics and quick actions",
+            "type": "home",
+            "variables": [
+              {
+                "name": "selectedPeriod",
+                "type": "string",
+                "defaultValue": "this_month"
+              }
+            ],
+            "template": "three-column",
+            "regions": [
+              {
+                "name": "header",
+                "width": "full",
+                "components": [
+                  {
+                    "type": "page:header",
+                    "id": "home_header",
+                    "label": "Sales Home Header",
+                    "properties": {
+                      "title": "Sales Dashboard",
+                      "subtitle": "Welcome back"
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "left_sidebar",
+                "width": "small",
+                "components": [
+                  {
+                    "type": "page:card",
+                    "id": "quick_create",
+                    "label": "Quick Create",
+                    "properties": {
+                      "title": "Quick Create",
+                      "bordered": true,
+                      "children": [
+                        {
+                          "type": "nav:menu",
+                          "id": "create_menu",
+                          "properties": {}
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "main",
+                "width": "large",
+                "components": [
+                  {
+                    "type": "page:card",
+                    "id": "key_metrics",
+                    "label": "Key Metrics",
+                    "properties": {
+                      "title": "Key Performance Indicators",
+                      "bordered": false,
+                      "children": [
+                        {
+                          "type": "object-metric",
+                          "id": "kpi_revenue_won",
+                          "properties": {
+                            "objectName": "crm_opportunity",
+                            "label": "Revenue (Won)",
+                            "icon": "dollar-sign",
+                            "aggregate": {
+                              "field": "amount",
+                              "function": "sum"
+                            },
+                            "filter": [
+                              {
+                                "field": "stage",
+                                "operator": "equals",
+                                "value": "closed_won"
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "type": "object-metric",
+                          "id": "kpi_deals_won",
+                          "properties": {
+                            "objectName": "crm_opportunity",
+                            "label": "Deals Won",
+                            "icon": "trophy",
+                            "aggregate": {
+                              "field": "id",
+                              "function": "count"
+                            },
+                            "filter": [
+                              {
+                                "field": "stage",
+                                "operator": "equals",
+                                "value": "closed_won"
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "type": "object-metric",
+                          "id": "kpi_pipeline_value",
+                          "properties": {
+                            "objectName": "crm_opportunity",
+                            "label": "Pipeline Value",
+                            "icon": "briefcase",
+                            "aggregate": {
+                              "field": "amount",
+                              "function": "sum"
+                            },
+                            "filter": [
+                              {
+                                "field": "stage",
+                                "operator": "not_in",
+                                "value": [
+                                  "closed_won",
+                                  "closed_lost"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "type": "object-metric",
+                          "id": "kpi_open_leads",
+                          "properties": {
+                            "objectName": "crm_lead",
+                            "label": "Open Leads",
+                            "icon": "user-plus",
+                            "aggregate": {
+                              "field": "id",
+                              "function": "count"
+                            },
+                            "filter": [
+                              {
+                                "field": "is_converted",
+                                "operator": "equals",
+                                "value": false
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "page:tabs",
+                    "id": "home_tabs",
+                    "label": "Home Tabs",
+                    "properties": {
+                      "tabStyle": "card",
+                      "position": "top",
+                      "items": [
+                        {
+                          "label": "My Leads",
+                          "icon": "user-plus",
+                          "children": [
+                            {
+                              "type": "list-view",
+                              "id": "home_my_leads",
+                              "label": "My Leads",
+                              "properties": {
+                                "objectName": "crm_lead",
+                                "viewType": "grid",
+                                "columns": [
+                                  "full_name",
+                                  "company",
+                                  "email",
+                                  "status",
+                                  "rating"
+                                ],
+                                "filter": [
+                                  {
+                                    "field": "owner_id",
+                                    "operator": "equals",
+                                    "value": "{current_user_id}"
+                                  }
+                                ],
+                                "sort": [
+                                  {
+                                    "field": "rating",
+                                    "order": "desc"
+                                  },
+                                  {
+                                    "field": "created_at",
+                                    "order": "desc"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "label": "My Open Deals",
+                          "icon": "dollar-sign",
+                          "children": [
+                            {
+                              "type": "list-view",
+                              "id": "home_my_deals",
+                              "label": "My Open Deals",
+                              "properties": {
+                                "objectName": "crm_opportunity",
+                                "viewType": "grid",
+                                "columns": [
+                                  "name",
+                                  "crm_account",
+                                  "stage",
+                                  "amount",
+                                  "close_date"
+                                ],
+                                "filter": [
+                                  {
+                                    "field": "owner_id",
+                                    "operator": "equals",
+                                    "value": "{current_user_id}"
+                                  },
+                                  {
+                                    "field": "stage",
+                                    "operator": "not_in",
+                                    "value": [
+                                      "closed_won",
+                                      "closed_lost"
+                                    ]
+                                  }
+                                ],
+                                "sort": [
+                                  {
+                                    "field": "close_date",
+                                    "order": "asc"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        },
+                        {
+                          "label": "My Open Tasks",
+                          "icon": "list-checks",
+                          "children": [
+                            {
+                              "type": "list-view",
+                              "id": "home_my_tasks",
+                              "label": "My Open Tasks",
+                              "properties": {
+                                "objectName": "crm_task",
+                                "viewType": "grid",
+                                "columns": [
+                                  "subject",
+                                  "priority",
+                                  "due_date",
+                                  "progress_percent"
+                                ],
+                                "filter": [
+                                  {
+                                    "field": "owner_id",
+                                    "operator": "equals",
+                                    "value": "{current_user_id}"
+                                  },
+                                  {
+                                    "field": "is_completed",
+                                    "operator": "equals",
+                                    "value": false
+                                  }
+                                ],
+                                "sort": [
+                                  {
+                                    "field": "due_date",
+                                    "order": "asc"
+                                  }
+                                ]
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "name": "right_sidebar",
+                "width": "medium",
+                "components": [
+                  {
+                    "type": "page:card",
+                    "id": "ai_briefing",
+                    "label": "Today with the AI Assistant",
+                    "properties": {
+                      "title": "Ask the AI Assistant",
+                      "bordered": true,
+                      "children": [
+                        {
+                          "type": "element:text",
+                          "id": "ai_briefing_text",
+                          "properties": {
+                            "content": {
+                              "en": "Open the assistant panel from the right edge of the page and ask \"what should I focus on today?\" \u2014 it sees your live pipeline, schema, and accounts.",
+                              "zh-CN": "\u4ece\u9875\u9762\u53f3\u4fa7\u6253\u5f00\u52a9\u624b\u9762\u677f\uff0c\u8be2\u95ee\"\u6211\u4eca\u5929\u5e94\u8be5\u5173\u6ce8\u4ec0\u4e48\uff1f\"\u2014\u2014\u5b83\u53ef\u4ee5\u5b9e\u65f6\u67e5\u770b\u60a8\u7684\u9500\u552e\u7ba1\u9053\u3001\u67b6\u6784\u4e0e\u5ba2\u6237\u4fe1\u606f\u3002",
+                              "es-ES": "Abra el panel del asistente desde el borde derecho de la p\u00e1gina y pregunte \"\u00bfen qu\u00e9 deber\u00eda concentrarme hoy?\" \u2014 ve su flujo de ventas, esquema y cuentas en tiempo real.",
+                              "ja-JP": "\u30da\u30fc\u30b8\u53f3\u7aef\u304b\u3089\u30a2\u30b7\u30b9\u30bf\u30f3\u30c8\u30d1\u30cd\u30eb\u3092\u958b\u304d\u3001\u300c\u4eca\u65e5\u306f\u4f55\u306b\u96c6\u4e2d\u3059\u3079\u304d\u304b\uff1f\u300d\u3068\u5c0b\u306d\u3066\u304f\u3060\u3055\u3044 \u2014 \u30ea\u30a2\u30eb\u30bf\u30a4\u30e0\u306e\u30d1\u30a4\u30d7\u30e9\u30a4\u30f3\u3001\u30b9\u30ad\u30fc\u30de\u3001\u53d6\u5f15\u5148\u60c5\u5831\u3092\u628a\u63e1\u3057\u3066\u3044\u307e\u3059\u3002"
+                            }
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "page:card",
+                    "id": "upcoming_events",
+                    "label": "Upcoming Events",
+                    "properties": {
+                      "title": "Upcoming Events",
+                      "bordered": true,
+                      "children": [
+                        {
+                          "type": "list-view",
+                          "id": "home_upcoming_events",
+                          "label": "\ud83d\udcc5 Upcoming \u00b7 Soonest First",
+                          "properties": {
+                            "objectName": "crm_event",
+                            "viewType": "grid",
+                            "columns": [
+                              "subject",
+                              "type",
+                              "start_datetime",
+                              "location",
+                              "related_to_type",
+                              "owner_id"
+                            ],
+                            "filter": [
+                              {
+                                "field": "status",
+                                "operator": "equals",
+                                "value": "planned"
+                              }
+                            ],
+                            "sort": [
+                              {
+                                "field": "start_datetime",
+                                "order": "asc"
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ],
+            "isDefault": true,
+            "aria": {
+              "ariaLabel": "Sales Home Page",
+              "ariaDescribedBy": "Sales team home page with metrics, leads, and quick actions"
+            },
+            "kind": "full"
+          },
+          {
+            "name": "utility_bar_page",
+            "label": "Utility Bar",
+            "description": "Quick access utility bar with floating tools",
+            "type": "utility",
+            "template": "utility-bar",
+            "regions": [
+              {
+                "name": "utilities",
+                "width": "full",
+                "components": [
+                  {
+                    "type": "global:notifications",
+                    "id": "notifications_panel",
+                    "label": "Notifications",
+                    "properties": {}
+                  },
+                  {
+                    "type": "page:card",
+                    "id": "quick_notes",
+                    "label": "Quick Notes",
+                    "properties": {
+                      "title": "Quick Notes",
+                      "bordered": true
+                    }
+                  },
+                  {
+                    "type": "global:search",
+                    "id": "quick_search",
+                    "label": "Quick Search",
+                    "properties": {}
+                  }
+                ]
+              }
+            ],
+            "isDefault": false,
+            "aria": {
+              "ariaLabel": "Utility Bar",
+              "ariaDescribedBy": "Quick access utility bar with floating tools and notifications"
+            },
+            "kind": "full"
+          }
+        ]
+      }
+    }
+  ]
+}

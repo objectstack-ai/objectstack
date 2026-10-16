@@ -89,6 +89,9 @@
  *   the next release — so the change that re-legalizes a retired key decides
  *   that entry's fate at this door, where the default-flip refusal below
  *   ({@link DEFAULT_FLIPS_NOT_REPLAYED_HERE}) is the existing mechanism.
+ * - **A flat package body** — the manifest half beside the collections, with
+ *   no `manifest` key (the shape `registerApp` and the marketplace ledger
+ *   hold) — declares its range on itself, and the window is read there.
  * - **No declared range** → replay the full chain. Same posture as the
  *   protocol handshake (which grandfathers range-less packages with a warning,
  *   ADR-0087 "never false-reject") and as the stored-row pass (whose rows
@@ -498,11 +501,18 @@ export function applyArtifactForwardConversions<T>(
     return { definition, verdict: 'not-an-object', authoredFloor: null, runtimeSpecVersion, notices: [], replayedRetirements: [] };
   }
 
+  // WHERE the declared range is read from. A stack definition carries it on
+  // its `manifest`; a package BODY carries it on itself — the manifest half of
+  // `AssembledPackageBodySchema` sits beside the collections, which is the
+  // shape a flat `manifest.register` / `registerApp` payload and a marketplace
+  // ledger entry have, and the shape `packages[i].manifest` has inside an
+  // option-B artifact (ADR-0130 D4). A definition that carries a `manifest`
+  // object is read there and nowhere else, as before; only a definition with
+  // no `manifest` is read on its own keys, so a flat body's window is the
+  // body's own, versioned, instead of the undeclared amnesty.
   const manifest = (definition as { manifest?: unknown }).manifest;
-  const declared =
-    manifest && typeof manifest === 'object'
-      ? resolveDeclaredRange(manifest as ProtocolHandshakeManifest)
-      : null;
+  const rangeCarrier: unknown = manifest && typeof manifest === 'object' && !Array.isArray(manifest) ? manifest : definition;
+  const declared = resolveDeclaredRange(rangeCarrier as ProtocolHandshakeManifest);
   const floor = declared ? parseRangeFloor(declared.range) : null;
   const authoredFloor = floor ? floor.join('.') : null;
 

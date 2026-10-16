@@ -50,7 +50,7 @@
       "note": "layout template selects the region arrangement. CLOSED 2026-10-15 (#23610, ruling 6190536588 Q2 A): PageTemplateSchema is the registered set less full-width (retired by name, a second name for default), and each template declares the regions it places in PAGE_TEMPLATE_SLOTS (page.zod.ts), which checkPageRegionPlacement enforces at the region name. RE-CITED 2026-08-10 (#7133/#7142): the old citation was split across 'page.tsx + containers.tsx' and the containers.tsx half is dead for this key — its only `template` occurrences (:240-248) are a `{field.path}` string-interpolation helper, an unrelated sense of the word. Verdict unchanged: LIVE."
     },
     "regions": {
-      "status": "live",
+      "status": "live LOAD PATH (P0 after #23610): a stored or installed page still spelling full-width replays the retired D2 entry page-template-full-width-to-default on read (both names drew FullWidthTemplate); an unregistered name has no lossless rewrite and stays with the parse.",
       "verifiedAt": "2026-10-15",
       "evidenceScope": "cross-repo",
       "evidence": "objectui @0656b0e3c0 packages/components/src/renderers/layout/page.tsx#RegionLayout resolves the named slots (header/sidebar/main/aside/footer, by #findRegion, case-insensitive) and appends the remainder below main (#getRemainingRegions); #HeaderSidebarMainTemplate places header/sidebar/main, #ThreeColumnTemplate the five, #DashboardTemplate header/footer and grids the rest — re-read 2026-10-15. The spec declares the same slots per template (PAGE_TEMPLATE_SLOTS) and refuses a region its template does not place (checkPageRegionPlacement, #23610)",
@@ -63,7 +63,7 @@
     },
     "isDefault": {
       "status": "live",
-      "note": "the default record page of the object a record page binds — objectui page resolution (the one reading every door judges by is defaultRecordPageObject, default-record-page.ts). On any other page it is REFUSED (#23610, ruling 6190536588 Q1 A; checkPageDefaultPlacement and the registry door, one sentence misplacedDefaultPageRefusal): nothing read it there — an app opens on its first navigation item and the root landing follows the app's own isDefault."
+      "note": "the default record page of the object a record page binds — objectui page resolution (the one reading every door judges by is defaultRecordPageObject, default-record-page.ts). On any other page it is REFUSED (#23610, ruling 6190536588 Q1 A; checkPageDefaultPlacement and the registry door, one sentence misplacedDefaultPageRefusal): nothing read it there — an app opens on its first navigation item and the root landing follows the app's own isDefault. LOAD PATH (P0 after #23610): an installed or stored page still carrying the flag replays the retired D2 entry page-is-default-off-record-page-removed on read — stored rows, the artifact doors, and the kernel's package registration door for a body that declares its protocol range (ObjectQL.convertPackageBodyForward) — so the kernel builds with an OS_METADATA_CONVERTED notice; the authoring, save and publish doors keep refusing."
     },
     "interfaceConfig": {
       "status": "live",
