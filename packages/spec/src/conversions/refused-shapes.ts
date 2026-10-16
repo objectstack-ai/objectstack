@@ -245,8 +245,8 @@ const COMPONENT_API_BINDING_FATE =
   'No mechanical move: the successor is a page component\'s `dataSource` binding, which takes a same-origin '
   + '`url` and no other request key, so the request cannot be carried over as written; and deleting `data` '
   + 'would make the component query its object instead and change what it shows. Left as stored, the page '
-  + 'still loads and is served as stored, with no read diagnostic for the binding, and the console keeps '
-  + 'reading it; its next save through the Studio, REST or MCP is refused with 422 by the component-props '
+  + 'still loads and is served as stored, with no read diagnostic for the binding, and the console no longer '
+  + 'reads the retired arm, so it sends no request; its next save through the Studio, REST or MCP is refused with 422 by the component-props '
   + 'gate, as `os validate`, `os build` and `os lint` refuse the binding in source. Decide what the component '
   + 'binds now, and which same-origin endpoint, if any, replaces the request.';
 
