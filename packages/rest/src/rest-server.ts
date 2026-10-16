@@ -9507,9 +9507,13 @@ export class RestServer {
                                         // call above hands its own base. ⛔ No walk of
                                         // `_sections` and no locale chain here.
                                         //
-                                        // The protocol enumerates view ITEMS only, so the
+                                        // The protocol's view list serves view ITEMS only
+                                        // (a container is dropped and served as the
+                                        // `viewKind: 'form'` items it expands to), so the
                                         // matched form is the item's `config`, the address
-                                        // `translateView` translates sections at. It runs
+                                        // `translateView` translates sections at. A form
+                                        // matched in any other slot is served as matched,
+                                        // never swapped for the item's `config`. It runs
                                         // BEFORE the strip below and returns each section's
                                         // `fields` untouched, so it cannot re-introduce a
                                         // stripped field. The top-level `label` keeps its

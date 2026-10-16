@@ -17,8 +17,19 @@
 // against the packaged view. What is pinned here is the ROUTE's half: that it
 // makes the call, with the request's locale and the packaged view base, and
 // serves its result through the existing lookup / master-detail / user strip.
+//
+// The translator localizes sections at a view item's `config`, one of the
+// three slots an open form is found in. The other two (a container's `form`
+// and `formViews.KEY`) never reach the route: the protocol's view list drops
+// every container and serves each of its forms as the `viewKind: 'form'` item
+// it expands to. Pinned below over the REAL protocol, beside what the route
+// answers when it is handed a form in those slots anyway.
 
 import { describe, it, expect, vi } from 'vitest';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { SchemaRegistry } from '@objectstack/objectql';
+import { expandViewContainer } from '@objectstack/spec/ui';
 import { RestServer } from './rest-server';
 
 // [#10126] Pay the first transform of the dist-resolved workspace dep the
@@ -66,7 +77,7 @@ const ticketObject = {
     fields: {
         subject: { type: 'text', label: 'Subject' },
         email: { type: 'text', label: 'Email' },
-        status: { type: 'select', label: 'Status' },
+        status: { type: 'select', label: 'Status', options: [{ label: 'Open', value: 'open' }] },
         contact_id: { type: 'lookup', reference: 'contact', label: 'Contact' },
     },
 };
@@ -103,12 +114,36 @@ function mockServer() {
     };
 }
 
+/** The real `GET /forms/:slug` route, mounted over `protocol`. `get` answers one anonymous request. */
+function routeOver(protocol: unknown) {
+    const rest = new RestServer(
+        mockServer() as any, protocol as any, { api: { requireAuth: false } } as any,
+        undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined, undefined,
+        // i18nServiceProvider — the 14th constructor argument.
+        async () => i18nService as any,
+    );
+    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
+    rest.registerRoutes();
+    const resolve = rest.getRoutes().find((r) => r.method === 'GET' && r.path.endsWith('/forms/:slug'))!;
+    return async (locale: string, slug = 'test') => {
+        const res: any = { statusCode: 200, body: undefined, headers: {} as Record<string, string> };
+        res.status = vi.fn((c: number) => { res.statusCode = c; return res; });
+        res.json = vi.fn((b: any) => { res.body = b; return res; });
+        res.header = vi.fn((k: string, v: string) => { res.headers[k] = v; return res; });
+        await resolve.handler({ params: { slug }, query: {}, headers: { 'accept-language': locale } } as any, res);
+        expect(res.statusCode, JSON.stringify(res.body)).toBe(200);
+        return res;
+    };
+}
+
 /**
- * The route over a protocol double. `packagedView`, when given, is what the
- * protocol's `getPackagedViewBase` answers — the packaged view before any
- * overlay, which the override rule compares the served strings against.
+ * The route over a protocol double that serves `view` as the one view body.
+ * `packagedView`, when given, is what the protocol's `getPackagedViewBase`
+ * answers — the packaged view before any overlay, which the override rule
+ * compares the served strings against.
  */
-function buildServer(view: ReturnType<typeof formView>, packagedView?: ReturnType<typeof formView>) {
+function buildServer(view: Record<string, any>, packagedView?: Record<string, any>) {
     const getPackagedViewBase = vi.fn((name: string) => (name === view.name ? packagedView : undefined));
     const protocol: any = {
         getDiscovery: vi.fn().mockResolvedValue({ version: 'v0', routes: { data: '', metadata: '' } }),
@@ -120,26 +155,7 @@ function buildServer(view: ReturnType<typeof formView>, packagedView?: ReturnTyp
         }),
         ...(packagedView ? { getPackagedViewBase } : {}),
     };
-    const rest = new RestServer(
-        mockServer() as any, protocol, { api: { requireAuth: false } } as any,
-        undefined, undefined, undefined, undefined, undefined,
-        undefined, undefined, undefined, undefined, undefined,
-        // i18nServiceProvider — the 14th constructor argument.
-        async () => i18nService as any,
-    );
-    (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
-    rest.registerRoutes();
-    const resolve = rest.getRoutes().find((r) => r.method === 'GET' && r.path.endsWith('/forms/:slug'))!;
-    const get = async (locale: string) => {
-        const res: any = { statusCode: 200, body: undefined, headers: {} as Record<string, string> };
-        res.status = vi.fn((c: number) => { res.statusCode = c; return res; });
-        res.json = vi.fn((b: any) => { res.body = b; return res; });
-        res.header = vi.fn((k: string, v: string) => { res.headers[k] = v; return res; });
-        await resolve.handler({ params: { slug: 'test' }, query: {}, headers: { 'accept-language': locale } } as any, res);
-        expect(res.statusCode).toBe(200);
-        return res;
-    };
-    return { get, getPackagedViewBase };
+    return { get: routeOver(protocol), getPackagedViewBase };
 }
 
 const section = (res: any, index: number) => res.body.form.sections[index];
@@ -212,4 +228,138 @@ describe('[#23497] GET /forms/:slug — section headings are localized under Acc
         expect(view.config.sections[0]).toMatchObject({ label: ABOUT_EN, description: ABOUT_DESC_EN });
         expect(view.config.sections[0].fields).toEqual(['subject', 'contact_id']);
     });
+});
+
+// ─── the three form slots ───────────────────────────────────────────────────
+//
+// `anonymousFormIntakeCandidates` finds an open form in three slots of a view
+// body: a container's `form`, a container's `formViews.KEY`, and a
+// `viewKind: 'form'` item's `config`. The spec's view translator localizes
+// sections at the THIRD address only, and the route serves its translation for
+// that slot alone. The two pins below are why that is the whole population, and
+// what the route does with a body that breaks the premise.
+
+/** A container's form as the showcase authors its public form: a `formViews` entry and the default `form`. */
+const containerForm = (slug: string) => ({
+    type: 'simple',
+    data: { provider: 'object', object: 'ticket' },
+    sharing: { enabled: true, allowAnonymous: true, publicLink: `/forms/${slug}` },
+    sections: [
+        { name: 'about', label: ABOUT_EN, description: ABOUT_DESC_EN, fields: ['subject', 'contact_id'] },
+        { name: 'details', label: 'Details', description: 'Anything else we should know.', fields: ['email'] },
+    ],
+});
+const ticketContainer = () => ({ object: 'ticket', form: containerForm('ticket-default'), formViews: { contact: containerForm('ticket-contact') } });
+
+const PKG = 'com.example.helpdesk';
+
+const matchesWhere = (row: Record<string, unknown>, where: Record<string, unknown>) =>
+    Object.entries(where ?? {}).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
+        if (v === null) return row[k] === null || row[k] === undefined;
+        return row[k] === v;
+    });
+
+/**
+ * The REAL protocol (`ObjectStackProtocolImplementation`) over a real
+ * `SchemaRegistry`, with the container registered the way the boot registers
+ * a `defineView` container (the bare object key, then every item
+ * `expandViewContainer` expands it to), over a READ-ONLY in-memory
+ * `sys_metadata` the overlay rows are seeded into.
+ */
+function realProtocolSession() {
+    const registry = new SchemaRegistry({ multiTenant: false });
+    registry.logLevel = 'silent';
+    const rows: Record<string, unknown>[] = [];
+    const engine: any = {
+        registry,
+        async findOne(table: string, o: { where: Record<string, unknown> }) {
+            // The real engine's predicate: a `findOne` naming no record is refused.
+            assertEngineFindOnePredicate(table, o);
+            if (table !== 'sys_metadata') return null;
+            return rows.find((r) => matchesWhere(r, o.where)) ?? null;
+        },
+        async find(table: string, o: { where: Record<string, unknown>; limit?: number }) {
+            if (table !== 'sys_metadata') return [];
+            const matched = rows.filter((r) => matchesWhere(r, o.where));
+            return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
+        },
+    };
+    const protocol: any = new ObjectStackProtocolImplementation(engine, undefined, 'env_test');
+    registry.registerObject(ticketObject as any, PKG);
+    const container = ticketContainer();
+    registry.registerItem('view', { name: 'ticket', ...container }, 'name', PKG);
+    for (const item of expandViewContainer('ticket', container)) registry.registerItem('view', item, 'name', PKG);
+    return { protocol, rows, get: routeOver(protocol) };
+}
+
+describe('[#23497] a container-authored form reaches the route as the item the protocol expands it to', () => {
+    it('the view list the route reads serves each container form only as a `viewKind: \'form\'` item, its form under `config`', async () => {
+        const { protocol } = realProtocolSession();
+        const views: any[] = (await protocol.getMetaItems({ type: 'view' })).items;
+        // No served body carries a container slot, so no candidate the route
+        // matches can come from `form` or `formViews`.
+        expect(views.filter((v) => v && ('form' in v || 'formViews' in v))).toEqual([]);
+        const forms = views.filter((v) => v?.viewKind === 'form');
+        expect(forms.map((v) => [v.name, v.config?.sharing?.publicLink]).sort()).toEqual([
+            ['ticket.contact', '/forms/ticket-contact'],
+            ['ticket.form', '/forms/ticket-default'],
+        ]);
+    });
+
+    for (const slug of ['ticket-contact', 'ticket-default']) {
+        it(`zh-CN: the form authored at ${slug === 'ticket-contact' ? '`formViews.contact`' : 'the default `form`'} is served its translated headings`, async () => {
+            const { get } = realProtocolSession();
+            const res = await get('zh-CN', slug);
+            expect(res.body.form.sections.map((s: any) => [s.name, s.label, s.description])).toEqual([
+                ['about', ABOUT_ZH, ABOUT_DESC_ZH],
+                ['details', 'Details', 'Anything else we should know.'],
+            ]);
+            expect(renderedFields(res)).toEqual([['subject'], ['email']]);
+            // CONTROL: the same form under `en` is served as authored.
+            const en = await get('en', slug);
+            expect(en.body.form.sections.map((s: any) => s.label)).toEqual([ABOUT_EN, 'Details']);
+        });
+    }
+
+    it('zh-CN: a heading an environment overlay edited keeps the edit against the packaged view the real protocol answers', async () => {
+        const { rows, get, protocol } = realProtocolSession();
+        const shipped: any = expandViewContainer('ticket', ticketContainer()).find((v) => v.name === 'ticket.contact');
+        const edited = 'Tell us about yourself (edited)';
+        const overlay = {
+            ...shipped,
+            config: {
+                ...shipped.config,
+                sections: shipped.config.sections.map((s: any) => (s.name === 'about' ? { ...s, label: edited } : s)),
+            },
+        };
+        rows.push({
+            id: 'r_1', type: 'view', name: 'ticket.contact', package_id: null, organization_id: null,
+            state: 'active', metadata: JSON.stringify(overlay),
+        });
+        // The packaged base is the item the package shipped, under the served item's own name.
+        expect((protocol.getPackagedViewBase('ticket.contact') as any)?.config?.sections?.[0]?.label).toBe(ABOUT_EN);
+        const res = await get('zh-CN', 'ticket-contact');
+        expect(section(res, 0)).toMatchObject({ name: 'about', label: edited, description: ABOUT_DESC_ZH });
+    });
+});
+
+describe('[#23497] a form matched outside `config` is served as matched', () => {
+    // No body the route reads carries a container slot (the pin above), but
+    // the route still answers one it is handed, from a protocol double or a
+    // row stored before the write door stored parsed bodies: its own sections,
+    // never the item's `config`, and as authored, because the spec's view
+    // translator localizes sections at `config` only.
+    for (const [where, slug] of [['form', 'ticket-default'], ['formViews.contact', 'ticket-contact']] as const) {
+        it(`a container's \`${where}\` is answered with its own sections, as authored`, async () => {
+            const res = await buildServer({ name: 'ticket', ...ticketContainer() }).get('zh-CN', slug);
+            expect(res.body.form.sharing.publicLink).toBe(`/forms/${slug}`);
+            expect(res.body.form.sections.map((s: any) => [s.name, s.label])).toEqual([
+                ['about', ABOUT_EN],
+                ['details', 'Details'],
+            ]);
+            // The strip still ran over it.
+            expect(renderedFields(res)).toEqual([['subject'], ['email']]);
+        });
+    }
 });
