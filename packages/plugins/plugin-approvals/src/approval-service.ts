@@ -90,6 +90,8 @@ import {
   slateNamesAPerson,
   type ActingCaller,
 } from './approver-address.js';
+import { labelOrMachineName, requestDisplayLabels } from './display-labels.js';
+import type { SlotLabelSource } from './display-label-backfill.js';
 import {
   redactSnapshot,
   resolveReadableSnapshotFields,
@@ -1147,29 +1149,12 @@ function isBlankDecisionOutput(value: unknown): boolean {
   return false;
 }
 
-/**
- * Humanize a machine name for display fallback: strips a `flow:` prefix and
- * title-cases underscore/dash segments (`flow:manager_review` → "Manager
- * Review"). Used only when no authored label was snapshotted on the row.
- */
-function prettifyMachineName(raw: string | null | undefined): string | undefined {
-  if (!raw) return undefined;
-  const base = String(raw).replace(/^flow:/, '').trim();
-  if (!base) return undefined;
-  return base
-    .split(/[_\-\s]+/)
-    .filter(Boolean)
-    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
-    .join(' ');
-}
-
 function rowFromRequest(row: any): ApprovalRequestRow {
-  // Authored display labels are the row's engine-written columns
-  // (`process_label` / `current_step_label`, #23889). A row opened before those
-  // columns carries the same labels on the node-config snapshot (`__flowLabel`
-  // / `__nodeLabel`); one written before labels were captured at all falls
-  // back to a prettified machine name.
+  // Display labels by the ONE chain (`display-labels.ts`, #23889) the open
+  // write and the boot backfill use: the row's column, else the node-config
+  // snapshot (`__flowLabel` / `__nodeLabel`), else the humanized machine name.
   const cfg = parseJson<any>(row.node_config_json, undefined);
+  const labels = requestDisplayLabels(row);
   return {
     id: String(row.id),
     organization_id: row.organization_id ?? undefined,
@@ -1194,8 +1179,8 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     updated_at: row.updated_at ?? undefined,
     // The row is created at submission time; expose the stable inbox-facing name.
     submitted_at: row.created_at ?? undefined,
-    process_label: row.process_label ?? cfg?.__flowLabel ?? prettifyMachineName(row.process_name),
-    step_label: row.current_step_label ?? cfg?.__nodeLabel ?? prettifyMachineName(row.current_step),
+    process_label: labels.process_label,
+    step_label: labels.current_step_label,
     sla_due_at: slaDueAt(row.created_at, cfg),
     // ADR-0044 revision round (rides the config snapshot; absent ⇒ round 1).
     round: typeof cfg?.__round === 'number' ? cfg.__round : undefined,
@@ -1444,6 +1429,24 @@ async function findChildRequestId(
 const REQUEST_VISIBILITY = new WeakMap<ApprovalService, RequestVisibilitySource>();
 
 /**
+ * [#23889] Each service's own slot labeller — the one its live writers label
+ * `pending_approver_labels` / `acted_as_label` with — for the boot backfills
+ * (`display-label-backfill.ts`, `action-slot-backfill.ts`). In-package only, by
+ * the same rule as {@link REQUEST_VISIBILITY}: the published class type stays
+ * what it was.
+ */
+const SLOT_LABELS = new WeakMap<ApprovalService, SlotLabelSource>();
+
+/** [#23889] The slot labeller the boot backfills use for `service`. */
+export function slotLabelSourceOf(service: ApprovalService): SlotLabelSource {
+  const source = SLOT_LABELS.get(service);
+  if (!source) {
+    throw new Error('[approvals] no slot label source is registered for this ApprovalService instance');
+  }
+  return source;
+}
+
+/**
  * [#22559] The visibility source the read gate consumes for `service`: the
  * approvals door's own `visibleRequestIds`, asked for a read that arrives
  * through another door. Every constructed service registers one.
@@ -1524,6 +1527,10 @@ export class ApprovalService implements IApprovalService {
     // its `request_id` is in it. There `target.row` names a child row loaded
     // by id: the request it belongs to is the anchor, as `authorizeFileRead`
     // reads it — `findChildRequestId`, shared with that method.
+    SLOT_LABELS.set(this, {
+      slotLabels: (slots) => this.slotLabels(slots),
+      slateLabels: (slate) => this.slateLabels(slate),
+    });
     REQUEST_VISIBILITY.set(this, {
       visibleRequestIdsFor: async (context, target) => {
         // `organizationId` is not on the envelope — see isOverrideActor().
@@ -3555,9 +3562,11 @@ export class ApprovalService implements IApprovalService {
       // the node's authored labels as the flow engine handed them over, and
       // whom the request waits on. Engine-written here and never re-derived by
       // a reader (`sys-approval-request.object.ts` documents each column).
-      process_label: input.flowLabel ?? null,
+      // An empty authored label counts as none: the chain falls through to
+      // the humanized machine name, the label the approvals door served.
+      process_label: labelOrMachineName(input.flowLabel, processName) ?? null,
       current_step: input.nodeId,
-      current_step_label: input.nodeLabel ?? null,
+      current_step_label: labelOrMachineName(input.nodeLabel, input.nodeId) ?? null,
       current_step_index: 0,
       pending_approvers: approvers.join(','),
       pending_approver_labels: await this.slateLabels(approvers),
@@ -6638,11 +6647,30 @@ export class ApprovalService implements IApprovalService {
   /**
    * Batch-resolve `sys_user` display names for identifiers that may be user
    * ids or emails. Best-effort — failures leave entries unresolved.
+   *
+   * [#23889] ⚠️ STORED COPIES: this answer is also written into rows, not only
+   * served per read — `sys_approval_request.pending_approver_labels` and
+   * `sys_approval_action.acted_as_label` (via {@link slotLabels}). A later
+   * narrowing of these names by the reader's `sys_user` field-level security,
+   * here or in `enrichRows` / `listActions`, does not reach those stored values:
+   * they must be narrowed (or rewritten) too.
    */
   private async resolveUserNames(identifiers: Array<string | null | undefined>): Promise<Map<string, string>> {
+    return (await this.readUserNames(identifiers)).names;
+  }
+
+  /**
+   * {@link resolveUserNames}, saying whether a `sys_user` read FAILED — which a
+   * per-read enrichment can ignore, and a STORED label cannot: an unresolved
+   * name after a failed read is not "this address names no account".
+   */
+  private async readUserNames(
+    identifiers: Array<string | null | undefined>,
+  ): Promise<{ names: Map<string, string>; failed: boolean }> {
     const names = new Map<string, string>();
+    let failed = false;
     const targets = Array.from(new Set(identifiers.filter(Boolean))) as string[];
-    if (!targets.length) return names;
+    if (!targets.length) return { names, failed };
     try {
       const users = await this.engine.find('sys_user', {
         where: { id: { $in: targets } }, fields: ['id', 'name', 'email'],
@@ -6651,7 +6679,7 @@ export class ApprovalService implements IApprovalService {
       for (const u of (users ?? []) as any[]) {
         if (u?.id && (u.name || u.email)) names.set(String(u.id), String(u.name ?? u.email));
       }
-    } catch { /* best-effort */ }
+    } catch { failed = true; }
     const unresolvedEmails = targets.filter(t => !names.has(t) && t.includes('@'));
     if (unresolvedEmails.length) {
       try {
@@ -6662,16 +6690,19 @@ export class ApprovalService implements IApprovalService {
         for (const u of (users ?? []) as any[]) {
           if (u?.email && u.name) names.set(String(u.email), String(u.name));
         }
-      } catch { /* best-effort */ }
+      } catch { failed = true; }
     }
-    return names;
+    return { names, failed };
   }
 
   /**
    * [#23889] The display label of each slot address, in order: the account
    * name {@link resolveUserNames} gives a slot that names a person (a user id,
    * or an email an account carries), else the address as stored — a
-   * `position:` / `team:` literal, or an address no account answers to.
+   * `position:` / `team:` literal, or an address no account answers to. When
+   * the `sys_user` read FAILED, a person slot's label is null (said once at
+   * `warn`), never its address: an address is the label of a slot that names
+   * no account, and a failed read has not shown that.
    *
    * The same resolver, under the same system read, that the approvals door
    * names `pending_approver_names` and the timeline's hand-off parties with,
@@ -6681,21 +6712,39 @@ export class ApprovalService implements IApprovalService {
    * the generic data door serves the row to the same readers
    * (`request-read-gate.ts`).
    */
-  private async slotLabels(slots: readonly string[]): Promise<string[]> {
-    const names = await this.resolveUserNames(slots.filter((slot) => !!slot && !slot.includes(':')));
-    return slots.map((slot) => names.get(slot) ?? slot);
+  private async slotLabels(slots: readonly string[]): Promise<Array<string | null>> {
+    const persons = slots.filter((slot) => !!slot && !slot.includes(':'));
+    const { names, failed } = await this.readUserNames(persons);
+    if (failed) {
+      // A failed read is not an answer: a person slot gets no label (null) rather
+      // than its raw address frozen into a stored row, and the boot backfill
+      // (`display-label-backfill.ts`) fills it on the next boot.
+      this.logger?.warn?.(
+        '[approvals] the sys_user names for an approval display label could not be read — the label is left '
+        + 'empty and is filled by the display-label backfill on the next boot',
+        { slots: persons.length },
+      );
+    }
+    return slots.map((slot) => {
+      const name = names.get(slot);
+      if (name) return name;
+      const isPerson = !!slot && !slot.includes(':');
+      return failed && isPerson ? null : slot;
+    });
   }
 
   /**
    * [#23889] `sys_approval_request.pending_approver_labels` for a slate: each
    * slot's {@link slotLabels} label in slate order, joined with ", "; null for
-   * an empty slate, as the slate itself is cleared. Written beside
+   * an empty slate, as the slate itself is cleared, and null when any slot's
+   * name could not be read (the boot backfill retries). Written beside
    * `pending_approvers` on every write that sets it, so the two describe the
    * same slate.
    */
   private async slateLabels(slate: readonly string[]): Promise<string | null> {
     if (!slate.length) return null;
-    return (await this.slotLabels(slate)).join(', ');
+    const labels = await this.slotLabels(slate);
+    return labels.some((label) => label === null) ? null : labels.join(', ');
   }
 
   /**
@@ -6703,12 +6752,12 @@ export class ApprovalService implements IApprovalService {
    * plus what an action list shows without a join, copied from the request the
    * action belongs to. Every writer of the decision log builds its row here:
    *
-   *  - `step_label` — the request's `current_step_label`, the node label the
-   *    engine snapshotted at open (a row opened before that column carries the
-   *    same label in its config snapshot, which is read instead);
+   *  - `step_label` — the request's step label by `requestDisplayLabels`: its
+   *    `current_step_label`, else (a row opened before that column) the same
+   *    chain the approvals door serves;
    *  - `object_name` + `record_id` — the request's pointer pair;
-   *  - `acted_as_label` — `acted_as` labelled by {@link slotLabels}; null
-   *    exactly when `acted_as` is.
+   *  - `acted_as_label` — `acted_as` labelled by {@link slotLabels}; null when
+   *    `acted_as` is, or when the slot's name could not be read.
    *
    * Every value is a column of the request the row's readers already read
    * (the decision log is served only where its request is,
@@ -6717,14 +6766,13 @@ export class ApprovalService implements IApprovalService {
    */
   private async actionRow(request: any, action: Record<string, unknown>): Promise<Record<string, unknown>> {
     const actedAs = typeof action.acted_as === 'string' && action.acted_as ? action.acted_as : null;
-    const stepLabel = request?.current_step_label
-      ?? parseJson<any>(request?.node_config_json, undefined)?.__nodeLabel
-      ?? null;
+    const stepLabel = request ? requestDisplayLabels(request).current_step_label ?? null : null;
     return {
       ...action,
       step_label: stepLabel,
       object_name: request?.object_name ?? null,
       record_id: request?.record_id ?? null,
+      // Null when the slot's name could not be read: the boot backfill retries.
       acted_as_label: actedAs ? (await this.slotLabels([actedAs]))[0] : null,
     };
   }

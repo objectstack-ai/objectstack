@@ -186,8 +186,10 @@ export const SysApprovalRequest = ObjectSchema.create({
     // engine writes once, in `openNodeRequest`, from the label the flow engine
     // seeds as `$flowLabel` (`FlowSchema.label`, required). A rename of the flow
     // later does not rewrite it: the row records what the approver was asked
-    // under. Null on rows opened before this column, and on a request opened
-    // by a direct caller that named no flow label.
+    // under. An empty or absent authored label falls through to the humanized
+    // machine name (`display-labels.ts`, the chain the approvals door serves).
+    // Rows opened before this column are filled by the boot backfill
+    // (`display-label-backfill.ts`) by the same chain.
     process_label: Field.text({
       label: 'Flow',
       required: false,
@@ -309,7 +311,7 @@ export const SysApprovalRequest = ObjectSchema.create({
     // The Approval node's authored label (`FlowNodeSchema.label`, required),
     // written with `current_step` when the request opens. The engine's fact at
     // that moment: the console shows it as stored and never reads the flow to
-    // re-derive it. Null on rows opened before this column.
+    // re-derive it. Same chain and same boot backfill as `process_label`.
     current_step_label: Field.text({
       label: 'Approval Step',
       required: false,
@@ -346,8 +348,10 @@ export const SysApprovalRequest = ObjectSchema.create({
     // A snapshot, not a live read: a user renamed while the request is pending
     // keeps the old name here until the slate is next written. Display only —
     // no decision, filter or index reads it; `pending_approvers` stays the
-    // authority. Null on rows written before this column until their next
-    // slate write.
+    // authority. Null on a non-pending row, and while a person slot's name
+    // could not be read (never a raw address in its place); the boot backfill
+    // (`display-label-backfill.ts`) fills pending rows written before this
+    // column, and retries a failed read.
     pending_approver_labels: Field.textarea({
       label: 'Waiting On',
       required: false,

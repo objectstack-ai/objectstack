@@ -69,6 +69,7 @@
  */
 
 import { keysetWalk } from '@objectstack/types';
+import type { SlotLabelSource } from './display-label-backfill.js';
 
 /**
  * The engine surface the repair needs — a structural subset of
@@ -123,9 +124,17 @@ export function isSlotLiteral(actorId: string): boolean {
  */
 export async function backfillActionSlots(
   engine: ActionSlotBackfillEngine,
-  options: { pageSize?: number } = {},
+  options: { pageSize?: number; labels?: Pick<SlotLabelSource, 'slotLabels'> } = {},
 ): Promise<ActionSlotBackfillResult> {
   const pageSize = options.pageSize ?? PAGE;
+  // [#23889] Every `acted_as` this repair writes gets its display label in the
+  // same write, so `acted_as_label` is null only where `acted_as` is (or where
+  // the name could not be read — the display-label backfill retries that).
+  const labelOf = async (slot: string): Promise<Record<string, unknown>> => {
+    if (!options.labels) return {};
+    const [label] = await options.labels.slotLabels([slot]);
+    return label ? { acted_as_label: label } : {};
+  };
   let literalsMoved = 0;
   let sentinelsCleared = 0;
   let votesStamped = 0;
@@ -155,7 +164,7 @@ export async function backfillActionSlots(
       // Either way the column ends up empty. A slot also moves to `acted_as`;
       // a sentinel does not — the sweep took no slot.
       const patch: Record<string, unknown> = { id, actor_id: null };
-      if (!sentinel && !nonEmpty(row.acted_as)) patch.acted_as = actorId;
+      if (!sentinel && !nonEmpty(row.acted_as)) Object.assign(patch, { acted_as: actorId }, await labelOf(actorId));
       await engine.update('sys_approval_action', patch, { context: SYSTEM_CONTEXT });
       if (sentinel) sentinelsCleared++;
       else literalsMoved++;
@@ -190,7 +199,7 @@ export async function backfillActionSlots(
         // Pass 1 has already emptied every sentinel; a machine took no slot,
         // so one is never stamped as a vote even if a write raced the scan.
         if (isMachineSentinel(actorId)) continue;
-        await engine.update('sys_approval_action', { id, acted_as: actorId }, { context: SYSTEM_CONTEXT });
+        await engine.update('sys_approval_action', { id, acted_as: actorId, ...(await labelOf(actorId)) }, { context: SYSTEM_CONTEXT });
         votesStamped++;
       }
     }

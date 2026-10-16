@@ -117,7 +117,8 @@ export const SysApprovalAction = ObjectSchema.create({
 
     // The step's authored label at the time of the action, copied from the
     // request's `current_step_label` (the node label the engine snapshotted
-    // when the request opened). Null on rows written before this column.
+    // when the request opened). Filled on rows written before this column by
+    // the boot backfill (`display-label-backfill.ts`).
     step_label: Field.text({
       label: 'Approval Step',
       required: false,
@@ -129,8 +130,10 @@ export const SysApprovalAction = ObjectSchema.create({
 
     // The record the request is about — the request's own pointer pair
     // (ADR-0052 §5), copied onto the action when it is written so an action
-    // list can name the record without a join. Null on rows written before
-    // these columns: their record is still reachable through `request_id`.
+    // list can name the record without a join. Rows written before these
+    // columns are filled from their request by the boot backfill
+    // (`display-label-backfill.ts`); an action whose request no longer exists
+    // keeps them null.
     object_name: Field.text({
       label: 'Object',
       required: false,
@@ -227,8 +230,12 @@ export const SysApprovalAction = ObjectSchema.create({
     // id, or an email an account carries), resolved when the action is written
     // by `resolveUserNames` — the resolver `listActions` names the hand-off
     // parties with — or the stored address when the slot names no person (a
-    // `position:` literal). Null exactly when `acted_as` is null. A snapshot:
-    // a later rename does not rewrite an append-only row.
+    // `position:` literal). Null when `acted_as` is null, and — until the boot
+    // backfill (`display-label-backfill.ts`) fills it — when the name could not
+    // be read at write time, never a raw address in place of a name. Rows
+    // written before this column are filled by that backfill too, and every
+    // `acted_as` the action-slot backfill writes gets its label in the same
+    // write. A snapshot: a later rename does not rewrite an append-only row.
     acted_as_label: Field.text({
       label: 'Acting As',
       required: false,
