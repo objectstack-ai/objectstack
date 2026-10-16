@@ -227,10 +227,10 @@ describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
         connection: `postgres://u:p@127.0.0.1:${port}/d`,
         pool: { min: 0, max: 2 },
       });
-      let err: Error | undefined;
-      const outcome = (d as any).knex.raw('SELECT 1').then(
-        () => { throw new Error('query resolved but should have failed'); },
-        (e: Error) => { err = e; },
+      let settled = undefined as { ok: true } | { ok: false; error: Error } | undefined;
+      (d as any).knex.raw('SELECT 1').then(
+        () => { settled = { ok: true }; },
+        (error: Error) => { settled = { ok: false, error }; },
       );
 
       // Real I/O: do not move the clock until the server holds the socket, so
@@ -242,20 +242,21 @@ describe('SqlDriver — connection-attempt bound (framework#3769)', () => {
       // Each step also lets a real macrotask run, so the socket teardown and
       // the rejection it causes land before the next step is judged.
       let elapsed = 0;
-      while (err === undefined && elapsed < 20_000) {
+      while (settled === undefined && elapsed < 20_000) {
         await vi.advanceTimersByTimeAsync(500);
         await new Promise<void>((resolve) => setImmediate(resolve));
         elapsed += 500;
       }
-      expect(err, 'still pending after 20s of fake time — the connect is unbounded').toBeDefined();
-      await outcome; // surfaces the "resolved but should have failed" throw, if any
+      expect(settled, 'still pending after 20s of fake time — the connect is unbounded').toBeDefined();
+      expect(settled?.ok, 'query resolved but should have failed').toBe(false);
+      const err = (settled as { ok: false; error: Error }).error;
 
       // The pg-level timeout fires first (10s), so the message names the
       // connection attempt rather than blaming pool sizing. Guarding against
       // the regression is the point: knex's own wording would send an operator
       // to tune `pool.max` while the network is what is broken.
-      expect(err!.message).toContain('timeout expired');
-      expect(err!.message).not.toContain('pool is probably full');
+      expect(err.message).toContain('timeout expired');
+      expect(err.message).not.toContain('pool is probably full');
       expect(elapsed).toBeGreaterThan(8_000);
       expect(elapsed).toBeLessThan(20_000);
     } finally {
