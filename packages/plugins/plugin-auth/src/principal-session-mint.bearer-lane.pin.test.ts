@@ -86,7 +86,10 @@ describe('[#23772] bearer lane — a minted session is never renewed', () => {
     await minted.revoke();
 
     expect(fx.row(rawTokenOf(minted)), 'revoke left the session row').toBeUndefined();
-    expect((await fx.getSession({ authorization: `Bearer ${minted.token}` })).body).toBeNull();
+    // The platform's answer for "no session" on this route (anonymous-session-refusal.ts).
+    const res = await fx.getSession({ authorization: `Bearer ${minted.token}` });
+    expect({ status: res.status, code: res.body?.error?.code }, 'a revoked token still resolved a session')
+      .toEqual({ status: 401, code: 'UNAUTHENTICATED' });
     expect(await inProcessRead(minted.token)).toBeNull();
   });
 });

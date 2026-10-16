@@ -82,8 +82,9 @@ describe('[#23772] cookie lane — a minted session is never renewed', () => {
     await minted.revoke();
 
     expect(fx.row(rawTokenOf(minted)), 'revoke left the session row').toBeUndefined();
+    // The platform's answer for "no session" on this route (anonymous-session-refusal.ts).
     const res = await fx.getSession({ cookie });
-    expect(res.status).toBe(200);
-    expect(res.body, 'a revoked cookie still resolved a session').toBeNull();
+    expect({ status: res.status, code: res.body?.error?.code }, 'a revoked cookie still resolved a session')
+      .toEqual({ status: 401, code: 'UNAUTHENTICATED' });
   });
 });

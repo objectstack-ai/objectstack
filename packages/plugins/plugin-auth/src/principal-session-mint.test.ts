@@ -88,7 +88,13 @@ describe('[#23772] refusals — before anything is minted', () => {
   });
 
   it('the system user row and a role=system row → PERMISSION_DENIED / 403 (isHumanUserRow)', async () => {
-    await expectRefused(fx.manager.mintPrincipalSession(fx.human({ userId: SystemUserId.SYSTEM })), 'PERMISSION_DENIED', 403);
+    const users = fx.engine.tables.get('sys_user')!;
+    users.push({ ...userRow(), id: SystemUserId.SYSTEM, email: 'system.23772@example.com', role: 'user' });
+    try {
+      await expectRefused(fx.manager.mintPrincipalSession(fx.human({ userId: SystemUserId.SYSTEM })), 'PERMISSION_DENIED', 403);
+    } finally {
+      users.splice(users.findIndex((r) => r.id === SystemUserId.SYSTEM), 1);
+    }
     const row = userRow();
     row.role = 'system';
     try {
