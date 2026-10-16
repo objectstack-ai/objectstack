@@ -23,9 +23,13 @@
  * Rows are read and updated as the platform (a SYSTEM context), the shape of
  * `stored-metadata-body-migration.ts` and E6's activity backfill. The pair the
  * update names is re-derived by the update stamp from the row's thread as it
- * is stored at write time (`comment-access-hooks.ts`), so a re-point landing
- * between this page's read and the row's write cannot leave the pair naming
- * the thread the comment left. The update names the row's stored
+ * is stored at write time (`comment-access-hooks.ts`). That narrows the
+ * read-then-write race to the one engine call: a re-point landing between this
+ * page's read and the row's write no longer leaves the pair naming the thread
+ * the comment left; one committing between the engine's own prior-row read and
+ * its driver write is the window every `previous`-derived hook has. ⛔ No
+ * conditional `where`: that would put the write on the predicate path. The
+ * update names the row's stored
  * `updated_at` under `preserveAudit`, so
  * the backfill changes no comment's `updated_at` and names no `thread_id` or
  * `body` (no re-point, no edit stamp). A row whose thread names no record is
