@@ -818,10 +818,14 @@ const VALUE_SLOT_BARE_DOLLAR_FALLBACK =
   "A value slot stores a bare `$` reference as written: compute it in a CEL value envelope, `{ dialect: 'cel', "
   + "source: '…' }`, spelled as `os explain flow-bare-dollar-reference` says for this position.";
 
-/** [#22161] A value slot's double-brace `fix:` line where no direct spelling fits in one line. */
+/**
+ * [#22161] A value slot's double-brace `fix:` line where no direct spelling fits in one line. It points at
+ * `os explain`, never at the build's own refusal: that refusal reads the string's outer braces as literal
+ * text, so its spelling keeps them (`'{' + record.title + '}'`), not the hole the author meant.
+ */
 const VALUE_SLOT_DOUBLE_BRACE_FALLBACK =
   "A value slot reads no `{{ }}` template: compute the value in a CEL value envelope, `{ dialect: 'cel', "
-  + "source: '…' }`; the build's value-slot refusal names the spelling at this position.";
+  + "source: '…' }`, spelled as `os explain flow-double-brace-interpolation` says for this position.";
 
 /** [#22161] A text slot's bare-`$` `fix:` line where the references do not fit in one line. */
 const TEXT_SLOT_FALLBACK =

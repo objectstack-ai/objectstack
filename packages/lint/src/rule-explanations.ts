@@ -3501,9 +3501,9 @@ const FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION: RuleExplanation = {
     'A value slot (a record write\'s `fields`, an `assignment` value, a filter operand, a callee\'s ' +
       'input map, a screen\'s prefill or record id, an http `body`) reads a CEL value envelope, ' +
       '`{ dialect: \'cel\', source: \'…\' }`, and no template: the value-slot refusal reads a `{{ }}` ' +
-      'string\'s outer braces as literal text, so the build refuses it. The `fix:` line names the ' +
-      'value-slot judge\'s own spelling of the holes the string means; where the position takes no ' +
-      'envelope of its own, the build\'s value-slot refusal names the spelling there.',
+      'string\'s outer braces as literal text, so the build refuses it, and the spelling that refusal ' +
+      'gives keeps the braces as text. The `fix:` line names the value-slot judge\'s own spelling of ' +
+      'the holes the string means instead: each `{{ x }}` hole is the CEL path `x`.',
     FLOW_NO_ENVELOPE_POSITIONS,
     FLOW_CEL_CAVEATS,
     FLOW_FILTER_OPERAND,
@@ -3513,7 +3513,7 @@ const FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION: RuleExplanation = {
 
 const FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION: RuleExplanation = {
   rule: 'flow-bare-dollar-reference',
-  covers: 'how a `$name.path` reference is written in each slot',
+  covers: 'how a bare `$` reference is written in each slot',
   paragraphs: [
     'A bare `$name.path` in a flow node\'s config is never resolved: it is stored or sent as the ' +
       'literal text it spells. How to write the reference depends on the slot the string sits in.',
