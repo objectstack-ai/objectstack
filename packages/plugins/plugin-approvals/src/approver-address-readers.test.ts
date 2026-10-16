@@ -142,6 +142,11 @@ const SLOT_SITES: Readonly<Record<string, { role: SiteRole; why: string }>> = {
     role: 'slot-vs-slot',
     why: 'is the token\'s bound slot still on the slate (ADR-0043 invalidation)',
   },
+  'display-label-backfill.ts · backfillApprovalDisplayLabels · acted_as: { $null: false }': {
+    role: 'slot-vs-slot',
+    why: 'a presence test, not a comparison: selects the action rows that hold a slot to label (#23889 boot '
+      + 'backfill); the slot is compared with nothing, and no caller identity is involved',
+  },
   "sys-approval-request.object.ts · (module) · field: 'pending_approvers'": {
     role: 'declarative',
     why: 'the `my_pending` list view\'s substring filter on {current_user_id}; served only by the generic data '
