@@ -317,9 +317,10 @@ type WithRequiresFeature = {
 
 /**
  * Lower the declarative `requiresFeature: '<flag>'` sugar into the canonical
- * `visible` CEL predicate and strip the sugar key from the output — mirroring
- * `normalizeVisibleWhen` (ADR-0089): persisted artifacts, lint, runtime, and
- * objectui only ever see the canonical envelope.
+ * `visible` CEL predicate and strip the sugar key from the output — the same
+ * schema-boundary fold onto one canonical key that ADR-0089 ran for
+ * `visibleOn` / `visibility` → `visibleWhen` through 17: persisted artifacts,
+ * lint, runtime, and objectui only ever see the canonical envelope.
  *
  * - No existing `visible` → `{ dialect: 'cel', source: <gate> }`, string-equal
  *   to the hand-written gates it replaces.

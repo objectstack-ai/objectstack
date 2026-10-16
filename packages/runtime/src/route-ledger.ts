@@ -277,7 +277,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 88 rows.
+ * CENSUS (generated): this list holds 92 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -381,6 +381,19 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   // ── keys ──────────────────────────────────────────────────────────────────
   { route: 'POST /keys', domain: '/keys', disposition: 'sdk', client: 'keys.create',
     note: 'raw secret returned once; user_id pinned server-side' },
+  // [#23909] Refusal-only mounts. `POST` is the one verb `/keys` serves, but the
+  // v18 text (changeset `23225-domain-floor-anonymous-deny`) answers an anonymous
+  // caller `401 UNAUTHENTICATED` for EVERY verb, and the domain's floor answers
+  // only a verb that is mounted. Exact rows, deliberately not a `* /keys/**`
+  // family: no `/keys` sub-path is mounted on the standalone server.
+  { route: 'GET /keys', domain: '/keys', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-verb anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the keys domain\'s 405' },
+  { route: 'PUT /keys', domain: '/keys', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-verb anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the keys domain\'s 405' },
+  { route: 'PATCH /keys', domain: '/keys', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-verb anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the keys domain\'s 405' },
+  { route: 'DELETE /keys', domain: '/keys', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-verb anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the keys domain\'s 405' },
 
   // ── storage ───────────────────────────────────────────────────────────────
   // RETIRED (#4087) — deliberately no rows, and the `/storage` domain is gone

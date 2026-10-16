@@ -29,7 +29,6 @@ export * from './metadata-collection.zod';
 export * from './metadata-url-spelling';
 export * from './lazy-schema';
 export * from './expression.zod';
-export * from './visibility';
 export * from './protection.zod';
 export * from './resilient-fetch';
 // The closed standard-domain vocabulary (`iana_time_zone` / `iso_4217_currency`
