@@ -353,11 +353,13 @@
     },
     "lookupColumns": {
       "status": "live",
-      "note": "objectui RecordPickerDialog — record-picker table columns; renderer auto-derives from the referenced object when omitted (reads lookupColumns || lookup_columns). The lookup keys' snake_case twins (the docblock above `displayField` in packages/spec/src/data/field.zod.ts, for all seven lookup keys; moved out of spec source, #23434): of the seven, only `lookupColumns`, `lookupPageSize` and `allowCreate` are read as `SNAKE ?? CAMEL`, at objectui @ed971e8 packages/fields/src/widgets/LookupField.tsx#lookupColumns, #lookupPageSize and #explicitAllowCreate (all inside LookupField); `displayField`, `descriptionField`, `lookupFilters` and `dependsOn` are read camelCase-only there; claim dated 2026-09-09."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui RecordPickerDialog — record-picker table columns; renderer auto-derives from the referenced object when omitted. Read camelCase-only. The lookup keys' snake_case twins (the docblock above `displayField` in packages/spec/src/data/field.zod.ts, for all seven lookup keys): none of the seven is read as a snake_case alias by the picker. At objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#lookupColumns, #lookupPageSize, #explicitAllowCreate, #descriptionField, #lookupFilters and #dependsOn, and #declaredDisplayField, read the camelCase key alone (`displayField` keeps `reference_field`, objectui's own leg and not a spec key, behind it); objectui#12157 retired the last three snake reads (`lookup_columns`, `lookup_page_size`, `allow_create`). A stored snake spelling is folded onto the declared key at ingestion: objectui @daeb77fc84: packages/core/src/utils/reference-keys.ts#normalizeSchemaReferenceKeys, applied by packages/app-shell/src/providers/MetadataProvider.tsx to every stored object. Outside the picker two snake legs survive behind the declared key at the same pin: packages/fields/src/resolveActionParams.ts ranks `description_field` and `lookup_filters` after `descriptionField` / `lookupFilters` when it builds a lookup action param, and the metadata-admin ObjectFieldInspector reads `lookup_filters` / `depends_on` after the camelCase key from a stored document. Claim dated 2026-10-16 — a reading of a pinned foreign tree that nothing in this repo re-checks."
     },
     "lookupPageSize": {
       "status": "live",
-      "note": "objectui RecordPickerDialog — rows per page in the record-picker dialog (reads lookupPageSize || lookup_page_size)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui RecordPickerDialog — rows per page in the record-picker dialog. Read camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#lookupPageSize (objectui#12157 retired the `lookup_page_size` read)."
     },
     "lookupFilters": {
       "status": "live",
@@ -369,7 +371,8 @@
     },
     "allowCreate": {
       "status": "live",
-      "note": "objectui LookupField — opt-in inline quick-create (dataSource.create from typed text) (reads allowCreate || allow_create)."
+      "verifiedAt": "2026-10-16",
+      "note": "objectui LookupField — opt-in inline quick-create (dataSource.create from typed text). Read camelCase-only at objectui @daeb77fc84: packages/fields/src/widgets/LookupField.tsx#explicitAllowCreate (objectui#12157 retired the `allow_create` read)."
     },
     "searchable": {
       "status": "live",
