@@ -149,6 +149,48 @@ export const ROOTS = Object.freeze([
 /** Every tracked `package.json`, the repo root's included. */
 export const MANIFEST_PATHSPEC = ':(glob)**/package.json';
 
+/**
+ * The population above, in the spellings `scripts/pm/dispatch-gates.mjs` can
+ * match, so a card that adds a script under one of these roots is routed to
+ * this gate -- a new script is the input this gate is most likely to fail on.
+ * Without them the derivation reads the `'scripts/'` label above as a bare
+ * root no dispatch can name, and only `.githooks` reaches the gate.
+ *
+ * Honest at the precision the instrument allows, measured on this tree with
+ * this file's own `kindOf`: the walk descends the whole of each root, and
+ *
+ *   scripts/**               326 of 434   75.1%   the rest: 102 .json, 3 .md, 3 .txt
+ *   packages/**\/scripts/**   171 of 174   98.3%   the rest: 2 .json, 1 data file
+ *   .githooks/**               2 of 2    100.0%
+ *
+ * The files it skips are baselines and prose a card can touch without this
+ * gate having anything to say -- a lead the dispatch prints and the gate then
+ * passes, which is the cheap direction. `packages/**\/scripts/**` carries its
+ * glob in a non-final segment, so the derivation matches it as a PATTERN: it
+ * reaches `scripts/` directories under `packages/` and nothing else there.
+ *
+ * ⛔ Provenance, never a lookup key: nothing reads these arrays but the
+ * self-test, which pins them against ROOTS and against the live manifest
+ * population in both directions. They are literals because the extractor reads
+ * literals; assembling them at runtime would hide them from the very derivation
+ * they exist for.
+ */
+const ROOT_DIR_WATCH_HINTS = ['scripts/**', 'packages/**/scripts/**', '.githooks/**'];
+
+/**
+ * The manifest half: the root `package.json` (a bare filename is refused as too
+ * generic; `/**` collapses back to it exactly), and the member manifests,
+ * enumerated per root that holds one -- `**\/package.json` is dropped by the
+ * extractor's admission, so the population is spelled the way
+ * `scripts/git-merge-regen.mjs` spells the same one.
+ */
+const ROOT_FILE_WATCH_HINTS = ['package.json/**'];
+const DECLARED_WATCH_HINTS = [
+  'packages/**/package.json',
+  'apps/**/package.json',
+  'examples/**/package.json',
+];
+
 /** The file that owns this rule, and so is not judged by it (see the header). */
 export const RULE_OWNING_FILES = Object.freeze([SELF]);
 
@@ -767,7 +809,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   [NOT_PNPM]: 6,
   [PROSE]: 6,
   [TREE]: 13,
-  [PIN]: 3,
+  [PIN]: 5,
 });
 
 // Deleting a battery from the roster silences its floor as surely as zeroing
@@ -928,6 +970,31 @@ const PIN_CASES = [
     check: () => {
       const labels = ROOTS.map((r) => r.label).join(' ');
       return labels === 'scripts/ packages/**/scripts/ .githooks/' ? null : labels;
+    },
+  },
+  {
+    label: 'ROOT_DIR_WATCH_HINTS declares exactly the walked roots',
+    check: () => {
+      const walked = ROOTS.map((r) => r.pathspec.replace(/^:\(glob\)/, ''));
+      return JSON.stringify(walked) === JSON.stringify([...ROOT_DIR_WATCH_HINTS])
+        ? null
+        : `walked ${JSON.stringify(walked)} but declared ${JSON.stringify(ROOT_DIR_WATCH_HINTS)}`;
+    },
+  },
+  {
+    label: 'the manifest hints reach every tracked package.json, and each hint reaches one',
+    check: () => {
+      const manifests = gitLsFiles(REPO_ROOT, [MANIFEST_PATHSPEC]);
+      const roots = DECLARED_WATCH_HINTS.map((h) => h.slice(0, h.indexOf('/**/package.json')));
+      const reached = (path) =>
+        (path === 'package.json' && ROOT_FILE_WATCH_HINTS.includes('package.json/**')) ||
+        roots.some((root) => path.startsWith(`${root}/`));
+      const unreached = manifests.filter((path) => !reached(path));
+      const dead = roots.filter((root) => !manifests.some((path) => path.startsWith(`${root}/`)));
+      if (manifests.length === 0) return 'git ls-files listed no package.json';
+      if (unreached.length > 0) return `undeclared manifest root(s): ${unreached.join(', ')}`;
+      if (dead.length > 0) return `declared root(s) holding no tracked package.json: ${dead.join(', ')}`;
+      return null;
     },
   },
   {
