@@ -604,7 +604,7 @@
       "title": "Personal API key: minted show-once on Connect-an-Agent, authenticates as its owner, revoke kills it and restore brings it back — mine-view scoped",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["a signed-in member (key owner)", "platform admin", "the key itself (machine caller via x-api-key)"],
@@ -620,7 +620,7 @@
         "capture the mint response: POST /api/v1/keys returns data.key (the raw secret) exactly once, plus id / name / prefix",
         "record the raw secret, close the dialog, then re-open the API Keys list (sys_api_key `mine` view) and confirm the row shows only the prefix — the raw key is never shown again (the stored `key` column is hashed + hidden)",
         "call a data route as the machine caller: GET /api/v1/data/showcase_task with header x-api-key: <raw secret> (NOT a session cookie/Bearer) and capture the 200 + that the rows returned are the OWNER's row-level-security view (the key acts as the user)",
-        "revoke the key via the row action revoke_api_key (PATCH /api/v1/data/sys_api_key/{id} bodyExtra {revoked:true}); immediately re-call the data route with x-api-key and capture the 401",
+        "revoke the key via the row action revoke_api_key (PATCH /api/v1/data/sys_api_key/{id} bodyExtra {revoked:true}); immediately re-call the data route with x-api-key and capture the 403 whose body's error.code is API_KEY_REVOKED and which carries no rows (a recognised key its own lifecycle refuses — only an UNKNOWN key gets the generic 401)",
         "restore via restore_api_key (PATCH … {revoked:false}); re-call and capture the 200 again — the lifecycle is reversible",
         "mine-view scoping: sign in as a DIFFERENT member and confirm the sys_api_key `mine` view (filter user_id={current_user_id}) does NOT list the first user's key; then as admin open Setup → API Keys (the `all_keys` view, nav gated on manage_platform_settings) and confirm every user's key is listed",
         "attempt to read the raw secret back via the data API (GET /api/v1/data/sys_api_key/{id}) and confirm the `key` field is absent/hidden — only the prefix is ever returned"
@@ -639,10 +639,10 @@
           "evidence": "the x-api-key request trace + a session-read comparison"
         },
         {
-          "clause": "revoke is immediate and enforced server-side: after revoke_api_key the same x-api-key call 401s on the very next request",
+          "clause": "revoke is immediate and enforced server-side: after revoke_api_key the same x-api-key call is refused on the very next request with the key's own lifecycle refusal — 403, error.code API_KEY_REVOKED, and no rows. Since #23367 (executed by #23541) a recognised but revoked key is refused 403 API_KEY_REVOKED; the generic 401 answers only a key the server does not recognise at all. The refusal's message is the key's own lifecycle message and its wording is NOT pinned here: the code is what a client branches on, and the lifecycle owner rewords that text (#23944)",
           "oracle": "api",
-          "verify": "the post-revoke x-api-key request returns 401",
-          "evidence": "the revoke PATCH response + the 401"
+          "verify": "the post-revoke x-api-key request returns HTTP 403 and its body's error.code is API_KEY_REVOKED, with no record rows in the body (packages/core/src/security/api-key.ts#lifecycleRefusalOf decides it; the data routes answer it through packages/rest/src/rest-server.ts#enforceAuth). Score the status, the code and the absence of rows, never the message's wording. A 200 or any served row, a generic 401, or a 403 carrying any other code is a FAIL — the last means the key was accepted and something later refused",
+          "evidence": "the revoke PATCH response + the 403 API_KEY_REVOKED refusal body"
         },
         {
           "clause": "restore is reversible: restore_api_key flips revoked back to false and the key authenticates again (200)",
@@ -665,7 +665,7 @@
       ],
       "negative": [
         "the raw secret being readable a second time (in a list row, a get-by-id, or a re-opened dialog) is a FAIL — show-once means the hash is all the server keeps",
-        "a revoked key still returning 200 on a data route is a FAIL — revocation must be enforced at auth, not only hidden in the list",
+        "a revoked key still returning 200 on a data route is a FAIL — revocation must be enforced at auth, not only hidden in the list; so is a post-revoke refusal that is the generic 401 or carries any code other than API_KEY_REVOKED (#23367: a client branches on the code, never on the prose)",
         "an api key that reads MORE than its owner's RLS view (a superuser bypass) is a FAIL — the key carries the user's permissions",
         "one user's key appearing in another user's mine view is an RLS FAIL"
       ],
@@ -674,10 +674,12 @@
         "objectui apps/console/src/pages/developer/AgentConnectSection.tsx (ADR-0036 Phase 2b: POST /api/v1/keys mint, show-once dialog, x-api-key connect steps)",
         "packages/runtime/src/route-ledger.ts (POST /keys → client keys.create)",
         "packages/platform-objects/src/identity/sys-api-key.object.ts#bodyExtra (revoke_api_key/restore_api_key actions PATCH /api/v1/data/sys_api_key/{id} bodyExtra revoked; mine view user_id={current_user_id} vs all_keys; hashed hidden `key`, visible `prefix`; apiMethods ['get','list'])",
-        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_api_keys (nav_api_keys requiredPermissions ['manage_platform_settings'] — admin all-view)"
+        "packages/platform-objects/src/apps/setup-nav.contributions.ts#nav_api_keys (nav_api_keys requiredPermissions ['manage_platform_settings'] — admin all-view)",
+        "packages/core/src/security/api-key.ts#lifecycleRefusalOf (#23367 / #23541 — a recognised revoked key is refused 403 API_KEY_REVOKED with a located message; an unknown key keeps the generic 401) + packages/rest/src/rest-server.ts#enforceAuth (the data routes answer the remembered lifecycle refusal's status and code)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "new item: personal API key mint (show-once, POST /api/v1/keys) → authenticate-as-owner via x-api-key → revoke 401 → restore 200, plus mine-view vs admin all-view scoping, grounded in AgentConnectSection + sys_api_key object (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "new item: personal API key mint (show-once, POST /api/v1/keys) → authenticate-as-owner via x-api-key → revoke 401 → restore 200, plus mine-view vs admin all-view scoping, grounded in AgentConnectSection + sys_api_key object (PENDING-GAPS §B)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-16", "change": "stale oracle re-pointed (#23992): step 4 and acceptance[2] expected the post-revoke x-api-key call to answer 401, but since the API-key lifecycle (#23367 ruling A, executed by #23541) a recognised revoked key is refused 403 with error.code API_KEY_REVOKED (packages/core/src/security/api-key.ts#lifecycleRefusalOf) and only an unknown key gets the generic 401, so the item scored a correct runtime red. The step and the clause now capture the 403, the code and the absence of rows, and pin none of the refusal's wording (#23944 rewords it). Not loosened: a 200, a generic 401 and a 403 with any other code each still FAIL (the negative names both directions). Step 5 (restore → 200) is unchanged; source gains the refusal's decision and relay sites", "ref": "#23992" }
       ]
     },
     {
