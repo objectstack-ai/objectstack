@@ -23,8 +23,10 @@ export const entry: SemanticMigration = {
     + 'is dropped before the write. `ActionSchema` refused each of these shapes on an action; the rows accepted '
     + 'them. The rows now apply the same judge, read from one place, with the action\'s own texts (the executor '
     + 'spelled as the row spells it), and take `ActionSchema`\'s own `patch` record by reference. A page\'s '
-    + '`properties` is not parsed on the metadata save or load path; `os validate`\'s props gate parses it '
-    + 'against these same rows and reports each refusal at the row\'s own key. Measured producers: none in this '
+    + '`properties` is not parsed by the page schema; the component-props gate parses it against these same rows, '
+    + 'at `os validate`, `os build`, `os lint` and the metadata save door, and reports each refusal at the row\'s '
+    + 'own key; the load path runs no such gate, so a stored page still loads and its next save meets the '
+    + 'component-props gate at the metadata save door. Measured producers: none in this '
     + 'repository\'s examples, CLI corpus or tests outside these rows\' own pins; in objectui, at its pin and '
     + 'main, one renderer-test control mounts an `action:button` with `patch` and no `operation` to show nothing '
     + 'is written, and no spec parse judges it.',

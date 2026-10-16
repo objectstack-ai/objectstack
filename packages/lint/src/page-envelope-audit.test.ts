@@ -158,7 +158,7 @@ describe('negative control — the detector fires, and every door earns its plac
     expect(doorsOneTwo).toEqual([]);
   });
 
-  it('catches a bare predicate at the DEPRECATED `visibility` key and names the canonical one', () => {
+  it('a page still writing the RETIRED `visibility` key is a parse refusal on the precondition channel, not a finding (#23543 F4)', () => {
     const page = {
       name: 'nc_alias',
       label: 'Negative control',
@@ -170,9 +170,21 @@ describe('negative control — the detector fires, and every door earns its plac
       slots: { alerts: [{ type: 'record:alert', visibility: BARE, properties: { severity: 'warning' } }] },
     };
     const audit = auditPageExpressionEnvelopes(page, 'nc (nc_alias)');
-    expect(audit.findings.map(f => f.path)).toEqual(['slots.alerts[0].visibility']);
-    expect(audit.findings[0]!.normalizedTo).toBe('visibleWhen');
-    expect(renderBareExpressionFindings(audit.findings)).toContain('deprecated key');
+    // Until 18 the parse re-homed the value under `visibleWhen` and the audit
+    // reported both names; the key is refused now, so the door that parses the
+    // page says so instead of going silent.
+    expect(audit.findings).toEqual([]);
+    expect(audit.pageParseError).toBeDefined();
+    // The component door names the key and its prescription.
+    expect(audit.componentParseErrors.map(e => e.path)).toEqual(['slots.alerts[0]']);
+    expect(audit.componentParseErrors[0]!.issues).toMatch(/^visibility: `page\.components\[\]\.visibility` was removed in @objectstack\/spec 18/);
+    // CONTROL — the same bare predicate under the canonical key is the finding.
+    const canonical = auditPageExpressionEnvelopes(
+      { ...page, slots: { alerts: [{ type: 'record:alert', visibleWhen: BARE, properties: { severity: 'warning' } }] } },
+      'nc (nc_canonical)',
+    );
+    expect(canonical.findings.map(f => f.path)).toContain('slots.alerts[0].visibleWhen');
+    expect(renderBareExpressionFindings(canonical.findings)).not.toContain('deprecated key');
   });
 });
 

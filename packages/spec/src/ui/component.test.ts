@@ -1292,14 +1292,15 @@ describe('ComponentPropsMap', () => {
       expect(located[0]!.message).toMatch(FIRST_SENTENCE);
 
       // A slot-mounted node goes through the same node schema. The slot is a
-      // `z.union([PageComponentSchema, z.array(PageComponentSchema)])`, and zod 4
-      // reports a union whose every arm failed as ONE `invalid_union` at the
-      // slot's path with the arms' issues nested under `errors`, their paths
-      // RELATIVE to the union — a property of the slot union, not of this
-      // retirement (an unknown key on a slotted node arrives the same way;
-      // `formatZodIssue` renders the nested line with the absolute path, #4971
-      // / #5341, and `describeIssue` in `@objectstack/lint` unpacks it, #5583).
-      // The located prescription must still be inside it, at the node's `type`.
+      // `z.union([PageComponentSchema, z.array(PageComponentSchema)])`. Until 18
+      // the node schema was a `.transform` pipe (its `visibility` fold) and zod 4
+      // reported a union whose every arm failed as ONE `invalid_union` at the
+      // slot's path, the arms' issues nested under `errors`. The fold retired
+      // with the key (#23543 F4), so the node arm is a plain object again, and
+      // a `type` refusal — a non-aborting refinement issue — leaves that arm the
+      // one zod did not abort: the union reports its issue directly, at the
+      // absolute path. (A shape error such as an unknown key still arrives as
+      // the `invalid_union`; `describeIssue` in `@objectstack/lint` reads both.)
       const slotted = PageSchema.safeParse({
         name: 'home',
         label: 'Home',
@@ -1308,15 +1309,10 @@ describe('ComponentPropsMap', () => {
       });
       expect(slotted.success).toBe(false);
       if (!slotted.success) {
-        type Nested = { code: string; path: PropertyKey[]; message: string; errors?: Nested[][] };
-        const outer = slotted.error.issues.filter((i) => i.code === 'invalid_union');
-        expect(outer).toHaveLength(1);
-        expect(outer[0]!.path).toEqual(['slots', 'header']);
-        const flatten = (issues: Nested[]): Nested[] =>
-          issues.flatMap((i) => [i, ...(i.errors ?? []).flatMap(flatten)]);
-        const atSlot = flatten(slotted.error.issues as Nested[]).filter((i) => i.code === 'custom');
+        expect(slotted.error.issues.filter((i) => i.code === 'invalid_union')).toHaveLength(0);
+        const atSlot = slotted.error.issues.filter((i) => i.code === 'custom');
         expect(atSlot).toHaveLength(1);
-        expect(atSlot[0]!.path).toEqual(['type']);
+        expect(atSlot[0]!.path).toEqual(['slots', 'header', 'type']);
         expect(atSlot[0]!.message).toMatch(FIRST_SENTENCE);
       }
     });
@@ -2875,8 +2871,8 @@ describe('ComponentPropsMap record:chatter', () => {
  */
 describe('批 17 — the carrier stays an open bag; the gate is on the lint side', () => {
   it('the carrier is still an OPEN bag — direction B (a typed `properties`) was declined, so this stays green', () => {
-    // `PageComponentSchema` is `.strict().transform(…)`, so unwrap the pipe to
-    // reach the object shape.
+    // `PageComponentSchema` was a `.strict().transform(…)` pipe until its
+    // `visibility` fold retired (#23543 F4); unwrap one if it ever returns.
     const def = (PageComponentSchema as any)._zod.def;
     const shape = def.type === 'pipe' ? def.in._zod.def.shape : def.shape;
     // `properties` is `z.record(z.string(), z.unknown()).optional().default({})`.

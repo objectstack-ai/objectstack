@@ -955,9 +955,9 @@ export const PageTabsProps = strictObject({
      * row `regions`).
      *
      * Canonical `*When` name per ADR-0089 — this key is new, so the deprecated
-     * `visibility` / `visibleOn` aliases are NOT ACCEPTED on tab items: unlike
-     * the view/page surfaces that fold them into `visibleWhen` via
-     * `normalizeVisibleWhen`, none of `visible` / `showWhen` / `visibility` /
+     * `visibility` / `visibleOn` aliases were never accepted on tab items (the
+     * view/page surfaces that folded them into `visibleWhen` retired both at
+     * 18, #23543 F4): none of `visible` / `showWhen` / `visibility` /
      * `visibleOn` parses here — all four are rejected. #8382 gave the
      * rejection a pointer at this key for all four spellings (message only:
      * being pointed AT `visibleWhen` is not the same as being accepted).
@@ -6701,16 +6701,17 @@ type ObjectFormSectionFieldEntry =
  * schema's, by reference (pinned def by def), with three differences, each
  * from how the page block reaches the form:
  *
- * - **canonical spellings only.** A form view folds the deprecated `visibleOn`
- *   into `visibleWhen` at parse; a page block's `properties` is never parsed on
- *   the way to the form, so no fold runs, and the deprecated spelling is
- *   refused with the canonical one (ADR-0089).
+ * - **canonical spellings only.** The form view's entry retired `visibleOn`
+ *   at 18 (#23543 F4) and answers it with a tombstone whose prescription names
+ *   the form view's path; this arm leaves that member out and answers the key
+ *   with its own refusal naming `visibleWhen` (ADR-0089), worded for a page
+ *   block.
  * - **`label`, `placeholder` and `helpText` are plain strings.** The form
  *   copies each onto the field it draws as it stands, and the renderer
  *   draws a label as a React child, so an inline locale map would
  *   throw.
- * - **no parse-time fill.** The arm is the view entry's object half, without
- *   its `visibleOn` fold, and `span` drops the default the form view fills (the
+ * - **no parse-time fill.** The arm is the view entry's shape, and `span`
+ *   drops the default the form view fills (the
  *   form draws an absent `span` as `'auto'` anyway); the one parse-time change
  *   left is the evaluated predicate's own envelope for a bare CEL string.
  *
@@ -6719,12 +6720,13 @@ type ObjectFormSectionFieldEntry =
  * holds at every depth.
  */
 function buildObjectFormSectionFieldEntry(): z.ZodType<ObjectFormSectionFieldEntry, ObjectFormSectionFieldEntryInput> {
-  // The object half of the form view's entry: `FormFieldSchema` is that object
-  // piped into its `visibleOn` fold, and its declared type is the pipe's, so
-  // the half is read off the pipe here, in one place.
-  const viewShape = (FormFieldSchema as unknown as z.ZodPipe<z.ZodObject<z.ZodRawShape>, z.ZodType>).in.shape;
+  // The form view's entry shape. `FormFieldSchema` is a plain closed object
+  // since its `visibleOn` fold retired (#23543 F4), but its declared type is the
+  // hand-written `ZodType<FormField, FormFieldInput>`, so the shape is read
+  // through a cast here, in one place.
+  const viewShape = (FormFieldSchema as unknown as z.ZodObject<z.ZodRawShape>).shape;
   const {
-    visibleOn: _foldedAtParse, label: _label, placeholder: _placeholder, helpText: _helpText, span, fields: _viewSubFields, ...shape
+    visibleOn: _retiredTombstone, label: _label, placeholder: _placeholder, helpText: _helpText, span, fields: _viewSubFields, ...shape
   } = viewShape;
   return strictObject({
     surface: 'this form section\'s `{ field }` entry',
@@ -6734,9 +6736,8 @@ function buildObjectFormSectionFieldEntry(): z.ZodType<ObjectFormSectionFieldEnt
     aliases: { disabled: 'readonly' },
     guidance: {
       visibleOn:
-        '`visibleOn` is the form view\'s deprecated spelling of `visibleWhen` (ADR-0089), which a form view '
-        + 'folds at parse. A page block\'s `properties` is never parsed on the way to the form, so it takes the '
-        + 'canonical spelling only: write `visibleWhen`.',
+        '`visibleOn` is the retired spelling of `visibleWhen` (ADR-0089): a form view refuses it too since '
+        + '@objectstack/spec 18. Write `visibleWhen`; the value (a CEL predicate) is unchanged.',
       name:
         'A section field entry is either the form view\'s `{ field: \'email\', … }` entry, keyed by `field`, '
         + 'or an inline form field keyed by `name` — not both. Drop `name` to override the object field `field` '
@@ -6784,12 +6785,13 @@ function objectFormSectionColumnsRefusal(input: unknown): string | undefined {
  *
  * ## Canonical spellings only
  *
- * A form view folds two spellings at parse: the deprecated section `visibleOn`
- * into `visibleWhen`, and a string `columns` into its number. A page block's
- * `properties` is never parsed on the way to the form, so neither fold runs —
- * and the form reads only `visibleWhen` off a section and only a NUMBER
- * `columns` (`clampCol`), so both spellings were dropped in silence.
- * Both are refused with the canonical spelling. `label` is a plain string:
+ * A form view converts a string `columns` into its number at parse, and until
+ * 18 it also folded a section's deprecated `visibleOn` into `visibleWhen` (it
+ * refuses that key now, #23543 F4). A page block's `properties` is never parsed
+ * on the way to the form, so no conversion runs — and the form reads only
+ * `visibleWhen` off a section and only a NUMBER `columns` (`clampCol`), so both
+ * spellings were dropped in silence. Both are refused with the canonical
+ * spelling. `label` is a plain string:
  * the form draws the heading as it stands. Nothing carries a schema default;
  * the one parse-time change is the evaluated predicate's own — a bare CEL
  * `visibleWhen` parses to its `{ dialect, source }` envelope, as on every
@@ -6816,10 +6818,9 @@ function buildObjectFormSection() {
     aliases: { fieldGroup: 'group', groupKey: 'group' },
     guidance: {
       visibleOn:
-        '`visibleOn` is the form view\'s deprecated spelling of a section\'s `visibleWhen` (ADR-0089), which a '
-        + 'form view folds at parse. A page block\'s `properties` is never parsed on the way to the form, and '
-        + 'the form reads only `visibleWhen` off a section, so a `visibleOn` here gated nothing. Write it as '
-        + '`visibleWhen`.',
+        '`visibleOn` is the retired spelling of a section\'s `visibleWhen` (ADR-0089), which a form view refuses '
+        + 'too since @objectstack/spec 18. The form reads only `visibleWhen` off a section, so a `visibleOn` here '
+        + 'gated nothing. Write it as `visibleWhen`.',
     },
   }, {
     name: z.string().optional().describe('Stable section identifier (snake_case) — the heading resolves through `objects.<object>._sections.<name>.label`'),

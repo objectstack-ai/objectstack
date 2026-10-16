@@ -3,7 +3,6 @@
 import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
-import { normalizeVisibleWhen } from '../shared/visibility';
 import { VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 import { SortItemSchema } from '../shared/enums.zod';
 import { I18nLabelSchema, AriaPropsSchema } from './i18n.zod';
@@ -17,7 +16,6 @@ import {
   AddRecordConfigSchema,
   ListColumnSchema,
   EmptyStateSchema,
-  ViewDataSchema,
 } from './view.zod';
 
 import { lazySchema } from '../shared/lazy-schema';
@@ -682,8 +680,19 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * `component.zod.ts` rather than assuming either environment carries over.
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record`. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
-  /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibility: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
+  // `visibility` REMOVED at 18 (#23543 F4, ADR-0089 D2): through 17 it was the
+  // page component's deprecated spelling of `visibleWhen`, folded onto it at
+  // parse by a `.transform` that went with the key. The tombstone carries the
+  // prescription; stored pages keep loading because every stored-row
+  // rehydration seam replays the retired `page-component-visibility-to-visibleWhen`
+  // conversion. No `os migrate meta` sentence: that rename belongs to protocol
+  // 15, below `MIGRATION_SUPPORT_FLOOR`, so the tool lists no edit for it.
+  visibility: retiredKey(
+    '`page.components[].visibility` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the page '
+    + 'component\'s deprecated spelling of the conditional-visibility predicate, which the parse folded into '
+    + '`visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate) is '
+    + 'unchanged. Where a component writes both, `visibleWhen` is the one that was in effect: delete `visibility`.',
+  ),
 
   /**
    * Per-element data binding — one of two shapes:
@@ -730,14 +739,14 @@ export const PageComponentSchema = lazySchema(() => strictObject({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
-}).transform(normalizeVisibleWhen));
+}));
 
 /**
  * Page Variable Schema
  * Local, in-memory page state. Runtime-live (ADR-0049): the renderer mounts the
  * declared variables, exposes them to expressions as `page.<name>`, and lets an
  * interactive element write one via `source`. A write re-evaluates dependent
- * `visibility` / binding predicates immediately — the master/detail and
+ * `visibleWhen` / binding predicates immediately — the master/detail and
  * filtered-dashboard pattern with no custom code.
  *
  * Binding direction: a variable names the **writer** component, not the other
@@ -1113,113 +1122,6 @@ export function checkPageSlotPair(
       + "`{ label: 'Details', children: [{ type: 'record:details', properties: { … } }] }` — and delete "
       + '`slots.details`. To keep the synthesized tabs instead, delete `slots.tabs`.',
   });
-}
-
-/**
- * The page-component types whose `data` prop is a view data source — the
- * `object-*` blocks whose `ComponentPropsMap` row (`component.zod.ts`)
- * declares `data` as {@link ViewDataSchema}. Read by
- * {@link checkPageComponentViewData} and by nothing else.
- *
- * Declared here, not derived, because this module cannot read those rows:
- * `component.zod.ts` imports this module (`ElementDataSourceSchema`,
- * `RETIRED_PAGE_COMPONENT_TYPES`), and this package has no import cycle. The
- * set is held equal to the derivation — every row whose `data` member is
- * `ViewDataSchema` by identity, and no other — by
- * `page-component-view-data.test.ts`, so a row that gains or loses the view
- * data source fails that pin the day it lands (the
- * {@link PRINT_REFUSED_PAGE_COMPONENT_TYPES} discipline). A type whose row
- * takes a row array as `data` (`object-kanban`, `object-calendar`,
- * `object-timeline`), and a type with no row (a custom or registered SDUI
- * block), is not in it: there `data` is that component's own contract.
- */
-const VIEW_DATA_SOURCE_COMPONENT_TYPES: ReadonlySet<string> = new Set([
-  'object-grid',
-  'object-map',
-  'object-gantt',
-  'object-tree',
-]);
-
-/**
- * The page parse refuses a component's `data` prop that names the retired
- * view-level `api` provider, as a view's own `data` is refused (#23357; the
- * retirement is `view.zod.ts`'s, ADR-0049 enforce-or-remove).
- *
- * Why the page parse: it leaves a component's `properties` an open record,
- * and the door that judges the bag — the component-props gate, against the
- * type's `ComponentPropsMap` row — runs at the CLI doors only, a rollout
- * decision this check does not reopen. So a page saved through the Studio,
- * REST or MCP kept a component's retired binding, and the console kept
- * sending its request with the stored headers. This check is the narrow
- * judge: one retirement, at every door that parses a page (`definePage`,
- * `defineStack`, the metadata save door's `422 INVALID_METADATA`, and the
- * read and boot diagnostics), and nothing else about the bag.
- *
- * The judge is the retirement's own. `ViewDataSchema` parses the component's
- * `data`, and the prescription its issue at `provider` carries is raised
- * here, located at the component's `properties.data.provider`. Nothing is
- * copied, so a page and a view refuse with one text. The code is `custom`,
- * the code of every object-level check on this schema (the view's own
- * `invalid_union` is the discriminated union's).
- *
- * Reach: every component node under `regions` and `slots`, at any depth — a
- * node nested in another component's `properties` (a `page:tabs` item's
- * `children`, a container's `children`) included. The canonical slot list
- * (`pageComponentSlotPositions()`) lives in `component.zod.ts`, out of this
- * module's reach for the cycle reason above, so the walk descends every
- * object and array under `regions` and `slots` instead. That is a superset of
- * every slot position, so it reaches no less than `os migrate meta --stored`
- * lists or the props gate judges, and what it judges at a node stays narrow:
- * a type in {@link VIEW_DATA_SOURCE_COMPONENT_TYPES} whose `properties.data`
- * names the retired provider. A binding found anywhere else is still a
- * request, and its headers, stored in metadata and served to every reader.
- *
- * Exported for the reason {@link checkPageSourceCompleteness} is: a
- * downstream mirror that derives its schema from `PageSchema.shape` drops
- * every object-level check, and re-attaches this one with
- * `.superRefine(checkPageComponentViewData)`. `PageSchema` attaches this same
- * binding — pinned in `object-refinement-check-exports.test.ts`.
- */
-export function checkPageComponentViewData(
-  page: { regions?: unknown; slots?: unknown },
-  ctx: z.RefinementCtx,
-): void {
-  // A hand-built `defineStack` object can share a node or refer back to one;
-  // each object is visited once.
-  const seen = new Set<object>();
-  const visit = (value: unknown, path: PropertyKey[]): void => {
-    if (value === null || typeof value !== 'object' || seen.has(value)) return;
-    seen.add(value);
-    if (Array.isArray(value)) {
-      value.forEach((entry, i) => visit(entry, [...path, i]));
-      return;
-    }
-    const node = value as Record<string, unknown>;
-    const properties = node.properties;
-    if (
-      typeof node.type === 'string' && VIEW_DATA_SOURCE_COMPONENT_TYPES.has(node.type)
-      && properties !== null && typeof properties === 'object' && !Array.isArray(properties)
-    ) {
-      const bound = (properties as Record<string, unknown>).data;
-      // The retired spelling only: any other `data` is the props gate's to judge.
-      if (bound !== null && typeof bound === 'object' && (bound as { provider?: unknown }).provider === 'api') {
-        const verdict = ViewDataSchema.safeParse(bound);
-        const retirement = verdict.success
-          ? undefined
-          : verdict.error.issues.find((issue) => issue.path.length === 1 && issue.path[0] === 'provider');
-        if (retirement !== undefined) {
-          ctx.addIssue({
-            code: 'custom',
-            message: retirement.message,
-            path: [...path, 'properties', 'data', ...retirement.path],
-          });
-        }
-      }
-    }
-    for (const [key, child] of Object.entries(node)) visit(child, [...path, key]);
-  };
-  visit(page.regions, ['regions']);
-  visit(page.slots, ['slots']);
 }
 
 /**
@@ -1826,7 +1728,7 @@ export const PageSchema = lazySchema(() => strictObject({
    * declared variables, exposes each to expressions as `page.<name>`, and lets an
    * interactive element write one via its `source` binding (e.g.
    * `element:record_picker` → `source`). A write re-evaluates dependent
-   * `visibility` / binding predicates immediately — the master/detail and
+   * `visibleWhen` / binding predicates immediately — the master/detail and
    * filtered-dashboard pattern, with no custom code. See {@link PageVariableSchema}.
    */
   variables: z.array(PageVariableSchema).optional()
@@ -2042,21 +1944,19 @@ export const PageSchema = lazySchema(() => strictObject({
   // slot replaces the strip the Details tab lives in. Attached by identifier
   // for the same reason as the checks above.
   .superRefine(checkPageSlotPair)
-  // #23357: a component's `data` prop naming the retired view-level `api`
-  // provider is refused by the page parse, as a view's own `data` is.
-  // Attached by identifier for the same reason as the checks above.
-  .superRefine(checkPageComponentViewData)
   // #23610 (ruling A, record 6190536588): `isDefault: true` on a page that is
   // not a record page bound to an object, and a region the page's template
   // does not place, are refused. Attached by identifier for the same reason
   // as the checks above.
   .superRefine(checkPageDefaultPlacement)
   .superRefine(checkPageRegionPlacement));
-// PageSchema's cross-field rules are the seven checks above: the
+// PageSchema's cross-field rules are the six checks above: the
 // ADR-0080/0081 source completeness check, the compiled-kind `requires`
 // check, the print-page composition check, the `details` + `tabs` slot
-// pair check, the component view-data check, the `isDefault` placement
-// check and the region placement check. It once also required
+// pair check, the `isDefault` placement check and the region placement
+// check. A component's `properties` bag is judged by none of them: it is
+// `@objectstack/lint`'s `validateComponentProps`, at the CLI doors and the
+// runtime save door alike. It once also required
 // `recordReview`/`blankLayout` and `slots` (all removed — unrendered roadmap /
 // "required-but-unauthorable" Studio traps).
 
