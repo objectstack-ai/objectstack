@@ -20,7 +20,9 @@
  *
  *  1. PRESERVATION — the `body` argument is the value the old line produced, for
  *     every input: each case is checked against a reference Hono app that runs
- *     that exact line, and against the literal value written out.
+ *     that exact line, and against the literal value written out. One input
+ *     left this table on purpose (#23914): a declared `application/json` body
+ *     that does not parse is refused with a 400 instead (`hono-body-refusal.test.ts`).
  *  2. THE FIX — at dispatch the request is unread (`bodyUsed === false`) and
  *     reads back the exact bytes the client sent, JSON included.
  *
@@ -95,7 +97,10 @@ const CASES: ReadonlyArray<readonly [string, string | undefined, string, unknown
   ['JSON string', 'application/json', '"hi"', 'hi'],
   ['JSON behind a byte-order mark', 'application/json', '\uFEFF{"bom":true}', { bom: true }],
   ['JSON sent as text/plain (the Content-Type was never read)', 'text/plain', '{"a":1}', { a: 1 }],
-  ['invalid JSON', 'application/json', '{ not json', {}],
+  // [#23914] Not here any more: a body declared `application/json` that does
+  // not parse is REFUSED before dispatch, not handed on as `{}` — pinned in
+  // `hono-body-refusal.test.ts`. The undeclared garbage rows below are unchanged.
+  ['invalid JSON that does not declare JSON', 'text/plain', '{ not json', {}],
   ['empty body', 'application/json', '', {}],
   ['a form body', 'application/x-www-form-urlencoded', 'token=abc&token=def&x=1', {}],
   ['plain text', 'text/plain', 'hello', {}],
