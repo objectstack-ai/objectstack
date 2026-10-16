@@ -3310,7 +3310,10 @@ describe('runtime authoring gate on PAGE writes — a component `data` naming th
         // Read: served as stored, with no diagnostic for the binding.
         const served: any = (await protocol.getMetaItem({ type: 'page', name: 'partner_page' })).item;
         expect(served?.regions?.[0]?.components?.[0]?.properties?.data?.provider).toBe(RETIRED_PROVIDER);
-        expect(served?._diagnostics).toBeUndefined();
+        expect(served?._diagnostics?.valid).toBe(true);
+        expect(served?._diagnostics?.errors ?? []).toEqual([]);
+        // No `[metadata_spec_invalid]` registration either: that came from the page parse.
+        expect((warn.mock.calls as unknown[][]).map((c) => String(c[0])).filter((m) => m.includes('metadata_spec_invalid'))).toEqual([]);
 
         // The next save of the same body is a write, and is judged.
         const err = await savePage(protocol, stored).catch((e: any) => e);
