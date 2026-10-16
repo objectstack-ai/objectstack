@@ -33,6 +33,12 @@
  * commands, and every claim about the server is read back through a SECOND
  * libSQL connection.
  *
+ * [#23925] The human plan says the same thing up front, read from the driver's
+ * declaration (`TursoDriver.driftApplyLimit`): the tightening and the relax
+ * are listed with the transport's limit instead of a remedy it cannot run, and
+ * the drop keeps `--allow-destructive`. The local file is the control: its
+ * plan reads as it always has.
+ *
  * ## How to run it
  *
  * It needs a `sqld` binary (libsql-server), so the remote cases are skipped
@@ -242,6 +248,21 @@ const DROP = `${TABLE}.legacy_23848 drop_column`;
 const TIGHTEN = `${TABLE}.code tighten_not_null`;
 const RELAX = `${TABLE}.memo relax_not_null`;
 
+/**
+ * [#23925] The line the human plan prints under an entry's `[op]` heading on
+ * the fixture table: the entry's finding and its remedy.
+ */
+function planEntryLine(lines: string, op: string): string {
+  const all = lines.split('\n');
+  const at = all.findIndex((l) => l.includes(`${TABLE}.`) && l.includes(`[${op}]`));
+  expect(at, `no ${TABLE} [${op}] entry in:\n${lines.slice(-3000)}`).toBeGreaterThanOrEqual(0);
+  return all[at + 1]!;
+}
+
+/** [#23925] The plan's closing lines: what to apply with, and what this database cannot apply. */
+const planFooter = (lines: string) =>
+  lines.split('\n').filter((l) => /Apply with:|cannot be applied on this database/.test(l)).join('\n');
+
 beforeAll(() => {
   for (const key of OVERRIDING_ENV) {
     savedEnv[key] = process.env[key];
@@ -271,6 +292,24 @@ afterAll(() => {
 // control's document whenever a remote case before it failed at its boot (the
 // positive control and the ablation are exactly such runs).
 describe('CONTROL: the same apply on a local SQLite file applies all three, as it always has', () => {
+  // [#23925] The local face declares no limit, so its plan reads as it always
+  // has: the tightening keeps the differ's remedy, and the footer offers
+  // --allow-destructive for drops and tightenings.
+  it('plan on a file, human face: the tightening keeps "--allow-destructive", the footer is unchanged', async () => {
+    const file = join(dir, 'local-plan.db');
+    await buildFixture(`file:${file}`, (seed) => local(file, seed));
+
+    const plan = await run(MigratePlan, ['--database-url', `file:${file}`]);
+    expect(plan.exitCode, plan.lines.slice(-1500)).toBe(0);
+    expect(planEntryLine(plan.lines, 'tighten_not_null')).toContain(
+      `${TABLE}.code: metadata declares \`storage.notNull\` but the column is nullable — existing nulls must be backfilled. `
+      + 'Run "os migrate apply --allow-destructive".',
+    );
+    expect(planEntryLine(plan.lines, 'drop_column')).toContain('"os migrate apply --allow-destructive" to drop it.');
+    expect(plan.lines).not.toContain('cannot apply it on this database');
+    expect(planFooter(plan.lines)).toBe('  Apply with: os migrate apply (add --allow-destructive for drops / tightenings)');
+  }, CASE_TIMEOUT_MS);
+
   it('apply --allow-destructive on a file: exit 0, every entry applied, nothing skipped', async () => {
     const file = join(dir, 'local.db');
     await buildFixture(`file:${file}`, (seed) => local(file, seed));
@@ -316,6 +355,32 @@ describe.skipIf(!SQLD)('os migrate plan / apply on a Turso REMOTE database (sqld
     expect(plan.payload.schemaSync).toBe('skipped');
     expect(plan.payload.pending).toEqual([]);
     expect(kinds(plan.payload.changes)).toEqual([DROP, TIGHTEN, RELAX].sort());
+    expect(await logicalDump()).toBe(before);
+  }, CASE_TIMEOUT_MS);
+
+  // [#23925] Before the apply below names them as not applied, the plan says so:
+  // read from the driver's declaration, never from the dialect or the URL.
+  it('plan, human face: the tightening and the relax name the transport\'s limit, never --allow-destructive; the drop keeps it', async () => {
+    const before = await logicalDump();
+    const plan = await run(MigratePlan, ['--database-url', url]);
+    expect(plan.exitCode, plan.lines.slice(-1500)).toBe(0);
+
+    const tighten = planEntryLine(plan.lines, 'tighten_not_null');
+    expect(tighten).not.toContain('--allow-destructive');
+    expect(tighten).toContain(
+      `${TABLE}.code: metadata declares \`storage.notNull\` but the column is nullable — existing nulls must be backfilled. `
+      + '"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE '
+      + 'transport does not run.',
+    );
+    expect(planEntryLine(plan.lines, 'relax_not_null')).toContain('"os migrate apply" cannot apply it on this database');
+    const drop = planEntryLine(plan.lines, 'drop_column');
+    expect(drop).toContain('"os migrate apply --allow-destructive" to drop it.');
+    expect(drop).not.toContain('cannot apply it on this database');
+
+    const footer = planFooter(plan.lines);
+    expect(footer).not.toContain('drops / tightenings');
+    expect(footer).toContain('Apply with: os migrate apply (add --allow-destructive for the 1 destructive change(s) it can apply on this database)');
+    expect(footer).toMatch(/2 change\(s\) above cannot be applied on this database by "os migrate apply"/);
     expect(await logicalDump()).toBe(before);
   }, CASE_TIMEOUT_MS);
 
