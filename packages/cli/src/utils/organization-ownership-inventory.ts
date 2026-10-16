@@ -24,6 +24,13 @@
  *  - `platform-census-main` — objects the gated census on `main` lists and
  *    the first census did not (`sys_comment_reaction`, `sys_flow_credential`,
  *    `sys_platform_setting`).
+ *  - `retired-before-census` — platform objects retired from the tree before
+ *    the first census was measured, so neither census counted them, whose
+ *    physical tables a database that booted an earlier release still holds,
+ *    `organization_id` included (`sys_scim_provider`, whose ADR-0087 entry
+ *    leaves the table in place untouched). Without a row the plan would
+ *    refuse every such database as carrying an uninventoried platform table.
+ *    Each row is listed with fate 4 and cites the retirement's ADR-0087 entry.
  *  - `example-census-2026-08-31` — the non-platform objects the same census
  *    counted as "28" (it counted the 28 FILES; they declare 33 objects, the
  *    same 33 on `main` today).
@@ -94,6 +101,7 @@ export const ORGANIZATION_OWNERSHIP_FATES: readonly OrganizationOwnershipFate[] 
 export type InventoryCensus =
   | 'platform-census-2026-08-31'
   | 'platform-census-main'
+  | 'retired-before-census'
   | 'example-census-2026-08-31'
   | 'cloud-supplement'
   | 'host-supplement';
@@ -191,6 +199,7 @@ const EXAMPLE =
 const P1: readonly InventoryCensus[] = ['platform-census-2026-08-31', 'platform-census-main'];
 const P1_ONLY: readonly InventoryCensus[] = ['platform-census-2026-08-31'];
 const PMAIN: readonly InventoryCensus[] = ['platform-census-main'];
+const RETIRED: readonly InventoryCensus[] = ['retired-before-census'];
 const EX: readonly InventoryCensus[] = ['example-census-2026-08-31'];
 
 /** Rows a package or the platform seeded — the D10 fate-2 mirror selector on the catalog objects. */
@@ -400,6 +409,22 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     census: P1_ONLY,
     fate: 'report',
     citation: `${CENSUS_1}; removed from the tree since (re-verification record 6018712820). A physical table left by an older release is listed, its NULL rows reported`,
+  },
+
+  // ── Platform: retired before either census (fate 4) ──
+  {
+    object: 'sys_scim_provider',
+    census: RETIRED,
+    fate: 'report',
+    citation:
+      'ADR-0087 semantic entry scim-provider-object-retired (packages/spec/src/migrations/entries/semantic/' +
+      '18.scim-provider-object-retired.ts): the rc.1-era @better-auth/scim connection object, retired before the ' +
+      'first census with no data-migration path owed (maintainer ruling 2026-08-24), its tables in deployed ' +
+      'databases left in place untouched by ruling. A physical table left by an older release is listed, its NULL ' +
+      'rows reported, never attributed and never deleted',
+    notNullExempt:
+      'the object is retired and its table is left in place untouched, by ruling: no declaration anchors tenancy on ' +
+      'the column, and a connection scoped to no organization was a legitimate row',
   },
 
   // ── Platform: attribution through a parent anchor (fate 3) ──
