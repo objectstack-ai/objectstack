@@ -14,19 +14,19 @@
 // `engine.ts`), twice per write: over the caller's keys ahead of the hooks,
 // and again over the post-hook payload ahead of the statement. Before the
 // second run existed, ONE hook writing `tax_rate` onto an object that does not
-// declare it meant a different thing per driver (measured on 17.1.0): the
-// memory driver stored a shadow column outside field-level security,
-// driver-sql threw a raw `SQLITE_ERROR` with no `status`, and sqlite-wasm a
-// bare `Error` with neither. objectql pins the door against driver DOUBLES
-// (`engine-post-hook-undeclared-field.test.ts`, and the caller path in
-// `engine-undeclared-key-caller-path.test.ts`) and says so: it depends on no
-// real driver. This file is the other half, the shipped drivers under the
-// engine.
+// declare it meant a different thing per driver (objectql's suite records the
+// 17.1.0 reading): the memory driver stored a shadow column outside
+// field-level security, driver-sql threw a raw `SQLITE_ERROR` with no
+// `status`, and sqlite-wasm a bare `Error` with neither. objectql pins the
+// door against driver DOUBLES (`engine-post-hook-undeclared-field.test.ts`,
+// and the caller path in `engine-undeclared-key-caller-path.test.ts`) and
+// says so: it depends on no real driver. This file is the other half, the
+// shipped drivers under the engine.
 //
-// The arms. The table's "memory" is the suite's in-memory SQL arm:
-// `driver-memory` left this suite in #5704, and `driver-sql` on better-sqlite3
-// `:memory:` is the arm `read-coercion-conformance.test.ts` runs. It is also
-// the table's "sqlite". `sqlite-wasm` is the arm
+// The arms. The table's "memory" is the suite's in-memory SQL arm: the
+// `driver-memory` arm left the conformance files in #5704, and `driver-sql` on
+// better-sqlite3 `:memory:` is the arm `read-coercion-conformance.test.ts`
+// runs. It is also the table's "sqlite". `sqlite-wasm` is the arm
 // `date-bucket-parity-conformance.test.ts` runs beside it.
 //
 // The envelope is read off the engine, never rebuilt here. The caller path is
@@ -58,7 +58,7 @@ const DRIVERS = [
   },
 ];
 
-const SYS = { context: { isSystem: true, userId: 'usr_system' } } as never;
+const SYS = { context: { isSystem: true, userId: 'usr_system' } };
 
 /** hotcrm's pair: `probe_quote` declares the key, `probe_quote_line` does not. */
 const KEY = 'tax_rate';
@@ -121,11 +121,11 @@ async function refusalOf(run: () => Promise<unknown>): Promise<Refusal> {
 
 /** A `beforeInsert` + `beforeUpdate` hook on `object` that stamps `writes` onto the payload. */
 function armStampHook(engine: ObjectQL, object: string, writes: Record<string, unknown>): void {
-  const stamp = (ctx: { input: { data: Record<string, unknown> } }) => {
-    Object.assign(ctx.input.data, writes);
+  const stamp = (ctx: { input: Record<string, unknown> }) => {
+    Object.assign(ctx.input.data as Record<string, unknown>, writes);
   };
-  engine.registerHook('beforeInsert', stamp as never, { object });
-  engine.registerHook('beforeUpdate', stamp as never, { object });
+  engine.registerHook('beforeInsert', stamp, { object });
+  engine.registerHook('beforeUpdate', stamp, { object });
 }
 
 describe.each(DRIVERS)('undeclared-key conformance: $name', ({ make }) => {
@@ -137,7 +137,7 @@ describe.each(DRIVERS)('undeclared-key conformance: $name', ({ make }) => {
     engine = new ObjectQL();
     engine.registerDriver(driver, true);
     await engine.init();
-    engine.registerApp(APP as never);
+    engine.registerApp(APP);
     await engine.syncSchemas();
   });
 
@@ -156,10 +156,10 @@ describe.each(DRIVERS)('undeclared-key conformance: $name', ({ make }) => {
 
   it('control: a declared key round-trips through insert, update and read', async () => {
     await engine.insert(QUOTE, { id: 'q1', name: 'Q', [KEY]: 10 }, SYS);
-    expect((await engine.findOne(QUOTE, { where: { id: 'q1' } } as never, SYS))?.[KEY]).toBe(10);
+    expect((await engine.findOne(QUOTE, { where: { id: 'q1' } }, SYS))?.[KEY]).toBe(10);
 
     await engine.update(QUOTE, { id: 'q1', [KEY]: 12 }, SYS);
-    expect((await engine.findOne(QUOTE, { where: { id: 'q1' } } as never, SYS))?.[KEY]).toBe(12);
+    expect((await engine.findOne(QUOTE, { where: { id: 'q1' } }, SYS))?.[KEY]).toBe(12);
     expect(await stored(QUOTE, KEY)).toEqual(['q1:Q:12']);
   });
 
@@ -208,7 +208,7 @@ describe.each(DRIVERS)('undeclared-key conformance: $name', ({ make }) => {
 
     const byId = await refusalOf(() => engine.update(LINE, { id: 'l1', unit_price: 200 }, SYS));
     const byPredicate = await refusalOf(() =>
-      engine.update(LINE, { unit_price: 300 }, { ...(SYS as object), where: { name: 'L' }, multi: true } as never),
+      engine.update(LINE, { unit_price: 300 }, { ...SYS, where: { name: 'L' }, multi: true }),
     );
 
     expect(byId).toMatchObject(CALLER_PATH);
