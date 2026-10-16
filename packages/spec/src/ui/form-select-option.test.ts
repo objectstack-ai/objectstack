@@ -208,8 +208,9 @@ describe('FormSelectOptionSchema is an Omit of SelectOptionSchema', () => {
     );
     expect(formDecl!.options.aliases).toEqual(expectedFormAliases);
 
-    // The removed key and its two spellings are all answered by guidance.
-    expect(Object.keys(formDecl!.options.guidance ?? {}).sort()).toEqual(['default', 'isDefault', 'selected']);
+    // The removed key and its two spellings are all answered by guidance, and
+    // so is `kind`, the object field's lifecycle category (#23809).
+    expect(Object.keys(formDecl!.options.guidance ?? {}).sort()).toEqual(['default', 'isDefault', 'kind', 'selected']);
   });
 
   it('the editability boundary rides along (one vocabulary, per-shape answer)', () => {
