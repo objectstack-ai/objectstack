@@ -220,8 +220,9 @@ describe('bundled template declared version surfaces', () => {
     // for vitest@^4.1.0 conflicts with direct dependency`, measured), so the two
     // move together. That is the second assertion. Both are stamped from
     // `SCAFFOLD_VITEST_RANGE` at build (the `devDependencies.vitest` and
-    // `overrides.vitest` rows of `scripts/sync-scaffold-emission-policy.mjs`),
-    // the constant `os init` / `os create` emit their own override from.
+    // `overrides.vitest` rows of the emission-policy stamp script's
+    // `POLICY_STAMPS`), the constant `os init` / `os create` emit their own
+    // override from.
     // ⛔ Not a shipped `.npmrc` with `legacy-peer-deps`, which changes peer
     // resolution for every npm user of the scaffold.
     it('package.json overrides vitest to its own declared range, so npm 10 installs it', () => {
