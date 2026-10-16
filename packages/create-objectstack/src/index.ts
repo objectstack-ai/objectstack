@@ -631,7 +631,11 @@ const program = new Command()
       if (!isCurrentDir) {
         console.log(chalk.dim(`    cd ${name}`));
       }
-      if (options.skipInstall) {
+      // `!installed`, not `options.skipInstall`: an install that was attempted
+      // and FAILED leaves the same empty node_modules as a skipped one, so the
+      // list a newcomer follows must name the install before the run commands
+      // in both cases — the warning line above is easy to scroll past.
+      if (!installed) {
         console.log(chalk.dim(`    ${pm} install`));
       }
       // Same `${pm} run …` shape for both commands, padded to the longer of

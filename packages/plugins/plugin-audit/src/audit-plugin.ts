@@ -458,7 +458,16 @@ export class AuditPlugin implements Plugin {
           },
         );
         if (typeof (engine as any).registerMiddleware === 'function') {
-          installCommentReadVisibility(engine as any, ctx.logger);
+          // [ADR-0139 E7] The thread gate writes one ReadableIds leaf per parent
+          // object, and only where the security service answers `canReadObject`
+          // (`parent-record-read-gate.ts`). Resolved on every read.
+          installCommentReadVisibility(engine as any, ctx.logger, () => {
+            try {
+              return ctx.getService<ParentObjectReadAdmission>('security');
+            } catch {
+              return undefined;
+            }
+          });
         } else {
           ctx.logger.warn(
             'AuditPlugin: engine has no middleware seam — sys_comment and sys_comment_reaction READ visibility NOT ' +
