@@ -384,8 +384,11 @@ async function planPackageTable(
  * {@link drivers} keeps what was armed, so the stack can report every
  * datasource's held-back work and flush all of it on the operator's say-so.
  * No driver changes: each one keeps its own deferred set and its own flush.
+ *
+ * Exported for its unit pin (`schema-migrate.remote-posture.test.ts`, #23816),
+ * which holds the primary exemption without booting a kernel.
  */
-class DeferSchemaDdlPlugin {
+export class DeferSchemaDdlPlugin {
   name = 'com.objectstack.cli.defer-schema-ddl';
   version = '1.0.0';
   /** Ordering, not optionality: our init must follow the one that registers `driver.*`. */
@@ -530,8 +533,9 @@ function defaultDriverOf(ctx: { getService?: (name: string) => unknown }): unkno
  * Loaded lazily, as every driver is from this module (#5726). A package that
  * cannot be loaded answers `false`, and the boot then fails where it always
  * has, in `@objectstack/runtime`'s loader, naming the package to install.
+ * Exported for its unit pin (`schema-migrate.remote-posture.test.ts`).
  */
-async function transportRefusesDeferredDdl(resolved: { driver: string; url: string }): Promise<boolean> {
+export async function transportRefusesDeferredDdl(resolved: { driver: string; url: string }): Promise<boolean> {
   if (resolved.driver !== 'turso') return false;
   let detectMode: ((config: { url: string }) => string) | undefined;
   try {
