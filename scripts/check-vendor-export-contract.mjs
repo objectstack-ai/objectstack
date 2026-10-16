@@ -74,6 +74,11 @@
  * ⛔ It never "passes" when it cannot measure — an unreachable registry is
  * EXIT_PREREQUISITE_NOT_MET, never a green.
  *
+ * The scratch installs run under a PINNED npm (`PROBE_INSTALLER_NPM`), not
+ * whichever npm the runner bundles: this leg measures export maps, and npm
+ * 10's arborist crashes on upstream peer graphs that have nothing to do with
+ * them. The constant's own comment holds the reading.
+ *
  * ## Scope: why a ledger of vendor NAMES and not every dependency
  *
  * Requiring an exact pin on every third-party range would be a different
@@ -377,6 +382,101 @@ async function runOffline(root = repoRoot) {
 
 // ── the network leg ────────────────────────────────────────────────────────
 
+/**
+ * The npm that `--resolve` installs every scratch project WITH. It is part of
+ * the instrument, so it is pinned.
+ *
+ * This leg measures a vendor's EXPORT SURFACE. It does not measure how an
+ * installer resolves peers. npm 10 (the npm Node 22 bundles, and the CI
+ * runner's) crashes in arborist's `#loadPeerSet` with `Cannot read properties
+ * of null (reading 'edgesOut')` on upstream peer graphs that npm 11 installs.
+ * A crash there says nothing about the surface, but it read as PREREQUISITE
+ * NOT MET on every run. Measured 2026-10-16, each leg in an empty directory
+ * with a fresh `--cache`, on `npm install better-auth@1.7.3 --no-package-lock`:
+ *
+ *   npm 10.9.4, 10.9.9                          exit 1, the `edgesOut` crash
+ *   npm 11.21.0, 11.21.1                        exit 0; both governed specifiers import
+ *   npm 10.9.9 --before=2026-10-15T14:50:00Z    exit 0
+ *   npm 10.9.9 --before=2026-10-15T14:52:00Z    exit 1, the crash
+ *
+ * The trigger in that window is vitest@4.1.12 (published 14:51Z), reached
+ * through better-auth's OPTIONAL `vitest` peer. It peers
+ * `@vitest/browser-webdriverio: ^4.1.11`, whose only matching release, 4.1.11,
+ * peers `vitest: 4.1.11` exactly, so the peer set contradicts itself. The next
+ * upstream graph of that shape would break this leg the same way, so the fix
+ * is the installer rather than a pin on vitest.
+ *
+ * ⛔ Not `--legacy-peer-deps`. It skips REQUIRED peers too, and
+ * `@better-auth/core/context` then fails to import (`Cannot find package
+ * 'better-call'`, measured on 10.9.9). That would be a "does not load" finding
+ * about a package that loads for every consumer, a false red. ⛔ Not
+ * `--omit=peer`: the crash happens while the ideal tree is built, before any
+ * omit applies (measured: still exit 1).
+ *
+ * The installer is fetched once per run into the scratch directory, using the
+ * runner's own npm. npm bundles its dependencies, so that install walks no
+ * peer graph. Failing to fetch it is PREREQUISITE NOT MET, as for any
+ * unreachable registry. A vendor that this npm cannot install is still
+ * PREREQUISITE NOT MET, so only the npm-10 crash class stops masking the
+ * measurement. Exact, never a range: two runs of one commit must use the same
+ * instrument.
+ *
+ * Re-check before moving it: run the install above in an empty directory with
+ * a fresh `--cache` on the candidate npm, and import both governed specifiers
+ * from it.
+ */
+export const PROBE_INSTALLER_NPM = '11.21.0';
+
+/**
+ * The argv (after `process.execPath`) of one scratch install under the pinned
+ * installer. Exported so the self-test pins the flags: a probe install never
+ * carries a flag that changes WHICH packages land (see `PROBE_INSTALLER_NPM`).
+ */
+export function probeInstallArgv(installerCli, spec) {
+  return [installerCli, 'install', spec, '--no-package-lock', '--no-audit', '--no-fund'];
+}
+
+/**
+ * Install `npm@PROBE_INSTALLER_NPM` under `scratch` with the runner's npm, and
+ * return the path of its CLI entry. Exits PREREQUISITE NOT MET when it cannot.
+ */
+function fetchProbeInstaller(scratch) {
+  const dir = join(scratch, '.probe-installer');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(
+    join(dir, 'package.json'),
+    `${JSON.stringify({ name: 'vendor-export-probe-installer', private: true, version: '0.0.0' }, null, 2)}\n`,
+  );
+  try {
+    execFileSync('npm', ['install', `npm@${PROBE_INSTALLER_NPM}`, '--no-package-lock', '--no-audit', '--no-fund'], {
+      cwd: dir,
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+  } catch (e) {
+    console.error(
+      `PREREQUISITE NOT MET: could not fetch the probe's installer npm@${PROBE_INSTALLER_NPM} (${e?.message ?? e}).\n` +
+        `  --resolve installs every scratch project with it; without it nothing is measured, which is NOT a pass.`,
+    );
+    process.exit(EXIT_PREREQUISITE_NOT_MET);
+  }
+  const root = join(dir, 'node_modules', 'npm');
+  let version = null;
+  try {
+    version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).version ?? null;
+  } catch {
+    /* reported below */
+  }
+  const cli = join(root, 'bin', 'npm-cli.js');
+  if (version !== PROBE_INSTALLER_NPM || !existsSync(cli)) {
+    console.error(
+      `PREREQUISITE NOT MET: the probe's installer did not land as npm@${PROBE_INSTALLER_NPM} ` +
+        `(found ${version ?? 'nothing'} at ${root}).`,
+    );
+    process.exit(EXIT_PREREQUISITE_NOT_MET);
+  }
+  return cli;
+}
+
 function registryVersions(name) {
   const raw = execFileSync('npm', ['view', name, 'versions', '--json'], {
     encoding: 'utf8',
@@ -392,6 +492,7 @@ async function runResolve(root = repoRoot) {
   const { edges, declarations } = collectVendorEdges(root);
   const scratch = mkdtempSync(join(tmpdir(), 'os-vendor-export-'));
   try {
+    const installerCli = fetchProbeInstaller(scratch);
     for (const [vendor, bySpecifier] of [...edges].sort()) {
       const declared = declarations.get(vendor) ?? [];
       if (declared.length === 0) continue;
@@ -419,13 +520,14 @@ async function runResolve(root = repoRoot) {
             `${JSON.stringify({ name: 'vendor-export-probe', private: true, version: '0.0.0', type: 'module' }, null, 2)}\n`,
           );
           try {
-            execFileSync('npm', ['install', `${vendor}@${version}`, '--no-package-lock', '--no-audit', '--no-fund'], {
+            execFileSync(process.execPath, probeInstallArgv(installerCli, `${vendor}@${version}`), {
               cwd: dir,
               stdio: ['ignore', 'ignore', 'pipe'],
             });
           } catch (e) {
             console.error(
-              `PREREQUISITE NOT MET: could not install ${vendor}@${version} (${e?.message ?? e}).`,
+              `PREREQUISITE NOT MET: could not install ${vendor}@${version} with npm@${PROBE_INSTALLER_NPM} ` +
+                `(${e?.message ?? e}).`,
             );
             process.exit(EXIT_PREREQUISITE_NOT_MET);
           }
@@ -518,6 +620,31 @@ function selfTest() {
   eq('^1.7.2 admits 1.7.3', semver.satisfies('1.7.3', '^1.7.2'), true);
   eq('1.7.2 admits only itself', semver.satisfies('1.7.3', '1.7.2'), false);
 
+  // ── the --resolve installer ───────────────────────────────────────────────
+  // Exact, so two runs of one commit use one instrument; npm 11 or later,
+  // because npm 10's arborist crashes on upstream peer graphs unrelated to the
+  // export surface this leg measures (`PROBE_INSTALLER_NPM` holds the reading).
+  if (semver.valid(PROBE_INSTALLER_NPM) === null) {
+    failures.push(`PROBE_INSTALLER_NPM "${PROBE_INSTALLER_NPM}" is not an exact version — the instrument would move between runs.`);
+  } else if (semver.major(PROBE_INSTALLER_NPM) < 11) {
+    failures.push(
+      `PROBE_INSTALLER_NPM "${PROBE_INSTALLER_NPM}" is npm ${semver.major(PROBE_INSTALLER_NPM)} — npm 10's arborist ` +
+        'crashes (`edgesOut` of null) on upstream peer graphs, which reads as PREREQUISITE NOT MET on every run.',
+    );
+  }
+  // The flags are pinned whole. `--legacy-peer-deps` was measured to drop
+  // @better-auth/core's REQUIRED peers, so its specifier stops importing: a
+  // false "does not load" finding. Any flag that changes which packages land is
+  // a change to the instrument and belongs in that constant's reading first.
+  eq('probe install argv', probeInstallArgv('/x/npm-cli.js', 'better-auth@1.7.3'), [
+    '/x/npm-cli.js',
+    'install',
+    'better-auth@1.7.3',
+    '--no-package-lock',
+    '--no-audit',
+    '--no-fund',
+  ]);
+
   // ── the repo's own state, read through the same collector ─────────────────
   //
   // [#17440] This case used to be anchored on `@better-auth/core/db` naming
@@ -593,7 +720,9 @@ if (!isMain) {
 } else {
   const wantResolve = args.includes('--resolve');
   const { findings, checked } = wantResolve ? await runResolve() : await runOffline();
-  const leg = wantResolve ? 'registry resolution' : 'installed workspace';
+  const leg = wantResolve
+    ? `registry resolution, installed with npm@${PROBE_INSTALLER_NPM}`
+    : 'installed workspace';
   if (findings.length > 0) {
     console.error(`VERDICT: FAIL — vendor export contract (${leg})`);
     for (const f of findings) console.error(`  - ${f}`);
