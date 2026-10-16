@@ -229,7 +229,13 @@ const manifest = {
       description: 'Persist prompt/response traces to sys_ai_trace for debugging and replay.' },
     { type: 'toggle', key: 'log_prompts', label: 'Log full prompts',
       required: false, default: false,
-      description: 'Include rendered prompts (not just metadata) in trace rows. ⚠ May leak PII — disable in regulated environments.' },
+      description: 'Include rendered prompts (not just metadata) in trace rows.' },
+    // The PII warning is an `info_banner` row (`bannerSeverity: 'warning'`), not
+    // a sentence in the toggle's help; its copy lives under
+    // `settings.ai.banners.log_prompts_warning` in the locale bundles.
+    { type: 'info_banner', id: 'log_prompts_warning', label: 'Prompts may contain PII',
+      required: false, bannerSeverity: 'warning',
+      bannerText: 'May leak PII — disable in regulated environments.' },
 
     // ── Probe ────────────────────────────────────────────────────
     { type: 'action_button', id: 'test', label: 'Test connection',

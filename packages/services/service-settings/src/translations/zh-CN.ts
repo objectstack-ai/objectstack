@@ -405,13 +405,15 @@ export const zhCN: PlatformTranslationData = {
         realtime_cursors: { label: '实时光标' },
         inline_comments: { label: '行内评论' },
       },
+      banners: {
+        beta_notice: { title: '注意',
+          text: 'Beta 功能可能随时变更,恕不另行通知。可通过环境变量固定(例如 `OS_FEATURE_FLAGS_AI_ENABLED=true`),对整个部署生效。' },
+      },
     },
 
     storage: {
       title: '文件存储',
-      description:
-        '附件、导出文件与用户上传所使用的存储后端。' +
-        '⚠ 切换适配器不会迁移已有文件 —— 通过旧适配器上传的文件，在新适配器中将不可访问。',
+      description: '附件、导出文件与用户上传所使用的存储后端。',
       groups: {
         adapter: { title: '存储后端', description: '选择上传文件的存放位置。' },
         local: { title: '本地' },
@@ -441,6 +443,10 @@ export const zhCN: PlatformTranslationData = {
       },
       actions: {
         test: { label: '测试连接' },
+      },
+      banners: {
+        adapter_switch_warning: { title: '已有文件不会迁移',
+          text: '切换适配器不会迁移已有文件 —— 通过旧适配器上传的文件，在新适配器中将不可访问。' },
       },
     },
 
@@ -506,7 +512,7 @@ export const zhCN: PlatformTranslationData = {
         max_tokens: { label: '最大输出 tokens', help: '单次响应生成的硬上限。' },
         request_timeout_ms: { label: '请求超时(毫秒)' },
         trace_enabled: { label: '记录 Trace', help: '将 prompt/response 落入 sys_ai_trace,便于调试与回放。' },
-        log_prompts: { label: '记录完整 Prompt', help: '在 trace 行中包含完整 prompt 而非仅元数据。⚠ 可能泄露 PII,合规场景请关闭。' },
+        log_prompts: { label: '记录完整 Prompt', help: '在 trace 行中包含完整 prompt 而非仅元数据。' },
         embedder_provider: {
           label: '提供商',
           options: {
@@ -532,11 +538,14 @@ export const zhCN: PlatformTranslationData = {
         test: { label: '测试连接' },
         test_embedder: { label: '测试 Embedder' },
       },
+      banners: {
+        log_prompts_warning: { title: 'Prompt 可能含有 PII', text: '可能泄露 PII,合规场景请关闭。' },
+      },
     },
 
     knowledge: {
       title: '知识库',
-      description: 'RAG / 知识源使用的向量存储后端。⚠ 切换适配器不会迁移已有索引。',
+      description: 'RAG / 知识源使用的向量存储后端。',
       groups: {
         adapter: { title: '后端', description: '选择文档分块及其向量的存储位置。' },
         turso: { title: 'Turso / libSQL', description: '支持托管 Turso、本地文件、内存三种模式。' },
@@ -561,10 +570,14 @@ export const zhCN: PlatformTranslationData = {
         chunk_target: { label: '目标 chunk 大小(字符)', help: '在按 token 切分之前的软上限。' },
         chunk_overlap: { label: 'Chunk 重叠(字符)', help: '保留上一个 chunk 末尾的字符,以保证跨界上下文。' },
         over_fetch: { label: '过取倍数', help: '内部按 topK × overFetch 拉取候选,以便 JS 端元数据过滤仍有行可返回。' },
-        enforce_rls: { label: '搜索时强制 RLS', help: '对每条命中通过 IDataEngine 再次校验调用方的行级权限。⚠ 关闭将跳过平台对向量存储数据外泄的独有防护。' },
+        enforce_rls: { label: '搜索时强制 RLS', help: '对每条命中通过 IDataEngine 再次校验调用方的行级权限。' },
       },
       actions: {
         test: { label: '测试连接' },
+      },
+      banners: {
+        adapter_switch_warning: { title: '已有索引不会迁移', text: '切换适配器不会迁移已有索引。' },
+        enforce_rls_warning: { title: '生产环境请保持开启', text: '关闭将跳过平台对向量存储数据外泄的独有防护。' },
       },
     },
   },

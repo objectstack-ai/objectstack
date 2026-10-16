@@ -237,6 +237,29 @@ describe('aiSettingsManifest — temperature declares a window, not a grid (#655
   });
 });
 
+describe('aiSettingsManifest — the log_prompts PII warning is an info_banner', () => {
+  const specs = aiSettingsManifest.specifiers as any[];
+  const sectionOf = (i: number) => specs.slice(0, i + 1).reverse().find((s) => s.type === 'group')?.id;
+
+  it('declares it as a warning-severity info_banner with an id, a title and a body', () => {
+    const banners = specs.filter((s) => s.type === 'info_banner');
+    expect(banners.map((b) => [b.id, b.bannerSeverity])).toEqual([['log_prompts_warning', 'warning']]);
+    expect(typeof banners[0].label).toBe('string');
+    expect(banners[0].label.length).toBeGreaterThan(0);
+    expect(banners[0].bannerText.length).toBeGreaterThan(0);
+  });
+
+  it('places it in the Observability section, directly under the log_prompts toggle', () => {
+    const i = specs.findIndex((s) => s.id === 'log_prompts_warning');
+    expect(sectionOf(i)).toBe('observability');
+    expect(specs[i - 1].key).toBe('log_prompts');
+  });
+
+  it('carries the warning glyph nowhere — the banner severity is the only warning marker', () => {
+    expect(JSON.stringify(aiSettingsManifest)).not.toContain('⚠');
+  });
+});
+
 describe('aiSettingsManifest — embedder section', () => {
   it('exposes embedder_provider select with 10 options incl. none + 5 Chinese providers', () => {
     const f = (aiSettingsManifest.specifiers as any[]).find(

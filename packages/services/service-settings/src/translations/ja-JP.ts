@@ -340,13 +340,15 @@ export const jaJP: PlatformTranslationData = {
         realtime_cursors: { label: 'リアルタイムカーソル' },
         inline_comments: { label: 'インラインコメント' },
       },
+      banners: {
+        beta_notice: { title: 'ご注意ください',
+          text: 'ベータ機能は予告なく変更される場合があります。デプロイ全体で固定するには環境変数 (例: `OS_FEATURE_FLAGS_AI_ENABLED=true`) を使用してください。' },
+      },
     },
 
     storage: {
       title: 'ファイルストレージ',
-      description:
-        '添付ファイル・エクスポート・ユーザーアップロードに使用するバックエンド。' +
-        '⚠ アダプターを切替えても既存ファイルは移行されません。以前のアダプターでアップロードされたファイルは新しいアダプターからアクセスできなくなります。',
+      description: '添付ファイル・エクスポート・ユーザーアップロードに使用するバックエンド。',
       groups: {
         adapter: { title: 'バックエンド', description: 'アップロードファイルの保存先を選択します。' },
         local: { title: 'ローカル' },
@@ -376,6 +378,10 @@ export const jaJP: PlatformTranslationData = {
       },
       actions: {
         test: { label: '接続テスト' },
+      },
+      banners: {
+        adapter_switch_warning: { title: '既存ファイルは移行されません',
+          text: 'アダプターを切替えても既存ファイルは移行されません。以前のアダプターでアップロードされたファイルは新しいアダプターからアクセスできなくなります。' },
       },
     },
 
@@ -459,7 +465,7 @@ export const jaJP: PlatformTranslationData = {
         trace_enabled: { label: 'トレースを記録',
           help: 'デバッグと再生のため prompt/response トレースを sys_ai_trace に保存します。' },
         log_prompts: { label: '完全なプロンプトを記録',
-          help: 'メタデータだけでなくレンダリングされたプロンプトをトレース行に含めます。⚠ PII が漏えいする可能性があります。規制環境では無効にしてください。' },
+          help: 'メタデータだけでなくレンダリングされたプロンプトをトレース行に含めます。' },
         embedder_provider: {
           label: 'プロバイダー',
           options: {
@@ -490,13 +496,15 @@ export const jaJP: PlatformTranslationData = {
         test: { label: '接続テスト' },
         test_embedder: { label: 'Embedder をテスト' },
       },
+      banners: {
+        log_prompts_warning: { title: 'PII 漏えいの可能性',
+          text: 'PII が漏えいする可能性があります。規制環境では無効にしてください。' },
+      },
     },
 
     knowledge: {
       title: 'ナレッジ',
-      description:
-        'RAG / ナレッジソース用のベクトルストアバックエンド。' +
-        '⚠ アダプターを切替えても既存のインデックスは移行されません。',
+      description: 'RAG / ナレッジソース用のベクトルストアバックエンド。',
       groups: {
         adapter: { title: 'バックエンド',
           description: 'ドキュメントチャンクとそのベクトルの保存先を選択します。' },
@@ -532,10 +540,16 @@ export const jaJP: PlatformTranslationData = {
         over_fetch: { label: 'オーバーフェッチ倍率',
           help: 'JS 側のメタデータフィルタリングでも行が残るよう、内部で topK × overFetch 件の候補を取得します。' },
         enforce_rls: { label: '検索時に RLS を強制',
-          help: '各ヒットを呼び出し元のレコードレベル権限に対して再確認します。⚠ 無効化するとプラットフォーム固有のセーフガードがスキップされます。' },
+          help: '各ヒットを呼び出し元のレコードレベル権限に対して再確認します。' },
       },
       actions: {
         test: { label: '接続テスト' },
+      },
+      banners: {
+        adapter_switch_warning: { title: '既存のインデックスは移行されません',
+          text: 'アダプターを切替えても既存のインデックスは移行されません。' },
+        enforce_rls_warning: { title: '本番環境では有効のままにしてください',
+          text: '無効化するとプラットフォーム固有のセーフガードがスキップされます。' },
       },
     },
   },
