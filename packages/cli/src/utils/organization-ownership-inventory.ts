@@ -24,6 +24,13 @@
  *  - `platform-census-main` — objects the gated census on `main` lists and
  *    the first census did not (`sys_comment_reaction`, `sys_flow_credential`,
  *    `sys_platform_setting`).
+ *  - `retired-before-census` — platform objects retired from the tree before
+ *    the first census was measured, so neither census counted them, whose
+ *    physical tables a database that booted an earlier release still holds,
+ *    `organization_id` included (`sys_scim_provider`, whose ADR-0087 entry
+ *    leaves the table in place untouched). Without a row the plan would
+ *    refuse every such database as carrying an uninventoried platform table.
+ *    Each row is listed with fate 4 and cites the retirement's ADR-0087 entry.
  *  - `example-census-2026-08-31` — the non-platform objects the same census
  *    counted as "28" (it counted the 28 FILES; they declare 33 objects, the
  *    same 33 on `main` today).
@@ -94,6 +101,7 @@ export const ORGANIZATION_OWNERSHIP_FATES: readonly OrganizationOwnershipFate[] 
 export type InventoryCensus =
   | 'platform-census-2026-08-31'
   | 'platform-census-main'
+  | 'retired-before-census'
   | 'example-census-2026-08-31'
   | 'cloud-supplement'
   | 'host-supplement';
@@ -191,11 +199,41 @@ const EXAMPLE =
 const P1: readonly InventoryCensus[] = ['platform-census-2026-08-31', 'platform-census-main'];
 const P1_ONLY: readonly InventoryCensus[] = ['platform-census-2026-08-31'];
 const PMAIN: readonly InventoryCensus[] = ['platform-census-main'];
+const RETIRED: readonly InventoryCensus[] = ['retired-before-census'];
 const EX: readonly InventoryCensus[] = ['example-census-2026-08-31'];
 
 /** Rows a package or the platform seeded — the D10 fate-2 mirror selector on the catalog objects. */
 const SEEDED = [{ column: 'managed_by', in: ['package', 'platform', 'system'] }] satisfies RowPredicate;
 const AUTHORED = [{ column: 'managed_by', notIn: ['package', 'platform', 'system'] }] satisfies RowPredicate;
+
+/**
+ * The permission sets the security plugin ships (`securityDefaultPermissionSets`,
+ * `@objectstack/plugin-security`), by name. `organization-ownership-inventory.test.ts`
+ * holds this list equal to the plugin's.
+ */
+export const SHIPPED_PERMISSION_SET_NAMES: readonly string[] = [
+  'admin_full_access', 'organization_admin', 'organization_admin_no_bypass', 'member_default', 'viewer_readonly',
+  'mcp_agent_data_read', 'mcp_agent_data_write', 'mcp_agent_restricted',
+];
+
+/**
+ * The shipped sets an install seeded before the seeder stamped its rows
+ * `managed_by: 'platform'` (commit 712e185db, ruled 2026-08-15): the insert
+ * omitted the column, so the object's `defaultValue: 'admin'` filled it, and
+ * every install created earlier holds the shipped sets as `admin` rows that
+ * read as Setup-authored. The ceremony adopts them as the platform seeds they
+ * are — re-owned `platform` at the authored conversion, then deleted as mirrors
+ * once the grants name them — so the shipped definition stands; an edit an
+ * administrator made to one of them in Setup is not carried, and the plan and
+ * the apply both warn, naming each row (ADR-0131, amendment 2026-10-16).
+ */
+export const LEGACY_SHIPPED_SET_SEEDS = [
+  { column: 'managed_by', equals: 'admin' },
+  { column: 'name', in: [...SHIPPED_PERMISSION_SET_NAMES] },
+] satisfies RowPredicate;
+
+/** The `sys_permission_set` category that counts {@link LEGACY_SHIPPED_SET_SEEDS}. */
+export const LEGACY_SHIPPED_SET_SEEDS_CATEGORY = 'legacy-shipped-set-seeds';
 
 const parent = (childKey: string, parentObject: string): Anchor => ({ kind: 'parent', childKey, parentObject });
 const subject = (objectColumn: string, idColumn: string): Anchor => ({ kind: 'subject', objectColumn, idColumn });
@@ -350,7 +388,15 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     fate: 'mirror-deletion',
     citation: `${D3_CATALOG}; ADR-0094 D1 generalized (D2); D10 fate 2`,
     mirror: SEEDED,
-    categories: [{ id: 'authored', label: 'Setup-authored permission sets — converted to environment metadata by C3, never deleted as mirrors', citation: 'ADR-0131 D3', where: AUTHORED }],
+    categories: [
+      { id: 'authored', label: 'Setup-authored permission sets — converted to environment metadata by C3, never deleted as mirrors', citation: 'ADR-0131 D3', where: AUTHORED },
+      {
+        id: LEGACY_SHIPPED_SET_SEEDS_CATEGORY,
+        label: 'shipped permission sets an install seeded before 2026-08-15 as managed_by admin — adopted as platform seeds and deleted as mirrors; a Setup edit to one of them is not carried',
+        citation: 'seed provenance: commit 712e185db (ruled 2026-08-15); ADR-0131, amendment 2026-10-16',
+        where: LEGACY_SHIPPED_SET_SEEDS,
+      },
+    ],
   },
   {
     object: 'sys_capability',
@@ -400,6 +446,22 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     census: P1_ONLY,
     fate: 'report',
     citation: `${CENSUS_1}; removed from the tree since (re-verification record 6018712820). A physical table left by an older release is listed, its NULL rows reported`,
+  },
+
+  // ── Platform: retired before either census (fate 4) ──
+  {
+    object: 'sys_scim_provider',
+    census: RETIRED,
+    fate: 'report',
+    citation:
+      'ADR-0087 semantic entry scim-provider-object-retired (packages/spec/src/migrations/entries/semantic/' +
+      '18.scim-provider-object-retired.ts): the rc.1-era @better-auth/scim connection object, retired before the ' +
+      'first census with no data-migration path owed (maintainer ruling 2026-08-24), its tables in deployed ' +
+      'databases left in place untouched by ruling. A physical table left by an older release is listed, its NULL ' +
+      'rows reported, never attributed and never deleted',
+    notNullExempt:
+      'the object is retired and its table is left in place untouched, by ruling: no declaration anchors tenancy on ' +
+      'the column, and a connection scoped to no organization was a legitimate row',
   },
 
   // ── Platform: attribution through a parent anchor (fate 3) ──

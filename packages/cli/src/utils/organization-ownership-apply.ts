@@ -9,6 +9,7 @@ import {
 import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn, hashSpec } from '@objectstack/metadata-core';
 import {
   inventoryEntryFor,
+  LEGACY_SHIPPED_SET_SEEDS,
   type InventoryEntry,
   type RowPredicate,
 } from './organization-ownership-inventory.js';
@@ -25,6 +26,7 @@ import {
   TEMPLATE_OBJECT,
   columnNameOf,
   predicateSql,
+  PRIMARY_DATABASE,
   Sql,
   type AttributionSink,
   type MetadataConflict,
@@ -179,6 +181,17 @@ export type CeremonyStep = (typeof CEREMONY_STEPS)[number];
 /** The raw-SQL seam: the plan's reader plus the one write verb. */
 export interface ApplyExecutor extends PlanReader {
   execute(sql: string, params?: readonly unknown[]): Promise<void>;
+}
+
+/**
+ * A database beside the primary the deployment keeps objects in — the
+ * `telemetry` sibling (`PlanSibling`): its tables are planned, attributed and
+ * have their columns dropped where they live, through its own executor.
+ */
+export interface ApplySibling {
+  name: string;
+  database: string;
+  executor: ApplyExecutor;
 }
 
 /** The security catalog read (core's `SecurityCatalogReader` satisfies it). */
@@ -445,6 +458,8 @@ export interface OrganizationOwnershipApplyReport {
   restartedFrom?: { inventoryDigest: string; steps: CeremonyStep[] };
   /** Steps an earlier run finished, read from the checkpoint. */
   resumedFrom: CeremonyStep[];
+  /** The plan's warnings as this run read them before its first write (`OrganizationOwnershipPlan.warnings`). */
+  warnings: string[];
   steps: StepReport[];
   tables: TableOutcome[];
   /** Every step finished. */
@@ -459,6 +474,10 @@ export interface ApplyOptions {
   executor: ApplyExecutor;
   posture: string;
   database: string;
+  /** The databases beside the primary (the `telemetry` sibling), each with its own executor. */
+  siblings?: readonly ApplySibling[];
+  /** The database the deployment keeps `object` in (the booted engine's routing); see the plan's `homeOf`. */
+  homeOf?: (object: string) => string | undefined;
   catalog: CatalogPort;
   door: MetadataDoorPort;
   templates: TemplatePort;
@@ -498,6 +517,8 @@ export interface ApplyOptions {
   now?: () => Date;
   /** One line per milestone, for the command's human face. */
   onProgress?: (message: string) => void;
+  /** Each of the plan's warnings, before the first write: what the ceremony decides on the operator's behalf. */
+  onWarning?: (message: string) => void;
 }
 
 const ORG = 'organization_id';
@@ -530,7 +551,12 @@ const text = (value: unknown): string | null =>
 /** Shared state of one run. */
 interface Run {
   opts: ApplyOptions;
+  /** The primary database's SQL seam. */
   sql: Sql;
+  /** Each database's SQL seam and executor, by name (the primary is `PRIMARY_DATABASE`). */
+  databases: Map<string, { sql: Sql; executor: ApplyExecutor }>;
+  /** The database each planned physical table lives in, as the latest plan read it. */
+  databaseOf: Map<string, string>;
   plan: OrganizationOwnershipPlan;
   columns: Map<string, Set<string> | null>;
   attributed: Map<string, number>;
@@ -584,12 +610,18 @@ async function saveDefinition(run: Run, type: 'position' | 'permission', name: s
   run.saved.set(`${type}|${name}`, body);
 }
 
+/** The database `table` lives in: its SQL seam and executor (the primary for a table no plan placed). */
+function databaseFor(run: Run, table: string): { sql: Sql; executor: ApplyExecutor } {
+  return run.databases.get(run.databaseOf.get(table) ?? PRIMARY_DATABASE) ?? run.databases.get(PRIMARY_DATABASE)!;
+}
+
 async function columnsOf(run: Run, table: string): Promise<Set<string> | null> {
   if (run.columns.has(table)) return run.columns.get(table)!;
   const present = run.plan.tables.some((t) => t.tables.includes(table));
   let cols: Set<string> | null = null;
   if (present) {
-    const rows = await run.sql.read(table, columnListSql(run.sql.dialect), [table]);
+    const { sql } = databaseFor(run, table);
+    const rows = await sql.read(table, columnListSql(sql.dialect), [table]);
     cols = new Set(rows.map(columnNameOf).filter((c): c is string => c !== null));
   }
   run.columns.set(table, cols);
@@ -598,7 +630,7 @@ async function columnsOf(run: Run, table: string): Promise<Set<string> | null> {
 
 /** Every row of `table` matching `where`, keyset-paged by id. */
 async function readAll(run: Run, table: string, select: readonly string[], where: { text: string; params: unknown[] } = { text: '1 = 1', params: [] }): Promise<Record<string, unknown>[]> {
-  const { sql } = run;
+  const { sql } = databaseFor(run, table);
   const t = sql.q(table, table);
   const id = sql.q('id', table);
   const cols = [...new Set(['id', ...select])].map((c) => `${sql.q(c, table)} AS ${sql.q(c, table)}`).join(', ');
@@ -618,21 +650,30 @@ async function readAll(run: Run, table: string, select: readonly string[], where
 
 async function execute(run: Run, table: string, statement: string, params: readonly unknown[]): Promise<void> {
   try {
-    await run.opts.executor.execute(statement, params);
+    await databaseFor(run, table).executor.execute(statement, params);
   } catch (error) {
     throw new Error(`The write to ${table} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   }
 }
 
-const planFor = (run: Run, extra: { onAttribution?: AttributionSink } = {}): Promise<OrganizationOwnershipPlan> =>
-  buildOrganizationOwnershipPlan({
+async function planFor(run: Run, extra: { onAttribution?: AttributionSink } = {}): Promise<OrganizationOwnershipPlan> {
+  const plan = await buildOrganizationOwnershipPlan({
     reader: run.opts.executor,
     posture: run.opts.posture,
     database: run.opts.database,
+    ...(run.opts.siblings?.length
+      ? { siblings: run.opts.siblings.map((d) => ({ name: d.name, database: d.database, reader: d.executor })) }
+      : {}),
+    ...(run.opts.homeOf ? { homeOf: run.opts.homeOf } : {}),
     ...(run.opts.inventory ? { inventory: run.opts.inventory } : {}),
     ...(run.opts.now ? { now: run.opts.now() } : {}),
     ...extra,
   });
+  for (const table of plan.tables) {
+    for (const physical of table.tables) run.databaseOf.set(physical, table.database ?? PRIMARY_DATABASE);
+  }
+  return plan;
+}
 
 const nullsUnderAttribution = (plan: OrganizationOwnershipPlan): number =>
   plan.tables.filter((t) => t.fate === 'attribution').reduce((n, t) => n + (t.rows?.organizationNull ?? 0), 0);
@@ -648,24 +689,28 @@ async function runAttribution(run: Run): Promise<StepReport> {
     let wrote = 0;
     const plan = await planFor(run, {
       onAttribution: async ({ object, assignments }) => {
+        // Each row is written in the database the plan read it from (the
+        // assignment says, before any plan of this pass has placed the table).
         const groups = new Map<string, string[]>();
         for (const a of assignments) {
-          const key = `${a.table}\u0000${a.organizationId}`;
+          const key = `${a.database ?? PRIMARY_DATABASE}\u0000${a.table}\u0000${a.organizationId}`;
           const ids = groups.get(key) ?? [];
           ids.push(a.id);
           groups.set(key, ids);
         }
         for (const [key, ids] of groups) {
-          const [table, organizationId] = key.split('\u0000') as [string, string];
-          const t = run.sql.q(table, table);
+          const [database, table, organizationId] = key.split('\u0000') as [string, string, string];
+          const { sql, executor } = run.databases.get(database)!;
+          const t = sql.q(table, table);
           for (let i = 0; i < ids.length; i += IN_CHUNK) {
             const chunk = ids.slice(i, i + IN_CHUNK);
-            await execute(
-              run,
-              table,
-              `UPDATE ${t} SET ${run.sql.q(ORG, table)} = ? WHERE ${run.sql.q(ORG, table)} IS NULL AND ${run.sql.q('id', table)} IN (${chunk.map(() => '?').join(', ')})`,
-              [organizationId, ...chunk],
-            );
+            const statement =
+              `UPDATE ${t} SET ${sql.q(ORG, table)} = ? WHERE ${sql.q(ORG, table)} IS NULL AND ${sql.q('id', table)} IN (${chunk.map(() => '?').join(', ')})`;
+            try {
+              await executor.execute(statement, [organizationId, ...chunk]);
+            } catch (error) {
+              throw new Error(`The write to ${table} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+            }
           }
         }
         wrote += assignments.length;
@@ -774,6 +819,31 @@ async function runAuthoredConversion(run: Run): Promise<StepReport> {
     if (!cols || !where) return [];
     return readAll(run, table, [...cols], predicateSql(run.sql, table, cols, where));
   };
+  // The shipped sets an install seeded as `admin` rows (LEGACY_SHIPPED_SET_SEEDS)
+  // are the platform's seeds, not Setup-authored sets: re-owned `platform`
+  // here, under every posture, so the authored read below leaves them out and
+  // mirror deletion takes them once the rewrite has named every grant.
+  // Idempotent: a re-run finds none. The plan warned, naming each row.
+  const setColumns = await columnsOf(run, SETS);
+  if (setColumns?.has('managed_by') && setColumns.has('name')) {
+    const legacy = predicateSql(run.sql, SETS, setColumns, LEGACY_SHIPPED_SET_SEEDS);
+    const adopted = await readAll(run, SETS, ['name'], legacy);
+    if (adopted.length > 0) {
+      await execute(
+        run,
+        SETS,
+        `UPDATE ${run.sql.q(SETS, SETS)} SET ${run.sql.q('managed_by', SETS)} = ? WHERE ${legacy.text}`,
+        ['platform', ...legacy.params],
+      );
+      summary.legacySeedsAdopted = adopted.length;
+      notes.push(
+        `Adopted ${adopted.length} shipped permission set row(s) stored as managed_by 'admin' ` +
+          `(${[...new Set(adopted.map((r) => String(r.name)))].sort().join(', ')}) as platform seeds: the shipped ` +
+          'definitions stand, and mirror deletion removes these rows once every grant names its set.',
+      );
+      run.opts.onProgress?.(`adopted ${adopted.length} legacy shipped permission set row(s) as platform seeds`);
+    }
+  }
   const sets = await authoredRows(SETS);
   const positions = await authoredRows(POSITIONS);
   const capabilities = await authoredRows(CAPABILITIES);
@@ -2564,6 +2634,11 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     // The executor's dialect was resolved from the driver before this call
     // (`ceremonyDialectOf`, which refuses an unresolved one): never a default.
     sql: new Sql(opts.executor, opts.executor.dialect),
+    databases: new Map([
+      [PRIMARY_DATABASE, { sql: new Sql(opts.executor, opts.executor.dialect), executor: opts.executor }],
+      ...(opts.siblings ?? []).map((d) => [d.name, { sql: new Sql(d.executor, d.executor.dialect), executor: d.executor }] as const),
+    ]),
+    databaseOf: new Map(),
     plan: undefined as unknown as OrganizationOwnershipPlan,
     columns: new Map(),
     attributed: new Map(),
@@ -2578,6 +2653,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
   refuseUnreviewedPlan(run.plan, opts.reviewedPlan);
   validateTemplateChoices(run);
   const before = run.plan;
+  for (const warning of before.warnings) opts.onWarning?.(warning);
 
   const stored = await opts.ledger.read();
   // The applied choices outlive a new digest: their rows are already resolved.
@@ -2705,6 +2781,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     reviewedPlan: { file: opts.reviewedPlan.file, generatedAt: opts.reviewedPlan.generatedAt },
     ...(stored && superseded.length > 0 ? { restartedFrom: { inventoryDigest: stored.inventoryDigest, steps: superseded } } : {}),
     resumedFrom,
+    warnings: [...before.warnings],
     steps,
     tables,
     complete,

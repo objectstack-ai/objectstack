@@ -21,6 +21,7 @@ import {
   type PlanReader,
   type TablePlan,
 } from './organization-ownership-plan.js';
+import { ORGANIZATION_OWNERSHIP_INVENTORY } from './organization-ownership-inventory.js';
 
 let dir: string;
 let file: string;
@@ -220,6 +221,48 @@ describe('ADR-0131 D10 preflight — the per-table plan', () => {
     const p = await plan('single');
     expect(p).toMatchObject({ organizations: 0, defaultOrganization: null });
     expect(table(p, 'crm_deal').unattributable).toEqual([{ id: 'deal_2', reason: expect.stringContaining('no Default Organization') }]);
+  });
+
+  it('a v17 database still holding the retired sys_scim_provider plans, listing it as fate 4', async () => {
+    // The rc.1-era table every database that booted before the retirement still
+    // holds, in its last declared shape. Neither census counted the object.
+    db.exec(`
+      CREATE TABLE sys_scim_provider (
+        id TEXT PRIMARY KEY, provider_id TEXT, provider_key TEXT, scim_token TEXT,
+        organization_id TEXT, user_id TEXT, created_at TEXT, updated_at TEXT
+      );
+      INSERT INTO sys_scim_provider VALUES
+        ('scim_1', 'okta-scim', 'org_b:okta-scim', 'hash_1', 'org_b', 'usr_1', '2026-07-01', '2026-07-01'),
+        ('scim_2', 'entra-scim', NULL, 'hash_2', NULL, NULL, '2026-07-02', '2026-07-02');
+    `);
+
+    for (const posture of ['isolated', 'single']) {
+      const scim = table(await plan(posture), 'sys_scim_provider');
+      expect(scim, posture).toMatchObject({
+        source: 'inventory',
+        fate: 'report',
+        physical: 'present',
+        organizationColumn: 'present',
+        rows: { total: 2, organizationNull: 1, stamped: 1 },
+        fateCounts: { reportedRows: 1 },
+        // Reported, never attributed — not even to the Default Organization under single.
+        unattributable: [{ id: 'scim_2', reason: 'fate 4: reported, never guessed' }],
+        notNull: { willReceive: false, reason: expect.stringContaining('left in place untouched') },
+      });
+      expect(scim.census, posture).toEqual(['retired-before-census']);
+      expect(scim.citation, posture).toContain('scim-provider-object-retired');
+    }
+
+    // Control: without its row the same database is refused, by name.
+    const r = await refusal(
+      buildOrganizationOwnershipPlan({
+        reader: reader(),
+        posture: 'isolated',
+        database: file,
+        inventory: ORGANIZATION_OWNERSHIP_INVENTORY.filter((e) => e.object !== 'sys_scim_provider'),
+      }),
+    );
+    expect(r).toMatchObject({ reason: 'uninventoried-platform-table', table: 'sys_scim_provider' });
   });
 
   it('under single with no Default Organization, nothing is assigned and the reason says why', async () => {

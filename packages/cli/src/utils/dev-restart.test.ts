@@ -155,7 +155,7 @@ class FakeChild implements ServeChildLike {
     }
 }
 
-function makeHarness(opts: { forceKillAfterMs?: number; failSpawnAt?: number } = {}) {
+function makeHarness(opts: { forceKillAfterMs?: number; failSpawnAt?: number; recover?: () => Promise<boolean> | boolean } = {}) {
     const children: FakeChild[] = [];
     const spawnInfos: Array<{ restartIndex: number }> = [];
     const exits: number[] = [];
@@ -173,6 +173,7 @@ function makeHarness(opts: { forceKillAfterMs?: number; failSpawnAt?: number } =
         exitParent: (code) => { exits.push(code); },
         log: (line) => { logs.push(line); },
         forceKillAfterMs: opts.forceKillAfterMs,
+        ...(opts.recover ? { recover: opts.recover } : {}),
     });
     return { coordinator, children, spawnInfos, exits, logs };
 }
@@ -330,5 +331,59 @@ describe('ServeRestartCoordinator', () => {
         h.children[0].emitExit(1); // stale double-fire from the dead child
         expect(h.exits).toEqual([]); // replacement unaffected, parent alive
         expect(h.coordinator.getState()).toBe('running');
+    });
+
+    describe('recover — a child that exited on its own, repaired by the parent', () => {
+        it('⭐ recovered: a replacement boots and the parent survives', async () => {
+            const h = makeHarness({ recover: async () => true });
+            h.coordinator.start();
+            h.children[0].emitExit(1);
+            expect(h.coordinator.getState()).toBe('recovering');
+            await sleep(0);
+            expect(h.children).toHaveLength(2);
+            expect(h.exits).toEqual([]);
+            expect(h.coordinator.getState()).toBe('running');
+        });
+
+        it('not recovered (or the repair threw): the parent follows the child out, as before', async () => {
+            const h = makeHarness({ recover: async () => false });
+            h.coordinator.start();
+            h.children[0].emitExit(1);
+            await sleep(0);
+            expect(h.exits).toEqual([1]);
+            expect(h.children).toHaveLength(1);
+
+            const h2 = makeHarness({ recover: async () => { throw new Error('repair failed'); } });
+            h2.coordinator.start();
+            h2.children[0].emitExit(1);
+            await sleep(0);
+            expect(h2.exits).toEqual([1]);
+        });
+
+        it('a rebuild landing during the repair is absorbed: exactly one replacement boots', async () => {
+            let finish!: (ok: boolean) => void;
+            const h = makeHarness({ recover: () => new Promise<boolean>((r) => { finish = r; }) });
+            h.coordinator.start();
+            h.children[0].emitExit(1);
+            h.coordinator.requestRestart('src/a.view.ts');
+            await sleep(0); // the repair is asked on the next tick
+            expect(h.children).toHaveLength(1);
+            finish(true);
+            await sleep(0);
+            expect(h.children).toHaveLength(2);
+        });
+
+        it('a signal during the repair ends the parent once the repair answers, and boots nothing', async () => {
+            let finish!: (ok: boolean) => void;
+            const h = makeHarness({ recover: () => new Promise<boolean>((r) => { finish = r; }) });
+            h.coordinator.start();
+            h.children[0].emitExit(1);
+            h.coordinator.beginShutdown('SIGINT');
+            await sleep(0);
+            finish(true);
+            await sleep(0);
+            expect(h.exits).toEqual([1]);
+            expect(h.children).toHaveLength(1);
+        });
     });
 });

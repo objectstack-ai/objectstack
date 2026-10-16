@@ -163,6 +163,7 @@ import type {
   AudienceBindingSuggestionSync,
   AutomationResult,
   DelegableScope,
+  FlowRuntimeState,
   ImportObjectResult,
   ObjectDraft,
   RecordShare,
@@ -5664,8 +5665,13 @@ export class ObjectStackClient {
       /**
        * Runtime enable/bound state for every flow — engine state, not
        * persisted metadata (backs the Studio's Automations status badges).
+       *
+       * [#23859] Each row is the declared contract `FlowRuntimeState`: the
+       * route serves `getFlowRuntimeStates()` rows unchanged, so the optional
+       * `status` / `triggerType` / `object` / `reason` / `unboundCause` reach
+       * the caller. A hand-typed `{ name, enabled, bound }` hid them.
        */
-      getRuntimeStatus: async (): Promise<{ flows: Array<{ name: string; enabled: boolean; bound: boolean }>; total: number }> => {
+      getRuntimeStatus: async (): Promise<{ flows: FlowRuntimeState[]; total: number }> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/_status`);
           return this.unwrapResponse(res);

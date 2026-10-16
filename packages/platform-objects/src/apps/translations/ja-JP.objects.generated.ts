@@ -719,16 +719,32 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       pending: {
-        label: "保留中"
+        label: "保留中",
+        emptyState: {
+          title: "保留中の招待はありません",
+          message: "招待は、承認・辞退・キャンセルされるか、期限切れになるまでここに表示されます。"
+        }
       },
       accepted: {
-        label: "承認済み"
+        label: "承認済み",
+        emptyState: {
+          title: "承認済みの招待はありません",
+          message: "相手が招待を承認して組織に参加すると、招待はここに移動します。"
+        }
       },
       expired: {
-        label: "期限切れ / キャンセル済み"
+        label: "期限切れ / キャンセル済み",
+        emptyState: {
+          title: "期限切れまたはキャンセル済みの招待はありません",
+          message: "期限切れ、辞退、またはキャンセルされた招待はここに保持されます。"
+        }
       },
       all_invitations: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "まだ招待がありません",
+          message: "組織への招待は、状態にかかわらずすべてここに一覧表示されます。"
+        }
       }
     },
     _actions: {
@@ -1024,19 +1040,47 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_keys: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "まだ API キーがありません",
+          message: "「キーを作成」でスクリプトや連携用のキーを作成できます。キーは作成時に一度だけ表示されます。"
+        }
       },
       mine: {
-        label: "自分のキー"
+        label: "自分のキー",
+        emptyState: {
+          title: "自分の API キーはまだありません",
+          message: "「キーを作成」で自分のスクリプトや連携用のキーを作成できます。キーは作成時に一度だけ表示されます。"
+        }
       },
       active: {
-        label: "有効"
+        label: "有効",
+        emptyState: {
+          title: "有効な API キーはありません",
+          message: "失効していないキーはすべてここに一覧表示されます。"
+        }
       },
       revoked: {
-        label: "失効済み"
+        label: "失効済み",
+        emptyState: {
+          title: "失効済みのキーはありません",
+          message: "失効したキーはここに移動し、そのキーを使うクライアントは復元されるまでアクセスを失います。"
+        }
       }
     },
     _actions: {
+      create_api_key: {
+        label: "キーを作成",
+        description: "スクリプトや連携用のキーを作成します。キーはあなたとして、あなたのアクセス権で、現在作業中の組織で動作します。",
+        resultDialog: {
+          title: "API キーを作成しました",
+          description: "今すぐキーをコピーしてください。キーは一度しか表示されず、後から取得することはできません。漏えいした場合は失効させて新しいキーを作成してください。",
+          acknowledge: "キーを保存しました",
+          fields: {
+            key: "API キー"
+          }
+        }
+      },
       revoke_api_key: {
         label: "API キーを失効",
         confirmText: "この API キーを失効しますか？使用中のクライアントはすぐにアクセスを失います。",
@@ -1388,16 +1432,32 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_apps: {
-        label: "すべて"
+        label: "すべて",
+        emptyState: {
+          title: "まだ OAuth アプリケーションがありません",
+          message: "アプリケーションを登録すると、そのクライアントがこの環境でユーザーをサインインさせられるようになります。"
+        }
       },
       mine: {
-        label: "自分のアプリケーション"
+        label: "自分のアプリケーション",
+        emptyState: {
+          title: "自分の OAuth アプリケーションはまだありません",
+          message: "登録したアプリケーションはここに一覧表示されます。"
+        }
       },
       active: {
-        label: "有効"
+        label: "有効",
+        emptyState: {
+          title: "有効な OAuth アプリケーションはありません",
+          message: "アプリケーションは無効化されるまで有効です。無効化されたアプリケーションは「無効」に表示されます。"
+        }
       },
       disabled_apps: {
-        label: "無効"
+        label: "無効",
+        emptyState: {
+          title: "無効な OAuth アプリケーションはありません",
+          message: "無効化されたアプリケーションはここに移動し、再び有効化されるまでそのクライアントはサインインできません。"
+        }
       }
     },
     _actions: {

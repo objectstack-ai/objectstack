@@ -196,6 +196,26 @@ os dev --database file:./data/test.db --auth-secret $(openssl rand -hex 32)
 | `--seed-admin` / `--no-seed-admin` | — | Seed a dev admin (`admin@objectos.ai` / `admin123`) on an empty DB — default on; override with `--admin-email` / `--admin-password` |
 | `-v, --verbose` | — | Verbose output |
 
+##### A 17.x development database is upgraded in place
+
+A v18 server refuses to start on a database still in the v17
+organization-ownership shape until the [ownership ceremony](#os-migrate-organization-ownership)
+has run on it. `os dev` runs that ceremony for you when the database is a local
+SQLite file:
+
+1. It copies the database file and its `telemetry` sibling (each with its
+   `-wal` / `-shm`) into `<data dir>/backups/organization-ownership-<timestamp>/`.
+2. It runs `os migrate organization-ownership --dev` (the plan), then applies
+   that plan. The plan, the apply report and the ceremony's log are kept
+   beside the copy.
+3. It prints the ceremony's warnings and starts the server again.
+
+If a step blocks, `os dev` stops and prints the blocker, where the copy is, and
+the command that resumes the run. It tries once per session. A database that is
+not a local SQLite file (PostgreSQL, a remote libSQL, `:memory:`) is not
+upgraded in place: run the ceremony yourself. `os serve` and `os start` never run
+it; they refuse and name the command.
+
 ##### Serving dev over https
 
 An interactive MCP client (and any OAuth client worth the name) refuses to open a
@@ -266,8 +286,8 @@ output at all. Spawn with an `ipc` channel and wait for a message:
 
 | Message | Sent by | Means |
 |---|---|---|
-| `objectstack:listening` | `os serve` | The HTTP server is bound. Carries `{ port, url }` — the port actually bound, which in dev may differ from the one requested. |
-| `objectstack:seed-settled` | `os serve` | Nothing is still seeding. Carries `{ ok, suppressed, sources }`. Sent once per boot, always **after** `objectstack:listening`. |
+| `objectstack:listening` | `os serve` | The HTTP server is bound. Carries `{ port, url }` — the port actually bound, which in dev may differ from the one requested. Not sent by a boot that binds no HTTP server (`--no-server` with no transport composed). |
+| `objectstack:seed-settled` | `os serve` | Nothing is still seeding. Carries `{ ok, suppressed, sources }`. Sent once per boot, always **after** `objectstack:listening`; on a boot that binds no HTTP server it is still sent, and is the only message. |
 
 ```js
 import { spawn } from 'node:child_process';
@@ -1172,6 +1192,7 @@ where the data lives.
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
+| `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. A v18 server refuses to start until it has run. See [below](#os-migrate-organization-ownership) |
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
 | `os migrate security-catalog-overlays` | List the environment-wide permission-set and position rows (the legacy plurals `permissions` / `positions` included) stored over a name a configured package holds — the rows a v18 cold boot refuses — each with the package that holds its name; `--apply` deletes them, one history tombstone per row. Run it before the first v18 boot, with the flags and environment the deployment boots with: the platform security plugin's sets are held only where `os serve` composes it (an auth secret set, and the `auth` tier on), and the step takes `serve`'s `--preset` and `--dev` with `serve`'s meaning. Adopts nothing; exits 1 while it lists a row |
@@ -1441,6 +1462,42 @@ and re-running is how an interrupted run is finished. The columns arrive with
 the upgraded deployment's schema sync, which an `--apply` run performs itself:
 a dry run against a database no upgraded process has opened cannot read them,
 reports the failed read and exits `1`. A failed read or write exits `1`.
+
+#### `os migrate organization-ownership`
+
+The v18 ownership ceremony (ADR-0131 D10). A v18 `os serve` / `os start` refuses
+to start on a database still in the v17 organization-ownership shape until this
+has run. Under `os dev` it runs on its own for a local SQLite database (see
+[`os dev`](#os-dev)).
+
+```bash
+os migrate organization-ownership --out plan.json            # the plan: reads only
+os migrate organization-ownership --apply --plan-file plan.json --backup-taken
+os migrate organization-ownership --dev …                    # boot as `os serve --dev` does
+```
+
+- **The plan writes nothing.** Per table it lists the fate (column dropped,
+  mirror rows deleted, owner attributed, rows reported), the row counts, and the
+  rows whose owner cannot be derived. It refuses to plan a table it cannot read.
+- **`--apply` runs only the plan you reviewed**, and only after you confirm a
+  backup (`--backup-taken`, or the prompt). The platform takes no backup. The run
+  is resumable: re-running it continues from its recorded checkpoint.
+- **Warnings come before the first write.** The plan prints what the ceremony
+  decides on your behalf, and `--apply` prints the same warnings again before
+  it writes. An example: the shipped permission sets an install created before
+  2026-08-15 stored as `managed_by: 'admin'` are adopted as platform seeds and
+  deleted, and the shipped definitions apply. A Setup edit to one of those
+  sets is not carried over.
+- **Every database the deployment uses.** A development boot, or one with
+  `OS_TELEMETRY_DB`, keeps the audit, job-run and notification objects in a
+  `telemetry` sibling database. The ceremony plans and applies each object in
+  the database it lives in. If an older boot left a copy of such a table in the
+  primary, the ceremony lists it under `staleCopies`, warns about it, and leaves
+  it alone.
+- **Boot it the way the deployment boots.** `--dev` composes the stack as
+  `os serve --dev` does: the development auth secret's fallback (and with it
+  the security and audit plugins), the development `.env*` files, and the
+  `telemetry` sibling. Pass it for a database that `os dev` serves.
 
 #### A database created by this version needs no migration
 

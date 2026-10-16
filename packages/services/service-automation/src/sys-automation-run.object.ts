@@ -67,7 +67,10 @@ export const SysAutomationRun = ObjectSchema.create({
       onlyWhen: { status: { $in: ['completed', 'failed', 'cancelled', 'timed_out', 'refused'] } },
     },
   },
-  description: 'Durable automation run state: live suspended runs (resumable, ADR-0019) and terminal run history (completed / failed / cancelled / timed_out / refused, for observability).',
+  // [ADR-0019] Paused runs are resumable state; the terminal rows are
+  // observability history (completed / failed / cancelled / timed_out /
+  // refused), aged out by the retention above.
+  description: 'Paused automation runs waiting to resume, and the recent history of finished runs.',
   // [ADR-0079] The record title is `display_title`, a text formula over the
   // same two columns `titleFormat` names. The pointer used to be `id`: once a
   // renderer honours ADR-0079's order (an explicit `nameField` wins over

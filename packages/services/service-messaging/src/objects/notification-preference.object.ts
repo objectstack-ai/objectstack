@@ -46,6 +46,27 @@ export const NotificationPreference = ObjectSchema.create({
     titleFormat: '{user_id} · {topic} · {channel}',
     highlightFields: ['user_id', 'topic', 'channel', 'enabled', 'digest'],
 
+    // The one list view this object ships, declared for its `emptyState`: with
+    // no view at all the console synthesizes an "All records" tab and draws
+    // the generic "Nothing here yet" under it, which says nothing about what
+    // belongs on this page. `columns: []` declares no projection on purpose —
+    // the spec's "left to the renderer" form — so the grid keeps exactly the
+    // columns it derived from `highlightFields` before this view existed, and
+    // the view adds no filter, sort or page size of its own.
+    listViews: {
+        all: {
+            type: 'grid',
+            name: 'all',
+            label: 'All',
+            data: { provider: 'object', object: 'sys_notification_preference' },
+            columns: [],
+            emptyState: {
+                title: 'No preferences yet',
+                message: 'Nothing is muted until a preference is added; add one to mute or allow a topic on a channel, for one user or as the default for everyone.',
+            },
+        },
+    },
+
     fields: {
         id: Field.text({ label: 'Preference ID', required: true, readonly: true }),
 

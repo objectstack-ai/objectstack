@@ -571,6 +571,8 @@ diverged (#3903). This addendum extends the contract to data at rest:
   (availability over purity for data at rest; the same verdict reaches Studio
   as `_diagnostics` on every read).
 
+> **2026-10-16 note** (#23775, ruling B) — the flow save door draws this line by one predicate: `saveMetaItem` canonicalizes a flow with **no stored row at the save's address** (the row the save overwrites, or for a draft with none yet the active row it overlays) **without** retired entries, so a retired spelling meets the parse refusal (`422 INVALID_METADATA`, located, the text `os validate` prints), while a re-save of a stored row — and the server's own writes of bodies at rest — keep the full chain.
+
 ## Addendum (2026-08-01) — the stored chain gets a finish line (#4327)
 
 The addendum above makes a legacy row read canonical *forever*, which is the
