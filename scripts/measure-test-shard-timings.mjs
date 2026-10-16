@@ -1222,13 +1222,17 @@ export function readWindowCaptures(dir) {
   return { byRun, problems, present: true };
 }
 
-// -- A test file's own measured budget (ruling record 6181973363, letter B) --
+// -- A test file's own measured budget (ruling records 6181973363, 6212133431) --
 //
-// Two classes of test file cannot fit the 10 s line without being weakened:
+// Three classes of test file cannot fit the 10 s line without being weakened:
 // one that spawns the real producer (a gate, a generator) once per
-// single-cause fixture, and one whose subject is every module of its package.
-// A file of either class carries its own budget in place of the line, as ONE
-// line in its header, and is listed only when the window reads it above it:
+// single-cause fixture, and one whose subject is every module of its package
+// (both ruling record 6181973363, letter B); and one whose floor is a single
+// compile of its package's type graph, every probe after the first reading
+// that one program (ruling record 6212133431, letter A, which adds this class
+// and changes nothing else). A file of any class carries its own budget in
+// place of the line, as ONE line in its header, and is listed only when the
+// window reads it above it:
 //
 //   // test-budget: SECONDS — CLASS: REASON
 //
@@ -1236,7 +1240,7 @@ export function readWindowCaptures(dir) {
 //            next 10 s: a whole number, a multiple of 10, above
 //            FILE_BUDGET_SECONDS (one at or under the line lifts nothing). It
 //            rises only by a PR that re-measures and says why in REASON.
-//   CLASS    exactly one of TEST_BUDGET_CLASSES, spelled as the ruling names it.
+//   CLASS    exactly one of TEST_BUDGET_CLASSES, spelled as its ruling names it.
 //   REASON   why the file is of that class; not empty.
 //
 // The separators are an em dash between single spaces, and a colon and a space
@@ -1255,6 +1259,7 @@ export function readWindowCaptures(dir) {
 export const TEST_BUDGET_CLASSES = Object.freeze([
   'spawns the real producer once per single-cause fixture',
   'whole-package import',
+  'compiles the package type graph once',
 ]);
 const TEST_BUDGET_ATTEMPT = /^(?:\/\/+|\/\*+|\*)\s*test[-_ ]?budget\s*:/i;
 const TEST_BUDGET_LINE = /^\/\/ test-budget: (\S+) — ([^:]+): (.*)$/u;
@@ -1265,8 +1270,8 @@ export function readTestBudget(text, label) {
   const refuse = (line, why) => {
     throw new Error(
       `${label}:${line}: ${why}. A test file's budget is ONE header line, \`// test-budget: SECONDS — CLASS: REASON\` ` +
-        `(ruling record 6181973363): SECONDS is the measured CI reading x ${CEILING_HEADROOM} rounded up to the next 10 s, ` +
-        `above the ${FILE_BUDGET_SECONDS} s line; CLASS is ${TEST_BUDGET_CLASSES.map((c) => `"${c}"`).join(' or ')}; ` +
+        `(ruling records 6181973363 and 6212133431): SECONDS is the measured CI reading x ${CEILING_HEADROOM} rounded up to the next 10 s, ` +
+        `above the ${FILE_BUDGET_SECONDS} s line; CLASS is one of ${TEST_BUDGET_CLASSES.map((c) => `"${c}"`).join(', ')}; ` +
         'REASON is not empty. Refusing to guess which budget the file is held to.'
     );
   };
@@ -1292,7 +1297,7 @@ export function readTestBudget(text, label) {
     const seconds = Number(number);
     if (seconds % 10 !== 0) refuse(line, `the budget ${seconds} s is not on the 10 s grid`);
     if (seconds <= FILE_BUDGET_SECONDS) refuse(line, `the budget ${seconds} s does not lift the ${FILE_BUDGET_SECONDS} s line`);
-    if (!TEST_BUDGET_CLASSES.includes(cls)) refuse(line, `the class "${cls}" is neither class the ruling names`);
+    if (!TEST_BUDGET_CLASSES.includes(cls)) refuse(line, `the class "${cls}" is none of the ${TEST_BUDGET_CLASSES.length} classes the rulings name`);
     if (reason.trim() === '') refuse(line, 'the reason is empty');
     found = { seconds, cls, reason: reason.trim(), line };
   }
@@ -1660,8 +1665,9 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // (the density-only and the code fixture first), and the per-file budget.
   'refresh diff and per-file budget (#22949 E)': 22,
   // Ruling record 6181973363: a test file's own measured budget, the
-  // declaration's grammar and its refusals, and the list held to it.
-  'per-file budget declarations (ruling 6181973363)': 14,
+  // declaration's grammar and its refusals, and the list held to it; ruling
+  // record 6212133431: its third class, read in memory and from disk.
+  'per-file budget declarations (ruling 6181973363)': 18,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
@@ -2979,11 +2985,20 @@ function selfTest() {
 
   // -- A test file's own measured budget (ruling record 6181973363) ----------
   battery('per-file budget declarations (ruling 6181973363)');
-  const [producerClass, wholePackageClass] = TEST_BUDGET_CLASSES;
+  const [producerClass, wholePackageClass, typeGraphClass] = TEST_BUDGET_CLASSES;
+  // The ruled spellings, as LITERALS: a case that read them back out of
+  // TEST_BUDGET_CLASSES would still pass with a value deleted from it.
+  const ruledClasses = ['spawns the real producer once per single-cause fixture', 'whole-package import', 'compiles the package type graph once'];
   const declare = (seconds, cls = producerClass, reason = 'each case spawns the gate once') =>
     `// test-budget: ${seconds} — ${cls}: ${reason}`;
   // Line 3 of the file is `decl`; `rest` follows the header's blank line 4.
   const fileWith = (decl, rest = "import { it } from 'vitest';\n") => `// Copyright (c) 2026 ObjectStack.\n//\n${decl}\n\n${rest}`;
+  // The header of the two spec files the third class was ruled for, with the
+  // declaration on line 2, where every declaration in the tree sits.
+  const specFileWith = (decl) =>
+    `// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.\n${decl}\n\nimport { describe, it, expect } from 'vitest';\nimport ts from 'typescript';\n`;
+  const typeGraphLine =
+    '// test-budget: 30 — compiles the package type graph once: one ts.createProgram over the published entries, and every probe after the first reads that one program';
   const refusalOf = (fn) => {
     try {
       fn();
@@ -2993,9 +3008,47 @@ function selfTest() {
     return null;
   };
   check(() => {
-    // The two classes, spelled as the ruling names them, and no third.
-    if (TEST_BUDGET_CLASSES.length !== 2 || producerClass !== 'spawns the real producer once per single-cause fixture' || wholePackageClass !== 'whole-package import') {
+    // The three classes, spelled as their rulings name them, in order, and no fourth.
+    if (
+      TEST_BUDGET_CLASSES.length !== 3 ||
+      producerClass !== ruledClasses[0] ||
+      wholePackageClass !== ruledClasses[1] ||
+      typeGraphClass !== ruledClasses[2]
+    ) {
       throw new Error(`budget: the classes read ${JSON.stringify(TEST_BUDGET_CLASSES)}`);
+    }
+  });
+  check(() => {
+    // The third class (ruling record 6212133431), in the line the ruling
+    // writes, under the header of the files it was ruled for: a declared budget.
+    const d = readTestBudget(specFileWith(typeGraphLine), 'packages/spec/src/contracts/scoped-context.test.ts');
+    if (d?.seconds !== 30 || d.cls !== ruledClasses[2] || d.line !== 2 || !d.reason.startsWith('one ts.createProgram over')) {
+      throw new Error(`budget: the third class's declaration read ${JSON.stringify(d)}`);
+    }
+  });
+  check(() => {
+    // The two earlier classes still read, in that same header: the third
+    // took nothing from them.
+    for (const cls of ruledClasses.slice(0, 2)) {
+      const d = readTestBudget(specFileWith(declare(40, cls, 'r')), 'f.test.ts');
+      if (d?.seconds !== 40 || d.cls !== cls || d.line !== 2) throw new Error(`budget: the class "${cls}" read ${JSON.stringify(d)}`);
+    }
+  });
+  check(() => {
+    // A near miss of the third class is REFUSED, never read as a nearby class:
+    // the refusal names the file and line, the spelling, and all three classes.
+    for (const near of [
+      'compiles the package type-graph once',
+      'compiles the package type graph',
+      'compiles the type graph once',
+      'compiles the packages type graph once',
+      'Compiles the package type graph once',
+      'compiles the package type graph once ',
+    ]) {
+      const msg = refusalOf(() => readTestBudget(fileWith(declare(30, near)), 'f.test.ts'));
+      if (!msg?.startsWith('f.test.ts:3: ') || !msg.includes(`"${near}"`) || !ruledClasses.every((c) => msg.includes(`"${c}"`))) {
+        throw new Error(`budget: the near miss "${near}" read as ${msg}`);
+      }
     }
   });
   check(() => {
@@ -3016,9 +3069,9 @@ function selfTest() {
     }
   });
   check(() => {
-    // A class naming neither is REFUSED, naming the file and the line.
+    // A class naming none of them is REFUSED, naming the file and the line.
     const msg = refusalOf(() => readTestBudget(fileWith(declare(1130, 'slow by nature')), 'packages/x/a.test.ts'));
-    if (!msg?.startsWith('packages/x/a.test.ts:3: ') || !msg.includes('slow by nature')) throw new Error(`budget: a class naming neither read as ${msg}`);
+    if (!msg?.startsWith('packages/x/a.test.ts:3: ') || !msg.includes('slow by nature')) throw new Error(`budget: a class naming none of them read as ${msg}`);
   });
   check(() => {
     // A number off the 10 s grid, at or under the line, or not a whole number is REFUSED.
@@ -3149,6 +3202,44 @@ function selfTest() {
       const msg = refusalOf(() => run('scripts/bad.test.ts', 20_000, 'refused.md'));
       if (!msg?.includes(`${path.join('spec', 'scripts', 'bad.test.ts')}:3: `) || existsSync(path.join(dir, 'refused.md'))) {
         throw new Error(`cli: a malformed declaration did not refuse the diff (${msg})`);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+  check(() => {
+    // The third class end to end, from a file on disk through --diff: at the
+    // card's slowest CI reading (18.1 s) the file is held to its 30 s and named
+    // with its class; read over the 30 s, it is listed against them.
+    const dir = mkdtempSync(path.join(tmpdir(), 'os-refresh-type-graph-'));
+    try {
+      const pkgDir = path.join(dir, 'spec');
+      mkdirSync(path.join(pkgDir, 'src', 'integration'), { recursive: true });
+      writeFileSync(path.join(pkgDir, 'src', 'integration', 'graph.test.ts'), specFileWith(typeGraphLine));
+      writeFileSync(path.join(dir, 'prior.json'), JSON.stringify(priorWindow));
+      writeFileSync(path.join(dir, 'refreshed.json'), JSON.stringify(codeWindow));
+      const run = (ms, out) => {
+        const caps = path.join(dir, `captures-${out}`);
+        mkdirSync(path.join(caps, 'n1', '1'), { recursive: true });
+        writeFileSync(path.join(caps, 'n1', '1', 'shard-1.json'), JSON.stringify(capture([fileRow('spec', 'src/integration/graph.test.ts', ms)])));
+        const argv = ['--diff', '--prior', path.join(dir, 'prior.json'), '--refreshed', path.join(dir, 'refreshed.json'), '--captures', caps, '--out', path.join(dir, out)];
+        const quiet = console.error;
+        console.error = () => {};
+        try {
+          return diffMain(argv, { packageDir: (name) => (name === 'spec' ? pkgDir : null) });
+        } finally {
+          console.error = quiet;
+        }
+      };
+      const heldCode = run(18_100, 'held.md');
+      const held = readFileSync(path.join(dir, 'held.md'), 'utf8');
+      if (heldCode !== 0 || held.includes('| `src/integration/graph.test.ts`') || !held.includes('`src/integration/graph.test.ts` (`spec`) 18.10 s of its 30 s, compiles the package type graph once')) {
+        throw new Error(`cli: a type-graph file under its declared budget exited ${heldCode} and wrote:\n${held}`);
+      }
+      const overCode = run(31_000, 'over.md');
+      const over = readFileSync(path.join(dir, 'over.md'), 'utf8');
+      if (overCode !== 0 || !over.includes('| `src/integration/graph.test.ts` | `spec` | `n1` | 31.00 (declared 30) | 1 / 1 |')) {
+        throw new Error(`cli: a type-graph file over its declared budget exited ${overCode} and wrote:\n${over}`);
       }
     } finally {
       rmSync(dir, { recursive: true, force: true });

@@ -65,6 +65,9 @@ import {
   confirmAudienceBindingSuggestion,
   dismissAudienceBindingSuggestion,
   readAcceptedEveryoneSets,
+  readAcceptedDefaultPermissionSetsOption,
+  refuseAcceptedDefaultsWithoutWall,
+  type DeploymentAcceptance,
   type SuggestionDeps,
   type SuggestionListFilter,
 } from './suggested-audience-bindings.js';
@@ -907,6 +910,34 @@ export interface SecurityPluginOptions {
    * @default 'member_default'
    */
   fallbackPermissionSet?: string | null;
+  /**
+   * [ADR-0131 D5] The package defaults this deployment accepts for the
+   * `everyone` anchor, declared as host configuration — read ONLY under a
+   * walled posture (`group` / `isolated`, `postureEnforcesWall`).
+   *
+   * Under a wall, platform standing is configuration, and no reserved
+   * organization owns deployment-level rows (ADR-0131 §1.5). So a walled host
+   * names here the `isDefault: true` permission sets every signed-in member
+   * holds beside the baseline. Declared, this list IS the deployment-level
+   * acceptance: the `everyone` definition derives from the baseline plus these
+   * sets, the `sys_audience_binding_suggestion` record is neither read nor
+   * written, and its list / accept / dismiss doors answer 409
+   * `SUGGESTION_STATE` naming this option. `[]` declares that nothing beyond
+   * the baseline is accepted.
+   *
+   * Each name passes the same checks an accepted suggestion does, on every
+   * derivation: the security catalog serves it under some package, it declares
+   * `isDefault: true`, and it carries no bit the `everyone` anchor forbids
+   * (ADR-0090 D7). A name failing one is not granted and is reported — at
+   * `error` for a forbidden bit.
+   *
+   * Omitted (the default), the acceptance is the record, owned by the Default
+   * Organization, as before. Declared under the `single` posture it is refused
+   * at `start()`: there the record is the acceptance (ADR-0131 D5's
+   * Default-Organization row), and a declaration nothing reads would only
+   * look enforced.
+   */
+  acceptedDefaultPermissionSets?: readonly string[];
 }
 
 /**
@@ -1166,6 +1197,8 @@ export class SecurityPlugin implements Plugin {
   private fieldMasker = new FieldMasker();
   private readonly bootstrapPermissionSets: PermissionSet[];
   private readonly fallbackPermissionSet: string | null;
+  /** [ADR-0131 D5] {@link SecurityPluginOptions.acceptedDefaultPermissionSets}, frozen. */
+  private readonly acceptedDefaultPermissionSets: readonly string[] | undefined;
   /**
    * [#7555, ADR-0090 D5] The HUMAN baseline, as the list of set names it is:
    * {@link fallbackPermissionSet} COMPOSED WITH the platform baseline
@@ -1479,6 +1512,15 @@ export class SecurityPlugin implements Plugin {
     // [#7555] …and the baseline that actually resolves is that name COMPOSED
     // with the platform's own, never one displacing the other (ADR-0090 D5).
     this.baselinePermissionSets = composeHumanBaselinePermissionSets(this.fallbackPermissionSet);
+    this.acceptedDefaultPermissionSets = readAcceptedDefaultPermissionSetsOption(options.acceptedDefaultPermissionSets);
+  }
+
+  /**
+   * [ADR-0131 D5] Where the deployment-level acceptance lives: the posture this
+   * plugin resolved, and the host's declaration (read only under a wall).
+   */
+  private deploymentAcceptance(): DeploymentAcceptance {
+    return { posture: this.tenancyPosture, acceptedDefaultPermissionSets: this.acceptedDefaultPermissionSets };
   }
 
   async init(ctx: PluginContext): Promise<void> {
@@ -1895,6 +1937,10 @@ export class SecurityPlugin implements Plugin {
     } catch {
       /* engine absent — nothing to widen */
     }
+    // [ADR-0131 D5] The host's accepted package defaults are read only under a
+    // wall; declared under `single` they are refused here, the first moment the
+    // posture is known, rather than left looking enforced.
+    refuseAcceptedDefaultsWithoutWall(this.tenancyPosture, this.acceptedDefaultPermissionSets);
     // [ADR-0105 D11] Optional app/plugin membership resolver for the §7.3.1
     // `IN (current_user.<key>)` sets. Absent is the norm — probe once.
     try {
@@ -2012,6 +2058,7 @@ export class SecurityPlugin implements Plugin {
         metadata,
         posture: () => this.tenancyPosture,
         rederiveEveryone: () => this.declareEveryone(ctx.logger),
+        acceptedDefaultPermissionSets: this.acceptedDefaultPermissionSets,
         logger: ctx.logger,
       };
       // Typed against the published contract so the registered surface cannot
@@ -4375,7 +4422,7 @@ export class SecurityPlugin implements Plugin {
               if (evt?.type !== 'permission' || evt.state === 'draft') return;
               void (async () => {
                 try {
-                  await reconcileAudienceBindingSuggestions(ql, ctx.logger);
+                  await reconcileAudienceBindingSuggestions(ql, ctx.logger, this.deploymentAcceptance());
                 } catch (e) {
                   ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
                 }
@@ -4471,7 +4518,7 @@ export class SecurityPlugin implements Plugin {
         // `manage_metadata` holder's decision — never auto-bound. ONE
         // deployment-level pass, owned by the Default Organization (#22801 → A).
         try {
-          await reconcileAudienceBindingSuggestions(ql, ctx.logger);
+          await reconcileAudienceBindingSuggestions(ql, ctx.logger, this.deploymentAcceptance());
         } catch (e) {
           ctx.logger.warn('[security] audience-binding suggestion sync failed (non-fatal)', { error: (e as Error).message });
         }
@@ -4670,13 +4717,16 @@ export class SecurityPlugin implements Plugin {
         logger.warn('[security] the everyone anchor does not name a baseline set — high-privilege bits', { set, offending });
       });
       try {
-        const derived = await readAcceptedEveryoneSets(ql, this.metadata);
+        const derived = await readAcceptedEveryoneSets(ql, this.metadata, this.deploymentAcceptance());
         for (const name of derived.accepted) if (!sets.includes(name)) sets.push(name);
         for (const w of derived.withheld) {
-          const line =
-            `[security] the everyone anchor does not carry the accepted set '${w.set}' (package '${w.packageId}'): ` +
-            `${w.reason}. Its acceptance stays recorded and grants nothing until the set is served again as ` +
-            'accepted; a manage_metadata holder can revoke it in Setup.';
+          const line = w.source === 'host-configuration'
+            ? `[security] the everyone anchor does not carry the set '${w.set}' the security plugin's ` +
+              `\`acceptedDefaultPermissionSets\` option declares: ${w.reason}. It grants nothing while that holds; ` +
+              'remove the name from the option, or serve the set again as an isDefault set some package declares.'
+            : `[security] the everyone anchor does not carry the accepted set '${w.set}' (package '${w.packageId}'): ` +
+              `${w.reason}. Its acceptance stays recorded and grants nothing until the set is served again as ` +
+              'accepted; a manage_metadata holder can revoke it in Setup.';
           if (w.forbidden) logger.error(line, undefined, { set: w.set, package: w.packageId });
           else logger.warn(line, { set: w.set, package: w.packageId });
         }
