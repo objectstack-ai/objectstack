@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, expect, it, vi } from 'vitest';
+import { PRINCIPAL_SESSION_MAX_TTL_SECONDS } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { ChromiumDriver } from './chromium-driver.js';
 import type { PrintPlacementResolution } from './config.js';
@@ -291,8 +292,11 @@ describe('PrintService — mint, render, archive, revoke', () => {
     const h = await harness();
     const out = await h.service.printRecordToFile(REQUEST, USER);
     expect(h.mint).toHaveBeenCalledWith(USER, PRINT_SESSION_TTL_SECONDS);
+    // The request's own context, unchanged — the very object the caller passed, never one assembled.
+    expect(h.mint.mock.calls[0]![0]).toBe(USER);
+    expect(h.findOne.mock.calls[0]![2].context).toBe(USER);
     expect(PRINT_SESSION_TTL_SECONDS * 1000).toBeGreaterThan(PRINT_RENDER_TIMEOUT_MS);
-    expect(PRINT_SESSION_TTL_SECONDS).toBeLessThanOrEqual(120);
+    expect(PRINT_SESSION_TTL_SECONDS).toBeLessThanOrEqual(PRINCIPAL_SESSION_MAX_TTL_SECONDS);
     expect(h.driver.renderPdf).toHaveBeenCalledWith({
       url: `${CONSOLE}/apps/showcase/invoice/record/inv_1`,
       cookie: expect.objectContaining({ value: COOKIE_VALUE }),
@@ -361,7 +365,7 @@ describe('PrintService — mint, render, archive, revoke', () => {
 describe('principalSessionMinterOf — the one read of the auth service’s mint', () => {
   it('absent auth, or an auth service without the member, has no mint', () => {
     expect(principalSessionMinterOf(undefined)).toBeUndefined();
-    expect(principalSessionMinterOf({ verify: () => undefined })).toBeUndefined();
+    expect(principalSessionMinterOf({ verify: () => undefined } as never)).toBeUndefined();
   });
 
   it('calls the member on the auth service with the caller’s context and the TTL', async () => {
@@ -372,8 +376,9 @@ describe('principalSessionMinterOf — the one read of the auth service’s mint
         return { token: 't', cookie: { name: 'n', value: 'v', path: '/', httpOnly: true, secure: true }, revoke: async () => {} };
       },
     };
-    const minter = principalSessionMinterOf(auth)!;
+    const minter = principalSessionMinterOf(auth as never)!;
     await minter.mint(USER, 60);
     expect(auth.seen).toEqual([USER, { ttlSeconds: 60 }]);
+    expect(auth.seen[0]).toBe(USER);
   });
 });

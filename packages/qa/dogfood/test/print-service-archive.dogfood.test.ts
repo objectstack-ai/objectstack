@@ -36,12 +36,18 @@ import { StorageServicePlugin } from '@objectstack/service-storage';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 import { bootShowcase } from './showcase-boot.js';
 import { PrintServicePlugin } from '../../../services/service-print/src/print-service-plugin.js';
+import { principalSessionMinterOf } from '../../../services/service-print/src/principal-session.js';
 import {
   PrintService,
   type IPrintService,
   type PrintEngine,
 } from '../../../services/service-print/src/print-service.js';
-import { FILE_ATTACHMENT_SERVICE, type IDataEngine, type IFileAttachmentService } from '@objectstack/spec/contracts';
+import {
+  FILE_ATTACHMENT_SERVICE,
+  type IAuthService,
+  type IDataEngine,
+  type IFileAttachmentService,
+} from '@objectstack/spec/contracts';
 
 const SYS = { isSystem: true } as const;
 const PAGE = 'showcase_invoice_document';
@@ -209,6 +215,39 @@ describe('print service on a real showcase boot', () => {
       expect(file).toMatchObject({ status: 'committed', mime_type: 'application/pdf', size: PDF.byteLength, scope: 'attachments' });
       const attachment = await ql.findOne('sys_attachment', { where: { id: out.attachmentId } }, { context: SYS });
       expect(attachment).toMatchObject({ parent_object: 'showcase_invoice', parent_id: ownInvoice, file_id: out.fileId });
+    });
+
+    it('with the real auth mint: the render loads as the caller, and the session is gone once the print returns', async () => {
+      const ctx = await stack.contextFor(memberToken);
+      const minter = principalSessionMinterOf(stack.kernel.getService<IAuthService>('auth'));
+      expect(minter, 'the auth service implements IAuthService.mintPrincipalSession').toBeDefined();
+      const asSession = (cookie: { name: string; value: string }) =>
+        stack.raw('/api/v1/auth/get-session', { headers: { cookie: `${cookie.name}=${cookie.value}` } });
+      let seenCookie: { name: string; value: string } | undefined;
+      let duringRender: unknown;
+      const real = new PrintService({
+        placement: {
+          state: 'configured',
+          resolved: { placement: 'local', target: '/stand-in/chromium', consoleUrl: 'http://127.0.0.1:1/_console' },
+        },
+        driver: {
+          placement: 'local',
+          probe: async () => ({ version: 'stand-in' }),
+          renderPdf: async ({ cookie }) => {
+            seenCookie = cookie;
+            duringRender = await (await asSession(cookie)).json();
+            return PDF;
+          },
+        },
+        getEngine: () => stack.kernel.getService<PrintEngine>('objectql'),
+        getAttachments: () => stack.kernel.getService<IFileAttachmentService>(FILE_ATTACHMENT_SERVICE),
+        getMinter: () => minter,
+      });
+      await real.probe();
+      await real.printRecordToFile(request(ownInvoice), ctx);
+      expect((duringRender as { user?: { id?: string } } | null)?.user?.id).toBe(ctx.userId);
+      const after = await (await asSession(seenCookie!)).json();
+      expect(after).toBeNull();
     });
   });
 });

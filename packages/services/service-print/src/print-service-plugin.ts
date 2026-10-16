@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Plugin, PluginContext } from '@objectstack/core';
-import { FILE_ATTACHMENT_SERVICE, type IFileAttachmentService } from '@objectstack/spec/contracts';
+import { FILE_ATTACHMENT_SERVICE, type IAuthService, type IFileAttachmentService } from '@objectstack/spec/contracts';
 import { createChromiumDriver } from './chromium-driver.js';
 import {
   describeEndpoint,
@@ -68,7 +68,7 @@ export class PrintServicePlugin implements Plugin {
       driver,
       getEngine: () => optional<PrintEngine>('objectql'),
       getAttachments: () => optional<IFileAttachmentService>(FILE_ATTACHMENT_SERVICE),
-      getMinter: () => principalSessionMinterOf(optional<unknown>('auth')),
+      getMinter: () => principalSessionMinterOf(optional<IAuthService>('auth')),
     });
     ctx.registerService(PRINT_SERVICE, this.service);
   }
