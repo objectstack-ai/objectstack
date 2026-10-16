@@ -9434,6 +9434,10 @@ export class RestServer {
                     // now agree — but they agree by each enforcing the
                     // declaration itself, NOT by one deferring to the other.
                     let objectSchema: any = null;
+                    // [#23497] The form served below: the matched form, with its
+                    // sections' `label` / `description` localized beside the
+                    // schema's field labels (see the translation block).
+                    let servedForm: any = match.form;
                     try {
                         const p = await this.resolveProtocol(environmentId, req);
                         if (typeof (p as any).getMetaItems === 'function') {
@@ -9469,9 +9473,10 @@ export class RestServer {
                                 }
                                 objectSchema = { name: obj.name, label: obj.label, fields };
                                 // Localize labels / help text / option labels so anonymous
-                                // clients render in the visitor's preferred language. The
-                                // form payload is otherwise un-translated (resolveFormBySlug
-                                // returns the raw view spec), so we hydrate the schema here.
+                                // clients render in the visitor's preferred language.
+                                // `resolveFormBySlug` returns the raw view spec, so both
+                                // halves of the payload are hydrated here: the schema, and
+                                // the form's section headings ([#23497], below).
                                 try {
                                     const i18n = await this.resolveI18nService(environmentId, req);
                                     const bundle = this.buildTranslationBundle(i18n);
@@ -9488,6 +9493,34 @@ export class RestServer {
                                             ...RestServer.translateOptionsFor(i18n, locale),
                                             packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
                                         });
+                                        // [#23497] The section headings. An anonymous
+                                        // visitor cannot load the bundle client-side (the
+                                        // `/i18n` domain answers it 401), so a section's
+                                        // `objects.OBJECT._sections.NAME` copy reaches it
+                                        // here or not at all. ONE call into the spec's view
+                                        // translator, which owns every rule: the key is the
+                                        // section's `name` (a nameless section is returned
+                                        // as authored), a missing key keeps the authored
+                                        // text, only authored copy is translated, and an
+                                        // explicit override beats the catalog against the
+                                        // packaged view, handed over exactly as the object
+                                        // call above hands its own base. ⛔ No walk of
+                                        // `_sections` and no locale chain here.
+                                        //
+                                        // The protocol enumerates view ITEMS only, so the
+                                        // matched form is the item's `config`, the address
+                                        // `translateView` translates sections at. It runs
+                                        // BEFORE the strip below and returns each section's
+                                        // `fields` untouched, so it cannot re-introduce a
+                                        // stripped field. The top-level `label` keeps its
+                                        // own reading: the translator falls back to the
+                                        // view's machine name where this route falls back
+                                        // to the form's label.
+                                        const view = translateMetadataDocument('view', match.view, bundle, {
+                                            ...RestServer.translateOptionsFor(i18n, locale),
+                                            packagedBase: this.packagedObjectBase(p, 'view', match.view?.name),
+                                        });
+                                        if (match.form === match.view?.config) servedForm = view?.config;
                                     }
                                 } catch (e: any) {
                                     logError('[REST] Public form schema translation failed:', e);
@@ -9506,7 +9539,7 @@ export class RestServer {
                     // unconditional: no declaration can put record search on the
                     // internet through a public form.
                     const safeForm = (() => {
-                        if (!match.form || !Array.isArray(match.form.sections)) return match.form;
+                        if (!servedForm || !Array.isArray(servedForm.sections)) return servedForm;
                         const allow = (name: string): boolean => {
                             // [#3022] A declared server-managed anchor (e.g. a
                             // FormView listing `owner_id`) is a spec mistake —
@@ -9520,7 +9553,7 @@ export class RestServer {
                             // expose unrestricted user search to the internet.
                             return t !== 'lookup' && t !== 'master_detail' && t !== 'user';
                         };
-                        const sections = match.form.sections.map((sec: any) => {
+                        const sections = servedForm.sections.map((sec: any) => {
                             const fields = (sec?.fields ?? []).filter((f: any) => {
                                 const name = typeof f === 'string' ? f : f?.field;
                                 if (!name) return false;
@@ -9528,7 +9561,7 @@ export class RestServer {
                             });
                             return { ...sec, fields };
                         });
-                        return { ...match.form, sections };
+                        return { ...servedForm, sections };
                     })();
                     res.header('Vary', 'Accept-Language');
                     res.json({
