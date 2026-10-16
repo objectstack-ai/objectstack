@@ -194,7 +194,7 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         expectRefusal(outcome, 'env_org_detail', 'acme_org', `page 'acme_org_detail' of package '${PKG}'`);
         expect(String((outcome as { error?: any }).error?.message)).toContain(
             "Save 'env_org_detail' with `isDefault: false`: a page a package ships stays the default unless the deployment "
-            + 'is composed without that package.',
+            + "is composed without that package's page.",
         );
         expect(storedPages()).toEqual([]);
     });

@@ -329,10 +329,20 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
   // the same URLs. Kept ABOVE the sqlite test so it is not shadowed, and
   // deliberately distinct from sqlite's `:memory:` pseudo-file below, which is
   // the replacement this refusal names.
-  if (/^(memory|mingo):\/\//i.test(u)) {
+  //
+  // The refusal names the SCHEME, never the URL: both schemes accept anything
+  // after the `//`, a `user:password@` and a `?authToken=` included, and this
+  // sentence is printed to the console on the way out. The subject is the
+  // runtime host's own (`refuseRetiredMemoryEngine` in
+  // `packages/runtime/src/standalone-stack.ts`, module-local there, so written
+  // out here), and `driver-vocabulary-parity.test.ts` holds the two equal.
+  // The scheme is also what the error carries as `driverType`, as the
+  // unrecognised-scheme refusal below does.
+  const retiredScheme = /^(memory|mingo):\/\//i.exec(u)?.[0];
+  if (retiredScheme) {
     throw new UnsupportedDriverError(
-      u,
-      retiredMemoryEngineMessage(`OS_DATABASE_URL "${u}"`),
+      retiredScheme,
+      retiredMemoryEngineMessage(`An OS_DATABASE_URL with the "${retiredScheme}" scheme`),
       // Not a kind this resolver can produce — `database-driver-allowlist.pin`
       // reads `recognized` to tell the two apart.
       { recognized: false },

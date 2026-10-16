@@ -2,6 +2,8 @@
 '@objectstack/runtime': patch
 ---
 
+**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+
 fix(runtime): a sandboxed body that throws a value no read can flatten (`throw ''`, a null-prototype object, an object whose `message` getter throws) now ends its run at once with the sentence `the script threw a value that could not be read`, instead of waiting for the wall-clock ceiling (#23723)
 
 **Latency and answer change, for these values only.** The QuickJS runner's reject handler records a body's rejection as a flattened string, and the run ends only once that string is non-empty. For these values the read threw or gave `''`, so nothing was recorded: the run waited for the sandbox's wall-clock ceiling (30 s by default) and ended as a budget error with no business message, which the doors answer as a crash. The handler now records the fixed sentence above for any value it cannot read, and the run ends on the same path as any other rejection. The sentence names nothing the value carried and no stack.

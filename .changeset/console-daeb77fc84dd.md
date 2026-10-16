@@ -2,6 +2,8 @@
 "@objectstack/console": minor
 ---
 
+**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+
 Console (objectui) refreshed to `daeb77fc84dd`. Frontend changes in this range:
 
 Derived from the changesets objectui declared over the range — 4 releasing of 4 changesets added across 5 non-merge commits; omitted: 1 commit carrying no changeset (they ship no package code).

@@ -1871,8 +1871,8 @@ export const PageSchema = lazySchema(() => strictObject({
    * objectstack#23015, record 6134056653.)
    *
    * To change which page opens: set `isDefault: false` on one of the two, or
-   * compose the deployment without the package that ships the other. Shipping
-   * a second default is not an override path.
+   * compose the deployment without the other package's page. Shipping a
+   * second default is not an override path.
    *
    * `isDefault: true` on a page that is not a record page bound to an object
    * is REFUSED, at the same doors (maintainer ruling A on objectstack#23610,
