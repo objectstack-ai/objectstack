@@ -104,6 +104,7 @@ import {
   devAutoMigrateConfig,
   loadTursoDriverFactory as loadRuntimeTursoDriverFactory,
   namesRetiredMemoryEngine,
+  normalizeDatabaseUrl,
   retiredMemoryEngineMessage,
   type LoadTursoDriverFactoryOptions,
 } from '@objectstack/runtime';
@@ -291,9 +292,11 @@ function unsupportedUrlSchemeMessage(scheme: string): string {
  *
  * The arms are the runtime host's (`detectDriverFromUrl` in
  * `packages/runtime/src/standalone-stack.ts`), so the two hosts give one answer
- * per URL: `pg://` is postgres, and a value with no `<scheme>://` is a SQLite
- * file path, whatever its extension. The runtime refuses every other
- * `<scheme>://`, so refusing it here takes away nothing that host accepts.
+ * per URL: `pg://` is postgres, and a value with no scheme is a SQLite file
+ * path, whatever its extension. The runtime refuses every other
+ * `<scheme>://`, so refusing it here takes away nothing that host means to
+ * accept. The one difference is an OPAQUE scheme (`jdbc:…`, `redis:h`), which
+ * this host refuses and the runtime host still opens as a file (#23765).
  */
 export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (!url) return '';
@@ -330,20 +333,29 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
     );
   }
   if (/^file:/i.test(u) || /^sqlite:/i.test(u)) return 'sqlite';
-  // No `<scheme>://` at all: a SQLite file path — `:memory:`, `./app.db`,
-  // `data/app`. The runtime host's arm, character for character. It is what
-  // keeps a `.db` name from rescuing an unrecognised scheme: `redis://h/x.db`
-  // is refused below, as the runtime refuses it, rather than handed to SQLite
-  // as a file path.
-  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(u)) return 'sqlite';
-  const scheme = `${/^[a-z][a-z0-9+.-]*/i.exec(u)![0]}://`;
-  throw new UnsupportedDriverError(
-    scheme,
-    unsupportedUrlSchemeMessage(scheme),
-    // Not a kind this resolver can produce — `database-driver-allowlist.pin`
-    // reads `recognized` to tell the two apart.
-    { recognized: false },
-  );
+  // What is left with a scheme is refused, naming the scheme and never the URL:
+  //  - an unrecognised `<scheme>://` (`redis://…`). Refusing it here, rather
+  //    than letting a name that ends `.db` reach SQLite, is what keeps
+  //    `redis://h/x.db` refused, as the runtime host refuses it;
+  //  - an OPAQUE scheme, two or more characters and a `:` with no `//`
+  //    (`jdbc:postgresql://…`, `redis:h`). The runtime host's scheme-less arm
+  //    opens these as a SQLite file at a path made of the URL. That is an
+  //    implementation gap on that host (#23765), against its own rule that an
+  //    unknown scheme never falls back to SQLite, so it is not copied here.
+  // A single letter and a `:` is a drive (`C:\data\app`, `C:/data/app`), not
+  // a scheme, and stays a path.
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(u)?.[0] ?? /^[a-z][a-z0-9+.-]+:/i.exec(u)?.[0];
+  if (scheme) {
+    throw new UnsupportedDriverError(
+      scheme,
+      unsupportedUrlSchemeMessage(scheme),
+      // Not a kind this resolver can produce — `database-driver-allowlist.pin`
+      // reads `recognized` to tell the two apart.
+      { recognized: false },
+    );
+  }
+  // No scheme at all: a SQLite file path — `:memory:`, `./app.db`, `data/app`.
+  return 'sqlite';
 }
 
 /**
@@ -500,9 +512,12 @@ export function resolveStorageDefinition(
   }
 
   if (kind === 'sqlite') {
-    const filePath = (databaseUrl ?? ':memory:')
+    // `sqlite:` and `sqlite://` are aliases of `file:`, translated by the runtime
+    // host's own rule (`normalizeDatabaseUrl`) rather than a second copy of it,
+    // so both hosts open one file: `sqlite://x.db` is `x.db`, never `//x.db`
+    // (the filesystem root), and `sqlite:///abs/x.db` is `/abs/x.db`.
+    const filePath = normalizeDatabaseUrl(databaseUrl ?? ':memory:')
       .replace(/^file:/, '')
-      .replace(/^sqlite:/, '')
       .replace(/^sql:\/\//, '');
     return {
       driverId: 'sqlite',
