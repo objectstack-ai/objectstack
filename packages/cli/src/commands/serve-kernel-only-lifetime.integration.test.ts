@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 40 — spawns the real producer once per single-cause fixture: three boots of the built CLI (production --no-server --preset minimal, --dev --no-server, a default composed boot), each differing only in the input under test, held 3 s past its banner and then stopped by SIGTERM; 27.0 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawn, type ChildProcess } from 'node:child_process';
