@@ -145,6 +145,10 @@ interface CensusEntry {
  * OpenAPI bodies (`discovery-routes.ts`) build no `query:` literal either —
  * they read the protocol's discovery document and its `getMetaItems` listings
  * by `type`, never through a `query:` slot.
+ *
+ * [#23050 slice 8] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0: the email send body
+ * (`email-routes.ts`) builds no `query:` literal either — it hands the email
+ * service the caller's own JSON body, never a `query:` slot.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 1,
@@ -155,6 +159,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'analytics-routes.ts': 0,
     'security-routes.ts': 0,
     'discovery-routes.ts': 0,
+    'email-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -346,7 +351,8 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#23050 slice 5] Length 5 → 6, the sum unchanged.
         // [#23050 slice 6] Length 6 → 7, the sum unchanged.
         // [#23050 slice 7] Length 7 → 8, the sum unchanged.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(8);
+        // [#23050 slice 8] Length 8 → 9, the sum unchanged.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(9);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

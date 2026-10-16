@@ -364,7 +364,13 @@ const MODULES = {
     // `{ error: { code, message } }`), so this count does not move and that
     // module declares 0 below; the sum is unchanged
     // (17 + 13 + 8 + 1 + 0 + 0 + 0 + 0 = 39).
-    stringError: 17,
+    //
+    // 17 → 16 (#23050 slice 8): NOT progress — the same MOVE as slices 1–3.
+    // The email send body's one literal string `error` body (the non-object
+    // body's 400 `INVALID_REQUEST`, `'JSON body required'`) left this file with
+    // that body for `email-routes.ts`, declared below at the count it had here;
+    // the sum is unchanged (16 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 = 39).
+    stringError: 16,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -438,7 +444,13 @@ const MODULES = {
     // for `discovery-routes.ts` carrying NO `{ code, error }` body, so this
     // count does not move and that module declares 0 below; the sum is
     // unchanged (17 + 15 + 8 + 9 + 4 + 1 + 0 + 0 = 54).
-    siblingCode: 17,
+    //
+    // 17 → 14 (#23050 slice 8): NOT progress — the same MOVE as `stringError`
+    // above. The email send body's three `{ code, error }` bodies (the 400s
+    // `INVALID_REQUEST` and `VALIDATION_FAILED`, and its 500 `EMAIL_SEND_FAILED`)
+    // left with that body for `email-routes.ts`, declared below; the sum is
+    // unchanged (14 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 = 54).
+    siblingCode: 14,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -602,6 +614,23 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 0,
     siblingCode: 0,
+  },
+
+  // [#23050 slice 8] `RestServer#registerEmailEndpoints`' body — the
+  // transactional send door, `POST /email/send` — moved out of `rest-server.ts`
+  // whole, on exactly slice 1's terms above: a MOVE, no wire answer changed, so
+  // it inherits `dialectOnly` and the two dialect facts, and no write-site
+  // count. Both counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 17 → 16, siblingCode 17 → 14),
+  // so each sum is unchanged. Both only ever tick down. Discovered by the
+  // `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/email-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 8 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 1,
+    siblingCode: 3,
   },
 };
 
