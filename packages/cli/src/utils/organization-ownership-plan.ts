@@ -1321,8 +1321,8 @@ export async function buildOrganizationOwnershipPlan(opts: {
       `${names.length} shipped permission set row(s) are stored as managed_by 'admin' (${[...new Set(names)].sort().join(', ')}): ` +
         'the seeder of an install created before 2026-08-15 wrote them that way. The ceremony adopts them as the platform ' +
         'seeds they are and deletes them as mirrors once every grant names its set, so the shipped definitions stand. ' +
-        'An edit an administrator made to one of these sets in Setup is not carried — record it before --apply and ' +
-        'author it as a new permission set afterwards.',
+        'An edit an administrator made to one of these sets in Setup is not carried: it stays readable in the backup ' +
+        'taken before the upgrade, to author again as a new permission set.',
     );
   }
   for (const copy of staleCopies) {

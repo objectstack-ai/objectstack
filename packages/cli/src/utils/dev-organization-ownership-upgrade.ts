@@ -8,7 +8,7 @@ import { resolveTelemetryDbPath } from './telemetry-datasource.js';
 /**
  * `os dev`'s in-place upgrade of a development database still in the v17
  * organization-ownership shape — the ADR-0131 D10 development exception
- * (maintainer ruling 2026-10-16).
+ * (ADR-0131, amendment 2026-10-16).
  *
  * ## Why `os dev` runs the ceremony, and `os serve` / `os start` never do
  *

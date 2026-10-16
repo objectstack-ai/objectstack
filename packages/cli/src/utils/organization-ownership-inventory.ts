@@ -209,15 +209,14 @@ export const SHIPPED_PERMISSION_SET_NAMES: readonly string[] = [
 
 /**
  * The shipped sets an install seeded before the seeder stamped its rows
- * `managed_by: 'platform'` (plugin-security `bootstrap-platform-admin.ts`, ruled
- * 2026-08-15): the insert omitted the column, so the object's `defaultValue:
- * 'admin'` filled it, and every install created earlier holds the shipped sets
- * as `admin` rows that read as Setup-authored. The ceremony adopts them as the
- * platform seeds they are — re-owned `platform` at the authored conversion, then
- * deleted as mirrors once the grants name them — so the shipped definition
- * stands; an edit an administrator made to one of them in Setup is not carried,
- * and the plan and the apply both warn, naming each row (maintainer ruling
- * 2026-10-16: adopt them automatically, warn in production).
+ * `managed_by: 'platform'` (commit 712e185db, ruled 2026-08-15): the insert
+ * omitted the column, so the object's `defaultValue: 'admin'` filled it, and
+ * every install created earlier holds the shipped sets as `admin` rows that
+ * read as Setup-authored. The ceremony adopts them as the platform seeds they
+ * are — re-owned `platform` at the authored conversion, then deleted as mirrors
+ * once the grants name them — so the shipped definition stands; an edit an
+ * administrator made to one of them in Setup is not carried, and the plan and
+ * the apply both warn, naming each row (ADR-0131, amendment 2026-10-16).
  */
 export const LEGACY_SHIPPED_SET_SEEDS = [
   { column: 'managed_by', equals: 'admin' },
@@ -385,7 +384,7 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
       {
         id: LEGACY_SHIPPED_SET_SEEDS_CATEGORY,
         label: 'shipped permission sets an install seeded before 2026-08-15 as managed_by admin — adopted as platform seeds and deleted as mirrors; a Setup edit to one of them is not carried',
-        citation: 'plugin-security bootstrap-platform-admin.ts (seed provenance, ruled 2026-08-15); maintainer ruling 2026-10-16',
+        citation: 'seed provenance: commit 712e185db (ruled 2026-08-15); ADR-0131, amendment 2026-10-16',
         where: LEGACY_SHIPPED_SET_SEEDS,
       },
     ],
