@@ -2,6 +2,8 @@
 "@objectstack/spec": minor
 ---
 
+**Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+
 feat(spec)!: a form section's `columns` has no default — undeclared, the density is the renderer's (by available width); declared, it is the author's ceiling
 
 Clause-②: no

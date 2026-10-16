@@ -21757,7 +21757,7 @@ export class ObjectStackProtocolImplementation implements
         const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
         const remedy = unique.some((h) => h.shipped)
             ? `Save '${saveName}' with \`isDefault: false\`: a page a package ships stays the default unless the `
-              + `deployment is composed without that package.`
+              + `deployment is composed without that package's page.`
             : `Save '${saveName}' with \`isDefault: false\`, or first save ${unique.map((h) => `'${h.page}'`).join(' and ')} `
               + `with \`isDefault: false\` to make '${saveName}' the default instead.`;
         const err = new Error(
