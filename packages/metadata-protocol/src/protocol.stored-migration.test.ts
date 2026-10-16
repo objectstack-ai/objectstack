@@ -407,7 +407,7 @@ describe('migrateStoredMetadata — flow rows via the canonicalizeFlow hook (#44
         if (!node || !('filters' in (node.config ?? {}))) {
             // Copy-on-write: an unchanged body comes back BY REFERENCE, which is
             // what the pass reads as "already canonical".
-            return { storable: body, notices: [], conflicts: [] };
+            return { storable: body, notices: [] };
         }
         const { filters, ...rest } = node.config;
         return {
@@ -420,7 +420,6 @@ describe('migrateStoredMetadata — flow rows via the canonicalizeFlow hook (#44
                 path: 'flows[0].nodes[0].config',
                 message: 'filters → filter',
             }],
-            conflicts: [],
         };
     };
 
@@ -476,7 +475,6 @@ describe('migrateStoredMetadata — flow rows via the canonicalizeFlow hook (#44
                 edges: [{ ...body.edges[0], condition: { dialect: 'cel', source: "x == 'y'" } }],
             },
             notices: [],
-            conflicts: [],
         });
         const row = {
             type: 'flow',
@@ -494,31 +492,6 @@ describe('migrateStoredMetadata — flow rows via the canonicalizeFlow hook (#44
         expect(report.rewritten).toBe(1);
         expect(JSON.parse(metaRows(tables)[0]!.metadata).edges[0].condition)
             .toEqual({ dialect: 'cel', source: "x == 'y'" });
-    });
-
-    it('fails the row loudly when the guard refuses a rename over a live name', async () => {
-        const conflicting = (_n: string, body: any) => ({
-            storable: body,
-            notices: [],
-            conflicts: [{
-                conversionId: 'flow-node-type-rename',
-                token: 'webhook',
-                path: 'flows[0].nodes[0].type',
-                message: "'webhook' is registered by a custom executor in this environment.",
-            }],
-        });
-        const { engine, tables } = makeStubEngine([flowRow]);
-        const protocol = new ObjectStackProtocolImplementation(engine);
-
-        const report = await protocol.migrateStoredMetadata({ apply: true, canonicalizeFlow: conflicting });
-
-        expect(report.failed).toBe(1);
-        expect(report.rewritten).toBe(0);
-        expect(report.rows[0]!.reason).toMatch(/live name/);
-        expect(report.rows[0]!.reason).toMatch(/webhook/);
-        // Never a silent skip and never a clobber — the owner's node survives.
-        expect(historyRows(tables)).toHaveLength(0);
-        expect(storedMigrationClean(report)).toBe(false);
     });
 
     it('reports a flow that cannot canonicalize instead of persisting a guess', async () => {
@@ -938,7 +911,7 @@ describe('migrateStoredMetadata — the decision review list: stored rows take f
      */
     const canonicalizeFlow = (_name: string, body: any) => {
         const purge = body?.nodes?.find((n: any) => n.id === 'purge');
-        if (!purge || !('filters' in (purge.config ?? {}))) return { storable: body, notices: [], conflicts: [] };
+        if (!purge || !('filters' in (purge.config ?? {}))) return { storable: body, notices: [] };
         return {
             storable: {
                 ...body,
@@ -954,7 +927,6 @@ describe('migrateStoredMetadata — the decision review list: stored rows take f
                 path: 'flows[0].nodes[0].config',
                 message: 'filters → filter',
             }],
-            conflicts: [],
         };
     };
 
@@ -1133,7 +1105,7 @@ describe('migrateStoredMetadata — the v18 stored shapes refused with no lossle
     const canonicalizeFlow = (_name: string, body: unknown) => {
         const todos: ConversionTodoNotice[] = [];
         const storable = applyConversionsToFlow(body, { includeRetired: true, onTodo: (t) => todos.push(t) });
-        return { storable, notices: [], conflicts: [], todos };
+        return { storable, notices: [], todos };
     };
 
     it('#23270 — each refused controlled_by_parent shape is listed by object; a conforming object is counted canonical', async () => {
@@ -1266,7 +1238,7 @@ describe('migrateStoredMetadata — the v18 stored shapes refused with no lossle
         const protocol = new ObjectStackProtocolImplementation(engine);
 
         const report = await protocol.migrateStoredMetadata({
-            canonicalizeFlow: (_n, body) => ({ storable: body, notices: [], conflicts: [] }),
+            canonicalizeFlow: (_n, body) => ({ storable: body, notices: [] }),
         });
 
         expect(report.canonical).toBe(1);

@@ -136,7 +136,7 @@ describe('getMetaItems — stored rows are served canonical (#3903)', () => {
         expect('execute' in action).toBe(false);
     });
 
-    it('deliberately does NOT convert flow rows — that seam is registerFlow (conflict guard needs the executor registry)', async () => {
+    it('deliberately does NOT convert flow rows — that seam is registerFlow (the engine canonicalizes flows)', async () => {
         const legacyFlow = {
             type: 'flow',
             name: 'purge_flow',

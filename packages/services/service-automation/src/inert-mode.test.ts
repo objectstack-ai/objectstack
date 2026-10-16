@@ -72,11 +72,10 @@ describe('armRuntime: false — nothing is armed (#4454)', () => {
         expect(onMetadataMutation).not.toHaveBeenCalled();
     });
 
-    it('still fires automation:ready — a partial registry would corrupt the guard', async () => {
+    it('still fires automation:ready — a partial registry would corrupt the registration preview', async () => {
         // This is the one thing inert mode must NOT skip. Third-party executors
-        // register on this hook; without them `reservedNodeTypes` is short, and
-        // the conflict guard silently rewrites over a live custom node type
-        // instead of refusing.
+        // and descriptors register on this hook; without them the stored pass's
+        // registration preview judges a plugin node against no descriptor.
         const { triggered } = await boot({ armRuntime: false, suspendedRunStore: 'memory' });
 
         expect(triggered).toContain('automation:ready');
