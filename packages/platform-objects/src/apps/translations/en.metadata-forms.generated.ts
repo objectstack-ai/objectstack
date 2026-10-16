@@ -204,6 +204,10 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       "fields.options.description": {
         label: "Description"
       },
+      "fields.options.kind": {
+        label: "Kind",
+        helpText: "Lifecycle category (single-value select / radio only): a step on the way, the successful end, or the unsuccessful end. Required on every option of the stage field."
+      },
       "fields.reference": {
         label: "Reference",
         helpText: "Target object name. For a tree field it is optional and, if given, must be this object (a tree is a hierarchy within its own object — link a different object with a lookup)"
@@ -677,6 +681,9 @@ export const enMetadataForms: NonNullable<TranslationData['metadataForms']> = {
       },
       "options.visibleWhen": {
         label: "Visible When"
+      },
+      "options.kind": {
+        label: "Kind"
       },
       reference: {
         label: "Reference",

@@ -479,6 +479,9 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
     ['data/app.sqlite3', 'sqlite'],
     ['./data/app', 'sqlite'],
     ['/var/lib/objectstack/app', 'sqlite'],
+    // A single letter and a `:` is a Windows drive, not an opaque scheme.
+    ['C:\\data\\app.db', 'sqlite'],
+    ['C:/data/app.db', 'sqlite'],
   ])('both hosts ACCEPT %s as %s, and the CLI builds it from that URL in dev and prod', (url, kind) => {
     expect(runtimeUrlVerdict(url), `the runtime host refused ${url}`).toEqual({ accepted: true, driverId: kind });
     for (const isDev of [false, true]) {
@@ -487,41 +490,26 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
     }
   });
 
-  // A `<scheme>://` neither host recognises: refused by both, the CLI's refusal
-  // being the typed one serve.ts makes fatal, in dev as in production.
+  // A scheme neither host recognises: refused by both, naming the same scheme,
+  // the CLI's refusal being the typed one serve.ts makes fatal, in dev as in
+  // production. That is an unrecognised `<scheme>://`; an OPAQUE scheme — two
+  // or more characters and a `:`, no `//` (`jdbc:postgresql://…`, `redis:h`),
+  // which the runtime host used to open as a SQLite file at a path made of the
+  // URL; and any scheme a `*.wasm.db` file name used to rescue there (#23765).
   it.each([
     ['redis://127.0.0.1:6399/0', 'redis://'],
     ['rediss://cache.example.com:6380', 'rediss://'],
     ['https://db.example.com/app', 'https://'],
     ['mssql://h/db', 'mssql://'],
     ['redis://h/app.db', 'redis://'],
-  ])('both hosts REFUSE %s, in dev AND in prod', (url, scheme) => {
-    const runtime = runtimeUrlVerdict(url);
-    expect(runtime.accepted, `the runtime host accepted ${url}`).toBe(false);
-    for (const isDev of [false, true]) {
-      const cli = cliUrlVerdict(url, isDev);
-      expect(cli.accepted, `the CLI host (isDev=${isDev}) accepted ${url}`).toBe(false);
-      const error = (cli as { error: unknown }).error;
-      expect(error, `the CLI host (isDev=${isDev}) did not refuse ${url} by type`).toBeInstanceOf(UnsupportedDriverError);
-      expect((error as UnsupportedDriverError).recognized).toBe(false);
-      expect((error as Error).message).toContain(`"${scheme}"`);
-      expect((error as Error).message).toContain('OS_DATABASE_URL');
-    }
-  });
-
-  // An OPAQUE scheme — two or more characters and a `:`, no `//`
-  // (`jdbc:postgresql://…`, `redis:h`) — and any scheme a `*.wasm.db` file name
-  // used to rescue. The CLI host refuses them, typed, in dev and prod. The
-  // runtime host's answer is deliberately NOT pinned here: today it opens these
-  // as a SQLite file at a path made of the URL, an implementation gap against
-  // its own "unknown schemes throw" rule that is #23765's to close, so asserting
-  // either agreement or its current answer would pin that gap.
-  it.each([
     ['jdbc:postgresql://localhost:5432/db', 'jdbc:'],
     ['redis:cache', 'redis:'],
     ['redis://h/app.wasm.db', 'redis://'],
     ['jdbc:x/app.wasm.db', 'jdbc:'],
-  ])('the CLI host REFUSES %s (scheme %s), in dev AND in prod', (url, scheme) => {
+  ])('both hosts REFUSE %s, in dev AND in prod', (url, scheme) => {
+    const runtime = runtimeUrlVerdict(url);
+    expect(runtime.accepted, `the runtime host accepted ${url}`).toBe(false);
+    expect((runtime as { message: string }).message, `the runtime host's refusal of ${url}`).toContain(`"${scheme}"`);
     for (const isDev of [false, true]) {
       const cli = cliUrlVerdict(url, isDev);
       expect(cli.accepted, `the CLI host (isDev=${isDev}) accepted ${url}`).toBe(false);
@@ -533,15 +521,27 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
     }
   });
 
-  // `sqlite:` / `sqlite://` are aliases of `file:` on both hosts, by ONE rule —
-  // the runtime host's `normalizeDatabaseUrl`, which the CLI host calls. Both
-  // hosts must name the same FILE: `sqlite://x.db` used to open `//x.db` (the
-  // filesystem root) on the CLI host while the runtime host opened `x.db`.
+  // `sqlite:` / `sqlite://` are aliases of `file:` on both hosts, and a `file:`
+  // URL becomes a file name by ONE rule — the runtime host's
+  // `normalizeDatabaseUrl` and `sqliteFilenameFromUrl`, both of which the CLI
+  // host calls. Both hosts must name the same FILE: `sqlite://x.db` and
+  // `file://x.db` used to open `//x.db` (the filesystem root) on the CLI host
+  // while the runtime host opened `x.db`, and `FILE:./x.db` kept its upper-case
+  // prefix as part of the file name on both, making a `FILE:.` directory. The
+  // lower-case `file:` and bare-path rows are the CONTROL.
   it.each([
     ['sqlite://x.db', 'x.db', 'sqlite'],
     ['sqlite:x.db', 'x.db', 'sqlite'],
     ['sqlite:///var/lib/objectstack/x.db', '/var/lib/objectstack/x.db', 'sqlite'],
     ['sqlite://x.wasm.db', 'x.wasm.db', 'sqlite-wasm'],
+    ['file://x.db', 'x.db', 'sqlite'],
+    ['file:///var/lib/objectstack/x.db', '/var/lib/objectstack/x.db', 'sqlite'],
+    ['file://x.wasm.db', 'x.wasm.db', 'sqlite-wasm'],
+    ['FILE:./x.db', './x.db', 'sqlite'],
+    ['File:///var/lib/objectstack/x.db', '/var/lib/objectstack/x.db', 'sqlite'],
+    ['FILE:./x.wasm.db', './x.wasm.db', 'sqlite-wasm'],
+    ['file:./x.db', './x.db', 'sqlite'],
+    ['./x.db', './x.db', 'sqlite'],
   ])('both hosts open %s as the file %s (%s), in dev and prod', (url, file, kind) => {
     process.env.OS_DATABASE_URL = url;
     const runtime = resolveStandaloneDatabase({ artifactPath: '/nonexistent/objectstack.json' });
@@ -551,6 +551,52 @@ describe('the OS_DATABASE_URL door: both hosts, one verdict per URL, dev and pro
       const definition = resolveStorageDefinition(resolveDriverType(undefined, url), { databaseUrl: url, isDev });
       expect(definition!.driverId).toBe(kind);
       expect(definition!.config.filename, `the CLI host's file for ${url} (isDev=${isDev})`).toBe(runtime.sqliteFile);
+    }
+  });
+
+  // What that rule refuses, both hosts refuse, with ONE sentence that names the
+  // scheme and never the URL — the CLI host's is the runtime host's minus its
+  // `[StandaloneStack]` tag, as for the retired engine above — and the CLI
+  // host's refusal is typed, the class serve.ts makes fatal (it swallows every
+  // other construction error). Two
+  // inputs reach it: an explicit sqlite selection over a server URL, which the
+  // CLI host used to open as a file at a path made of the URL, credentials
+  // included, and a `file:` that names no file.
+  it.each([
+    ['sqlite', 'postgres://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:5432/db', 'its scheme is "postgres://"'],
+    [undefined, 'file:', 'it names no file after "file:"'],
+    [undefined, 'FILE:', 'it names no file after "file:"'],
+  ])('both hosts REFUSE driver %s over %s, in dev AND in prod, with one sentence', (driver, url, why) => {
+    if (driver) process.env.OS_DATABASE_DRIVER = driver;
+    const runtime = runtimeUrlVerdict(url);
+    expect(runtime.accepted, `the runtime host accepted ${url}`).toBe(false);
+    const sentence = (runtime as { message: string }).message;
+    expect(sentence).toContain(why);
+    for (const isDev of [false, true]) {
+      let error: unknown;
+      try {
+        resolveStorageDefinition(resolveDriverType(driver, url), { databaseUrl: url, isDev });
+      } catch (err) {
+        error = err;
+      }
+      expect(error, `the CLI host (isDev=${isDev}) did not refuse ${url} by type`).toBeInstanceOf(UnsupportedDriverError);
+      expect((error as UnsupportedDriverError).recognized).toBe(true);
+      expect((error as UnsupportedDriverError).driverType).toBe('sqlite');
+      expect((error as Error).message).toBe(sentence.replace(/^\[StandaloneStack\] /, ''));
+      expect((error as Error).message).not.toBe(sentence);
+      expect((error as Error).message).not.toContain('PLACEHOLDER');
+    }
+  });
+
+  // CLI host only: under an explicit sqlite selection a blank URL is the absent
+  // URL, `:memory:`, never a file named by whitespace — blank is absent, as this
+  // host's URL inference reads it. The runtime host's absent URL is its default
+  // file, a different answer for absence that this pin does not judge.
+  it.each(['', '   '])('the CLI host reads the blank URL %j under an explicit sqlite selection as :memory:', (url) => {
+    for (const isDev of [false, true]) {
+      const definition = resolveStorageDefinition(resolveDriverType('sqlite', url), { databaseUrl: url, isDev });
+      expect(definition!.driverId).toBe('sqlite');
+      expect(definition!.config.filename).toBe(':memory:');
     }
   });
 });

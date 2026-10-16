@@ -941,6 +941,7 @@
     "data/SelectOption:color",
     "data/SelectOption:default",
     "data/SelectOption:description",
+    "data/SelectOption:kind",
     "data/SelectOption:label",
     "data/SelectOption:value",
     "data/SelectOption:visibleWhen",

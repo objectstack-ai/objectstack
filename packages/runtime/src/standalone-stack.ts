@@ -456,12 +456,29 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     if (/^libsql:\/\//i.test(dbUrl)) return 'turso';
     if (/^https?:\/\//i.test(dbUrl) && /\.turso\./i.test(dbUrl)) return 'turso';
     if (/^wasm-sqlite:\/\//i.test(dbUrl)) return 'sqlite-wasm';
-    if (/\.wasm\.db$/i.test(dbUrl)) return 'sqlite-wasm';
-    if (/^file:/i.test(dbUrl)) return 'sqlite';
+    // A `*.wasm.db` file name selects the WASM engine only for a FILE: a
+    // `file:` URL or a value with no scheme (both returns below). Tested ahead
+    // of the scheme checks, it rescued a scheme nothing recognises
+    // (`redis://h/x.wasm.db`) into a SQLite file at a path made of the URL.
+    const wasmFile = /\.wasm\.db$/i.test(dbUrl);
+    if (/^file:/i.test(dbUrl)) return wasmFile ? 'sqlite-wasm' : 'sqlite';
+    // What is left with a scheme is refused, by the header's rule:
+    //  - an unrecognised `<scheme>://` (`redis://…`);
+    //  - an OPAQUE scheme, two or more characters and a `:` with no `//`
+    //    (`jdbc:postgresql://…`, `redis:h`). These used to read as a bare path
+    //    and open a SQLite file at a path made of the URL
+    //    (`./jdbc:postgresql:/127.0.0.1:5999/db`), the bogus directory the
+    //    rule exists to prevent.
+    // A single letter and a `:` is a Windows drive (`C:\data\app.db`,
+    // `C:/data/app.db`), not a scheme, and stays a path. The CLI host draws the
+    // same line (`inferDriverTypeFromUrl` in `utils/storage-driver.ts`), and
+    // `driver-vocabulary-parity.test.ts` holds the two equal.
+    const scheme = urlSchemeOf(dbUrl) ?? /^[a-z][a-z0-9+.-]+:/i.exec(dbUrl)?.[0];
     // Bare path without a scheme — treat as a sqlite file path.
-    const scheme = urlSchemeOf(dbUrl);
-    if (!scheme) return 'sqlite';
-    // Names the scheme, never the URL ({@link urlSchemeOf}).
+    if (!scheme) return wasmFile ? 'sqlite-wasm' : 'sqlite';
+    // Names the scheme, never the URL ({@link urlSchemeOf}). An opaque scheme
+    // ends at its FIRST `:`, so it cannot hold a userinfo, a host or a path
+    // either.
     throw new Error(
         `[StandaloneStack] Unsupported database URL scheme "${scheme}". ` +
         `Supported schemes: postgres://, pg://, mysql://, mysql2://, ` +
@@ -582,14 +599,31 @@ function refuseRetiredMemoryEngine(
     throw new Error(`[StandaloneStack] ${retiredMemoryEngineMessage(selection)}`);
 }
 
-/** URL→filename for the two sqlite kinds. Throws on a URL that isn't a path. */
-function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): string {
+/**
+ * URL→filename for the two sqlite kinds: the ONE rule both hosts turn a SQLite
+ * database URL into a file with. Throws on a URL that isn't a path.
+ *
+ * Takes the URL as {@link resolveStandaloneDatabase} has it, i.e. after
+ * `normalizeDatabaseUrl` (`sqlite:` / `sqlite://` are already `file:`).
+ * `file:` and `file://` are stripped case-insensitively on BOTH kinds, as
+ * {@link detectDriverFromUrl} classifies them (`/^file:/i`): a prefix the
+ * classifier accepts and this strip kept became part of the filename, so
+ * `FILE:./app.db` opened `./FILE:./app.db` and the boot's directory creation
+ * made a `FILE:.` directory — the "bogus directory from a URL" this module's
+ * header rules out.
+ *
+ * Exported because the CLI host (`resolveStorageDefinition` in
+ * `@objectstack/cli`'s `utils/storage-driver.ts`) calls it rather than keeping
+ * a second copy; its copy stripped only `/^file:/`, so `file://NAME` opened
+ * `//NAME` at the filesystem root there while this host opened `NAME`.
+ */
+export function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): string {
     if (kind === 'sqlite-wasm') {
         return dbUrl
             .replace(/^wasm-sqlite:(\/\/)?/i, '')
             .replace(/^file:(\/\/)?/i, '') || ':memory:';
     }
-    const filename = dbUrl.replace(/^file:(\/\/)?/, '');
+    const filename = dbUrl.replace(/^file:(\/\/)?/i, '');
     const scheme = urlSchemeOf(filename);
     if (!filename || scheme) {
         // Names the scheme, never the URL ({@link urlSchemeOf}). This is the

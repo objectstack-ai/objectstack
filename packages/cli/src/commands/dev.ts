@@ -997,15 +997,40 @@ export default class Dev extends Command {
           : `${changed.length} files`;
         console.log(chalk.dim(`\n  ↻ recompiling (${label})...`));
         const t0 = Date.now();
+        // BOTH streams are captured, and both are printed when the compile
+        // fails (#23820). `compile` renders its text face — refusals included — on
+        // STDOUT through `printError`, the convention `utils/format.ts` states
+        // for a command rendering its own text face; only the shared helpers
+        // that cannot see `--json` use stderr. Capturing stderr alone dropped
+        // the one message that says what to fix: a refused save printed a bare
+        // `✗ compile failed`, while `pnpm build` on the same tree printed the
+        // refusal. What is shown is the compile's whole output, unfiltered —
+        // the lines `pnpm build` prints, in the same words — because picking
+        // "the refusal" out of it would mean parsing another command's text
+        // face here. A successful compile's output is still discarded, so that
+        // path prints exactly what it did. `--verbose` keeps inheriting both
+        // streams, so the output is already on screen and nothing is repeated.
+        // `maxBuffer` is raised because a pipe that fills spawnSync's 1 MiB
+        // default kills the child: a large but successful compile would turn
+        // into a failed one.
         const r = spawnSync(
           process.execPath,
           [opts.binPath, 'compile', '--output', opts.artifactPath],
-          { stdio: opts.verbose ? 'inherit' : ['ignore', 'ignore', 'pipe'], env: process.env },
+          {
+            stdio: opts.verbose ? 'inherit' : ['ignore', 'pipe', 'pipe'],
+            env: process.env,
+            maxBuffer: 64 * 1024 * 1024,
+          },
         );
         const dt = Date.now() - t0;
         if (r.status !== 0) {
-          const stderr = r.stderr?.toString().trim();
-          console.log(chalk.red(`  ✗ compile failed (${dt}ms)${stderr ? '\n' + stderr : ''}`));
+          // stdout first, then stderr: the two pipes are read separately, so
+          // their interleaving is not recoverable.
+          const output = [r.stdout, r.stderr]
+            .map((b) => b?.toString().replace(/^\s*\n/, '').trimEnd())
+            .filter(Boolean)
+            .join('\n');
+          console.log(chalk.red(`  ✗ compile failed (${dt}ms)${output ? '\n' + output : ''}`));
           // A failed compile writes no artifact — the running server still
           // matches dist/objectstack.json, so no restart and no warning.
         } else {

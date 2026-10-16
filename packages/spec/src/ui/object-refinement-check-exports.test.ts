@@ -63,7 +63,6 @@ import {
   checkPageRequiresKind,
   checkPagePrintComposition,
   checkPageSlotPair,
-  checkPageComponentViewData,
   checkPageDefaultPlacement,
   checkPageRegionPlacement,
 } from './page.zod';
@@ -299,53 +298,6 @@ const pageSlotPairFixtures: Fixture[] = [
   { label: '`details` alone', value: { ...SLOT_PAGE, slots: { details: SLOT_DETAILS } }, refusesAt: [] },
   { label: '`tabs` alone, carrying the `record:details` in its first item', value: { ...SLOT_PAGE, slots: { tabs: { type: 'page:tabs', properties: { items: [{ label: 'Details', children: [SLOT_DETAILS] }] } } } }, refusesAt: [] },
   { label: 'a slot map with neither', value: { ...SLOT_PAGE, slots: { discussion: [] } }, refusesAt: [] },
-];
-
-// [#23357] A component's `data` prop naming the retired view-level `api`
-// provider is refused at the component's `properties.data.provider`, at any
-// depth under `regions` and `slots`, on the four types whose `data` is a view
-// data source. No fixture here carries `print`, `source`, `requires` or a
-// `details` + `tabs` pair, so the four siblings stay silent and each row
-// exercises THIS check alone. The provider is spelled through a constant: the
-// spec's tree-scoped absence pin reads authored literals, and these bodies are
-// refusals, not authorings.
-const RETIRED_PROVIDER = 'api' as const;
-const RETIRED_BINDING = { provider: RETIRED_PROVIDER, read: { url: 'https://partner.example.com/cases' } } as const;
-const viewDataBlock = (type: string, data: unknown) => ({ id: 'cases', type, properties: { objectName: 'crm_case', data } });
-const pageComponentViewDataFixtures: Fixture[] = [
-  {
-    label: 'an `object-grid` in a region binding the retired provider',
-    value: { ...PAGE_BASE, regions: [{ name: 'main', components: [viewDataBlock('object-grid', RETIRED_BINDING)] }] },
-    refusesAt: ['regions.0.components.0.properties.data.provider'],
-  },
-  {
-    label: 'an `object-tree` nested in a `page:tabs` item binding it',
-    value: {
-      ...PAGE_BASE,
-      regions: [{ name: 'main', components: [{ type: 'page:tabs', properties: { items: [{ label: 'Cases', children: [viewDataBlock('object-tree', RETIRED_BINDING)] }] } }] }],
-    },
-    refusesAt: ['regions.0.components.0.properties.items.0.children.0.properties.data.provider'],
-  },
-  {
-    label: 'an `object-map` in a slot binding it',
-    value: { ...SLOT_PAGE, slots: { details: viewDataBlock('object-map', RETIRED_BINDING) } },
-    refusesAt: ['slots.details.properties.data.provider'],
-  },
-  {
-    label: 'an `object-gantt` binding its object',
-    value: { ...PAGE_BASE, regions: [{ name: 'main', components: [viewDataBlock('object-gantt', { provider: 'object', object: 'crm_case' })] }] },
-    refusesAt: [],
-  },
-  {
-    label: 'an `object-kanban` (a row-array `data`, its own contract) carrying the retired provider',
-    value: { ...PAGE_BASE, regions: [{ name: 'main', components: [viewDataBlock('object-kanban', RETIRED_BINDING)] }] },
-    refusesAt: [],
-  },
-  {
-    label: 'a type with no props row carrying the retired provider',
-    value: { ...PAGE_BASE, regions: [{ name: 'main', components: [viewDataBlock('custom:partner-widget', RETIRED_BINDING)] }] },
-    refusesAt: [],
-  },
 ];
 
 // [#23610] `isDefault: true` off a record page bound to an object, and a
@@ -596,7 +548,6 @@ const MIRRORED: MirroredSchema[] = [
       { name: 'checkPageRequiresKind', check: checkPageRequiresKind, fixtures: pageRequiresFixtures },
       { name: 'checkPagePrintComposition', check: checkPagePrintComposition, fixtures: pagePrintFixtures },
       { name: 'checkPageSlotPair', check: checkPageSlotPair, fixtures: pageSlotPairFixtures },
-      { name: 'checkPageComponentViewData', check: checkPageComponentViewData, fixtures: pageComponentViewDataFixtures },
       { name: 'checkPageDefaultPlacement', check: checkPageDefaultPlacement, fixtures: pageDefaultPlacementFixtures },
       { name: 'checkPageRegionPlacement', check: checkPageRegionPlacement, fixtures: pageRegionPlacementFixtures },
     ],
@@ -753,13 +704,19 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares all seven exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all six exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageComponentViewData', 'checkPageDefaultPlacement', 'checkPageRegionPlacement']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageDefaultPlacement', 'checkPageRegionPlacement']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
     }
+    // `checkPageComponentViewData` was deleted once `validateComponentProps`
+    // judged a page component's `properties` at the save door too: one
+    // operation, one implementation, the props rule's. A re-attachment would be
+    // a second judge of the same bag.
+    expect(declarations(src, 'checkPageComponentViewData')).toBe(0);
+    expect(attachments(src, 'checkPageComponentViewData')).toBe(0);
   });
 
   it('dashboard.zod.ts declares the export and attaches it to GlobalFilterSchema', () => {
@@ -790,7 +747,6 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     ['checkPageRequiresKind', checkPageRequiresKind],
     ['checkPagePrintComposition', checkPagePrintComposition],
     ['checkPageSlotPair', checkPageSlotPair],
-    ['checkPageComponentViewData', checkPageComponentViewData],
     ['checkPageDefaultPlacement', checkPageDefaultPlacement],
     ['checkPageRegionPlacement', checkPageRegionPlacement],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
@@ -807,5 +763,9 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
   // above as the lit control that the namespace is really populated.
   it('no longer exports `checkListViewPageMount` — retired with the mount it policed', () => {
     expect('checkListViewPageMount' in (ui as Record<string, unknown>)).toBe(false);
+  });
+
+  it('no longer exports `checkPageComponentViewData` — the props rule judges the component bag', () => {
+    expect('checkPageComponentViewData' in (ui as Record<string, unknown>)).toBe(false);
   });
 });

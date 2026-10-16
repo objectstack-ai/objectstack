@@ -507,21 +507,31 @@ function renameVisibilityAlias(
  * `visibleWhen` across all layers. Applies to form sections and (recursively
  * nested) form fields in every FORM payload {@link mapViewPayloads} reaches —
  * `views[].form` / `views[].formViews.*`, a ViewItem record's `config`, and a
- * flattened form overlay's top level (commit b799ac553). **Live window**: the protocol-15 loader accepts the deprecated
- * key (the zod schemas also normalize it at parse — this entry makes the
- * acceptance *declared, loud, and expiring* per ADR-0087 D2, and will
- * graduate into the step-16 chain when the alias is removed).
+ * flattened form overlay's top level (commit b799ac553).
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `visibleOn` is
- * still a declared `[DEPRECATED]` key on the form field and section schemas
- * (`view.zod.ts`), which fold it into `visibleWhen` at parse, so retiring this
- * entry alone changes nothing an author can observe: the old spelling would
- * still be accepted without a word. It retires with the alias itself, once
- * those schemas tombstone `visibleOn` (`retiredKey`, naming `visibleWhen`).
+ * ## Retired from the load path at 18 (#23543, ruling F4 A)
+ *
+ * Through 17 it stayed live because `visibleOn` was still a declared
+ * `[DEPRECATED]` key on the form field and section schemas, which folded it
+ * into `visibleWhen` at parse, so retired alone it would have left the old
+ * spelling silently accepted (the verdict #23487 recorded). The ruling retired
+ * the key: both shapes carry a `retiredKey()` tombstone naming `visibleWhen`
+ * (`FORM_FIELD_VISIBLE_ON_RETIRED` / `FORM_SECTION_VISIBLE_ON_RETIRED`,
+ * `ui/view.zod.ts`), and the fold went with it. So the authoring funnel
+ * (`defineStack`, `os validate` / `os build` / `os lint`) no longer replays
+ * this entry, and an author is taught the canonical key instead of being
+ * rewritten. Stored form views are the `includeRetired` seams: stored-row
+ * rehydration (`applyConversionsToStoredItem`) still renames a `sys_metadata`
+ * view row's `visibleOn` before anything parses it, and so does the
+ * artifact-ingestion door inside its window. `os migrate meta` does not reach
+ * it: protocol 15 is below `MIGRATION_SUPPORT_FLOOR`. The family's D3 entry,
+ * `ui-visibility-alias-keys-retired`, states the edit for authored sources.
  */
 const viewVisibleOnToVisibleWhen: MetadataConversion = {
   id: 'view-visibleOn-to-visibleWhen',
   toMajor: 15,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'view.form.visibleOn',
   summary: "view form section/field key 'visibleOn' → 'visibleWhen' (ADR-0089)",
   apply(stack, emit) {
@@ -615,19 +625,24 @@ const viewVisibleOnToVisibleWhen: MetadataConversion = {
  * The page-component spelling of the same predicate. Applies to every page
  * component {@link mapPageComponents} reaches — `regions[].components[]`,
  * `slots.<slot>`, and the containers a component nests under its `properties`
- * (#6776, #6775). **Live window**, same terms as
- * {@link viewVisibleOnToVisibleWhen}. (An AI agent's `visibility` property is
- * a different, unrelated surface and is not touched.)
+ * (#6776, #6775). (An AI agent's `visibility` property is a different,
+ * unrelated surface and is not touched.)
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `visibility` is
- * still a declared `[DEPRECATED]` key on `PageComponentSchema` (`page.zod.ts`),
- * folded into `visibleWhen` at parse, so retiring this entry alone would leave
- * the old spelling silently accepted. It retires with the alias itself, once
- * that schema tombstones `visibility` (`retiredKey`, naming `visibleWhen`).
+ * ## Retired from the load path at 18 (#23543, ruling F4 A)
+ *
+ * Same terms as {@link viewVisibleOnToVisibleWhen}, retired in the same change:
+ * `PageComponentSchema.visibility` is a `retiredKey()` tombstone naming
+ * `visibleWhen` (`ui/page.zod.ts`) and its parse-time fold is gone, so the
+ * authoring funnel no longer replays this entry. Stored pages are the
+ * `includeRetired` seams (stored-row rehydration, the artifact-ingestion door
+ * inside its window); `os migrate meta` does not reach it, protocol 15 being
+ * below `MIGRATION_SUPPORT_FLOOR`.
  */
 const pageComponentVisibilityToVisibleWhen: MetadataConversion = {
   id: 'page-component-visibility-to-visibleWhen',
   toMajor: 15,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'page.component.visibility',
   summary: "page component key 'visibility' → 'visibleWhen' (ADR-0089)",
   apply(stack, emit) {

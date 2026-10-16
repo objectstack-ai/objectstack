@@ -3197,3 +3197,136 @@ describe('runtime authoring gate on PAGE writes — the component props and type
         expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(cleanPage());
     });
 });
+
+// A page component's `data` prop naming the retired view-level `api` provider,
+// at the runtime save door. `object-grid`, `object-map`, `object-gantt` and
+// `object-tree` take a view data source (`ViewDataSchema`) as `data`, so the
+// step-18 retirement of that provider reaches them through their
+// `ComponentPropsMap` rows. The page parse leaves `properties` an open record;
+// the rule that judges the bag is `validateComponentProps`, which runs on a
+// `page` write by the ruling of record above (6161173492, letter B). One
+// operation, one implementation: the refusal is that rule's
+// `component-props-invalid`, carrying the retirement's own prescription.
+//
+// Stored pages: the boot and read paths run no authoring rule, so a stored
+// page with the binding loads, is registered and is served with no read
+// diagnostic for it; its next save is refused until the binding is fixed.
+describe('runtime authoring gate on PAGE writes — a component `data` naming the retired view-level api source', () => {
+    // Spelled through a constant: the spec's tree-scoped absence pin reads
+    // authored literals, and these bodies are refusals, not authorings.
+    const RETIRED_PROVIDER = 'api' as const;
+    const RETIRED_BINDING = {
+        provider: RETIRED_PROVIDER,
+        read: { url: 'https://partner.example.com/cases', headers: { Authorization: 'Bearer s3cr3t' } },
+    };
+    const PRESCRIPTION = "`view.data.provider: 'api'` was removed in @objectstack/spec 18 (ADR-0049";
+    const block = (type: string, data: unknown, id = 'cases') => ({ id, type, properties: { objectName: 'crm_case', data } });
+    const page = (components: unknown[], extra: Record<string, unknown> = {}) => ({
+        name: 'partner_page',
+        label: 'Partner',
+        type: 'app',
+        regions: [{ name: 'main', components }],
+        ...extra,
+    });
+    const savePage = (protocol: any, item: unknown) =>
+        protocol.saveMetaItem({ type: 'page', name: 'partner_page', item });
+    const activePageRows = (rows: Map<string, Row>) =>
+        Array.from(rows.values()).filter((r) => r.type === 'page' && r.state === 'active');
+    const retirementIssues = (err: any) =>
+        (err?.issues ?? []).filter((i: any) => i.rule === 'component-props-invalid' && String(i.message).includes(PRESCRIPTION));
+
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => {
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+    afterEach(() => {
+        warn.mockRestore();
+        delete process.env.OS_ALLOW_UNLINTED_METADATA_WRITES;
+    });
+
+    it.each(['object-grid', 'object-map', 'object-gantt', 'object-tree'])(
+        '%s: 422 INVALID_METADATA from the props rule at the component\'s `data.provider`, with the prescription; nothing stored',
+        async (type) => {
+            const { protocol, rows } = makeProtocol();
+
+            const err = await savePage(protocol, page([block(type, RETIRED_BINDING)])).catch((e: any) => e);
+
+            expect(err).toBeInstanceOf(Error);
+            expect(err.status).toBe(422);
+            expect(err.code).toBe('INVALID_METADATA');
+            expect(err.rulesRun).toContain('validateComponentProps');
+            expect(retirementIssues(err).map((i: any) => i.path)).toEqual([
+                'pages[0].regions[0].components[0].properties.data.provider',
+            ]);
+            expect(activePageRows(rows)).toEqual([]);
+        },
+    );
+
+    it('reaches a component in a `page:tabs` item, one nested in containers, and one in a slot', async () => {
+        const { protocol, rows } = makeProtocol();
+        const body = page([
+            { id: 'tabs', type: 'page:tabs', properties: { items: [{ label: 'Cases', children: [block('object-grid', RETIRED_BINDING, 'in_tab')] }] } },
+            { id: 'row', type: 'flex', properties: { children: [{ id: 'card', type: 'page:card', properties: { children: [block('object-tree', RETIRED_BINDING, 'deep')] } }] } },
+        ], { kind: 'slotted', type: 'record', object: 'crm_case', slots: { details: block('object-map', RETIRED_BINDING, 'slotted') } });
+
+        const err = await savePage(protocol, body).catch((e: any) => e);
+
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(retirementIssues(err).map((i: any) => i.path).sort()).toEqual([
+            'pages[0].regions[0].components[0].properties.items[0].children[0].properties.data.provider',
+            'pages[0].regions[0].components[1].properties.children[0].properties.children[0].properties.data.provider',
+            'pages[0].slots.details.properties.data.provider',
+        ]);
+        expect(activePageRows(rows)).toEqual([]);
+    });
+
+    it('the control: the same page with the `object` or `value` provider saves, one row', async () => {
+        for (const data of [{ provider: 'object', object: 'crm_case' }, { provider: 'value', items: [{ name: 'a' }] }]) {
+            const { protocol, rows } = makeProtocol();
+            await expect(savePage(protocol, page([block('object-grid', data)]))).resolves.toMatchObject({ success: true });
+            expect(activePageRows(rows), JSON.stringify(data)).toHaveLength(1);
+        }
+    });
+
+    it('a stored page with the binding loads, registers and is served with no read diagnostic; its next save is refused until fixed', async () => {
+        const { engine, rows } = makeStubEngine();
+        const registered: Array<{ type: string; name: unknown }> = [];
+        engine.registry.registerItem = (type: string, item: { name?: unknown }) => {
+            registered.push({ type, name: item?.name });
+        };
+        const protocol = new ObjectStackProtocolImplementation(engine, () => new Map(), 'env_test') as any;
+        const stored = page([block('object-grid', RETIRED_BINDING)]);
+        rows.set(keyOf({ type: 'page', name: 'partner_page', organization_id: null, state: 'active' }), {
+            id: 'r_seed', type: 'page', name: 'partner_page', organization_id: null, state: 'active',
+            metadata: JSON.stringify(stored),
+        });
+
+        // Boot: no authoring rule runs, and the page parse no longer judges the bag.
+        const result = await protocol.loadMetaFromDb();
+        expect(result).toMatchObject({ loaded: 1, errors: 0, invalid: 0 });
+        expect(registered).toContainEqual({ type: 'page', name: 'partner_page' });
+        // Read: served as stored, with no diagnostic for the binding.
+        const served: any = (await protocol.getMetaItem({ type: 'page', name: 'partner_page' })).item;
+        expect(served?.regions?.[0]?.components?.[0]?.properties?.data?.provider).toBe(RETIRED_PROVIDER);
+        expect(served?._diagnostics?.valid).toBe(true);
+        expect(served?._diagnostics?.errors ?? []).toEqual([]);
+        // No `[metadata_spec_invalid]` registration either: that came from the page parse.
+        expect((warn.mock.calls as unknown[][]).map((c) => String(c[0])).filter((m) => m.includes('metadata_spec_invalid'))).toEqual([]);
+
+        // The next save of the same body is a write, and is judged.
+        const err = await savePage(protocol, stored).catch((e: any) => e);
+        expect(err?.status).toBe(422);
+        expect(err.code).toBe('INVALID_METADATA');
+        expect(retirementIssues(err).map((i: any) => i.path)).toEqual([
+            'pages[0].regions[0].components[0].properties.data.provider',
+        ]);
+        expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(stored);
+
+        // Fixed, then saved.
+        const fixed = page([block('object-grid', { provider: 'object', object: 'crm_case' })]);
+        await expect(savePage(protocol, fixed)).resolves.toMatchObject({ success: true });
+        expect(JSON.parse(activePageRows(rows)[0]!.metadata)).toEqual(fixed);
+    });
+});
