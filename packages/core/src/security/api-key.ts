@@ -306,7 +306,16 @@ function lifecycleRefusalOf(
   if (row.revoked === true || row.revoked === 1) {
     return {
       code: API_KEY_REVOKED_REFUSAL.code,
-      message: `${label} was revoked, and a revoked key never works again. ${API_KEY_REMEDY}`,
+      // Revocation is the `revoked` flag, and `restore_api_key` clears it again
+      // (`sys_api_key`'s own row action): the key works at once, no re-issue.
+      // Who may clear it is who may set it — the key's owner (own rows, `revoked`
+      // alone) and a platform administrator (any row) — so the text names those
+      // two and never claims the key is gone for good. Rotation stays the other
+      // road, for a key that should not come back.
+      message:
+        `${label} was revoked. Its owner or a platform administrator can restore it (the Restore API Key action `
+        + 'on the API Keys list); otherwise create a new key (POST /api/v1/keys, or the API Keys page) and replace '
+        + 'this one wherever it is configured.',
       ...ids,
     };
   }
