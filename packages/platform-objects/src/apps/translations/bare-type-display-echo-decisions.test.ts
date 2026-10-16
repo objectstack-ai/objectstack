@@ -312,10 +312,10 @@ const DECISIONS: readonly Decision[] = [
     scope: 'type',
     key: 'api',
     prop: 'description',
-    en: 'A stable HTTP URL that other systems call to reach flows, scripts and data in the app',
+    en: 'A stable HTTP URL that other systems call to run a flow or work with records in the app',
     verdict: ALL_TRANSLATE,
     reason:
-      'REWRITTEN AS PLAIN ADMIN COPY: the registry description is what Setup shows, so it says what the item is and who uses it, and the ADR-0121 vocabulary (declarative endpoint, policy layer, pipeline) moved to the comment beside the registry row. "flows, scripts and data" names what ApiEndpointSchema.type can target (flow/script/object_operation; proxy is the rare fourth) in words an admin reads. ⇒ 其他系统调用的稳定 HTTP URL，用于访问应用的流程、脚本和数据 / 他のシステムがアプリのフロー、スクリプト、データにアクセスするために呼び出す固定の HTTP URL / URL HTTP estable a la que llaman otros sistemas para acceder a los flujos, scripts y datos de la aplicación. ⭐ `HTTP` and `URL` stay machine tokens in all three, asserted by the token guard below. ⚠️ No second person in zh/ja/es: the catalog carries no 你的/您的, so "the app" is rendered 应用 / アプリ / la aplicación.',
+      'REWRITTEN AS PLAIN ADMIN COPY: the registry description is what Setup shows, so it says what the item is and who uses it, and the ADR-0121 vocabulary (declarative endpoint, policy layer, pipeline) moved to the comment beside the registry row. It names only what EXECUTES: ApiEndpointSchema.type says only `flow` and `object_operation` run, while `script` and `proxy` are rejected at publish, so "run a flow or work with records" is the whole servable set in an admin\'s words. "records" takes the catalog\'s record noun (记录 / レコード / registros). ⇒ 其他系统调用的稳定 HTTP URL，用于运行流程或操作应用中的记录 / 他のシステムが呼び出す固定の HTTP URL。フローを実行したり、アプリのレコードを操作したりします / URL HTTP estable a la que llaman otros sistemas para ejecutar un flujo o trabajar con los registros de la aplicación. ⭐ `HTTP` and `URL` stay machine tokens in all three, asserted by the token guard below. ⚠️ No second person in zh/ja/es: the catalog carries no 你的/您的.',
   },
   {
     scope: 'type',
@@ -330,10 +330,10 @@ const DECISIONS: readonly Decision[] = [
     scope: 'type',
     key: 'doc',
     prop: 'description',
-    en: 'A help page written in Markdown that a package ships for its users to read',
+    en: 'A help page written in Markdown that a package ships or you write yourself',
     verdict: ALL_TRANSLATE,
     reason:
-      'REWRITTEN AS PLAIN ADMIN COPY: "flat Markdown items (ADR-0046)" became what an admin meets, a help page, and the ADR reference moved to the comment beside the registry row. `package` is still rendered as the noun, by the near-miss clearing asserted below (zh prose takes 软件包, as in 软件包层). ⇒ 软件包随附的 Markdown 帮助页面，供用户阅读 / パッケージに同梱される、ユーザー向けの Markdown ヘルプページ / Página de ayuda en Markdown que un paquete incluye para que la lean sus usuarios. ⭐ `Markdown` is KEPT as a format proper noun in all three; asserted by the token guard.',
+      'REWRITTEN AS PLAIN ADMIN COPY: "flat Markdown items (ADR-0046)" became what an admin meets, a help page, and the ADR reference moved to the comment beside the registry row. Both origins are named because the registry row is `allowRuntimeCreate: true`: a doc can be shipped by a package or drafted in place through saveMetaItem. `package` is still rendered as the noun, by the near-miss clearing asserted below (zh prose takes 软件包). zh/ja/es carry the second origin impersonally (自行编写 / 自分で作成 / redactada directamente). ⇒ 以 Markdown 编写的帮助页面，可由软件包随附，也可自行编写 / Markdown で書かれたヘルプページ。パッケージに同梱されるほか、自分で作成することもできます / Página de ayuda en Markdown, incluida en un paquete o redactada directamente. ⭐ `Markdown` is KEPT as a format proper noun in all three; asserted by the token guard.',
   },
   {
     scope: 'type',
@@ -348,10 +348,10 @@ const DECISIONS: readonly Decision[] = [
     scope: 'type',
     key: 'book',
     prop: 'description',
-    en: 'A table of contents that groups the help pages of a package into ordered sections',
+    en: 'A table of contents that groups help pages into ordered sections',
     verdict: ALL_TRANSLATE,
     reason:
-      'REWRITTEN AS PLAIN ADMIN COPY: "navigation spine — ordered groups with derived membership (ADR-0046 §6)" became a table of contents, and the ADR-0046 §6 vocabulary moved to the comment beside the registry row. "help pages" is the same phrase the doc row now uses, so the two types read as a pair in every locale. "sections" is prose, not BookSchema.groups (a key that takes an array, asserted below). ⇒ 将软件包的帮助页面按顺序分节组织的目录 / パッケージのヘルプページを順序付きのセクションにまとめた目次 / Índice que organiza las páginas de ayuda de un paquete en secciones ordenadas. No machine token is kept: the ADR citation and its §6 are exactly what this rewrite removed, asserted by the plain-copy guard below.',
+      'REWRITTEN AS PLAIN ADMIN COPY: "navigation spine — ordered groups with derived membership (ADR-0046 §6)" became a table of contents, and the ADR-0046 §6 vocabulary moved to the comment beside the registry row. No package clause: the row is `allowRuntimeCreate: true` and a brand-new book can be authored in place. "help pages" is the doc row\'s own phrase, so the two types read as a pair in every locale. "sections" is prose, not BookSchema.groups (a key that takes an array, asserted below). ⇒ 将帮助页面按顺序分节组织的目录 / ヘルプページを順序付きのセクションにまとめた目次 / Índice que organiza las páginas de ayuda en secciones ordenadas. No machine token is kept: the ADR citation and its §6 are exactly what this rewrite removed, asserted by the plain-copy guard below.',
   },
   {
     scope: 'type',

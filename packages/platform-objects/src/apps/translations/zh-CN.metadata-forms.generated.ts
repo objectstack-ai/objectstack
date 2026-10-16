@@ -2202,7 +2202,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API 端点",
-    description: "其他系统调用的稳定 HTTP URL，用于访问应用的流程、脚本和数据"
+    description: "其他系统调用的稳定 HTTP URL，用于运行流程或操作应用中的记录"
   },
   translation: {
     label: "翻译"
@@ -2282,11 +2282,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "文档",
-    description: "软件包随附的 Markdown 帮助页面，供用户阅读"
+    description: "以 Markdown 编写的帮助页面，可由软件包随附，也可自行编写"
   },
   book: {
     label: "文档手册",
-    description: "将软件包的帮助页面按顺序分节组织的目录"
+    description: "将帮助页面按顺序分节组织的目录"
   },
   permission: {
     label: "权限集",

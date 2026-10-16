@@ -2202,7 +2202,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "Endpoint API",
-    description: "URL HTTP estable a la que llaman otros sistemas para acceder a los flujos, scripts y datos de la aplicación"
+    description: "URL HTTP estable a la que llaman otros sistemas para ejecutar un flujo o trabajar con los registros de la aplicación"
   },
   translation: {
     label: "Traducción"
@@ -2282,11 +2282,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "Documentación",
-    description: "Página de ayuda en Markdown que un paquete incluye para que la lean sus usuarios"
+    description: "Página de ayuda en Markdown, incluida en un paquete o redactada directamente"
   },
   book: {
     label: "Libro de documentación",
-    description: "Índice que organiza las páginas de ayuda de un paquete en secciones ordenadas"
+    description: "Índice que organiza las páginas de ayuda en secciones ordenadas"
   },
   permission: {
     label: "Conjunto de permisos",

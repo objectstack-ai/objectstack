@@ -1133,7 +1133,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // metadata-forms translations), so it stays in plain words; the design it
   // summarises — a declarative endpoint, a stable URL and policy layer over an
   // existing pipeline — is ADR-0121.
-  { type: 'api', label: 'API Endpoint', description: 'A stable HTTP URL that other systems call to reach flows, scripts and data in the app', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
+  { type: 'api', label: 'API Endpoint', description: 'A stable HTTP URL that other systems call to run a flow or work with records in the app', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
   { type: 'translation', label: 'Translation', filePatterns: ['**/*.translation.ts', '**/*.translation.yml', '**/*.translation.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 90, domain: 'system' },
   { type: 'email_template', label: 'Email Template', filePatterns: ['**/*.email-template.ts', '**/*.email-template.yml', '**/*.email-template.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'system' },
   // ADR-0046: package documentation. Inert data — no runtime behavior, no
@@ -1143,7 +1143,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // never parses `content`. loadOrder is last: nothing references docs.
   // `description` is admin-facing copy: plain words, the ADR-0046 vocabulary
   // (flat Markdown items) stays in this comment.
-  { type: 'doc', label: 'Documentation', description: 'A help page written in Markdown that a package ships for its users to read', filePatterns: ['**/docs/*.md'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
+  { type: 'doc', label: 'Documentation', description: 'A help page written in Markdown that a package ships or you write yourself', filePatterns: ['**/docs/*.md'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
   // Navigation spine over docs (ADR-0046 §6): ordered groups, membership derived
   // by rule. Overlay-mergeable at read (`supportsOverlay: true`); runtime-
   // creatable for AI/authors. loadOrder last (references docs).
@@ -1160,7 +1160,7 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   //
   // `description` is admin-facing copy: plain words, the ADR-0046 §6
   // vocabulary (navigation spine, ordered groups, derived membership) stays here.
-  { type: 'book', label: 'Documentation Book', description: 'A table of contents that groups the help pages of a package into ordered sections', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
+  { type: 'book', label: 'Documentation Book', description: 'A table of contents that groups help pages into ordered sections', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
 
   // Security Protocol
   //

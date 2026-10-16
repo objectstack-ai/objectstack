@@ -2202,7 +2202,7 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API エンドポイント",
-    description: "他のシステムがアプリのフロー、スクリプト、データにアクセスするために呼び出す固定の HTTP URL"
+    description: "他のシステムが呼び出す固定の HTTP URL。フローを実行したり、アプリのレコードを操作したりします"
   },
   translation: {
     label: "翻訳"
@@ -2282,11 +2282,11 @@ export const jaJPMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "ドキュメント",
-    description: "パッケージに同梱される、ユーザー向けの Markdown ヘルプページ"
+    description: "Markdown で書かれたヘルプページ。パッケージに同梱されるほか、自分で作成することもできます"
   },
   book: {
     label: "ドキュメントブック",
-    description: "パッケージのヘルプページを順序付きのセクションにまとめた目次"
+    description: "ヘルプページを順序付きのセクションにまとめた目次"
   },
   permission: {
     label: "権限セット",
