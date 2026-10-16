@@ -142,7 +142,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请"
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
       },
       ban_user: {
         label: "封禁用户",
@@ -633,7 +643,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请"
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
       },
       add_member: {
         label: "添加成员",
@@ -751,7 +771,17 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "邀请用户",
         description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
-        successMessage: "已向 ${result.email} 发送邀请"
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "取消邀请",
