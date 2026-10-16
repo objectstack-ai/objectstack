@@ -6662,7 +6662,7 @@ export class ObjectStackProtocolImplementation implements
                 }
                 const element: unknown = Array.isArray(at) ? at[Number(index)] : undefined;
                 const id = element !== null && typeof element === 'object' ? (element as { id?: unknown }).id : undefined;
-                site += typeof id === 'string' && id !== '' ? `[#${id}]` : `[${index}]`;
+                site += typeof id === 'string' && id !== '' ? `[#${id}]` : '[' + index + ']';
                 at = element;
             }
             return site;
