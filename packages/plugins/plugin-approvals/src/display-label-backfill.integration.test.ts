@@ -28,7 +28,10 @@
  *  (f) an empty authored label is stored as the humanized machine name, never
  *      `''`, at open;
  *  (g) every row a boot fills keeps its own `updated_at` exactly — the request
- *      lists sort on it, and a derived display column is not an edit.
+ *      lists sort on it, and a derived display column is not an edit;
+ *  (h) a live write landing between a page's read and its row writes — a
+ *      recall, an SLA-style slate change — is kept exactly as it left the row,
+ *      and the rest of the page is still filled with its stamps kept.
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -199,6 +202,11 @@ describe('#23889 — the boot-time display-label backfill', () => {
 
   it('(c) never overwrites a column a live writer filled; an orphaned action keeps a null pointer and its own step name', async () => {
     await engine.update('sys_approval_request', { id: 'areq_open', process_label: 'Live label' }, { context: SYSTEM } as any);
+    // A second pending request on the same page, so one labeller call per page
+    // and one per row give different calls.
+    await engine.insert('sys_approval_request', legacyRequest('open2', {
+      status: 'pending', pending_approvers: 'u_mail', node_config_json: JSON.stringify({ approvers: [] }),
+    }), { context: SYSTEM } as any);
     // An action whose step label and acting-as label a writer already stored,
     // different from what its request would give: the fill copies only its
     // null pointer columns and leaves both labels as stored.
@@ -206,14 +214,15 @@ describe('#23889 — the boot-time display-label backfill', () => {
       id: 'a_vote', step_label: 'Recorded step', acted_as_label: 'Recorded name',
     }, { context: SYSTEM } as any);
     const svc = new ApprovalService({ engine: engine as any, logger: quiet as any });
-    // The labeller is asked once per page, never once per row: here one request
-    // page (the pending slate) and one action page (two acted_as slots).
+    // The labeller is asked once per page, never once per row: one request page
+    // (two pending slates) and one action page.
     const source = slotLabelSourceOf(svc);
     const asked: string[][] = [];
     const counting = { slotLabels: (slots: readonly string[]) => { asked.push([...slots]); return source.slotLabels(slots); } };
     const out = await backfillApprovalDisplayLabels(engine as any, counting);
-    expect(asked).toEqual([['u_alice', 'position:legal'], ['position:legal']]);
-    expect(out.requestsFilled).toBe(2);
+    expect(asked).toEqual([['u_alice', 'position:legal', 'u_mail'], ['position:legal']]);
+    expect(out.requestsFilled).toBe(3);
+    expect((await row('sys_approval_request', 'areq_open2')).pending_approver_labels).toBe('Mia Mail');
 
     expect((await row('sys_approval_request', 'areq_open')).process_label).toBe('Live label');
     expect(await row('sys_approval_action', 'a_vote')).toMatchObject({
@@ -319,5 +328,58 @@ describe('#23889 — the boot-time display-label backfill', () => {
     for (const id of ['a_submit', 'a_vote', 'a_thread']) {
       expect(await row('sys_approval_action', id), id).toMatchObject({ object_name: 'crm_deal', updated_at: BACKDATED });
     }
+  });
+
+  it('(h) a live write between the page read and the row writes is kept as it left the row', async () => {
+    // Two more pending requests on the page: one a sweep recalls, one it moves to another slate.
+    await engine.insert('sys_approval_request', legacyRequest('recalled', {
+      status: 'pending', pending_approvers: 'u_alice', node_config_json: JSON.stringify({ approvers: [] }),
+    }), { context: SYSTEM } as any);
+    await engine.insert('sys_approval_request', legacyRequest('moved', {
+      status: 'pending', pending_approvers: 'u_alice', node_config_json: JSON.stringify({ approvers: [] }),
+    }), { context: SYSTEM } as any);
+    for (const id of ['areq_done', 'areq_open', 'areq_recalled', 'areq_moved']) await backdate('sys_approval_request', id);
+
+    const svc = new ApprovalService({ engine: engine as any, logger: quiet as any });
+    const source = slotLabelSourceOf(svc);
+    let left: Record<string, any> | undefined;
+    // The labeller is asked once the request page has been read and before any
+    // of its rows is written — the window. The live writes land there, as the
+    // sweep's do: plain system writes that stamp now.
+    const racing = {
+      slotLabels: async (slots: readonly string[]) => {
+        if (!left) {
+          await engine.update('sys_approval_request', {
+            id: 'areq_recalled', status: 'recalled', pending_approvers: null, pending_approver_labels: null,
+            completed_at: '2026-10-01T00:00:00.000Z',
+          }, { context: SYSTEM } as any);
+          await engine.update('sys_approval_request', {
+            id: 'areq_moved', pending_approvers: 'u_mail', pending_approver_labels: 'Mia Mail',
+          }, { context: SYSTEM } as any);
+          left = {
+            recalled: await row('sys_approval_request', 'areq_recalled'),
+            moved: await row('sys_approval_request', 'areq_moved'),
+          };
+        }
+        return source.slotLabels(slots);
+      },
+    };
+    await backfillApprovalDisplayLabels(engine as any, racing);
+
+    const pick = (r: any) => ({
+      status: r.status, pending_approvers: r.pending_approvers,
+      pending_approver_labels: r.pending_approver_labels, updated_at: r.updated_at,
+    });
+    expect(left!.recalled.updated_at).not.toBe(BACKDATED);
+    expect(pick(await row('sys_approval_request', 'areq_recalled'))).toEqual(pick(left!.recalled));
+    expect(pick(await row('sys_approval_request', 'areq_moved'))).toEqual(pick(left!.moved));
+    // Their null label columns are still filled, under the stamp the live write left.
+    expect((await row('sys_approval_request', 'areq_recalled')).process_label).toBe('Deal Review');
+
+    // The untouched rows on the page are filled, their stamps kept.
+    expect(await row('sys_approval_request', 'areq_open')).toMatchObject({
+      pending_approver_labels: 'Alice, position:legal', updated_at: BACKDATED,
+    });
+    expect(await row('sys_approval_request', 'areq_done')).toMatchObject({ process_label: 'Deal Review', updated_at: BACKDATED });
   });
 });

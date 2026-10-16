@@ -36,17 +36,25 @@
  *
  * ## Each row keeps its `updated_at`
  *
- * Every write passes the read row's `updated_at` back under `preserveAudit`
- * ({@link PRESERVING_CONTEXT}), so a filled request keeps its place in the
- * lists that sort on it. Where `plugin-audit` is composed, each filled row still
- * gets one system audit entry for the write.
+ * Every write passes the row's `updated_at` back under `preserveAudit`
+ * ({@link PRESERVING_CONTEXT}) — on a request, the value the row holds when it
+ * is re-read just before the write — so a filled request keeps its place in
+ * the lists that sort on it. A row with no stored `updated_at` takes the write's
+ * instant: no update can keep it null. Where `plugin-audit` is composed, the
+ * write still records one system entry in the audit log and one in the record's
+ * activity timeline for each row it fills.
  *
  * ## Idempotent, null-only, and run at every boot
  *
- * Each write names only columns that were null on the row it read, so the
- * pass can never overwrite what a live writer wrote, and a second run over an
- * unchanged database writes nothing (`display-label-backfill.integration.test.ts`
- * asserts both). A label the labeller could not produce — a failed `sys_user`
+ * Each write names only columns that are null on the row as it stands just
+ * before the write: a request is re-read by id first, and its waiting-on is
+ * written only while it is still pending on the slate the names were read for.
+ * So a value a live writer stored before that re-read is never overwritten;
+ * what remains is the one engine call between the re-read and the write, the
+ * window `plugin-audit`'s comment-parent-pair backfill accepts. No live writer
+ * updates an action row, so the action pass writes from its page read. A
+ * second run over an unchanged database writes nothing
+ * (`display-label-backfill.integration.test.ts` asserts both). A label the labeller could not produce — a failed `sys_user`
  * read, which `slotLabels` reports as null rather than freezing a raw address
  * — stays null and is retried on the next boot. Both walks are seek walks over
  * the predicate "a display column is null", so a row this pass fills leaves the
@@ -99,6 +107,12 @@ const SYSTEM_CONTEXT = { isSystem: true, positions: [], permissions: [] };
 const PRESERVING_CONTEXT = { ...SYSTEM_CONTEXT, preserveAudit: true };
 const PAGE = 500;
 
+/** What the request pass reads — on the page, and again on the row just before its write. */
+const REQUEST_FIELDS = [
+  'id', 'status', 'process_name', 'current_step', 'node_config_json', 'pending_approvers',
+  'process_label', 'current_step_label', 'pending_approver_labels', 'updated_at',
+];
+
 /** The read row's own `updated_at`, to hand back on the write. */
 function keptStamp(row: Record<string, unknown>): Record<string, unknown> {
   return row.updated_at !== undefined && row.updated_at !== null ? { updated_at: row.updated_at } : {};
@@ -140,10 +154,7 @@ export async function backfillApprovalDisplayLabels(
   const requests = keysetWalk<Record<string, unknown>>(
     (q) => engine.find('sys_approval_request', {
       ...q,
-      fields: [
-        'id', 'status', 'process_name', 'current_step', 'node_config_json', 'pending_approvers',
-        'process_label', 'current_step_label', 'pending_approver_labels', 'updated_at',
-      ],
+      fields: REQUEST_FIELDS,
       context: SYSTEM_CONTEXT,
     }) as Promise<Record<string, unknown>[]>,
     {
@@ -162,22 +173,43 @@ export async function backfillApprovalDisplayLabels(
       .filter((row) => row.status === 'pending' && !nonEmpty(row.pending_approver_labels))
       .flatMap((row) => slateOf(row.pending_approvers));
     const named = await pageLabels(labels, waitingOnSlots);
-    for (const row of rows) {
-      const id = nonEmpty(row.id);
+    for (const paged of rows) {
+      const id = nonEmpty(paged.id);
       if (!id) continue;
+      // The page is a snapshot; live writers keep writing pending requests while
+      // this pass runs — the boot SLA / dead-run sweep this plugin starts itself
+      // (not awaited), and every other node. So the row is RE-READ by id
+      // immediately before its write, and the patch is computed from that row:
+      // only columns still null there, the stamp it holds now, and the
+      // waiting-on only for the slate the names were read for. That narrows the
+      // read-then-write race to the one engine call, as `plugin-audit`'s
+      // comment-parent-pair backfill does. ⛔ No conditional `where` on the
+      // update: that would put the write on the predicate path.
+      const reread = ((await engine.find('sys_approval_request', {
+        where: { id }, fields: REQUEST_FIELDS, limit: 1, context: SYSTEM_CONTEXT,
+      })) as Record<string, unknown>[])[0];
+      if (!reread) continue;
       const patch: Record<string, unknown> = {};
-      const chain = requestDisplayLabels(row);
-      if (!nonEmpty(row.process_label) && chain.process_label) patch.process_label = chain.process_label;
-      if (!nonEmpty(row.current_step_label) && chain.current_step_label) {
+      const chain = requestDisplayLabels(reread);
+      if (!nonEmpty(reread.process_label) && chain.process_label) patch.process_label = chain.process_label;
+      if (!nonEmpty(reread.current_step_label) && chain.current_step_label) {
         patch.current_step_label = chain.current_step_label;
       }
-      if (row.status === 'pending' && !nonEmpty(row.pending_approver_labels)) {
-        const slate = slateOf(row.pending_approvers);
+      // Whom it waits on: only while it is still pending on the very slate the
+      // page's names were read for. A slate that moved was moved by a live
+      // writer, which wrote that slate's own labels (or cleared them).
+      if (
+        reread.status === 'pending'
+        && !nonEmpty(reread.pending_approver_labels)
+        && paged.status === 'pending'
+        && reread.pending_approvers === paged.pending_approvers
+      ) {
+        const slate = slateOf(reread.pending_approvers);
         const waitingOn = slate.length ? slateLabelOf(slate.map((slot) => named.get(slot) ?? null)) : null;
         if (waitingOn) patch.pending_approver_labels = waitingOn;
       }
       if (!Object.keys(patch).length) continue;
-      await engine.update('sys_approval_request', { id, ...patch, ...keptStamp(row) }, { context: PRESERVING_CONTEXT });
+      await engine.update('sys_approval_request', { id, ...patch, ...keptStamp(reread) }, { context: PRESERVING_CONTEXT });
       requestsFilled++;
     }
   }
