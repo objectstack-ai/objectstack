@@ -644,11 +644,14 @@ export function resolveStorageDefinition(
  * the runtime host's own sentence, which names the scheme and never the URL,
  * minus its `[StandaloneStack]` tag — the shape this host's retired-engine
  * refusal already has (`driver-vocabulary-parity.test.ts` holds both).
- * Two inputs reach that: an explicit `sqlite` selection over a server URL
- * (`OS_DATABASE_DRIVER=sqlite` beside `postgres://user:password@…`), and a
- * `file:` that names no file. Both used to build a definition: the first opened
- * a file at a path made of the URL, credentials included, and the second
- * declared an empty file name. The type is
+ * What reaches that is an explicit `sqlite` or `sqlite-wasm` selection over a
+ * value that is not a file path, which this host's URL inference never sees —
+ * a server URL (`OS_DATABASE_DRIVER=sqlite` beside
+ * `postgres://user:password@…`), an unrecognised `<scheme>://`, or an opaque
+ * scheme (`jdbc:postgresql://…`, `redis:h`) — and, on the `sqlite` kind, a
+ * `file:` that names no file. Each used to build a definition: a non-file value
+ * opened a file at a path made of the URL, credentials included, and the empty
+ * `file:` declared an empty file name. The type is
  * what makes the refusal fatal: `serve.ts` re-throws this class and swallows
  * every other construction error, so a plain `Error` would boot with no
  * storage at all.

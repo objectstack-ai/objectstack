@@ -489,6 +489,83 @@
         { "revision": 1, "date": "2026-08-07", "change": "new item: the i18n build lane — drift gate, undeclared-key gate, ratchet, and their provable red paths", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "step 4 was a no-op as written: 'perturb one committed bundle VALUE' is green by design under merge mode, where the committed file is its own baseline. Reworded to the STRUCTURAL perturbation (remove/rename a KEY) that actually bites, split into a do/don't pair, with the #7640 symlink-farm technique that drives it without touching a repo file; the drift-bites clause and both negatives are reconciled so a green value edit can no longer be read (or filed) as a gate defect", "ref": "#7686" }
       ]
+    },
+    {
+      "id": "i18n.flow-copy-translation-and-host-override",
+      "title": "Flow copy is translatable on v18: a flow refusal message and a paused screen's title/description resolve in the caller's Accept-Language with holes filled, `os i18n extract` scaffolds the refusal / screen / option keys, a translated screen title is judged by the {{ }} text-slot rule, and a host translation bundle overrides a platform key in either load order",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "a showcase (or scratch) flow with an end-node refusal message and a screen, plus a zh-CN translation bundle carrying their keys"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/automation/FLOW/trigger with Accept-Language: zh-CN and read the refusal message",
+        "start the screen flow with Accept-Language: zh-CN and read the paused screen title",
+        "in the scratch app run `os i18n extract` and inspect the scaffolded keys; add a translated screen title \"Hi {name}\" and run `os validate`",
+        "in the scratch app give the host bundle a key the platform also ships (e.g. a sys_user label) and boot; GET /api/v1/meta/object/sys_user with Accept-Language for that locale"
+      ],
+      "acceptance": [
+        {
+          "clause": "flow refusal / screen translation, extract scaffolding, translated text-slot rule and host override — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the refusal and the screen title come back in zh-CN with their holes filled; record-trigger refusals stay in the source language",
+          "oracle": "api",
+          "verify": "message text per call",
+          "evidence": "the two answers"
+        },
+        {
+          "clause": "`os i18n extract` writes the refusal, screen, option and toast keys",
+          "oracle": "build",
+          "verify": "diff of the bundle file",
+          "evidence": "the added keys"
+        },
+        {
+          "clause": "a translated screen title with single braces fails `os validate` naming the {{ }} spelling",
+          "oracle": "build",
+          "verify": "exit code + rule",
+          "evidence": "the issue line"
+        },
+        {
+          "clause": "the host bundle's value wins for the overlapping platform key",
+          "oracle": "api",
+          "verify": "label in the served definition",
+          "evidence": "the excerpt"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-automation/src/end-node-refusal-translation.test.ts + packages/runtime/src/flow-run-locale.test.ts + packages/spec/src/automation/flow-screen-option-key.test.ts + packages/spec/src/system/translation.test.ts + packages/platform-objects/src/plugin.translations.test.ts"
+      },
+      "source": [
+        "packages/spec/src/system/i18n-resolver.ts#flowRefusalMessageKey",
+        "packages/spec/src/system/i18n-resolver.ts#flowScreenCopyKey",
+        "packages/spec/src/automation/flow-screen-option-key.ts#flowScreenFieldOptionKey",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22450-flow-refusal-translation, 22507-flow-options-toasts-translation, 22507-screen-copy-engine-pick-automation, 22507-screen-copy-engine-pick-cli, 22507-screen-copy-engine-pick-lint, 22507-screen-copy-engine-pick-spec, 22627-flow-screen-title-translation-text-slot, 22972-host-bundle-wins"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

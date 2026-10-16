@@ -1194,6 +1194,75 @@
         }
       ],
       "retiredReason": "Capability removed (ADR-0049 enforce-or-remove; maintainer ruling 2026-09-25, #20102): the saved-report schedule dispatcher this item drove left with the rest of the saved-report stack (sys_report_schedule, the /api/v1/reports schedule routes, @objectstack/plugin-reports), which had zero consumers. The platform has no scheduled delivery of a report today; scheduled delivery for `report` metadata is explicitly NOT built by that ruling — a real need is a new card on the metadata kind, and a new item with it."
+    },
+    {
+      "id": "dashboards.analytics-exposure-gate-and-measure-aggregate",
+      "title": "Analytics on v18 asks each object's `enable` block and internal flags: a cube or dataset over an apiEnabled:false object is 404, an internal field as dimension / measure / filter is 400 even for admin, an unexposed configured cube is warned at boot and absent from /analytics/meta, and a dataset answer's measure column states its aggregate",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "in the scratch app: an apiEnabled:false object with a cube over it and an internal:true field on an exposed object"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/analytics/query on the cube over the unexposed object",
+        "POST /api/v1/analytics/query using the internal field as a dimension, then as a filter",
+        "GET /api/v1/analytics/meta and the boot log",
+        "POST /api/v1/analytics/dataset/query {datasetName: \"sys_user_metrics\", selection: {measures: [\"user_count\"]}} (a saved dataset is named by `datasetName`; `dataset` is an INLINE definition object); read fields[]"
+      ],
+      "acceptance": [
+        {
+          "clause": "the analytics exposure door, registration refusal, label withholding and measure aggregate — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the unexposed cube query → 404 OBJECT_API_DISABLED; the internal field → 400 INVALID_FIELD (admin too)",
+          "oracle": "api",
+          "verify": "status + code",
+          "evidence": "answers"
+        },
+        {
+          "clause": "the unexposed cube is warned at boot and absent from /analytics/meta",
+          "oracle": "log",
+          "verify": "boot line + meta list",
+          "evidence": "line + list"
+        },
+        {
+          "clause": "the count measure column carries aggregate:\"count\"; dimension columns carry none",
+          "oracle": "api",
+          "verify": "fields[] entries",
+          "evidence": "the excerpt"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-analytics/src/__tests__/api-exposure-door.test.ts + packages/services/service-analytics/src/__tests__/unexposed-definition-registration.test.ts + packages/services/service-analytics/src/__tests__/dimension-label-exposure.test.ts + packages/services/service-analytics/src/__tests__/preview-column-enrichment.test.ts"
+      },
+      "source": [
+        "packages/services/service-analytics/src/api-exposure-door.ts#assertObjectsExposed",
+        "packages/services/service-analytics/src/analytics-service.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22634-analytics-exposure-gate, 22634-spec-ledger-analytics-exposure-codes, 22663-analytics-unexposed-cube-registration, 21995-measure-column-aggregate"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

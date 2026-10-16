@@ -964,9 +964,10 @@ export interface ServerReadyOptions {
    * developer knows the endpoint is there. The banner is where they look, so
    * print the URL + the SKILL.md pointer when it's live.
    *
-   * It says whether the MCP surface is switched on, not whether anything
-   * serves it: the row also needs {@link httpServer} to be `'composed'`
-   * (#23623).
+   * It says whether the MCP surface is switched on AND the route's owner (the
+   * runtime dispatcher) is composed (#23743) — `serve` passes both — not
+   * whether a transport serves it: the row also needs {@link httpServer} to
+   * be `'composed'` (#23623).
    */
   mcpEnabled?: boolean;
 }

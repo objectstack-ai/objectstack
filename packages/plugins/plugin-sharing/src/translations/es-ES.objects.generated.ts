@@ -18,7 +18,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_record_share: {
     label: "Compartición de registro",
     pluralLabel: "Comparticiones de registro",
-    description: "Concesión de compartición por registro; amplía OWD con acceso explícito.",
+    description: "Registros compartidos más allá de su propietario, una fila por concesión.",
     fields: {
       id: {
         label: "ID de compartición"

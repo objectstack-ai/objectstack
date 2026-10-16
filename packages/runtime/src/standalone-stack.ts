@@ -427,6 +427,25 @@ function urlSchemeOf(dbUrl: string): string | undefined {
     return /^[a-z][a-z0-9+.-]*:\/\//i.exec(dbUrl)?.[0];
 }
 
+/**
+ * The scheme a database URL opens with — its `<scheme>://` ({@link urlSchemeOf})
+ * or an OPAQUE scheme, two or more characters and a `:` with no `//`
+ * (`jdbc:`, `redis:`) — or `undefined` when it has neither and so is a path.
+ *
+ * A single letter and a `:` is a Windows drive (`C:\data\app.db`,
+ * `C:/data/app.db`), never a scheme. An opaque scheme ends at its FIRST `:`, so
+ * like a `<scheme>://` it cannot hold a userinfo, a host or a path, and a
+ * refusal may name it. ONE answer for the two places this host asks whether a
+ * value is a path: the URL classification ({@link detectDriverFromUrl}) and the
+ * SQLite filename rule an explicit selection meets instead
+ * ({@link sqliteFilenameFromUrl}). The CLI host draws the same line
+ * (`inferDriverTypeFromUrl` in `utils/storage-driver.ts`), and
+ * `driver-vocabulary-parity.test.ts` holds the hosts equal.
+ */
+function schemeOf(dbUrl: string): string | undefined {
+    return urlSchemeOf(dbUrl) ?? /^[a-z][a-z0-9+.-]+:/i.exec(dbUrl)?.[0];
+}
+
 function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     // The in-memory (mingo) engine's two schemes — character-for-character the
     // CLI's `inferDriverTypeFromUrl` regex, for the reason the mysql and turso
@@ -473,7 +492,7 @@ function detectDriverFromUrl(dbUrl: string): ResolvedDriverKind {
     // `C:/data/app.db`), not a scheme, and stays a path. The CLI host draws the
     // same line (`inferDriverTypeFromUrl` in `utils/storage-driver.ts`), and
     // `driver-vocabulary-parity.test.ts` holds the two equal.
-    const scheme = urlSchemeOf(dbUrl) ?? /^[a-z][a-z0-9+.-]+:/i.exec(dbUrl)?.[0];
+    const scheme = schemeOf(dbUrl);
     // Bare path without a scheme — treat as a sqlite file path.
     if (!scheme) return wasmFile ? 'sqlite-wasm' : 'sqlite';
     // Names the scheme, never the URL ({@link urlSchemeOf}). An opaque scheme
@@ -603,8 +622,32 @@ function refuseRetiredMemoryEngine(
  * URL→filename for the two sqlite kinds: the ONE rule both hosts turn a SQLite
  * database URL into a file with. Throws on a URL that isn't a path.
  *
- * Takes the URL as {@link resolveStandaloneDatabase} has it, i.e. after
- * `normalizeDatabaseUrl` (`sqlite:` / `sqlite://` are already `file:`).
+ * Takes the URL as {@link resolveStandaloneDatabase} has it. The explicit and
+ * `OS_DATABASE_URL` rungs have applied `normalizeDatabaseUrl` (`sqlite:` /
+ * `sqlite://` are `file:` there); a declared datasource's `url` and
+ * `TURSO_DATABASE_URL` arrive as written, so on those two rungs a `sqlite:`
+ * alias is a scheme here and is refused.
+ *
+ * An explicit `sqlite` / `sqlite-wasm` selection skips
+ * {@link detectDriverFromUrl}, so this rule is the only check its URL meets, and
+ * on BOTH kinds it refuses every value that is not a file path:
+ *  - a `<scheme>://` left after the strip below: a server URL
+ *    (`postgres://user:password@…`) or a scheme nothing recognises
+ *    (`redis://h/x.db`);
+ *  - an OPAQUE scheme ({@link schemeOf}: two or more characters and a `:` with
+ *    no `//`, as in `jdbc:postgresql://…` or `redis:h`), judged on the value as
+ *    given. A value whose `file:` (or, on the WASM kind, `wasm-sqlite:`) prefix
+ *    the strip removed is a file, colons and all: `file:backup:2026.db` names
+ *    `backup:2026.db`, while `backup:2026.db` is the scheme `backup:`.
+ * Both used to pass through as a file name, and the boot made directories out of
+ * the URL: `./jdbc:postgresql:/127.0.0.1:5999/`, and on the WASM kind, which
+ * refused nothing, `./postgres:/USER:SECRET@127.0.0.1:5999/`, the credentials
+ * in a directory name. The refusal comes before any directory is made, and it
+ * names the selected kind and the scheme, never the URL.
+ *
+ * An empty name is `:memory:` on the WASM kind; on the `sqlite` kind a `file:`
+ * that names no file is refused.
+ *
  * `file:` and `file://` are stripped case-insensitively on BOTH kinds, as
  * {@link detectDriverFromUrl} classifies them (`/^file:/i`): a prefix the
  * classifier accepts and this strip kept became part of the filename, so
@@ -618,21 +661,21 @@ function refuseRetiredMemoryEngine(
  * `//NAME` at the filesystem root there while this host opened `NAME`.
  */
 export function sqliteFilenameFromUrl(dbUrl: string, kind: 'sqlite' | 'sqlite-wasm'): string {
-    if (kind === 'sqlite-wasm') {
-        return dbUrl
-            .replace(/^wasm-sqlite:(\/\/)?/i, '')
-            .replace(/^file:(\/\/)?/i, '') || ':memory:';
-    }
-    const filename = dbUrl.replace(/^file:(\/\/)?/i, '');
-    const scheme = urlSchemeOf(filename);
+    const filename = kind === 'sqlite-wasm'
+        ? dbUrl.replace(/^wasm-sqlite:(\/\/)?/i, '').replace(/^file:(\/\/)?/i, '')
+        : dbUrl.replace(/^file:(\/\/)?/i, '');
+    if (!filename && kind === 'sqlite-wasm') return ':memory:';
+    // A prefix the strip removed made the value a file, so only a value left as
+    // given is asked for an opaque scheme (`file:` is one itself).
+    const scheme = filename === dbUrl ? schemeOf(dbUrl) : urlSchemeOf(filename);
     if (!filename || scheme) {
-        // Names the scheme, never the URL ({@link urlSchemeOf}). This is the
-        // refusal an explicit `sqlite` selection meets over a server URL
+        // Names the scheme, never the URL ({@link schemeOf}). This is the
+        // refusal an explicit selection meets over a server URL
         // (`OS_DATABASE_DRIVER=sqlite` beside a `postgres://user:password@…`),
         // so the URL it would otherwise echo is exactly the credentialed kind.
         const why = scheme ? `its scheme is "${scheme}"` : 'it names no file after "file:"';
         throw new Error(
-            `[StandaloneStack] sqlite driver was selected but the URL does not look like a file path (${why}). ` +
+            `[StandaloneStack] ${kind} driver was selected but the URL does not look like a file path (${why}). ` +
             `Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.`
         );
     }

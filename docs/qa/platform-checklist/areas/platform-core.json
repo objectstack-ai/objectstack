@@ -2878,6 +2878,312 @@
           "ref": "#21932"
         }
       ]
+    },
+    {
+      "id": "platform-core.v18-boot-refusals",
+      "title": "A v18 server refuses to boot rather than serve wrongly: against a 17.x-shaped database (a physical organization_id on a non-tenant table, no verified ADR-0131 ceremony marker) it stops before listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED naming the tables and the command, and with security on but no identity objects it stops with AuthzIdentityObjectsMissingError",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P0",
+      "surface": "cli",
+      "personas": [
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "a v17-shaped SQLite file: a DB created by a 17.x showcase boot (npm `@objectstack/cli@17.7.0`) — or the guard pin's fixture shape planted into a scratch DB — copied, never the original"
+        ]
+      },
+      "steps": [
+        "checksum the v17 DB; run `os serve` (v18) against it with -d file:COPY.db; read the output and exit code; checksum again",
+        "run `os dev` on a scratch config with services:{auth:false} and security on"
+      ],
+      "acceptance": [
+        {
+          "clause": "the organization-ownership boot guard and the identity-objects boot refusal — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the v18 serve against the v17 DB exits before kernel:listening with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED, naming the tables and `os migrate organization-ownership`",
+          "oracle": "log",
+          "verify": "boot output + exit code + no listening line",
+          "evidence": "the refusal excerpt"
+        },
+        {
+          "clause": "the refused boot did not alter the database",
+          "oracle": "build",
+          "verify": "checksum before == after",
+          "evidence": "the two checksums"
+        },
+        {
+          "clause": "the auth-less security boot is refused naming createIdentityObjectsPlugin(), not served with 503s",
+          "oracle": "log",
+          "verify": "boot output",
+          "evidence": "the excerpt"
+        }
+      ],
+      "negative": [
+        "a v18 boot that serves a v17-shaped DB (or half-migrates it) is a P0 data-integrity FAIL"
+      ],
+      "traps": [
+        "destructive-in-place",
+        "first-boot-cold-start"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/organization-ownership-boot-guard.test.ts + packages/runtime/src/organization-ownership-boot-guard.kernel.test.ts + packages/plugins/plugin-security/src/authz-identity-objects-boot-refusal.test.ts"
+      },
+      "source": [
+        "packages/runtime/src/organization-ownership-boot-guard.ts#ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE",
+        "packages/plugins/plugin-security/src/security-plugin.ts#AuthzIdentityObjectsMissingError",
+        "docs/adr/0131-total-organization-ownership-no-null-organization-id.md",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 23429-v18-boot-refusal, 22074-auth-identity-objects-plugin, 22074-security-identity-objects-boot-refusal"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.protocol-18-handshake-and-stored-replay",
+      "title": "Protocol 18 upgrade surfaces: a package declaring engines.protocol \"^17\" is refused 422 OS_PROTOCOL_INCOMPATIBLE naming `os migrate meta --from 17` (\"^18\" is admitted), a stored v17-shaped row is served canonical while a PUT of the same old shape is refused at parse, and a \"^18\" artifact built before a retirement boots with one warn per replayed conversion",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "mixed",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "a scratch package manifest with engines.protocol \"^17\" and one with \"^18\"",
+          "a stored v17-shaped row (e.g. an element using a retired flat data-binding key) planted into the scratch DB"
+        ]
+      },
+      "steps": [
+        "POST /api/v1/marketplace/install-local (or POST /api/v1/packages) with the ^17 manifest; then the ^18 one",
+        "GET /api/v1/meta/page/PLANTED and compare with the planted body; PUT the planted (old-shape) body back",
+        "boot (`os start`) a ^18 dist/objectstack.json built before a retirement; read the boot warns"
+      ],
+      "acceptance": [
+        {
+          "clause": "the protocol handshake, stored-row replay and artifact forward conversion — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "^17 → 422 OS_PROTOCOL_INCOMPATIBLE with migrateCommand naming --from 17; ^18 admitted",
+          "oracle": "api",
+          "verify": "status + code + migrateCommand",
+          "evidence": "both answers"
+        },
+        {
+          "clause": "the planted row is served in the canonical v18 shape; PUT of the old shape → 422 with the tombstone prescription",
+          "oracle": "api",
+          "verify": "GET body vs planted; PUT status + message",
+          "evidence": "both excerpts"
+        },
+        {
+          "clause": "the old artifact boots with one \"converted N site(s) … ID\" warn per conversion",
+          "oracle": "log",
+          "verify": "boot log grep",
+          "evidence": "the lines"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/runtime/src/domains/packages-install-protocol-incompatible.test.ts + packages/cli/test/migrate-meta-protocol-range.test.ts + packages/spec/src/conversions/stored.test.ts + packages/metadata-protocol/src/protocol.stored-migration.test.ts + packages/metadata/src/plugin-artifact-forward-conversion-major-step.test.ts"
+      },
+      "source": [
+        "packages/spec/src/kernel/protocol-version.ts#PROTOCOL_VERSION",
+        "packages/metadata-core/src/protocol-handshake.ts#checkProtocolCompat",
+        "packages/spec/src/conversions/stored.ts#applyConversionsToStoredItem",
+        "packages/metadata-core/src/artifact-forward-conversion.ts#applyArtifactForwardConversions",
+        "ADR-0087",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22130-protocol-18, 23001-prerelease-artifact-window"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.settings-organization-isolation-and-platform-rung",
+      "title": "Settings on v18: a global-scope key is stored in sys_platform_setting (readable through /data only with manage_platform_settings), and under a walled posture one organization's tenant save or lock does not change or lock another's, with a data-API read of sys_setting filtered to readable namespaces",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P1",
+      "surface": "api",
+      "personas": [
+        "seeded admin (admin@objectos.ai / admin123) — the Default Organization owner and platform admin on a fresh boot",
+        "org member — created by the admin with POST /api/v1/auth/admin/create-user (stock showcase self-registration is closed: audience posture invite_only answers sign-up 403 SELF_REGISTRATION_CLOSED); joins the Default Organization as `member`, not platform admin, and lands mustChangePassword:true, i.e. a HELD session until it changes its password (POST /api/v1/auth/change-password)",
+        "org owner holding manage_metadata who is NOT platform admin — walled-posture legs only"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
+          "a second boot with OS_TENANCY_POSTURE=isolated (walled posture) on its own port and file DB — the stock single posture leaves every walled clause vacuous, so confirm the posture from the boot log before scoring",
+          "on the walled boot: two organizations A and B with an admin each"
+        ]
+      },
+      "steps": [
+        "as platform admin write a global-scope key through PUT /api/settings/NAMESPACE; GET /api/v1/data/sys_platform_setting and /sys_setting?filter scope=global",
+        "as the member GET /api/v1/data/sys_platform_setting",
+        "walled: as A's admin save a tenant key and lock it; as B's admin read and write the same key",
+        "walled: write a tenant key with no organization in scope"
+      ],
+      "acceptance": [
+        {
+          "clause": "the platform rung and per-organization settings isolation — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the global key lands in sys_platform_setting and sys_setting has no scope=global row; the member is refused that table",
+          "oracle": "api",
+          "verify": "row reads + member status",
+          "evidence": "excerpts"
+        },
+        {
+          "clause": "walled: A's save and lock leave B's value and lock untouched",
+          "oracle": "api",
+          "verify": "B's reads before/after",
+          "evidence": "reads"
+        },
+        {
+          "clause": "a tenant key with no organization → 400 SETTINGS_VALIDATION",
+          "oracle": "api",
+          "verify": "status + code",
+          "evidence": "the answer"
+        }
+      ],
+      "traps": [
+        "wrong-persona",
+        "cache-staleness"
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/services/service-settings/src/settings-organization-isolation.pin.test.ts + packages/services/service-settings/src/settings-read-door.pin.test.ts + packages/services/service-settings/src/settings-admission-tenancy-posture.test.ts + packages/services/service-settings/src/config-change-audit.test.ts"
+      },
+      "source": [
+        "packages/services/service-settings/src/settings-read-door.ts#registerSettingsReadDoor",
+        "packages/services/service-settings/src/config-change-audit.ts#CONFIG_CHANGE_GLOBAL_OBJECT_NAME",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22261-settings-organization-row-identity, 15207-settings-global-rung-platform-setting"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
+    },
+    {
+      "id": "platform-core.serve-composition-v18",
+      "title": "`os serve` composition on v18: unclaimed top-level items of a packages[] config are served under manifest.id with a warn line, an app shipping its own default sys_organization record page boots, a host datasourceMapping is installed before the first schema sync, a production host with no storage refuses to boot naming three remedies, and /_console/ answers 503 with the remedy when the console is not built",
+      "since": "v18",
+      "status": "active",
+      "revision": 1,
+      "priority": "P2",
+      "surface": "cli",
+      "personas": [
+        "metadata author running the CLI in a scratch copy of the showcase app (no server needed)"
+      ],
+      "fixtures": {
+        "app": "showcase",
+        "requires": [
+          "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
+          "per leg a scratch config: packages[] plus one top-level view; an isDefault:true sys_organization record page; a datasourceMapping (examples/app-crm declares one); NODE_ENV=production with no storage service"
+        ],
+        "knownGaps": [
+          "test/serve-organization-record-page.e2e.test.ts is a `*.e2e.test.ts` file, which packages/cli collects ONLY under OS_TEST_TIERS=nightly (vitest.config.ts nightly tiers): run it as `OS_TEST_TIERS=nightly npx vitest run test/serve-organization-record-page.e2e.test.ts` in packages/cli — a plain run of the automated.ref list silently collects 25 of its 26 cli files"
+        ]
+      },
+      "steps": [
+        "`os serve` each scratch config on its own port and file DB; read the boot output",
+        "GET /api/v1/meta/view and find the top-level view's package",
+        "boot a tree whose console is not built and GET /_console/"
+      ],
+      "acceptance": [
+        {
+          "clause": "the serve composition guards and fallbacks — the permanent pins pass at the run subject sha (RUNNER rule 6: cite their output, never re-derive by hand)",
+          "oracle": "test",
+          "verify": "run each file named in automated.ref with its package's vitest (`pnpm --filter PKG exec vitest run --maxWorkers=2 FILE`, never through a bare `--`); every named file reports ≥1 test and 0 failed. A file that reports 0 tests or is not found is NOT a pass — it is a stale ref, fix the item",
+          "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
+        },
+        {
+          "clause": "the unclaimed top-level view is served under manifest.id with one warn line",
+          "oracle": "api",
+          "verify": "item package + boot log",
+          "evidence": "excerpt + line"
+        },
+        {
+          "clause": "the custom sys_organization default page boots (no DEFAULT_RECORD_PAGE_CONFLICT) and is the only default",
+          "oracle": "log",
+          "verify": "boot output + GET /meta/page list",
+          "evidence": "excerpt"
+        },
+        {
+          "clause": "platform tables land in the mapped datasource (no `no such table`)",
+          "oracle": "log",
+          "verify": "boot output",
+          "evidence": "excerpt"
+        },
+        {
+          "clause": "the production no-storage boot exits non-zero naming the three remedies",
+          "oracle": "log",
+          "verify": "exit code + output",
+          "evidence": "excerpt"
+        },
+        {
+          "clause": "GET /_console/ on an unbuilt console → 503 with the build remedy",
+          "oracle": "api",
+          "verify": "status + body",
+          "evidence": "the answer"
+        }
+      ],
+      "automated": {
+        "kind": "unit",
+        "ref": "packages/cli/test/serve-config-boot-residual.integration.test.ts + packages/cli/test/serve-organization-record-page.e2e.test.ts + packages/cli/test/serve-datasource-mapping-before-sync.integration.test.ts + packages/runtime/src/datasource-mapping-before-schema-sync.test.ts + packages/cli/test/serve-no-storage-boot-guard.integration.test.ts + packages/cli/src/utils/console.not-built.test.ts"
+      },
+      "source": [
+        "packages/metadata/src/plugin.ts",
+        "packages/core/src/stack-organization-record-page.ts#stackDeclaresOrganizationRecordPage",
+        "packages/cli/src/utils/console.ts#createConsoleNotBuiltPlugin",
+        "packages/cli/src/commands/serve.ts",
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22521-config-boot-residual, 23254-auth-org-record-page-option, 23310-serve-org-record-page, 23649-datasource-mapping-before-sync, 23573-serve-no-storage-loud, 23636-no-storage-hydration-error, 22225-console-not-built-loud, 22420-console-drift-responder"
+      ],
+      "history": [
+        {
+          "revision": 1,
+          "date": "2026-10-16",
+          "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
+          "ref": "#23879"
+        }
+      ]
     }
   ]
 }

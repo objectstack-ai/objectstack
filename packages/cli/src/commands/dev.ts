@@ -16,6 +16,7 @@ import {
   assessArtifactStaleness,
   formatMtimeGap,
 } from '../utils/dev-restart.js';
+import { isOrganizationOwnershipRequiredMessage, upgradeDevelopmentDatabase } from '../utils/dev-organization-ownership-upgrade.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
 // THE artifact precedence, written once (#21501) — shared with `start`, and
 // with the `serve` child this command spawns. ⛔ No rung of it is restated here.
@@ -742,6 +743,13 @@ export default class Dev extends Command {
       // load is the one path that applies the whole artifact, so the
       // coordinator restarts the serve child after each successful rebuild
       // (nodemon-style, default-on; opt out with --no-restart).
+      // [ADR-0131 D10, development exception] A serve child refused for the
+      // v17 organization-ownership shape says so before it exits; the
+      // coordinator then asks `recover` below, which copies the development
+      // database, runs the ceremony on it and boots the server again — once
+      // per session (`utils/dev-organization-ownership-upgrade.ts`).
+      let ownershipUpgrade: 'none' | 'pending' | 'attempted' = 'none';
+      let upgradedBoot = false;
       const spawnServeChild = (info: { restartIndex: number }) => {
         const child = spawn(
           process.execPath,
@@ -774,12 +782,21 @@ export default class Dev extends Command {
           // announcement carries no port and has nothing to do with the block
           // below. See {@link forwardSeedSettledToParent}.
           if (forwardSeedSettledToParent(msg)) return;
+          if (isOrganizationOwnershipRequiredMessage(msg)) {
+            if (ownershipUpgrade === 'none') ownershipUpgrade = 'pending';
+            return;
+          }
           if (msg?.type === 'objectstack:listening' && msg.port) {
             const actual = String(msg.port);
             if (actual !== requestedPort) {
               console.log(chalk.dim(`  ↪ server bound to port ${actual} (requested ${requestedPort})`));
             }
-            if (info.restartIndex > 0) {
+            if (upgradedBoot) {
+              // The first child to listen after the upgrade: the boot the
+              // developer started, so it gets the initial boot's hint below.
+              upgradedBoot = false;
+              console.log(chalk.green('  ✓ server started on the upgraded database'));
+            } else if (info.restartIndex > 0) {
               // A restarted child is listening — the running server matches
               // dist/objectstack.json again. The MCP hint below is boot
               // noise on a restart, so it prints on the initial boot only.
@@ -816,6 +833,32 @@ export default class Dev extends Command {
       const coordinator = new ServeRestartCoordinator({
         spawnChild: spawnServeChild,
         exitParent: (code) => process.exit(code),
+        recover: async () => {
+          if (ownershipUpgrade !== 'pending') return false;
+          ownershipUpgrade = 'attempted';
+          console.log(chalk.yellow(
+            '  ⟳ This development database is still in the v17 organization-ownership shape — upgrading it in place '
+              + '(a copy is kept first)…',
+          ));
+          const { resolveStandaloneDatabase } = await import('@objectstack/runtime');
+          let sqliteFile: string | null = null;
+          try {
+            sqliteFile = resolveStandaloneDatabase({ projectRoot: process.cwd(), databaseUrl: effectiveDb }).sqliteFile;
+          } catch {
+            sqliteFile = null;
+          }
+          const result = upgradeDevelopmentDatabase({
+            binPath,
+            databaseUrl: effectiveDb,
+            sqliteFile,
+            env: localEnv,
+            cwd: process.cwd(),
+          });
+          for (const warning of result.warnings) console.log(chalk.yellow(`  ⚠ ${warning}`));
+          for (const line of result.lines) console.log(result.ok ? chalk.green(`  ✓ ${line}`) : chalk.red(`  ✗ ${line}`));
+          if (result.ok) upgradedBoot = true;
+          return result.ok;
+        },
         log: (line) => {
           const trimmed = line.trimStart();
           if (trimmed.startsWith('✗')) console.log(chalk.red(line));

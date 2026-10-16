@@ -39,8 +39,11 @@ export const SysApprovalDelegation = ObjectSchema.create({
   // CRUD (matching the full-CRUD apiMethods below), so no `userActions` block is
   // needed — RLS/permission sets are the authz.
   managedBy: 'system-data',
-  description:
-    'Self-service out-of-office rule: route this user\'s approver slots to a delegate within a time window.',
+  // The sentence Setup shows under the "Delegations (OOO)" title. It says
+  // "assigned to them personally" because only individually-routed approvers
+  // (`user` / `field` / `manager`) are rerouted; team, department, position and
+  // membership-level approvers are not (`ApprovalService.expandApprovers`).
+  description: 'While someone is away, approvals assigned to them personally go to their delegate.',
   // [ADR-0079] The record title is `display_title`, a text formula over the
   // same two columns `titleFormat` names. With no pointer declared, the
   // registry's designate-only pass stamped `nameField: 'id'` (the first
@@ -97,13 +100,14 @@ export const SysApprovalDelegation = ObjectSchema.create({
       description: 'The backup who receives the delegator\'s approvals while this rule is active. Acts under their own identity.',
     }),
 
+    // [ADR-0091 D2] `isGrantActive` is the shared validity predicate.
     valid_from: Field.datetime({
       label: 'Valid From',
       required: false,
       group: 'Delegation',
       description:
         'Rule is inactive before this instant. Null = active immediately. ' +
-        'Enforced at resolution time via isGrantActive (ADR-0091 D2 predicate) — never by a background job.',
+        'Enforced at resolution time via isGrantActive — never by a background job.',
     }),
 
     valid_until: Field.datetime({

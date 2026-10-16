@@ -21,6 +21,7 @@ import {
   renderPendingSchemaWork,
   summarize,
   summarizePendingSchemaWork,
+  SKIPPED_SCHEMA_SYNC_NOTE,
 } from '../../utils/schema-migrate.js';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import {
@@ -63,6 +64,11 @@ import {
  * an empty in-memory database: the plan is unchanged (an empty database is an
  * empty database, and "every table needs creating" is the true answer for a
  * fresh project), and nothing is written to disk.
+ *
+ * [#23848] A primary whose transport cannot hold DDL back (the Turso REMOTE
+ * transport) used to refuse the plan at its boot. It now boots with schema sync
+ * skipped: still nothing written, the drift half read from the database, and
+ * the additive half reported as not examined in both faces.
  */
 export default class MigratePlan extends Command {
   static override description =
@@ -140,6 +146,13 @@ export default class MigratePlan extends Command {
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         deferSchemaDdl: true,
+        // [#23848] …and where the primary's transport cannot defer DDL (the
+        // Turso REMOTE transport), boot with schema sync skipped instead of
+        // refusing: the drift half of the plan still reads the database, and
+        // the additive half is reported as NOT examined (`schemaSync`), never
+        // as "nothing to create". `os migrate apply` passes the same posture,
+        // so the plan an operator reads is the one that apply confirms.
+        deferredDdlUnsupported: 'skip-schema-sync',
         // A plan writes no row — so it must not bring a database file into
         // existence either (#6743). On a never-started project the target is
         // opened as an empty in-memory database: the plan below is unchanged
@@ -212,6 +225,10 @@ export default class MigratePlan extends Command {
         ? collectGlobalUniques(stack.allObjects())
         : [];
 
+      // [#23848] The boot skipped schema sync (a transport that cannot defer
+      // DDL): `pending` below was not examined, so it cannot read as "none".
+      const schemaSyncSkipped = stack.schemaSync === 'skipped';
+
       if (flags.json) {
         await emitJson({
           database: stack.dbLabel,
@@ -222,6 +239,10 @@ export default class MigratePlan extends Command {
           // against — present only when the serving boot keeps one, so a
           // document without it planned every object against `database`.
           ...(stack.telemetryDatabase !== null ? { telemetryDatabase: stack.telemetryDatabase } : {}),
+          // [#23848] Present only when the boot skipped schema sync: then
+          // `pending: []` means NOT EXAMINED, and a consumer must not read it
+          // as "every declared table and column exists".
+          ...(schemaSyncSkipped ? { schemaSync: 'skipped' as const } : {}),
           managedTables: stack.managedTableCount,
           total: drift.length,
           changes: drift,
@@ -292,6 +313,7 @@ export default class MigratePlan extends Command {
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)} ${chalk.dim(`(${describeDatabaseSource(stack.dbSource)})`)}`);
       if (stack.telemetryDatabase !== null) printInfo(describeTelemetryDatabase(stack.telemetryDatabase));
+      if (schemaSyncSkipped) printWarning(SKIPPED_SCHEMA_SYNC_NOTE);
       printInfo(`Examined ${chalk.white(String(stack.managedTableCount))} managed table(s).`);
       // What the object set was composed from (#12938) — never silent about a
       // host config it could not load, and empty (so this block prints nothing)
@@ -324,6 +346,12 @@ export default class MigratePlan extends Command {
             `No drift over the ${c.examinedObjects} object(s) this plan examined — but `
             + `${c.unexaminedObjects} of ${c.registeredObjects} declared object(s) were NOT examined (see above). `
             + 'This is a PARTIAL plan: it is not evidence that the deployment is in sync.',
+          );
+        } else if (schemaSyncSkipped) {
+          // [#23848] Drift was read; the additive half was not (see above).
+          printWarning(
+            'No drift over the tables this database holds — but its additive schema work was NOT examined (see above). '
+            + 'This is a PARTIAL plan: it is not evidence that every declared table and column exists.',
           );
         } else {
           printSuccess('Physical schema is in sync with metadata — nothing to migrate.');

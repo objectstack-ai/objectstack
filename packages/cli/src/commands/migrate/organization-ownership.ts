@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import { readFile, writeFile } from 'node:fs/promises';
+import { lstat, open, readFile, unlink, writeFile, type FileHandle } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Command, Flags } from '@oclif/core';
@@ -18,7 +18,8 @@ import {
   errorCodeFields,
   isExitSignal,
 } from '../../utils/format.js';
-import { bootSchemaStack } from '../../utils/schema-migrate.js';
+import { bootSchemaStack, describeTelemetryDatabase } from '../../utils/schema-migrate.js';
+import { TELEMETRY_DATASOURCE } from '../../utils/telemetry-datasource.js';
 import { OCCUPANCY_STOP_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
@@ -29,6 +30,7 @@ import {
   columnListSql,
   columnNameOf,
   ceremonyDialectOf,
+  PRIMARY_DATABASE,
   type OrganizationOwnershipPlan,
 } from '../../utils/organization-ownership-plan.js';
 import {
@@ -45,6 +47,7 @@ import {
   reviewedPlanFromFile,
   TemplateChoiceRefusal,
   type ApplyExecutor,
+  type ApplySibling,
   type CeremonyLedgerPort,
   type OrganizationOwnershipApplyReport,
   type ReviewedPlan,
@@ -52,6 +55,57 @@ import {
 
 /** Who the ceremony's metadata saves name as their actor. */
 const CEREMONY_ACTOR = 'os migrate organization-ownership';
+
+/**
+ * The databases beside the primary this boot provisioned — the `telemetry`
+ * sibling a development boot (`--dev`) or an `OS_TELEMETRY_DB` deployment
+ * keeps its lifecycle-classed objects in, exactly as the serving boot does —
+ * each with its raw-SQL seam, and the booted engine's routing of an object to
+ * its database. The ceremony plans, attributes and drops columns in each
+ * object's own database: the boot refusal reads every object's columns where
+ * the engine routes it, sibling included.
+ */
+async function ceremonySiblings(stack: {
+  kernel: { getService(name: string): unknown };
+  drivers: readonly unknown[];
+  telemetryDatabase: string | null;
+}): Promise<{ siblings: ApplySibling[]; homeOf: (object: string) => string | undefined }> {
+  const { normalizeRows } = await import('@objectstack/metadata-protocol');
+  const siblings: ApplySibling[] = [];
+  const telemetry = stack.telemetryDatabase ? stack.drivers[1] : undefined;
+  const exec = telemetry ? resolvePlannedDriverExec(telemetry as never) : null;
+  if (telemetry && exec) {
+    const client = (telemetry as { config?: { client?: unknown } }).config?.client;
+    siblings.push({
+      name: TELEMETRY_DATASOURCE,
+      database: stack.telemetryDatabase!,
+      executor: {
+        dialect: ceremonyDialectOf(telemetry),
+        ...(typeof client === 'string' ? { client } : {}),
+        query: async (sql, params) => normalizeRows(await exec(sql, params ? [...params] : [])),
+        execute: async (sql, params) => {
+          await exec(sql, params ? [...params] : []);
+        },
+      },
+    });
+  }
+  let engine: { getDriverForObject?: (object: string) => unknown } | undefined;
+  try {
+    engine = stack.kernel.getService('objectql') as typeof engine;
+  } catch {
+    engine = undefined;
+  }
+  const homeOf = (object: string): string | undefined => {
+    if (siblings.length === 0 || typeof engine?.getDriverForObject !== 'function') return undefined;
+    try {
+      const driver = engine.getDriverForObject(object) as { name?: unknown } | undefined;
+      return driver === telemetry || driver?.name === TELEMETRY_DATASOURCE ? TELEMETRY_DATASOURCE : PRIMARY_DATABASE;
+    } catch {
+      return undefined;
+    }
+  };
+  return { siblings, homeOf };
+}
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --backup-taken
@@ -61,6 +115,89 @@ async function confirm(question: string): Promise<boolean> {
     return /^y(es)?$/i.test(answer.trim());
   } finally {
     rl.close();
+  }
+}
+
+/**
+ * [#23826] What the apply's report file holds from the moment it is reserved
+ * (before the boot) until the report is written over it. A run that stops in
+ * between without reaching its own cleanup (an interrupt, a crash) leaves this
+ * text behind, which says what happened, never an empty file taken for a report.
+ */
+function reportReservationText(reservedAt: string): string {
+  const note =
+    'os migrate organization-ownership --apply reserved this file for its report before it opened the database. ' +
+    'If this text is still here after that run ended, the run stopped before it wrote its report: the deployment ' +
+    `ledger (sys_migration, row ${ORGANIZATION_OWNERSHIP_MIGRATION_ID}) records every step it finished. Re-run ` +
+    '--apply with a new --out: it resumes, and finished steps are not repeated.';
+  return `${JSON.stringify({ kind: 'organization-ownership-apply-reservation', reservedAt, note }, null, 2)}\n`;
+}
+
+/** Write `text` as the whole content of `handle`'s file, from its first byte. */
+async function writeWholeFile(handle: FileHandle, text: string): Promise<void> {
+  const bytes = Buffer.from(text, 'utf8');
+  await handle.truncate(0);
+  for (let at = 0; at < bytes.length;) {
+    const { bytesWritten } = await handle.write(bytes, at, bytes.length - at, at);
+    if (bytesWritten <= 0) throw new Error(`the write stopped at byte ${at} of ${bytes.length}`);
+    at += bytesWritten;
+  }
+}
+
+/**
+ * The reserved path no longer names the file this run created: it was removed
+ * or replaced while the ceremony ran. Not an OS error, so it carries no errno
+ * `code`; what became of the file is its `standing`.
+ */
+class ReportFileLost extends Error {
+  constructor(readonly file: string, readonly standing: 'removed' | 'replaced') {
+    super(`${file} no longer names the file this run reserved: it was ${standing} while the ceremony ran`);
+  }
+}
+
+/**
+ * [#23826] The apply report's file, reserved before the apply boots: created
+ * exclusively (never opened over an existing file), so an `--out` the run
+ * cannot write refuses before anything executes, and no concurrent creator can
+ * take the path between that check and the report. The report is written into
+ * this same file at the end; a run with nothing to report releases it.
+ */
+class ReportFileReservation {
+  private constructor(readonly file: string, private readonly handle: FileHandle) {}
+
+  /** Create `file` exclusively, holding the reservation text; throws the OS error when it cannot. */
+  static async take(file: string): Promise<ReportFileReservation> {
+    const reservation = new ReportFileReservation(file, await open(file, 'wx'));
+    try {
+      await writeWholeFile(reservation.handle, reportReservationText(new Date().toISOString()));
+    } catch (error) {
+      await reservation.release();
+      throw error;
+    }
+    return reservation;
+  }
+
+  /** Whether `file` still names the file this run created, or what became of it. */
+  private async standing(): Promise<'held' | 'removed' | 'replaced'> {
+    const ours = await this.handle.stat();
+    const there = await lstat(this.file).catch(() => undefined);
+    if (!there) return 'removed';
+    return there.dev === ours.dev && there.ino === ours.ino ? 'held' : 'replaced';
+  }
+
+  /** Write the report over the reservation text; throws when it cannot be kept at {@link file}. */
+  async keep(text: string): Promise<void> {
+    const standing = await this.standing();
+    if (standing !== 'held') throw new ReportFileLost(this.file, standing);
+    await writeWholeFile(this.handle, text);
+    await this.handle.close();
+  }
+
+  /** Nothing will be reported: remove the reservation, only while {@link file} still names it. Best effort. */
+  async release(): Promise<void> {
+    const standing = await this.standing().catch(() => undefined);
+    await this.handle.close().catch(() => {});
+    if (standing === 'held') await unlink(this.file).catch(() => {});
   }
 }
 
@@ -121,7 +258,11 @@ async function confirm(question: string): Promise<boolean> {
  * resumes where it stopped, and ends with the post-check. The ledger row is
  * the ceremony's marker: `applied_at` once every step has finished,
  * `verified_at` when the post-check also reads zero discrepancies. A report
- * file is written beside the plan's, never over an existing one.
+ * file is written beside the plan's, never over an existing one: it is reserved
+ * (created exclusively) before the boot, so an `--out` that cannot be written
+ * is refused before anything executes (`apply_refused`), and a report that
+ * still cannot be kept after the ceremony executed is answered with its own
+ * code (`apply_report_unwritable`, `executed: true`, the report itself).
  *
  * ## `--plan-file FILE` (the plan the operator reviewed)
  *
@@ -177,6 +318,7 @@ export default class MigrateOrganizationOwnership extends Command {
     '$ os migrate organization-ownership --database-url postgres://… --json',
     '$ os migrate organization-ownership --apply --plan-file plans/v18-ownership.json --backup-taken',
     '$ os migrate organization-ownership --fate-supplement host-fates.json',
+    '$ os migrate organization-ownership --dev',
   ];
 
   static override flags = {
@@ -188,9 +330,16 @@ export default class MigrateOrganizationOwnership extends Command {
       description:
         'Where to write the plan, or with --apply the apply report (default: organization-ownership-plan-TIMESTAMP.json, ' +
         'or organization-ownership-apply-TIMESTAMP.json, in the current directory). ' +
-        'An existing file is never overwritten',
+        'An existing file is never overwritten; with --apply, a report file that cannot be written refuses the run ' +
+        'before anything executes',
     }),
     json: Flags.boolean({ description: 'Also print the plan (or, with --apply, the apply report) on stdout' }),
+    dev: Flags.boolean({
+      description: 'Compose as `os serve --dev` does: the config\'s devPlugins, the development .env files, a '
+        + 'development boot for the auth secret\'s fallback, and the `telemetry` sibling database a development '
+        + 'boot keeps its lifecycle objects in. Pass it when the deployment boots with --dev (`os dev`).',
+      default: false,
+    }),
     apply: Flags.boolean({
       description:
         'Perform the ceremony: attribution, the verified id-to-name rewrite, mirror deletion, column drops, then the ' +
@@ -239,11 +388,15 @@ export default class MigrateOrganizationOwnership extends Command {
     const json = Boolean(flags.json);
     const refuse = async (payload: Record<string, unknown>, message: string): Promise<void> => {
       if (json) {
+        // `apply_refused` / `plan_refused` mean nothing was executed; a report
+        // lost after the ceremony executed has its own code (#23826).
         const error = payload.reason === 'boot-failed'
           ? 'boot_failed'
           : payload.reason === 'apply-failed'
             ? 'apply_failed'
-            : flags.apply ? 'apply_refused' : 'plan_refused';
+            : payload.reason === 'report-write-failed'
+              ? 'apply_report_unwritable'
+              : flags.apply ? 'apply_refused' : 'plan_refused';
         await emitJson({ error, ...payload }, 1, { compact: true });
         return;
       }
@@ -290,7 +443,7 @@ export default class MigrateOrganizationOwnership extends Command {
     // stop remedy alone. The plan writes no row or table and warns, as every
     // sibling's read-only arm does, saying what its connect can still change
     // on a SQLite file (`JOURNAL_MODE_SWITCH_NOTE`).
-    const occupancy = await probeMigrationTarget(flags['database-url']);
+    const occupancy = await probeMigrationTarget(flags['database-url'], { dev: flags.dev === true });
     if (occupancy.status === 'busy' && flags.apply) {
       await refuse(
         {
@@ -343,6 +496,7 @@ export default class MigrateOrganizationOwnership extends Command {
         jsonOutput: json,
         ...(flags['database-url'] ? { databaseUrl: flags['database-url'] } : {}),
         deferSchemaDdl: true,
+        serveFlags: { dev: flags.dev === true },
         // [#23816] The plan needs no held-back work listed, so a transport that
         // cannot defer DDL boots with no schema sync instead (still read-only).
         deferredDdlUnsupported: 'skip-schema-sync',
@@ -368,6 +522,7 @@ export default class MigrateOrganizationOwnership extends Command {
       const dialect = ceremonyDialectOf(stack.driver);
       const { normalizeRows } = await import('@objectstack/metadata-protocol');
       const client = (stack.driver.config as { client?: unknown } | undefined)?.client;
+      const { siblings, homeOf } = await ceremonySiblings(stack);
       plan = await buildOrganizationOwnershipPlan({
         reader: {
           dialect,
@@ -376,6 +531,8 @@ export default class MigrateOrganizationOwnership extends Command {
         },
         posture,
         database: stack.dbLabel,
+        siblings: siblings.map((d) => ({ name: d.name, database: d.database, reader: d.executor })),
+        homeOf,
         ...(inventory ? { inventory } : {}),
       });
     } catch (error: unknown) {
@@ -413,12 +570,14 @@ export default class MigrateOrganizationOwnership extends Command {
     }
     printInfo(`Database: ${chalk.white(plan.database)} · posture ${chalk.white(plan.posture)} · ` +
       `Default Organization ${plan.defaultOrganization ? chalk.white(plan.defaultOrganization.id) : chalk.yellow('none')}`);
+    for (const sibling of plan.siblings ?? []) printInfo(describeTelemetryDatabase(sibling.database));
     console.log('');
     for (const table of plan.tables) {
       if (table.physical === 'absent') continue;
       const unattributable = table.unattributable.length;
+      const where = table.database ? chalk.dim(` [${table.database}]`) : '';
       console.log(
-        `  ${chalk.white(table.object.padEnd(34))} ${table.fate.padEnd(16)} ` +
+        `  ${chalk.white(table.object.padEnd(34))}${where} ${table.fate.padEnd(16)} ` +
           `rows ${String(table.rows?.total ?? 0).padStart(7)}  null ${String(table.rows?.organizationNull ?? 0).padStart(6)}  ` +
           `${unattributable > 0 ? chalk.yellow(`unattributable ${unattributable}`) : ''}` +
           `${table.notNull.willReceive ? chalk.green(' NOT NULL') : ''}`,
@@ -441,6 +600,10 @@ export default class MigrateOrganizationOwnership extends Command {
       }
     }
     console.log('');
+    // What the ceremony decides on the operator's behalf: said before the
+    // summary, and again by --apply before its first write.
+    for (const warning of plan.warnings) printWarning(warning);
+    if (plan.warnings.length) console.log('');
     const { summary } = plan;
     printInfo(
       `${summary.present} table(s) planned, ${summary.absent} inventoried object(s) with no table here; ` +
@@ -462,6 +625,7 @@ export default class MigrateOrganizationOwnership extends Command {
       'database-url'?: string;
       out?: string;
       json?: boolean;
+      dev?: boolean;
       'backup-taken'?: boolean;
       'template-choice'?: string[];
       'metadata-choice'?: string[];
@@ -509,6 +673,24 @@ export default class MigrateOrganizationOwnership extends Command {
       }
     }
 
+    // [#23826] The report file, reserved before the boot under either boot
+    // posture: an `--out` this run cannot write (an existing file, a missing
+    // directory, no permission) is refused here, before anything executes. The
+    // default name is stamped with this moment.
+    const reportFile = resolve(flags.out ?? `organization-ownership-apply-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);
+    let reservation: ReportFileReservation;
+    try {
+      reservation = await ReportFileReservation.take(reportFile);
+    } catch (error) {
+      const message = String((error as Error)?.message ?? error);
+      await refuse(
+        { reason: 'report-file-unwritable', file: reportFile, ...errorCodeFields(error), detail: message },
+        `Refused: the apply report cannot be written to ${reportFile}: ${message}. Nothing was executed. An existing ` +
+          'file is never overwritten (a file a stopped run reserved says so in its own text); pass --out with a new path.',
+      );
+      return;
+    }
+
     if (!json) {
       printHeader('Migrate · organization-ownership (apply)');
       printStep('Booting the deployment\'s served stack (schema DDL held back)…');
@@ -524,13 +706,15 @@ export default class MigrateOrganizationOwnership extends Command {
         composeHostStack: true,
         composeServedPlatform: true,
         composeAuthGatedSecurity: true,
+        serveFlags: { dev: flags.dev === true },
       });
     } catch (error: unknown) {
+      await reservation.release();
       await refuse({ reason: 'boot-failed', detail: String((error as Error)?.message ?? error) }, String((error as Error)?.message ?? error));
       return;
     }
 
-    let report: OrganizationOwnershipApplyReport;
+    let report: OrganizationOwnershipApplyReport | undefined;
     try {
       const exec = resolvePlannedDriverExec(stack.driver);
       if (!stack.driver || !exec) {
@@ -594,8 +778,12 @@ export default class MigrateOrganizationOwnership extends Command {
         },
       };
       const liveStack = stack;
+      const { siblings, homeOf } = await ceremonySiblings(stack);
+      if (!json) for (const sibling of siblings) printInfo(describeTelemetryDatabase(sibling.database));
       report = await applyOrganizationOwnership({
         executor,
+        siblings,
+        homeOf,
         // Whether this boot composed the security plugin: a shipped set or a
         // built-in position it alone declares is reported with that cause.
         securityPlugin: stack.composition.securityPlugin,
@@ -701,7 +889,7 @@ export default class MigrateOrganizationOwnership extends Command {
         ledger,
         reviewedPlan,
         ...(inventory ? { inventory } : {}),
-        ...(json ? {} : { onProgress: (message: string) => printStep(message) }),
+        ...(json ? {} : { onProgress: (message: string) => printStep(message), onWarning: (message: string) => printWarning(message) }),
       });
     } catch (error: unknown) {
       if (isExitSignal(error)) throw error;
@@ -731,20 +919,34 @@ export default class MigrateOrganizationOwnership extends Command {
       );
       return;
     } finally {
+      // No report (a refusal, a failed step): the reserved file goes with the run.
+      if (!report) await reservation.release();
       await stack.shutdown();
     }
 
-    const target = resolve(flags.out ?? `organization-ownership-apply-${report.generatedAt.replace(/[:.]/g, '-')}.json`);
     try {
-      await writeFile(target, `${JSON.stringify(report, null, 2)}\n`, { flag: 'wx' });
+      await reservation.keep(`${JSON.stringify(report, null, 2)}\n`);
     } catch (error) {
+      await reservation.release();
+      // The ceremony executed: never the pre-write refusal's code (#23826).
+      const message = String((error as Error)?.message ?? error);
       await refuse(
-        { reason: 'report-file-unwritable', file: target, detail: String((error as Error).message) },
-        `The ceremony ran, and its report could not be written to ${target}: ${(error as Error).message}. ` +
-          'An existing file is never overwritten; re-run --apply (it resumes, writing nothing new) with --out.',
+        {
+          reason: 'report-write-failed',
+          file: reportFile,
+          // An OS error keeps its own code; a lost reservation says what became of the file.
+          ...(error instanceof ReportFileLost ? { standing: error.standing } : errorCodeFields(error)),
+          detail: message,
+          executed: true,
+          report,
+        },
+        `The ceremony ran (${report.complete ? 'every step finished' : 'it stopped at a blocker'}), and its report could ` +
+          `not be written to ${reportFile}: ${message}. Every finished step is checkpointed in the deployment ledger; ` +
+          're-run --apply with a new --out to write the report (it resumes, and finished steps are not repeated).',
       );
       return;
     }
+    const target = reportFile;
     const verdictCode = report.complete && report.blocking === 0 ? 0 : 1;
     if (json) {
       await emitJson({ file: target, report }, verdictCode);

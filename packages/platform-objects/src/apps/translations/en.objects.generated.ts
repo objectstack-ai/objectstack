@@ -719,16 +719,32 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       pending: {
-        label: "Pending"
+        label: "Pending",
+        emptyState: {
+          title: "No pending invitations",
+          message: "An invitation stays here until it is accepted, declined or canceled, or until it expires."
+        }
       },
       accepted: {
-        label: "Accepted"
+        label: "Accepted",
+        emptyState: {
+          title: "No accepted invitations",
+          message: "An invitation moves here when the person accepts it and joins the organization."
+        }
       },
       expired: {
-        label: "Expired / Canceled"
+        label: "Expired / Canceled",
+        emptyState: {
+          title: "No expired or canceled invitations",
+          message: "Invitations that expired, were declined or were canceled are kept here."
+        }
       },
       all_invitations: {
-        label: "All"
+        label: "All",
+        emptyState: {
+          title: "No invitations yet",
+          message: "Every invitation to join an organization is listed here, whatever its status."
+        }
       }
     },
     _actions: {
@@ -1024,19 +1040,47 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_keys: {
-        label: "All"
+        label: "All",
+        emptyState: {
+          title: "No API keys yet",
+          message: "Create a key for scripts and integrations with Create Key; the key is shown once, when it is created."
+        }
       },
       mine: {
-        label: "My Keys"
+        label: "My Keys",
+        emptyState: {
+          title: "You have no API keys yet",
+          message: "Create a key for your scripts and integrations with Create Key; the key is shown once, when it is created."
+        }
       },
       active: {
-        label: "Active"
+        label: "Active",
+        emptyState: {
+          title: "No active API keys",
+          message: "Every key that has not been revoked is listed here."
+        }
       },
       revoked: {
-        label: "Revoked"
+        label: "Revoked",
+        emptyState: {
+          title: "No revoked keys",
+          message: "A key moves here when it is revoked; clients using it lose access until it is restored."
+        }
       }
     },
     _actions: {
+      create_api_key: {
+        label: "Create Key",
+        description: "Create a key for a script or integration. The key acts as you, with your access, in the organization you are working in now.",
+        resultDialog: {
+          title: "API key created",
+          description: "Copy the key now — it is shown only once and cannot be recovered. If it leaks, revoke it and create a new one.",
+          acknowledge: "I have saved the key",
+          fields: {
+            key: "API Key"
+          }
+        }
+      },
       revoke_api_key: {
         label: "Revoke API Key",
         confirmText: "Revoke this API key? Any clients using it will immediately lose access.",
@@ -1388,16 +1432,32 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_apps: {
-        label: "All"
+        label: "All",
+        emptyState: {
+          title: "No OAuth applications yet",
+          message: "Register an application to let its clients sign users in with this environment."
+        }
       },
       mine: {
-        label: "My Applications"
+        label: "My Applications",
+        emptyState: {
+          title: "You have no OAuth applications yet",
+          message: "Applications you register are listed here."
+        }
       },
       active: {
-        label: "Active"
+        label: "Active",
+        emptyState: {
+          title: "No active OAuth applications",
+          message: "An application stays active until it is disabled; disabled applications are listed under Disabled."
+        }
       },
       disabled_apps: {
-        label: "Disabled"
+        label: "Disabled",
+        emptyState: {
+          title: "No disabled OAuth applications",
+          message: "An application moves here when it is disabled; its clients cannot sign in until it is enabled again."
+        }
       }
     },
     _actions: {
