@@ -251,13 +251,25 @@ describe('GET /packages — every row carries the `source` its registering door 
     });
 
     it('the served body parses through its declared contract, `source` and `writable` kept', async () => {
-        const r = await make().dispatcher.handlePackages('/', 'GET', undefined, {}, reader());
+        // Complete manifests, one per origin: the file's shared fixture leaves
+        // `type` off, which the declared manifest refuses on its own account.
+        const registry = new SchemaRegistry({ logLevel: 'silent' } as any);
+        const full = (id: string) => manifest(id, { type: 'app' });
+        registry.installPackage(full(CODE_PROJECT), 'code');
+        registry.installPackage(full(CODE_MODULE), 'marketplace');
+        registry.installPackage(full(DB_BASE), 'authored');
+        const objectql = { registry, manifests: new Map<string, any>([[CODE_PROJECT, full(CODE_PROJECT)], [CODE_MODULE, full(CODE_MODULE)]]) };
+        const dispatcher = new HttpDispatcher({ context: { getService: (name: string) => (name === 'objectql' ? objectql : null) } } as any);
+
+        const r = await dispatcher.handlePackages('/', 'GET', undefined, {}, reader());
         const parsed = ListInstalledPackagesResponseSchema.parse(r.response?.body);
-        for (const row of parsed.data.packages) {
-            expect(InstalledPackageSourceSchema.options).toContain(row.source);
-            expect(typeof row.writable).toBe('boolean');
-        }
-        const detail = await make().dispatcher.handlePackages(`/${DB_BASE}`, 'GET', undefined, {}, reader());
+        expect(parsed.data.packages.map((row) => [row.manifest.id, row.source, row.writable])).toEqual([
+            [CODE_PROJECT, 'code', false],
+            [CODE_MODULE, 'marketplace', false],
+            [DB_BASE, 'authored', true],
+        ]);
+        expect(parsed.data.packages.every((row) => InstalledPackageSourceSchema.options.includes(row.source))).toBe(true);
+        const detail = await dispatcher.handlePackages(`/${DB_BASE}`, 'GET', undefined, {}, reader());
         expect(GetInstalledPackageResponseSchema.parse(detail.response?.body).data).toMatchObject({ source: 'authored', writable: true });
     });
 });
