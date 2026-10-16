@@ -1011,6 +1011,7 @@ export type Iso_kernel_packageArtifact__MetadataCategoryEnum = Assert<Eq< z.inpu
 export type Iso_kernel_packageRegistry__DisablePackageRequestSchema = Assert<Eq< z.input< typeof M91.DisablePackageRequestSchema >, z.infer< typeof M91.DisablePackageRequestSchema > >>;
 export type Iso_kernel_packageRegistry__EnablePackageRequestSchema = Assert<Eq< z.input< typeof M91.EnablePackageRequestSchema >, z.infer< typeof M91.EnablePackageRequestSchema > >>;
 export type Iso_kernel_packageRegistry__GetPackageRequestSchema = Assert<Eq< z.input< typeof M91.GetPackageRequestSchema >, z.infer< typeof M91.GetPackageRequestSchema > >>;
+export type Iso_kernel_packageRegistry__InstalledPackageSourceSchema = Assert<Eq< z.input< typeof M91.InstalledPackageSourceSchema >, z.infer< typeof M91.InstalledPackageSourceSchema > >>;
 export type Iso_kernel_packageRegistry__ListPackagesRequestSchema = Assert<Eq< z.input< typeof M91.ListPackagesRequestSchema >, z.infer< typeof M91.ListPackagesRequestSchema > >>;
 export type Iso_kernel_packageRegistry__NamespaceConflictErrorSchema = Assert<Eq< z.input< typeof M91.NamespaceConflictErrorSchema >, z.infer< typeof M91.NamespaceConflictErrorSchema > >>;
 export type Iso_kernel_packageRegistry__NamespaceRegistryEntrySchema = Assert<Eq< z.input< typeof M91.NamespaceRegistryEntrySchema >, z.infer< typeof M91.NamespaceRegistryEntrySchema > >>;

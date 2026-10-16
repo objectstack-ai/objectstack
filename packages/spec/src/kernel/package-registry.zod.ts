@@ -69,7 +69,7 @@ export const InstalledPackageSourceSchema = z.enum([
   'marketplace',
   'authored',
 ]).describe('Where the installed package came from: code (registered by the deployment\'s own code), marketplace (installed from the marketplace), or authored (a database-authored package)');
-export type InstalledPackageSource = z.infer<typeof InstalledPackageSourceSchema>;
+export type InstalledPackageSource = z.input<typeof InstalledPackageSourceSchema>;
 
 /**
  * Installed Package Schema
