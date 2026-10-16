@@ -471,11 +471,13 @@ describe('[ADR-0139 E6] keptRowsOfParent / computeWithheldRowFilter — a predic
 
   it('an engine with no registry view: denied, and said once', async () => {
     const logger = { warn: vi.fn() };
-    const engine = { find: vi.fn() };
+    const find = vi.fn();
+    // No registry view: only a row reader, which the rule must not call.
+    const engine = { find } as unknown as Parameters<typeof computeWithheldRowFilter>[0];
     const filter = await computeWithheldRowFilter(engine, {}, async () => ['x'], logger);
     expect(filter).toEqual({ id: '__activity_withheld_row_denied__' });
     await computeWithheldRowFilter(engine, {}, async () => ['x'], logger);
     expect(logger.warn).toHaveBeenCalledTimes(1);
-    expect(engine.find).not.toHaveBeenCalled();
+    expect(find).not.toHaveBeenCalled();
   });
 });
