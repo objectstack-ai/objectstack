@@ -114,7 +114,7 @@ describe('empty-env boot seeds persisted package disable-state (#5047)', () => {
         const { kernel, registry } = await bootEmptyEnv();
         // Nothing came from the (empty) artifact; this is the post-boot
         // registration every package in such an env goes through.
-        registry.installPackage(manifestFor(DISABLED_ID));
+        registry.installPackage(manifestFor(DISABLED_ID), 'code');
 
         expect(registry.getPackage(DISABLED_ID)).toMatchObject({
             status: 'disabled',
@@ -128,7 +128,7 @@ describe('empty-env boot seeds persisted package disable-state (#5047)', () => {
         setPackageDisabled(ENVIRONMENT_ID, DISABLED_ID, true);
 
         const { kernel, registry } = await bootEmptyEnv();
-        registry.installPackage(manifestFor(ENABLED_ID));
+        registry.installPackage(manifestFor(ENABLED_ID), 'code');
 
         expect(registry.getPackage(ENABLED_ID)).toMatchObject({
             status: 'installed',
@@ -170,7 +170,7 @@ describe('empty-env boot seeds persisted package disable-state (#5047)', () => {
         setPackageDisabled(ENVIRONMENT_ID, DISABLED_ID, false);
 
         const { kernel, registry } = await bootEmptyEnv();
-        registry.installPackage(manifestFor(DISABLED_ID));
+        registry.installPackage(manifestFor(DISABLED_ID), 'code');
 
         expect(registry.getPackage(DISABLED_ID)).toMatchObject({
             status: 'installed',
@@ -182,7 +182,7 @@ describe('empty-env boot seeds persisted package disable-state (#5047)', () => {
 
     it('boots an empty env with no persisted state at all (nothing to seed)', async () => {
         const { kernel, registry } = await bootEmptyEnv();
-        registry.installPackage(manifestFor(DISABLED_ID));
+        registry.installPackage(manifestFor(DISABLED_ID), 'code');
 
         expect(registry.getPackage(DISABLED_ID)).toMatchObject({ enabled: true });
 

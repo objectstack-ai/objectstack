@@ -167,7 +167,7 @@ function matchesWhere(row: any, where: any): boolean {
 function dispatcher(manifests: any[], protocol?: unknown): HttpDispatcher {
     const registry = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     (registry as any).logLevel = 'silent';
-    for (const m of manifests) registry.installPackage(m as any);
+    for (const m of manifests) registry.installPackage(m as any, 'code');
 
     const ql = bindCatalogFromTables({
         registry,

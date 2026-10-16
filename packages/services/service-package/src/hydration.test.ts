@@ -57,7 +57,23 @@ describe('PackageServicePlugin boot hydration (ADR-0033 consolidation)', () => {
     expect(registry.installPackage).toHaveBeenCalledTimes(1);
     expect(registry.installPackage).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'app.seed', version: '1.0.0' }),
+      'authored',
     );
+  });
+
+  // [#23972] The `sys_packages` rehydrate is the restart half of an authored
+  // install: the row it puts back must say `source: 'authored'`, the origin the
+  // install stamped, never fall to the registry's other doors' values.
+  it('rehydrates a sys_packages row as source authored', async () => {
+    const registry = {
+      installPackage: vi.fn(),
+      getPackage: vi.fn(() => undefined),
+    };
+    const { ctx } = makeCtx(registry);
+
+    await new PackageServicePlugin().start(ctx);
+
+    expect(registry.installPackage.mock.calls.map((call) => call[1])).toEqual(['authored']);
   });
 
   it('does NOT overwrite a package already registered (e.g. from the filesystem)', async () => {

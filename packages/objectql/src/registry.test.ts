@@ -476,7 +476,7 @@ describe('SchemaRegistry', () => {
     describe('Package Management', () => {
         it('should install package with namespace', () => {
             const manifest = { id: 'com.test', name: 'Test', namespace: 'test', version: '1.0.0' };
-            const pkg = registry.installPackage(manifest as any);
+            const pkg = registry.installPackage(manifest as any, 'code');
 
             expect(pkg.status).toBe('installed');
             expect(registry.getNamespaceOwner('test')).toBe('com.test');
@@ -484,7 +484,7 @@ describe('SchemaRegistry', () => {
 
         it('should uninstall package and release namespace', () => {
             const manifest = { id: 'com.test', name: 'Test', namespace: 'test', version: '1.0.0' };
-            registry.installPackage(manifest as any);
+            registry.installPackage(manifest as any, 'code');
 
             registry.uninstallPackage('com.test');
             expect(registry.getPackage('com.test')).toBeUndefined();

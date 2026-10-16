@@ -51,6 +51,7 @@
     "kernel/InstallPackageRequest",
     "kernel/InstallPackageResponse",
     "kernel/InstalledPackage",
+    "kernel/InstalledPackageSource",
     "kernel/KernelContext",
     "kernel/KernelSecurityPolicy",
     "kernel/ListPackagesRequest",

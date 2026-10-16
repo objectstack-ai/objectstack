@@ -232,6 +232,7 @@
     "kernel/InstalledPackage:previousVersion",
     "kernel/InstalledPackage:registeredNamespaces",
     "kernel/InstalledPackage:settings",
+    "kernel/InstalledPackage:source",
     "kernel/InstalledPackage:status",
     "kernel/InstalledPackage:statusChangedAt",
     "kernel/InstalledPackage:updatedAt",

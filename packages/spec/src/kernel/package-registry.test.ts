@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   PackageStatusEnum,
   InstalledPackageSchema,
+  InstalledPackageSourceSchema,
   ListPackagesRequestSchema,
   ListPackagesResponseSchema,
   GetPackageRequestSchema,
@@ -36,6 +37,30 @@ describe('PackageStatusEnum', () => {
   it('should reject invalid statuses', () => {
     expect(() => PackageStatusEnum.parse('active')).toThrow();
     expect(() => PackageStatusEnum.parse('')).toThrow();
+  });
+});
+
+// [#23972] Every row says where it came from, from a closed set; the set is
+// the ruling's (code / marketplace / authored) and a row without it, or with a
+// value outside it, is refused — no reader is left to reconstruct it.
+describe('InstalledPackageSchema.source', () => {
+  it('accepts each of the three closed origins', () => {
+    for (const source of ['code', 'marketplace', 'authored'] as const) {
+      expect(InstalledPackageSchema.safeParse({ manifest: validManifest, source }).success, source).toBe(true);
+    }
+    expect(InstalledPackageSourceSchema.options).toEqual(['code', 'marketplace', 'authored']);
+  });
+
+  it('refuses a value outside the closed set, at the source key', () => {
+    const verdict = InstalledPackageSchema.safeParse({ manifest: validManifest, source: 'cloud' });
+    expect(verdict.success).toBe(false);
+    expect(verdict.error?.issues.map((issue) => [issue.code, issue.path.join('.')])).toEqual([['invalid_value', 'source']]);
+  });
+
+  it('refuses a row that does not say where it came from', () => {
+    const verdict = InstalledPackageSchema.safeParse({ manifest: validManifest });
+    expect(verdict.success).toBe(false);
+    expect(verdict.error?.issues.map((issue) => issue.path.join('.'))).toEqual(['source']);
   });
 });
 

@@ -78,7 +78,7 @@ function makeImpl(overrides?: {
   };
   const engine = { registry, find: overrides?.find ?? (async () => []) };
   // Seeded through the registry's own verb, exactly as the boot hydration does.
-  for (const manifest of overrides?.hydrate ?? []) registry.installPackage(manifest);
+  for (const manifest of overrides?.hydrate ?? []) registry.installPackage(manifest, 'authored');
   registryCalls.length = 0; // hydration is the fixture, not an observation
 
   const publish = vi.fn(overrides?.publish ?? (async () => ({ success: true })));
