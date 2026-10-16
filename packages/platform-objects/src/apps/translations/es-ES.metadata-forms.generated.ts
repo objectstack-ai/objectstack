@@ -2202,7 +2202,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "Endpoint API",
-    description: "Endpoint HTTP declarativo — una URL estable y una capa de política sobre un pipeline existente (ADR-0121)"
+    description: "URL HTTP estable a la que llaman otros sistemas para acceder a los flujos, scripts y datos de la aplicación"
   },
   translation: {
     label: "Traducción"
@@ -2282,11 +2282,11 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "Documentación",
-    description: "Documentación del paquete — elementos Markdown planos (ADR-0046)"
+    description: "Página de ayuda en Markdown que un paquete incluye para que la lean sus usuarios"
   },
   book: {
     label: "Libro de documentación",
-    description: "Columna vertebral de navegación de la documentación — grupos ordenados con pertenencia derivada (ADR-0046 §6)"
+    description: "Índice que organiza las páginas de ayuda de un paquete en secciones ordenadas"
   },
   permission: {
     label: "Conjunto de permisos",
@@ -2390,7 +2390,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   capability: {
     label: "Capacidad",
-    description: "Capacidad de autorización declarada por el paquete — el lado de la DEFINICIÓN de ADR-0066 D1 (las concesiones residen en los conjuntos de permisos; los requisitos, en los recursos)"
+    description: "Permiso que define un paquete; se concede mediante conjuntos de permisos"
   },
   agent: {
     label: "Agente de IA",
