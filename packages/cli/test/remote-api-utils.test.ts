@@ -3,9 +3,13 @@ import { createApiClient, requireAuth } from '../src/utils/api-client';
 import { readAuthConfig, writeAuthConfig, deleteAuthConfig, getCredentialsPath } from '../src/utils/auth-config';
 import { formatOutput } from '../src/utils/output-formatter';
 import * as fs from 'node:fs/promises';
+import { makeDirectorySync } from '../src/utils/make-directory';
 
 // Mock fs module
 vi.mock('node:fs/promises');
+// The credentials directory is made through the CLI's bounded walk (#23858),
+// which is synchronous `node:fs`: mocked too, so this file writes nothing real.
+vi.mock('../src/utils/make-directory');
 
 describe('API Client Utilities', () => {
   describe('createApiClient', () => {
@@ -75,7 +79,7 @@ describe('Auth Config Utilities', () => {
 
   describe('writeAuthConfig', () => {
     it('should write credentials to file with correct permissions', async () => {
-      const mockMkdir = vi.mocked(fs.mkdir);
+      const mockMakeDirectory = vi.mocked(makeDirectorySync);
       const mockWriteFile = vi.mocked(fs.writeFile);
 
       const config = {
@@ -87,10 +91,7 @@ describe('Auth Config Utilities', () => {
 
       await writeAuthConfig(config);
 
-      expect(mockMkdir).toHaveBeenCalledWith(
-        expect.stringContaining('.objectstack'),
-        { recursive: true }
-      );
+      expect(mockMakeDirectory).toHaveBeenCalledWith(expect.stringContaining('.objectstack'));
 
       expect(mockWriteFile).toHaveBeenCalledWith(
         expect.stringContaining('credentials.json'),
