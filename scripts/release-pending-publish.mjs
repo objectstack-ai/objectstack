@@ -13,6 +13,7 @@
  *   node scripts/release-pending-publish.mjs npm-state VERSION
  *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --version VERSION
  *   node scripts/release-pending-publish.mjs unconsumed --version-commit SHA --json
+ *   node scripts/release-pending-publish.mjs queue-guard --event EVENT --base SHA [--head REV]
  *   node scripts/release-pending-publish.mjs sweep --workflow release.yml [--dry-run]
  *   node scripts/release-pending-publish.mjs in-flight --version VERSION --version-commit SHA --head SHA --workflow release.yml
  *   node scripts/release-pending-publish.mjs --self-test
@@ -105,6 +106,34 @@
  * The report never refuses a release: it is a `::warning::` and a job-summary
  * section, and `release.yml` runs it in the push (or dispatch) that queues the
  * publish, where the approver reads it. `--json` prints the measurement alone.
+ *
+ * `queue-guard` -- the REFUSAL half of the same measurement (#23818), taken
+ * where it can still stop the landing. `unconsumed` above is read after the
+ * version commit is on `main`: its CHANGELOG files are already written, and its
+ * contract is to warn and never refuse. That is how 18.0.0-next.2 shipped 11
+ * changesets with no CHANGELOG entry while the report worked exactly as built:
+ * the push run of its version commit `e5136ff10f` (run 38841989023) carried the
+ * warning naming all 11 and their 10 commits, and the publish was approved three
+ * minutes later. Pre mode played no part -- @changesets/cli v3 moves what a
+ * prerelease pass consumes into `.changeset/pre/`, so the top-level read names
+ * the late ones correctly in either mode. What was missing is a check BEFORE the
+ * landing: the Version Packages PR is opened with the default `GITHUB_TOKEN`,
+ * so it gets no `pull_request` build at all, and the merge-queue build -- the
+ * one CI run it does get -- read nothing about changesets.
+ *
+ * So this mode judges a merge-queue build. It reads the first-parent commits of
+ * `base..head` (`base` = the group's `merge_group.base_sha`, which already
+ * carries every entry ahead of this one) and finds each version commit there,
+ * as `select` defines one. For each it takes the `unconsumed` measurement AT
+ * that commit -- not at the group's head, so a later entry's own changeset in
+ * the same batch is the next release's, never this one's -- and REFUSES (exit
+ * 1) when any changeset is left over: the PR was cut from a base that `main`,
+ * or a queue entry ahead of it, has since passed by at least one changeset. The
+ * remedy it prints is the refresh stroke `release.yml` already offers. A group
+ * that moves no version is never judged, so no ordinary PR depends on it. An
+ * event that is not `merge_group` is answered "nothing to judge"; a
+ * `merge_group` with no base, a base off the head's history or a shallow clone
+ * is refused rather than answered.
  *
  * `npm-state` -- present / absent / unknown for one version, from `npm view`'s
  * exit status and its `E404`. The caller decides what `unknown` means: the
@@ -199,6 +228,7 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from './invoked-as.mjs';
 
 export const CLI_MANIFEST = 'packages/cli/package.json';
@@ -451,6 +481,134 @@ export function describeUnconsumed({ version, report }) {
       ),
     ],
   };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The merge-queue guard: refuse a version commit that would land behind main
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** The one event whose build lands a commit on `main` (the merge queue's). */
+export const QUEUE_EVENT = 'merge_group';
+
+/**
+ * The version commits on `head`'s first-parent chain after `base`, oldest
+ * first: each commit at which the CLI version differs from its first parent's
+ * (`select`'s definition, read over a range instead of a whole history).
+ */
+export function versionCommitsInRange({ cwd, base, head }) {
+  const out = [];
+  const touching = gitOk(cwd, ['log', '--first-parent', '--reverse', '--format=%H', `${base}..${head}`, '--', CLI_MANIFEST])
+    .split('\n')
+    .filter(Boolean);
+  for (const commit of touching) {
+    const to = versionAt(cwd, commit);
+    if (to === null) continue;
+    const parent = git(cwd, ['rev-parse', '--verify', '--quiet', `${commit}^1`]);
+    const from = parent.status === 0 ? versionAt(cwd, parent.stdout.trim()) : null;
+    if (from !== to) out.push({ versionCommit: commit, from, to });
+  }
+  return out;
+}
+
+/**
+ * Judge one merge-queue build. `behind` when any version commit it lands
+ * leaves a changeset unconsumed; `current` when every one consumed its whole
+ * tree; `no-version-commit` when the build moves no version; `not-a-merge-group`
+ * for any other event. Throws -- never answers -- on a `merge_group` without a
+ * readable base, on a base that is not an ancestor of the head, and (through
+ * the readers it calls) on a shallow clone.
+ */
+export function queueGuard({ cwd, event, base, head = 'HEAD' }) {
+  if (event !== QUEUE_EVENT) return { verdict: 'not-a-merge-group', event, base: base || null, head, versionCommits: [] };
+  if (!base || !FULL_SHA.test(base)) {
+    throw new Error(
+      `a ${QUEUE_EVENT} build needs --base, the group's full base sha (got ${JSON.stringify(base ?? '')}): without it the ` +
+        'commits this build lands cannot be told apart from main, so nothing can be judged.',
+    );
+  }
+  if (gitOk(cwd, ['rev-parse', '--is-shallow-repository']).trim() !== 'false') {
+    throw new Error(
+      'refusing to judge a merge-queue build in a shallow clone: the group base and the commits that added each changeset ' +
+        'can sit past the graft boundary. Check out with fetch-depth: 0.',
+    );
+  }
+  if (git(cwd, ['cat-file', '-e', `${base}^{commit}`]).status !== 0) {
+    throw new Error(`the group base ${base} is not in this clone`);
+  }
+  const headSha = gitOk(cwd, ['rev-parse', '--verify', `${head}^{commit}`]).trim();
+  if (!isAncestor(cwd, base, headSha)) {
+    throw new Error(`the group base ${base} is not an ancestor of ${headSha}, so ${base}..${headSha} is not what this build lands`);
+  }
+  const versionCommits = versionCommitsInRange({ cwd, base, head: headSha }).map((vc) => ({
+    ...vc,
+    report: unconsumedChangesets({ cwd, versionCommit: vc.versionCommit }),
+  }));
+  const verdict =
+    versionCommits.length === 0
+      ? 'no-version-commit'
+      : versionCommits.some((vc) => vc.report.unconsumed.length > 0)
+        ? 'behind'
+        : 'current';
+  return { verdict, event, base, head: headSha, versionCommits };
+}
+
+/** The refresh stroke the refusal prescribes, spelled once. */
+export const QUEUE_GUARD_REMEDY =
+  'Refresh the Version Packages PR from the current main -- dispatch release.yml with refresh_version_pr: true, the ' +
+  'bookkeeping lane only -- and queue it again with no changeset-bearing PR ahead of it.';
+
+/**
+ * The guard's report -- pure, so every line is pinned. `refused` is the exit
+ * decision; `log` goes to the step log (an `::error::` per refused version
+ * commit), `summary` to the job summary.
+ */
+export function describeQueueGuard(result) {
+  const range = result.base ? `${result.base.slice(0, 10)}..${result.head.slice(0, 10)}` : null;
+  if (result.verdict === 'not-a-merge-group') {
+    const line = `Version-PR queue guard: event ${result.event} is not a merge-queue build, and only a ${QUEUE_EVENT} build lands a commit on main, so there is nothing to judge here.`;
+    return { refused: false, log: [line], summary: ['', line] };
+  }
+  if (result.verdict === 'no-version-commit') {
+    const line = `Version-PR queue guard: ${range} moves no ${CLI_PACKAGE} version, so this merge-queue build lands no version commit. Nothing to judge.`;
+    return { refused: false, log: [line], summary: ['', line] };
+  }
+  const log = [];
+  const summary = [''];
+  for (const { versionCommit, from, to, report } of result.versionCommits) {
+    const short = versionCommit.slice(0, 10);
+    const bump = `${CLI_PACKAGE} ${from ?? '(none)'} -> ${to}`;
+    if (report.unconsumed.length === 0) {
+      const line = `Version-PR queue guard: the version commit ${short} (${bump}) consumed every changeset in its tree, so ${to}'s CHANGELOG leaves out no change this build lands.`;
+      log.push(line);
+      summary.push(line);
+      continue;
+    }
+    const n = report.unconsumed.length;
+    const by = (c) => (c.commit ? c.commit.slice(0, 10) : 'commit not found');
+    log.push(
+      commandData(
+        `::error::Version Packages PR behind main: the version commit ${short} (${bump}) would land ${n} changeset(s) ` +
+          `from ${report.commits} commit(s) it did not consume. Their code would ship in ${to}, and the CHANGELOG.md files ` +
+          `${to} publishes would not name them. ${QUEUE_GUARD_REMEDY} ` +
+          report.unconsumed.map((c) => `${c.path} (${by(c)})`).join(', '),
+      ),
+      ...report.unconsumed.map((c) => `  ${c.path}  added by ${c.commit ? `${c.commit.slice(0, 10)} ${c.subject}` : 'a commit this history does not show'}`),
+    );
+    summary.push(
+      `### Refused: the Version Packages PR is behind main by ${n} changeset(s)`,
+      '',
+      `The version commit \`${short}\` (${bump}) this merge-queue build would land still carries these in its tree.`,
+      `It did not consume them, so their code would ship in ${to} while the \`CHANGELOG.md\` files ${to} publishes`,
+      'leave them out.',
+      '',
+      ...report.unconsumed.map((c) =>
+        c.commit ? `- \`${c.path}\`, added by \`${c.commit.slice(0, 10)}\`: ${c.subject}` : `- \`${c.path}\`, added by a commit this history does not show`,
+      ),
+      '',
+      QUEUE_GUARD_REMEDY,
+    );
+  }
+  return { refused: result.verdict === 'behind', log, summary };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -995,8 +1153,14 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the report -> a warning naming every changeset with its commit, a summary section, or a plain line for none': 4,
   "a publish of the version in another run -> in flight until it completes, and an unreadable read is in flight": 12,
   "the publishing run's image build -> in flight from the approval until its docker job completes, and an unreadable read is in flight": 12,
+  'the merge-queue guard -> a Version Packages PR cut behind main is refused, naming each changeset it did not consume': 5,
+  'the merge-queue guard -> a Version Packages PR cut from the current main passes (the control)': 3,
+  'the merge-queue guard -> a build that moves no version is never judged': 2,
+  'the merge-queue guard -> a batch is judged at its version commit, never at the batch head': 2,
+  'the merge-queue guard -> outside pre mode, where the version pass deletes what it consumes, a stale cut is refused too': 1,
+  'the merge-queue guard -> another event, a missing or foreign base, a shallow clone: answered or refused, never guessed': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 22;
+const SELF_TEST_BATTERY_FLOOR = 28;
 
 async function selfTest() {
   let failed = 0;
@@ -1268,6 +1432,170 @@ async function selfTest() {
       'a depth-1 clone -- where every changeset would read as added by its one commit -- is refused',
     );
     check(throws(() => unconsumedAt('f'.repeat(40)), /exited/), 'a version commit the clone does not have is refused');
+
+    // ── the merge-queue guard (#23818) ───────────────────────────────────
+    // The 18.0.0-next.2 sequence, reduced, in @changesets/cli v3's pre-mode
+    // layout: the Version Packages PR is cut from a base carrying two pending
+    // changesets and moves them into `.changeset/pre/`; main then takes two
+    // landings carrying three more; the queue builds the PR as a squash on top
+    // of them. #23825 (next.3) is the same shape one cut later.
+    const q = fixture();
+    const qPut = (path, text = `---\n'${CLI_PACKAGE}': patch\n---\n\n${path}\n`) => {
+      mkdirSync(dirname(join(q.dir, path)), { recursive: true });
+      writeFileSync(join(q.dir, path), text);
+    };
+    const qMove = (...names) => {
+      for (const name of names) q.g('mv', `.changeset/${name}.md`, `.changeset/pre/${name}.md`);
+    };
+    const guard = (base, head, event = QUEUE_EVENT) => queueGuard({ cwd: q.dir, event, base, head });
+    const guardPaths = (result) => result.versionCommits.flatMap((vc) => vc.report.unconsumed.map((u) => u.path)).join();
+    const SCRIPT = fileURLToPath(import.meta.url);
+    const cli = (cwd, ...args) => spawnSync(process.execPath, [SCRIPT, 'queue-guard', ...args], { cwd, encoding: 'utf8', env: { ...process.env, GITHUB_STEP_SUMMARY: '' } });
+    q.writeCli('18.0.0-next.1');
+    qPut('.changeset/README.md', 'what a changeset is\n');
+    qPut(PRE_STATE, `${JSON.stringify({ mode: 'pre', tag: 'next' })}\n`);
+    qPut('.changeset/pre/consumed-by-next-1.md');
+    qPut('.changeset/a.md');
+    qPut('.changeset/b.md');
+    const qBase = q.commit('base: two changesets pending in pre mode');
+    q.g('checkout', '-q', '-b', 'version-pr');
+    qMove('a', 'b');
+    q.writeCli('18.0.0-next.2');
+    const qPr = q.commit('chore: version packages (next), as cut');
+    q.g('checkout', '-q', 'main');
+    qPut('.changeset/late-one.md');
+    q.commit('a landing after the cut');
+    qPut('.changeset/late-two.md');
+    qPut('.changeset/late-three.md');
+    const groupBase = q.commit('a landing carrying two changesets: the merge group base');
+    q.g('checkout', '-q', '-b', 'queue-build', groupBase);
+    q.g('merge', '-q', '--squash', 'version-pr');
+    const qLanded = q.commit('chore: version packages (next) (the queue build)');
+
+    battery('the merge-queue guard -> a Version Packages PR cut behind main is refused, naming each changeset it did not consume');
+    const behindGuard = guard(groupBase, qLanded);
+    check(
+      behindGuard.verdict === 'behind' && behindGuard.versionCommits.length === 1 &&
+        behindGuard.versionCommits[0].versionCommit === qLanded &&
+        behindGuard.versionCommits[0].from === '18.0.0-next.1' && behindGuard.versionCommits[0].to === '18.0.0-next.2',
+      'the queue build of a PR cut behind main is "behind", judged at its version commit, next.1 -> next.2',
+    );
+    check(
+      guardPaths(behindGuard) === '.changeset/late-one.md,.changeset/late-three.md,.changeset/late-two.md',
+      'it names exactly the three changesets main gained after the cut -- not the two the PR moved into pre/, not the pre/ stock',
+    );
+    const behindText = describeQueueGuard(behindGuard);
+    check(
+      behindText.refused && behindText.log[0].startsWith('::error::Version Packages PR behind main') &&
+        behindText.log[0].includes('3 changeset(s) from 2 commit(s)') && behindText.log[0].includes('refresh_version_pr: true') &&
+        behindText.summary.includes(QUEUE_GUARD_REMEDY),
+      'the report is a refusal: an error annotation with the count, and the refresh stroke as its remedy',
+    );
+    const behindCli = cli(q.dir, '--event', QUEUE_EVENT, '--base', groupBase, '--head', qLanded);
+    check(behindCli.status === 1 && /late-two\.md/.test(behindCli.stdout), 'and the CLI exits 1 on it, naming the changesets on stdout');
+    // The miss, reproduced: before this mode, the one reader of this shape was
+    // `unconsumed`, run on the push that carries the landed version commit. It
+    // names the same three -- and only warns, after the landing, by contract.
+    const missed = describeUnconsumed({ version: '18.0.0-next.2', report: unconsumedChangesets({ cwd: q.dir, versionCommit: qLanded }) });
+    check(
+      missed.log[0].startsWith('::warning::') && !missed.log.some((l) => l.startsWith('::error::')) &&
+        unconsumedChangesets({ cwd: q.dir, versionCommit: qLanded }).unconsumed.map((u) => u.path).join() === guardPaths(behindGuard),
+      'the control: the post-landing report reads the same three and answers a warning -- it never refuses, which is the miss',
+    );
+
+    battery('the merge-queue guard -> a Version Packages PR cut from the current main passes (the control)');
+    q.g('checkout', '-q', '-b', 'fresh-cut', groupBase);
+    qMove('a', 'b', 'late-one', 'late-two', 'late-three');
+    q.writeCli('18.0.0-next.2');
+    const qFresh = q.commit('chore: version packages (next), refreshed from the current main');
+    const freshGuard = guard(groupBase, qFresh);
+    check(
+      freshGuard.verdict === 'current' && freshGuard.versionCommits[0].report.unconsumed.length === 0 && !describeQueueGuard(freshGuard).refused,
+      'a refresh from the group base consumes all five -> "current", not refused',
+    );
+    check(
+      guard(qBase, qPr).verdict === 'current',
+      'and the stale PR itself was current against the base it was cut from -- the defect is the landing, not the cut',
+    );
+    const freshCli = cli(q.dir, '--event', QUEUE_EVENT, '--base', groupBase, '--head', qFresh);
+    check(
+      freshCli.status === 0 && /consumed every changeset in its tree/.test(freshCli.stdout),
+      'and the CLI exits 0 on it with one plain line naming the version commit it read',
+    );
+
+    battery('the merge-queue guard -> a build that moves no version is never judged');
+    q.g('checkout', '-q', '-b', 'ordinary', groupBase);
+    qPut('.changeset/ordinary.md');
+    const qOrdinary = q.commit('an ordinary PR carrying a changeset');
+    const ordinaryGuard = guard(groupBase, qOrdinary);
+    check(
+      ordinaryGuard.verdict === 'no-version-commit' && ordinaryGuard.versionCommits.length === 0 && !describeQueueGuard(ordinaryGuard).refused,
+      'an ordinary PR with a changeset, on a base with five pending -> "no-version-commit", not refused',
+    );
+    q.writeCli('18.0.0-next.1', { dependencies: { 'left-pad': '1.3.0' } });
+    const qDepOnly = q.commit('deps: cli gains a dependency');
+    check(guard(groupBase, qDepOnly).verdict === 'no-version-commit', 'a CLI manifest edit that moves no version is no version commit either');
+
+    battery('the merge-queue guard -> a batch is judged at its version commit, never at the batch head');
+    q.g('checkout', '-q', '-b', 'batch-fresh', qFresh);
+    qPut('.changeset/after-fresh.md');
+    const qBatchFresh = q.commit('an entry behind the refreshed PR in the same batch');
+    const batchFresh = guard(groupBase, qBatchFresh);
+    check(
+      batchFresh.verdict === 'current' && batchFresh.versionCommits[0].versionCommit === qFresh,
+      'a current version commit followed by an entry with its own changeset -> "current": that changeset is the next release\'s',
+    );
+    q.g('checkout', '-q', '-b', 'batch-behind', qLanded);
+    qPut('.changeset/after-landed.md');
+    const qBatchBehind = q.commit('an entry behind the stale PR in the same batch');
+    const batchBehind = guard(groupBase, qBatchBehind);
+    check(
+      batchBehind.verdict === 'behind' && guardPaths(batchBehind) === guardPaths(behindGuard),
+      'a stale version commit mid-batch -> refused for the same three, and the later entry\'s changeset is not among them',
+    );
+
+    battery('the merge-queue guard -> outside pre mode, where the version pass deletes what it consumes, a stale cut is refused too');
+    const s = fixture();
+    const sPut = (path) => {
+      mkdirSync(dirname(join(s.dir, path)), { recursive: true });
+      writeFileSync(join(s.dir, path), `---\n'${CLI_PACKAGE}': minor\n---\n\n${path}\n`);
+    };
+    s.writeCli('17.6.0');
+    sPut('.changeset/x.md');
+    s.commit('base: one changeset pending');
+    s.g('checkout', '-q', '-b', 'version-pr');
+    s.g('rm', '-q', '.changeset/x.md');
+    s.writeCli('17.7.0');
+    s.commit('chore: version packages');
+    s.g('checkout', '-q', 'main');
+    sPut('.changeset/y.md');
+    const sBase = s.commit('a landing after the cut');
+    s.g('merge', '-q', '--squash', 'version-pr');
+    const sLanded = s.commit('chore: version packages (the queue build)');
+    const stable = queueGuard({ cwd: s.dir, event: QUEUE_EVENT, base: sBase, head: sLanded });
+    check(
+      stable.verdict === 'behind' && stable.versionCommits[0].report.unconsumed.map((u) => u.path).join() === '.changeset/y.md',
+      'a 17.6.0 -> 17.7.0 cut landing behind one changeset -> refused, naming y.md alone',
+    );
+
+    battery('the merge-queue guard -> another event, a missing or foreign base, a shallow clone: answered or refused, never guessed');
+    const pr = guard('', qLanded, 'pull_request');
+    check(
+      pr.verdict === 'not-a-merge-group' && !describeQueueGuard(pr).refused && /not a merge-queue build/.test(describeQueueGuard(pr).log[0]),
+      'a pull_request build -> "not-a-merge-group", said out loud, not refused',
+    );
+    check(throws(() => guard('', qLanded), /needs --base/), 'a merge_group build with an empty base is refused, not read as "nothing to judge"');
+    check(throws(() => guard('f'.repeat(40), qLanded), /not in this clone/), 'a base the clone does not have is refused');
+    check(throws(() => guard(qPr, qOrdinary), /not an ancestor/), 'a base off the head\'s first-parent history is refused');
+    const shallowQueue = mkdtempSync(join(tmpdir(), 'release-pending-publish-shallow-'));
+    dirs.push(shallowQueue);
+    gitOk(tmpdir(), ['clone', '-q', '--depth', '1', '--branch', 'queue-build', `file://${q.dir}`, shallowQueue]);
+    check(
+      throws(() => queueGuard({ cwd: shallowQueue, event: QUEUE_EVENT, base: qLanded, head: 'HEAD' }), /shallow clone/),
+      'a shallow clone is refused before any range is read',
+    );
+    const emptyCli = cli(q.dir, '--event', QUEUE_EVENT, '--base', '', '--head', qLanded);
+    check(emptyCli.status === 1 && /needs --base/.test(emptyCli.stderr), 'and the CLI exits 1 on an empty merge_group base, saying why');
   } finally {
     for (const d of dirs) rmSync(d, { recursive: true, force: true });
   }
@@ -1815,6 +2143,18 @@ async function main(argv) {
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
     return;
   }
+  if (mode === 'queue-guard') {
+    const event = flag(rest, '--event');
+    if (!event) throw new Error('queue-guard needs --event (the build event, e.g. merge_group)');
+    // An empty `--base ""` is what the workflow expression renders on every
+    // event that is not `merge_group`; `queueGuard` refuses it on one that is.
+    const result = queueGuard({ cwd: process.cwd(), event, base: flag(rest, '--base') || '', head: flag(rest, '--head') || 'HEAD' });
+    const { refused, log, summary } = describeQueueGuard(result);
+    console.log(log.join('\n'));
+    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${summary.join('\n')}\n`);
+    if (refused) process.exitCode = 1;
+    return;
+  }
   if (mode === 'sweep') {
     await sweep({ workflow: flag(rest, '--workflow') || 'release.yml', dryRun: rest.includes('--dry-run') });
     return;
@@ -1840,7 +2180,7 @@ async function main(argv) {
     process.stdout.write(`${JSON.stringify(result)}\n`);
     return;
   }
-  throw new Error(`unknown mode ${JSON.stringify(mode)} -- expected select, npm-state, unconsumed, sweep, in-flight or --self-test`);
+  throw new Error(`unknown mode ${JSON.stringify(mode)} -- expected select, npm-state, unconsumed, queue-guard, sweep, in-flight or --self-test`);
 }
 
 if (isEntrypoint(import.meta.url)) {
