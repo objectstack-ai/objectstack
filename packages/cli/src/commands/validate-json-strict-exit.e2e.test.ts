@@ -57,14 +57,18 @@
  * the original divergence for exactly these configs with all of them green.
  *
  * The two fixtures below are a MINIMAL PAIR from one template, differing in a
- * single value on one flow node: `type: 'http_request'`, the retired callout
- * name `flow-node-http-callout-rename` rewrites at load, against `type: 'http'`,
- * the canonical spelling that converts nothing. (The pair used to differ in
- * the header's `description` against `subtitle`, then in a page component's
- * `visibility` against `visibleWhen`; each of those conversions retired from
- * the load path at protocol 18 — `page-header-subtitle-alias`, then
- * `page-component-visibility-to-visibleWhen` with its key, #23543 F4 — and the
- * fixture was re-pointed, as the paragraph below prescribes.) So the pin
+ * single value on one flow node: `type: 'probe_old_callout'`, which a TEST-ONLY
+ * live conversion rewrites at load, against `type: 'http'`, the canonical
+ * spelling that converts nothing. (The pair used to differ in the header's
+ * `description` against `subtitle`, then in a page component's `visibility`
+ * against `visibleWhen`, then in `type: 'http_request'` against `http`; each of
+ * those conversions retired from the load path at protocol 18 —
+ * `page-header-subtitle-alias`, `page-component-visibility-to-visibleWhen` with
+ * its key (#23543 F4), and `flow-node-http-callout-rename` with the reservation
+ * of its old names (#23543 F5-http), the last real entry left live. So the
+ * converting member is now a probe the child loads with `--import`,
+ * `test/fixtures/live-conversion-probe.mjs`, which appends one live entry to
+ * the table the producer reads and changes nothing else.) So the pin
  * discriminates on the CONVERSION and not on "a flow is present". The cells
  * below are the same as they were measured on the earlier pairs: the
  * converting member → text `--strict` 1, `--json --strict` 1, `--json` 0,
@@ -82,14 +86,11 @@
  *
  * The live-notice assertion (the payload entry, and the producer's one
  * stderr line) is the anti-vacuity guard, and it is load-bearing rather than
- * decorative. `flow-node-http-callout-rename` is a LIVE
- * window (the last one); the day it retires from the load path,
- * this fixture raises nothing and, without that assertion, the file would keep
- * passing while pinning an empty cell — precisely the failure this test exists
- * to remove. It goes red instead, and whoever retires the entry re-points the
- * fixture at another live conversion. (The obvious candidate for this fixture,
- * `object-compactLayout-to-highlightFields`, is already `retiredFromLoadPath`:
- * the schema tombstones the key, so it raises a validation ERROR, not a notice.)
+ * decorative: were the probe not loaded, this fixture would raise nothing and,
+ * without that assertion, the file would keep passing while pinning an empty
+ * cell — precisely the failure this test exists to remove. It goes red instead.
+ * (A real retired entry cannot stand in: its old spelling is refused by the
+ * schema, so it raises a validation ERROR, not a notice.)
  *
  * ## Why a real child process
  *
@@ -125,7 +126,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /**
  * The fixture projects are `defineStack` configs (`os validate` refuses any
@@ -143,6 +144,16 @@ function linkSpec(dir: string): void {
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../../node_modules/.bin/tsx');
+
+/**
+ * The test-only live conversion the child loads with `--import` (its header
+ * says why): flow node `type: 'probe_old_callout'` → `'http'`. Spelled here
+ * rather than imported from `test/helpers/live-conversion-probe.ts` for the
+ * reason {@link linkSpec} is: this file lives under `src/`.
+ */
+const PROBE_HOOK = pathToFileURL(resolve(HERE, '../../test/fixtures/live-conversion-probe.mjs')).href;
+const PROBE_ID = 'cli-live-conversion-probe';
+const PROBE_FROM = 'probe_old_callout';
 
 /**
  * Raises all four structural advisories at once and nothing else: no
@@ -184,7 +195,7 @@ export default defineStack({
  * `normalized`, so what they see is the canonical `http` either way, and both
  * members are pinned to `warnings: []` below rather than assumed to be.
  */
-const calloutFlowSource = (calloutNodeType: 'http_request' | 'http'): string => `
+const calloutFlowSource = (calloutNodeType: typeof PROBE_FROM | 'http'): string => `
 import { defineStack } from '@objectstack/spec';
 
 export default defineStack({
@@ -221,7 +232,11 @@ function runCli(args: string[], cwd: string): Promise<Run> {
     execFile(
       TSX,
       [CLI, ...args],
-      { cwd, maxBuffer: 16 * 1024 * 1024, env: { ...process.env, NO_COLOR: '1' } },
+      {
+        cwd,
+        maxBuffer: 16 * 1024 * 1024,
+        env: { ...process.env, NO_COLOR: '1', NODE_OPTIONS: [process.env.NODE_OPTIONS, `--import ${PROBE_HOOK}`].filter(Boolean).join(' ') },
+      },
       (err, stdout, stderr) => {
         resolvePromise({
           code: err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as unknown as { code: number }).code : 1) : 0,
@@ -246,7 +261,7 @@ beforeAll(() => {
   writeFileSync(join(cleanDir, 'objectstack.config.ts'), CLEAN_SOURCE);
   linkSpec(cleanDir);
   conversionsDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-'));
-  writeFileSync(join(conversionsDir, 'objectstack.config.ts'), calloutFlowSource('http_request'));
+  writeFileSync(join(conversionsDir, 'objectstack.config.ts'), calloutFlowSource(PROBE_FROM));
   linkSpec(conversionsDir);
   conversionsCanonDir = mkdtempSync(join(tmpdir(), 'os-validate-strict-exit-conversions-canon-'));
   writeFileSync(join(conversionsCanonDir, 'objectstack.config.ts'), calloutFlowSource('http'));
@@ -335,25 +350,23 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
       'the producer-applied conversion reaches the payload, once',
     ).toEqual([
       {
-        conversionId: 'flow-node-http-callout-rename',
+        conversionId: PROBE_ID,
         path: 'flows[0].nodes[1].type',
-        from: 'http_request',
+        from: PROBE_FROM,
         to: 'http',
       },
     ]);
     expect(typeof payload.conversions?.[0]?.retiresIn, 'the expiry rides the entry').toBe('number');
 
     // The text face names what failed it, in its `⚠` block.
-    expect(text.stdout).toContain("conversion 'flow-node-http-callout-rename'");
+    expect(text.stdout).toContain(`conversion '${PROBE_ID}'`);
 
     // Anti-vacuity AND the one-stderr-line property: the conversion is LIVE —
     // it fired, in the producer, once per run — and no door-side line repeats it
-    // on stderr. The day `flow-node-http-callout-rename` retires this goes red;
-    // re-point `calloutFlowSource` at a live entry in
-    // `packages/spec/src/conversions/registry.ts`.
+    // on stderr. Were the probe not loaded this goes red.
     for (const run of [text, json]) {
       expect(
-        run.stderr.split("conversion 'flow-node-http-callout-rename'").length - 1,
+        run.stderr.split(`conversion '${PROBE_ID}'`).length - 1,
         'defineStack reported the conversion at load, on exactly one stderr line',
       ).toBe(1);
     }
@@ -365,7 +378,7 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     const json = await runCli(['validate', '--json'], conversionsDir);
     expect(json.code, `--json without --strict must stay 0:\n${json.stdout}\n${json.stderr}`).toBe(0);
     const payload = JSON.parse(json.stdout) as { conversions?: Array<{ conversionId?: unknown }> };
-    expect((payload.conversions ?? []).map((n) => n.conversionId)).toEqual(['flow-node-http-callout-rename']);
+    expect((payload.conversions ?? []).map((n) => n.conversionId)).toEqual([PROBE_ID]);
   }, 120_000);
 
   it('control: the same flow under the CANONICAL node type converts nothing and exits 0 on both faces', async () => {
@@ -381,7 +394,7 @@ describe('#11174 — --strict reaches the same exit status on both faces', () =>
     expect(payload.warnings).toEqual([]);
     expect(payload.conversions).toEqual([]);
     // The discriminator's other half: the canonical type raises no notice anywhere.
-    expect(json.stderr).not.toContain("conversion 'flow-node-http-callout-rename'");
+    expect(json.stderr).not.toContain(`conversion '${PROBE_ID}'`);
   }, 120_000);
 
   it('control: without --strict, the same advisory-raising config still exits 0 under --json', async () => {

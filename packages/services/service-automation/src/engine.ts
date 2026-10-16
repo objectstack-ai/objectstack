@@ -23,7 +23,7 @@ import {
 import type { Logger } from '@objectstack/spec/contracts';
 import type { FlowUnboundCause } from '@objectstack/spec/contracts';
 import { FLOW_HOOK_SECRET_KEY, flowCredentialClassLabel, flowCredentialPositions } from './flow-credential-projection.js';
-import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor, DecisionConfigSchema } from '@objectstack/spec/automation';
+import { FlowSchema, FLOW_RESERVED_NODE_TYPES, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor, DecisionConfigSchema } from '@objectstack/spec/automation';
 // [#14328] The ONE answer to "which trigger kind does this flow ask for?" —
 // shared with `defineStack`'s trigger-capability refusal and `@objectstack/lint`'s
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
@@ -3486,8 +3486,29 @@ export class AutomationEngine implements IAutomationService {
 
     // ── Plugin Extension API ──────────────────────────────
 
-    /** Register a node executor (called by plugins) */
+    /**
+     * Register a node executor (called by plugins).
+     *
+     * [#23543 F5-http] Refuses a type — the executor's or its descriptor's —
+     * that is one of the retired callout names reserved inside the open node
+     * namespace ({@link FLOW_RESERVED_NODE_TYPES}). No node could ever reach
+     * such an executor: the flow parse refuses an authored node typed with the
+     * name, and flow rehydration rewrites a stored one to `http` before it
+     * parses. Refused loudly here, at the plugin's own registration call, so
+     * the author hears it at boot instead of shipping a node type that is dead
+     * on arrival. Nothing is registered on a refusal.
+     */
     registerNodeExecutor(executor: NodeExecutor): void {
+        for (const type of new Set([executor.type, executor.descriptor?.type])) {
+            if (typeof type !== 'string' || !Object.prototype.hasOwnProperty.call(FLOW_RESERVED_NODE_TYPES, type)) continue;
+            throw new Error(
+                `Node executor type '${type}' is reserved: it is a retired official flow node name, superseded by `
+                + `'${FLOW_RESERVED_NODE_TYPES[type]}' (@objectstack/spec 18, ADR-0018). No node can reach an executor `
+                + `registered under it — the flow parse refuses an authored node typed '${type}', and a stored one is `
+                + `rewritten to '${FLOW_RESERVED_NODE_TYPES[type]}' before it parses. Register the executor under a `
+                + `type of your own (for example a namespaced 'acme_${type}').`,
+            );
+        }
         if (this.nodeExecutors.has(executor.type)) {
             this.logger.warn(`Node executor '${executor.type}' replaced`);
         }
@@ -3582,9 +3603,11 @@ export class AutomationEngine implements IAutomationService {
      * `aliasOf` so the designer palette can hide or mark it while the canonical
      * type is the one offered for new authoring.
      *
-     * This is how ADR-0018 collapses the five outbound verbs onto `http` /
-     * `notify`: `http_request` / `http_call` / `webhook` become aliases of
-     * `http`.
+     * ADR-0018 M3 first collapsed the outbound verbs onto `http` / `notify`
+     * this way: `http_request` / `http_call` / `webhook` were aliases of `http`
+     * until 11.0 removed them. Since 18 those three names are reserved
+     * (#23543 F5-http), so {@link registerNodeExecutor} refuses an alias under
+     * one of them too.
      */
     registerNodeAlias(
         alias: string,
@@ -4558,9 +4581,10 @@ export class AutomationEngine implements IAutomationService {
         // execution, so the executor only ever sees the canonical shape and a
         // dropped-alias upgrade never silently changes behavior (e.g. an empty
         // `filter` deleting a whole table). `reservedNodeTypes` is this engine's
-        // live executor registry: an open-namespace node-type rename over a type
-        // a custom executor owns becomes a loud, refused conflict — never a
-        // silent clobber of the third party's node.
+        // live executor registry, handed to any open-namespace node-type rename
+        // that guards against clobbering a live owner. The one such rename, the
+        // callout rename, no longer consults it (#23543 F5-http): its old names
+        // are reserved, and `registerNodeExecutor` refuses an executor under one.
         //
         // `includeRetired` (#3903): this seam rehydrates DATA AT REST — flows
         // stored in `sys_metadata` outlive any load window, and a row written

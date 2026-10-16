@@ -17,6 +17,16 @@ import { describe, expect, it } from 'vitest';
 import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
 import { applyConversions, applyConversionsToFlow, collectConversionNotices } from './apply.js';
 
+/**
+ * The vehicle is the protocol-11 callout rename, which left the load path at 18
+ * (#23543 F5-http): every pass below runs the posture that still replays it,
+ * data at rest (`includeRetired`) — the stored-row and flow-rehydration seams,
+ * where a region-nested old node still has to come out canonical.
+ */
+const collect = (stack: Record<string, unknown>, options: Parameters<typeof collectConversionNotices>[1] = {}) =>
+  collectConversionNotices(stack, { includeRetired: true, ...options });
+const atRest = (stack: Record<string, unknown>) => applyConversions(stack, { includeRetired: true });
+
 /** A protocol-11 callout alias — renamed to `http` by the table. */
 const webhookNode = (id: string) => ({ id, type: 'webhook', label: id, config: { url: 'https://x' } });
 /** The converted form of {@link webhookNode}. */
@@ -26,7 +36,7 @@ const region = (...nodes: unknown[]) => ({ nodes, edges: [] });
 
 describe('conversions reach nodes inside structured regions', () => {
   it('converts a node in a `loop` body exactly as it converts its top-level twin', () => {
-    const { stack, notices } = collectConversionNotices({
+    const { stack, notices } = collect({
       flows: [{
         name: 'sweep',
         nodes: [
@@ -48,7 +58,7 @@ describe('conversions reach nodes inside structured regions', () => {
   });
 
   it('converts nodes in every `parallel` branch', () => {
-    const { stack, notices } = collectConversionNotices({
+    const { stack, notices } = collect({
       flows: [{
         name: 'fan',
         nodes: [{
@@ -68,7 +78,7 @@ describe('conversions reach nodes inside structured regions', () => {
   });
 
   it('converts nodes in both `try_catch` regions', () => {
-    const { stack, notices } = collectConversionNotices({
+    const { stack, notices } = collect({
       flows: [{
         name: 'guarded',
         nodes: [{
@@ -85,7 +95,7 @@ describe('conversions reach nodes inside structured regions', () => {
   });
 
   it('recurses through nested containers (loop → try_catch → loop)', () => {
-    const { stack, notices } = collectConversionNotices({
+    const { stack, notices } = collect({
       flows: [{
         name: 'deep',
         nodes: [{
@@ -123,7 +133,7 @@ describe('conversions reach nodes inside structured regions', () => {
     // unconverted leaves it with NO filter at all. It has to reach a loop body.
     // Both CRUD aliases left the load path at 18 (#23487), so the walk is
     // exercised in the posture that still replays them: data at rest.
-    const { stack } = collectConversionNotices({
+    const { stack } = collect({
       flows: [{
         name: 'purge',
         nodes: [{
@@ -161,7 +171,7 @@ describe('the region walk stays copy-on-write and shape-gated', () => {
         nodes: [{ id: 'loop', type: 'loop', label: 'Loop', config: { collection: { dialect: 'cel', source: 'rows' }, body: region(httpNode('inner')) } }],
       }],
     };
-    expect(applyConversions(clean)).toBe(clean);
+    expect(atRest(clean)).toBe(clean);
   });
 
   it('shares untouched branches — only the changed path is copied', () => {
@@ -175,7 +185,7 @@ describe('the region walk stays copy-on-write and shape-gated', () => {
         }],
       }],
     };
-    const out = applyConversions(stack) as any;
+    const out = atRest(stack) as any;
     expect(out).not.toBe(stack);
     expect(out.flows[0].nodes[0].config.branches[1]).toBe(untouchedBranch);
   });
@@ -193,7 +203,7 @@ describe('the region walk stays copy-on-write and shape-gated', () => {
         ],
       }],
     };
-    expect(applyConversions(stack)).toBe(stack);
+    expect(atRest(stack)).toBe(stack);
   });
 
   it('terminates on a self-referential region instead of recursing forever', () => {
@@ -201,7 +211,7 @@ describe('the region walk stays copy-on-write and shape-gated', () => {
     // so a cycle is reachable on the load path.
     const selfRegion: { nodes: unknown[]; edges: unknown[] } = { nodes: [], edges: [] };
     selfRegion.nodes.push({ id: 'l', type: 'loop', label: 'L', config: { collection: { dialect: 'cel', source: 'r' }, body: selfRegion } });
-    expect(() => applyConversions({ flows: [{ name: 'cyclic', nodes: selfRegion.nodes }] })).not.toThrow();
+    expect(() => atRest({ flows: [{ name: 'cyclic', nodes: selfRegion.nodes }] })).not.toThrow();
   });
 
   it('cannot be steered onto Object.prototype by a hostile node type', () => {
@@ -213,7 +223,7 @@ describe('the region walk stays copy-on-write and shape-gated', () => {
     };
     // `constructor` is not a container: the region is left alone, and the lookup
     // must not resolve through the prototype chain and throw.
-    expect(applyConversions(stack)).toBe(stack);
+    expect(atRest(stack)).toBe(stack);
   });
 });
 
@@ -229,7 +239,7 @@ describe('the conversion walk descends into every declared container', () => {
     for (const nodeType of FLOW_REGION_SLOTS_BY_TYPE.keys()) {
       for (const { key, arity } of FLOW_REGION_SLOTS_BY_TYPE.get(nodeType)!) {
         const value = arity === 'many' ? [region(webhookNode('inner'))] : region(webhookNode('inner'));
-        const { stack } = collectConversionNotices({
+        const { stack } = collect({
           flows: [{ name: 'f', nodes: [{ id: 'c', type: nodeType, label: 'C', config: { [key]: value } }] }],
         });
         const slot = ((stack.flows as any[])[0].nodes[0].config)[key];

@@ -6,9 +6,12 @@
  * flow authored against an old protocol shape keeps running with zero action,
  * and dropping a deprecated executor alias never silently changes behavior.
  *
- * Open-namespace node-type renames (`webhook`/`http_request`/`http_call` → `http`)
- * are conflict-aware: if a live custom executor owns the retired name, the rename
- * is refused and a loud diagnostic is logged instead of clobbering the node.
+ * The retired callout node types (`webhook`/`http_request`/`http_call` → `http`)
+ * are reserved since 18 (#23543 F5-http): the authoring doors refuse them, and
+ * this engine refuses to register an executor under one. So a stored flow that
+ * still carries one is rewritten to `http` unconditionally — until 18 the
+ * rename skipped a node whose old name a live custom executor owned, and that
+ * owner can no longer exist.
  */
 import { describe, it, expect } from 'vitest';
 import { AutomationEngine } from './engine.js';
@@ -55,25 +58,64 @@ describe('registerFlow canonicalizes stored flows (ADR-0087 D2 runtime seam)', (
     expect(warns.some((w) => w.includes('OS_METADATA_CONVERTED') || w.includes('→'))).toBe(false);
   });
 
-  it('refuses to rewrite a retired name a live custom executor owns, logging a conflict', async () => {
+  it('rewrites every reserved callout name in a stored flow, with no conflict', async () => {
     const warns: string[] = [];
     const engine = new AutomationEngine(collectingLogger(warns));
-
-    // A third party registers a custom node under the retired official name.
-    let ran = false;
-    engine.registerNodeExecutor({
-      type: 'webhook',
-      async execute() { ran = true; return { success: true, output: {} }; },
+    engine.registerFlow('f', {
+      name: 'f', label: 'F', type: 'autolaunched',
+      nodes: [
+        { id: 'start', type: 'start', label: 'Start' },
+        { id: 'n', type: 'webhook', label: 'N', config: { url: 'https://x' } },
+        { id: 'm', type: 'http_call', label: 'M', config: { url: 'https://y' } },
+        { id: 'end', type: 'end', label: 'End' },
+      ],
+      edges: [
+        { id: 'e1', source: 'start', target: 'n' },
+        { id: 'e2', source: 'n', target: 'm' },
+        { id: 'e3', source: 'm', target: 'end' },
+      ],
     });
 
-    engine.registerFlow('f', flowWith({ id: 'n', type: 'webhook', config: {} }));
-
     const stored = await engine.getFlow('f');
-    // NOT clobbered to `http` — the custom node survives.
-    expect(stored?.nodes.find((n) => n.id === 'n')?.type).toBe('webhook');
-    expect(warns.some((w) => w.includes('OS_METADATA_CONVERSION_CONFLICT'))).toBe(true);
+    expect(stored?.nodes.filter((n) => n.id === 'n' || n.id === 'm').map((n) => n.type)).toEqual(['http', 'http']);
+    expect(warns.some((w) => w.includes('OS_METADATA_CONVERSION_CONFLICT'))).toBe(false);
+  });
+});
 
-    await engine.execute('f');
-    expect(ran).toBe(true); // the custom executor actually ran
+describe('registerNodeExecutor refuses the reserved callout names (#23543 F5-http)', () => {
+  it.each(['http_request', 'http_call', 'webhook'])("refuses an executor typed '%s', naming http, and registers nothing", (type) => {
+    const engine = new AutomationEngine(collectingLogger([]));
+    const before = engine.getRegisteredNodeTypes();
+    expect(() => engine.registerNodeExecutor({
+      type,
+      async execute() { return { success: true, output: {} }; },
+    })).toThrow(new RegExp(`^Node executor type '${type}' is reserved: it is a retired official flow node name, superseded by 'http'`));
+    expect(engine.getRegisteredNodeTypes()).toEqual(before);
+    expect(engine.getActionDescriptor(type)).toBeUndefined();
+  });
+
+  it('refuses a descriptor published under a reserved name beside a type of its own', () => {
+    const engine = new AutomationEngine(collectingLogger([]));
+    expect(() => engine.registerNodeExecutor({
+      type: 'acme_callout',
+      descriptor: { type: 'webhook', version: '1.0.0', name: 'Webhook' } as never,
+      async execute() { return { success: true, output: {} }; },
+    })).toThrow(/^Node executor type 'webhook' is reserved/);
+    expect(engine.getRegisteredNodeTypes()).not.toContain('acme_callout');
+    expect(engine.getActionDescriptor('webhook')).toBeUndefined();
+  });
+
+  it('refuses a deprecated alias under a reserved name too', () => {
+    const engine = new AutomationEngine(collectingLogger([]));
+    expect(() => engine.registerNodeAlias('http_request', 'http')).toThrow(/^Node executor type 'http_request' is reserved/);
+    expect(engine.getRegisteredNodeTypes()).not.toContain('http_request');
+  });
+
+  it('CONTROL — a plugin type of its own registers, including one that merely contains a reserved name', () => {
+    const engine = new AutomationEngine(collectingLogger([]));
+    for (const type of ['acme_webhook', 'http_request_v2']) {
+      engine.registerNodeExecutor({ type, async execute() { return { success: true, output: {} }; } });
+      expect(engine.getRegisteredNodeTypes()).toContain(type);
+    }
   });
 });

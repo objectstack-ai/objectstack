@@ -47,54 +47,57 @@ import {
 import { ASSEMBLED_VIEW_ITEMS_KEY } from '../ui/assembled-views.zod.js';
 import { FLOW_REGION_SLOTS_BY_TYPE } from '../automation/region-slots.js';
 import { CONNECTOR_CONFIG_LOOSE_KEYS, WAIT_EVENT_CONFIG_LOOSE_KEYS } from '../automation/flow-sibling-block-loose-keys.js';
+import { FLOW_RESERVED_NODE_TYPES } from '../automation/flow-reserved-node-types.js';
 
 /**
- * Flow callout node type rename (protocol 11.0).
+ * Flow callout node type rename (protocol 11.0; retired from the load path at
+ * 18, #23543 F5-http).
  *
  * The divergent `http_request` / `http_call` / `webhook` node types were
  * unified to the single canonical `http` node (see
  * `services/service-automation/src/builtin/http-nodes.ts`). A pure enum
  * re-spelling — losslessly convertible.
  *
- * **Stays on the load path at 18 — a recorded verdict (#23487).** `flow.node.type`
- * is an open namespace (ADR-0018), so no door refuses `http_request` /
- * `http_call` / `webhook`: retired, this entry would leave an authored node
- * silently carrying a type no builtin executor owns, where today it converts
- * with a notice. It can retire once the authoring doors refuse those three
- * reserved names with the rename to `http`, which is a decision about
- * reserving retired official names inside an open namespace.
+ * ## Retired from the load path at 18 (#23543, ruling F5-http A)
+ *
+ * Through 17 it stayed live because `flow.node.type` is an open namespace
+ * (ADR-0018) and no door refused the three names, so retired alone it would
+ * have left an authored node silently carrying a type no builtin executor owns
+ * (the verdict #23487 recorded). The ruling reserved the names inside the open
+ * namespace: the flow parse refuses each one as a node `type` with the
+ * prescription naming `http`, and the automation engine refuses to register a
+ * node executor under one (`FLOW_RESERVED_NODE_TYPES`,
+ * `automation/flow-reserved-node-types.ts`, the table this entry reads too). So
+ * the authoring funnel (`defineStack`, `os validate` / `os build`) no longer
+ * replays this entry, and an author is taught the canonical type instead of
+ * being rewritten. Stored flows are the `includeRetired` seams: the automation
+ * engine's flow rehydration and stored-row rehydration
+ * (`applyConversionsToStoredItem`) still rewrite a `sys_metadata` flow row
+ * written with an old name before anything parses it, and so does the
+ * artifact-ingestion door inside its window. `os migrate meta` does not reach
+ * it: protocol 11 is below `MIGRATION_SUPPORT_FLOOR`. The family's D3 entry,
+ * `flow-node-http-callout-types-reserved`, states the edit for authored sources.
+ *
+ * The rewrite is unconditional. Until 18 it skipped a node whose old name a
+ * live executor owned and reported a conflict instead (ADR-0078's guard,
+ * through `ConversionContext.reservedNodeTypes`); the engine now refuses that
+ * registration, so no live executor can own a reserved name and the guard had
+ * no case left to judge.
  */
 const flowNodeHttpRename: MetadataConversion = {
   id: 'flow-node-http-callout-rename',
   toMajor: 11,
+  retiredFromLoadPath: true,
+  retiredAfter: '17.7.0',
   surface: 'flow.node.type',
   summary: "flow callout node types 'http_request' / 'http_call' / 'webhook' → 'http'",
-  apply(stack, emit, context) {
-    const aliases = new Set(['http_request', 'http_call', 'webhook']);
+  apply(stack, emit) {
     return mapFlowNodes(stack, (node, path) => {
       const type = node.type;
-      if (typeof type !== 'string' || !aliases.has(type)) return node;
-      // `flow.node.type` is an OPEN namespace (ADR-0018 removed the enum gate),
-      // so a retired official name could be re-registered by a third party. If a
-      // live executor owns this token in this environment, refuse the rewrite —
-      // clobbering it would silently break that node — and report a loud,
-      // actionable conflict instead (ADR-0078). On the pure build/validate seam
-      // `context` is absent, so the historical alias converts as normal.
-      if (context?.reservedNodeTypes?.has(type)) {
-        context.reportConflict?.({
-          token: type,
-          path: `${path}.type`,
-          reason:
-            `'${type}' is a protocol-11 retired official flow-node type, but a live ` +
-            `executor is registered under that exact name in this environment. The ` +
-            `conversion to 'http' was skipped to avoid breaking it. Rename your ` +
-            `custom node to a non-reserved type (the reserved names are ` +
-            `'http_request' / 'http_call' / 'webhook', all superseded by 'http').`,
-        });
-        return node;
-      }
-      emit({ from: type, to: 'http', path: `${path}.type` });
-      return { ...node, type: 'http' };
+      if (typeof type !== 'string' || !Object.prototype.hasOwnProperty.call(FLOW_RESERVED_NODE_TYPES, type)) return node;
+      const canonical = FLOW_RESERVED_NODE_TYPES[type]!;
+      emit({ from: type, to: canonical, path: `${path}.type` });
+      return { ...node, type: canonical };
     });
   },
   fixture: {
