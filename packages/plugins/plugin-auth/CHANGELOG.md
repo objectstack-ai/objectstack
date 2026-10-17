@@ -1,5 +1,172 @@
 # Changelog
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 9cb9d95: feat(spec,plugin-auth): a short-lived principal-session mint, `IAuthService.mintPrincipalSession`, implemented by `AuthManager`
+  
+  Clause-②: yes (widening)
+  
+  An in-process service can now act as the requesting user through a door that only accepts a session, such as a headless browser rendering a page the user may see, under the user's own principal and never a system one. Nothing is removed and no HTTP route is added.
+  
+  - **`@objectstack/spec`** (`contracts`): an optional `IAuthService` member, `mintPrincipalSession(context, options?)`, its types `PrincipalSession`, `PrincipalSessionCookie` and `PrincipalSessionMintOptions`, and the constant `PRINCIPAL_SESSION_MAX_TTL_SECONDS` (`120`). The member is optional, so every existing `IAuthService` implementation compiles unchanged.
+  - **`@objectstack/plugin-auth`**: `AuthManager.mintPrincipalSession(context, options?)`.
+  
+  What the mint guarantees:
+  
+  - **Human principals only, refused before anything is minted.** A context with no user, a system context, or a `principalKind` other than `human` gets `PERMISSION_DENIED` / `403`. So does a user row that is missing, the system user or banned. A user an authentication policy holds gets `403` with the policy's own code (`MFA_REQUIRED`, `PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED`), whether the posture rides on the context or is computed at the call. A `ttlSeconds` outside 1 to 120 gets `VALIDATION_ERROR` / `400`: it is refused, never clamped.
+  - **Short and never renewed.** The session lives at most 120 seconds. Reading it never extends it, on the cookie lane, the bearer lane or the in-process session read alike.
+  - **Revocable.** `revoke()` ends the session. Afterwards neither the token nor the cookie resolves one. It is bound to that session alone and safe to call twice, so call it in a `finally`.
+  - **The deployment's own cookie.** The cookie carries the name and attributes of the plugin's session cookie, the cookie prefix and, on a secure deployment, `__Secure-` included. The session's active organization is the context's `tenantId`.
+  
+  ```ts
+  const auth = ctx.getService<IAuthService>('auth');
+  const session = await auth.mintPrincipalSession?.(context, { ttlSeconds: 60 });
+  try {
+    // send session.token as `Authorization: Bearer`, or set session.cookie in a browser
+  } finally {
+    await session?.revoke();
+  }
+  ```
+- e246f06: feat(plugin-auth,platform-objects,core)!: an API key an administrator's forced password reset revoked is restored by a platform administrator only; its owner creates a new key (#23993)
+  
+  **BREAKING** (an accept-set narrowing at the `sys_api_key` write door), shipped as `minor` under the launch-window convention for breaking changes. For an operator: a key revoked by `POST /api/v1/auth/admin/set-user-password` (the forced reset, which revokes the user's keys by default) can no longer be restored by its owner; a platform administrator restores it with the Restore API Key action, or the owner creates a new key. For an integrator: `PATCH /api/v1/data/sys_api_key/{id}` with `{ revoked: false }` on such a key now answers `403 PERMISSION_DENIED` for its owner, where it answered `200`; and `sys_api_key` gains a readonly `revoked_reason` column.
+  
+  Clause-②: yes (narrowing)
+  
+  What widens: `sys_api_key` declares one more field, `revoked_reason`. What narrows: the owner's restore of a key whose `revoked_reason` is `admin_password_reset` is refused, where it was admitted.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A write-door narrowing on one platform object plus one new readonly platform field, not a metadata change an author makes. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite: the refused request is a runtime call whose remedy is a person (a platform administrator) or a new key, not a rewrite. No ADR-0087 id covers this and none is added. -->
+  
+  #23287 ruling C′ makes the forced reset revoke the user's API keys by default, for a suspected compromise: a key that outlives the reset is the hole the reset was meant to close. Its changeset names who acts afterwards: a platform administrator restores such a key, or the owner mints a replacement. The owner could nevertheless restore it through the same door as any revoked key, because the row recorded no reason. Now it does.
+  
+  - **`sys_api_key.revoked_reason` (`@objectstack/platform-objects`).** A readonly `select` whose one value is `admin_password_reset`, set when the forced reset revoked the key and cleared when the key is restored. Empty for a key revoked from the API Keys list. Translated in `zh-CN`, `ja-JP` and `es-ES`.
+  - **The stamp (`@objectstack/plugin-auth`).** The forced reset's revocation writes `revoked_reason: admin_password_reset` beside `revoked: true`, the one place the reason is set. A key already revoked before the reset is not written, so it keeps no reason.
+  - **The restore guard (`@objectstack/plugin-auth`).** One `beforeUpdate` hook on `sys_api_key`, registered after the ADR-0092 D2 identity write guard. A user-context restore of a key carrying the reason is refused `403 PERMISSION_DENIED` unless the caller has platform-administrator standing (the ADR-0068 D2 rung); the refusal names both roads. Every restore it admits, the administrator's included, clears the reason. Revoking an already-revoked key leaves the reason in place, and the column is not on the D2 whitelist, so no data-API write can clear it. On a multi-row update every row is judged by its own stored state. System-context writes (the mint, the last-used stamp, the forced reset) are never refused.
+  - **The key door's message (`@objectstack/core`).** `API_KEY_REVOKED` for a key the forced reset revoked now says only a platform administrator can restore it; any other revoked key keeps today's sentence. Code, status and every carried field are unchanged.
+  
+  What changes for you:
+  
+  - **Refused now:** the owner restoring a key the forced reset revoked: `403 PERMISSION_DENIED`, naming the platform administrator and the new-key road. The administrator's restore works as before and clears the reason.
+  - **Unchanged:** revoking and restoring a key from the API Keys list, by its owner or an administrator; a forced reset with `revokeSessionsAndKeys: false`, which revokes nothing.
+  - **Keys revoked by a forced reset before this release** carry no reason, so their owner can still restore them. Such keys exist only where `18.0.0-next.2` or a `main` build since 2026-10-14 ran a forced reset; nothing backfills them, because the reset's audit row records counts, not key ids.
+- ab3ba2c: Clause-②: no (narrowing)
+  
+  fix(plugin-auth)!: sixteen of this package's own routes refuse a declared JSON body that does not parse with `400 INVALID_REQUEST`, instead of answering as if no body was sent
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten or deleted, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of sixteen of this package's own routes, and of the exported bridges eleven of them mount, for one input: a body declared as JSON that does not parse, which used to be read as no body. The remedy is in the requests a client sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed, every signature is unchanged (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  These routes read a body that does not parse as no body, through `try { body = await request.json() } catch { body = {} }` or a module-private `parseJson` that answered `{}` from its `catch`, so a truncated body was answered as if the client had sent none:
+  
+  - `POST /api/v1/auth/admin/oauth2/toggle-disabled`, `/admin/unlock-user` and `/sys-oauth-application/register`;
+  - `POST /api/v1/auth/admin/import-users`;
+  - `POST /api/v1/auth/admin/sso/register`, `/admin/sso/register-saml`, `/admin/sso/request-domain-verification` and `/admin/sso/verify-domain`;
+  - `POST /api/v1/auth/send-verification-email`;
+  - `POST /api/v1/auth/admin/ban-user` and `/admin/unban-user`;
+  - `POST /api/v1/auth/admin/set-user-manager`;
+  - `POST /api/v1/auth/admin/create-user` and `/admin/set-user-password`;
+  - `POST /api/v1/auth/organization/add-member`;
+  - `POST /api/v1/auth/set-initial-password`.
+  
+  `/admin/unlock-user` answered `400 "userId is required"` for a body that carried `userId` and lacked its closing brace. `/send-verification-email` read the same input as the one-click resend, and sent the link to the caller's own address for a body that named another one.
+  
+  What changes for an integrator. A body sent as `application/json` (matched case-insensitively) that is not blank and does not parse: FROM the route's answer for an empty body, TO `400` with `{ "success": false, "error": { "code": "INVALID_REQUEST", "message": "The request body could not be parsed as JSON (it was sent as application/json). It was refused rather than read as an empty body: send a well-formed JSON document, or no body at all." } }`, the answer the HTTP transports give the same body. A declared JSON body whose stream cannot be read is refused with the same code and "The request body could not be read. It was refused rather than read as an empty body." Each route refuses where it reads its body. The import, the four SSO bridges, ban/unban, set-user-manager, create-user, set-user-password and add-member read it after their platform-admin gate (and after the admin-plugin or organization-plugin check where the route has one). toggle-disabled, unlock-user, sys-oauth-application/register, the resend and set-initial-password read it before anything else runs. Nothing is looked up, written, sent or forwarded to better-auth.
+  
+  The exported bridges eleven of these routes mount (`runAdminImportUsers`, `runRegisterSsoProviderFromForm`, `runRegisterSamlProviderFromForm`, `runRequestDomainVerification`, `runVerifyDomain`, `runResendVerificationEmail`, `runSetInitialPassword`, `runAdminCreateUser`, `runAdminSetUserPassword`, `runAdminBanUser` and `runAdminUnbanUser`) answer the same refusal, so a host that mounts them itself refuses it too. Their signatures and result types are unchanged.
+  
+  **Remedy, in one line.** Send a JSON body as well-formed JSON with `Content-Type: application/json`, or send no body.
+  
+  **Unchanged.** An empty body (no body at all, a zero-byte one, or whitespace only) is still no body, and every route answers it as before: `/admin/unlock-user` with `400 "userId is required"`, and `/send-verification-email` as the one-click resend to the caller's own address. A body that parses is read as before, whatever its `Content-Type`, and a body that does not declare JSON and does not parse is still read as no body.
+
+### Patch Changes
+
+- 0cfd0c4: Clause-②: no
+  
+  A session minted by `IAuthService.mintPrincipalSession` is no longer refreshed by a read. Before,
+  `get-session` (and every endpoint that reads the session) still renewed it on each request: #23772's
+  guard held its expiry, but the row's `updatedAt` was rewritten, the session cookie was re-set with a
+  7-day `Max-Age`, and `bearer()` answered `set-auth-token`. The console reads that header as a token
+  rotation, so a browser carrying a minted cookie stayed on "Opening your console…" and the print
+  service could not render under the requesting user. A request that carries a minted session now
+  sets better-auth's own per-request skip-refresh switch, on the cookie lane, the bearer lane and
+  in-process. The mint's contract, TTL, refusals and revoke are unchanged.
+- d731b89: fix(identity): the Invite User dialog offers only the roles the caller may grant, read from the same table the invitation role cap enforces
+  
+  Clause-②: yes (widening)
+  
+  **What was wrong.** A `delegated_admin` who opened Invite User was offered Owner, Admin and Delegated Admin. The server's invitation role cap refuses all three for that issuer. The `role` param inherited one static option list from the field, and nothing told the client which roles this caller may grant.
+  
+  **What is new in `@objectstack/spec` (`identity`).** One table, `INVITATION_ROLE_GRANTORS`, says which issuer grades may invite as each membership role:
+  
+  | role | issuers that may grant it |
+  |---|---|
+  | `owner` | `owner` |
+  | `admin`, `delegated_admin` | `owner`, `admin` |
+  | `member` | any issuer (`INVITATION_ROLE_ANY_ISSUER`) |
+  
+  New exports beside it: `invitationRoleGrantors(role)` (a role the closed vocabulary does not list takes the `owner`, `admin` row), `invitationRoleGrantPredicate(role)` (the CEL gate, one `'<projected grade>' in current_user.positions` term per grade, `undefined` for an any-issuer row), `INVITATION_ROLE_OPTIONS` (the role picker's options, each carrying its gate as `visibleWhen`), and the types `InvitationRoleGrantors` and `InvitationRoleOption`.
+  
+  **`@objectstack/plugin-auth`.** The invitation role cap now reads that table to decide which invitations it admits. It refuses exactly what it refused before, with the same refusal text. A pin compares it with the previous implementation on 1,517 request and issuer pairs.
+  
+  **`@objectstack/platform-objects`.** The `role` param of the three `invite_user` actions (`sys_user`, `sys_member`, `sys_invitation`) declares `INVITATION_ROLE_OPTIONS` itself instead of inheriting the field's list. The option values and English labels are unchanged. A `delegated_admin` is now offered Member only, an admin Admin, Delegated Admin and Member, and an owner all four. The per-option gate is a UI courtesy; the server cap remains the authority. Because the options are declared on the param, their labels now translate under `_actions.invite_user.params.role.options.<value>`, and the bundles carry those keys in every locale.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [1eac7ad]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [5c2ac83]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [aefab7c]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [c1c0a90]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/rest@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/service-messaging@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

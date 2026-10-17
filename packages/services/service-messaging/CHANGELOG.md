@@ -1,5 +1,84 @@
 # @objectstack/service-messaging
 
+## 18.0.0-next.3
+
+### Patch Changes
+
+- 30ce56e: Clause-②: no
+  
+  Setup pages describe their records in plain admin sentences. Business Units now reads "Your
+  company structure — divisions, departments, regions and offices — used to scope data and
+  reports.", Notification Events "Every notification the platform sent, one row per event.",
+  Notification Preferences "Which topics and channels each user receives; admins set the
+  defaults.", Notification Templates "The subject and body each notification topic sends, per
+  channel and language." and HTTP Deliveries "Outgoing HTTP calls made by webhooks and flows, one
+  row per call, with its delivery status." Field help on Users, Organizations, Invitations and SSO
+  Providers, and the metadata-storage and notification-delivery object descriptions, no longer
+  carry design-record numbers; those references stay in the code comments. The zh-CN, ja-JP and
+  es-ES translations follow. Wording only: no field, permission or behaviour changes.
+- 8f4260f: Setup's Invitations, API Keys, OAuth Applications and Notification Preferences, Subscriptions and Templates lists say what belongs on them when they are empty, and API Keys gains a Create Key button (#23852)
+  
+  Clause-②: no
+  
+  **What an admin saw.** An empty Invitations, API Keys or OAuth Applications list read "No identity records — these records are created by the authentication provider … not added by hand here", which is false for all three. The three notification lists read the generic "Nothing here yet". API Keys had no way to create a key at all.
+  
+  **What changes.**
+  
+  - Every list view of `sys_invitation`, `sys_api_key` and `sys_oauth_application` declares its own `emptyState` (a title and one sentence), and a filtered view names itself: Invitations opens on "No pending invitations", the Revoked keys view reads "No revoked keys".
+  - `sys_notification_preference`, `sys_notification_subscription` and `sys_notification_template` each ship one list view, `all`, declared only for its `emptyState`: it sets no columns (`columns: []`, so the grid keeps the columns it derived before), no filter, no sort and no page size.
+  - `sys_api_key` gains `create_api_key` ("Create Key"), a primary list-toolbar action on every API Keys list, Setup's and the Account app's. It calls the existing `POST /api/v1/keys` route with the name you give it; the key is created for you, in the organization you are working in, and the raw key is shown once in a dialog you close after copying it. Nothing about the route changes, and the data API still does not create keys.
+  - The new copy ships in `en`, `zh-CN`, `ja-JP` and `es-ES`.
+  
+  Unchanged: every field, index, permission and the `revoke_api_key` / `restore_api_key` row actions.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Patch Changes

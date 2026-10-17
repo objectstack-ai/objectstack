@@ -1,5 +1,78 @@
 # @objectstack/core
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- e246f06: feat(plugin-auth,platform-objects,core)!: an API key an administrator's forced password reset revoked is restored by a platform administrator only; its owner creates a new key (#23993)
+  
+  **BREAKING** (an accept-set narrowing at the `sys_api_key` write door), shipped as `minor` under the launch-window convention for breaking changes. For an operator: a key revoked by `POST /api/v1/auth/admin/set-user-password` (the forced reset, which revokes the user's keys by default) can no longer be restored by its owner; a platform administrator restores it with the Restore API Key action, or the owner creates a new key. For an integrator: `PATCH /api/v1/data/sys_api_key/{id}` with `{ revoked: false }` on such a key now answers `403 PERMISSION_DENIED` for its owner, where it answered `200`; and `sys_api_key` gains a readonly `revoked_reason` column.
+  
+  Clause-②: yes (narrowing)
+  
+  What widens: `sys_api_key` declares one more field, `revoked_reason`. What narrows: the owner's restore of a key whose `revoked_reason` is `admin_password_reset` is refused, where it was admitted.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A write-door narrowing on one platform object plus one new readonly platform field, not a metadata change an author makes. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite: the refused request is a runtime call whose remedy is a person (a platform administrator) or a new key, not a rewrite. No ADR-0087 id covers this and none is added. -->
+  
+  #23287 ruling C′ makes the forced reset revoke the user's API keys by default, for a suspected compromise: a key that outlives the reset is the hole the reset was meant to close. Its changeset names who acts afterwards: a platform administrator restores such a key, or the owner mints a replacement. The owner could nevertheless restore it through the same door as any revoked key, because the row recorded no reason. Now it does.
+  
+  - **`sys_api_key.revoked_reason` (`@objectstack/platform-objects`).** A readonly `select` whose one value is `admin_password_reset`, set when the forced reset revoked the key and cleared when the key is restored. Empty for a key revoked from the API Keys list. Translated in `zh-CN`, `ja-JP` and `es-ES`.
+  - **The stamp (`@objectstack/plugin-auth`).** The forced reset's revocation writes `revoked_reason: admin_password_reset` beside `revoked: true`, the one place the reason is set. A key already revoked before the reset is not written, so it keeps no reason.
+  - **The restore guard (`@objectstack/plugin-auth`).** One `beforeUpdate` hook on `sys_api_key`, registered after the ADR-0092 D2 identity write guard. A user-context restore of a key carrying the reason is refused `403 PERMISSION_DENIED` unless the caller has platform-administrator standing (the ADR-0068 D2 rung); the refusal names both roads. Every restore it admits, the administrator's included, clears the reason. Revoking an already-revoked key leaves the reason in place, and the column is not on the D2 whitelist, so no data-API write can clear it. On a multi-row update every row is judged by its own stored state. System-context writes (the mint, the last-used stamp, the forced reset) are never refused.
+  - **The key door's message (`@objectstack/core`).** `API_KEY_REVOKED` for a key the forced reset revoked now says only a platform administrator can restore it; any other revoked key keeps today's sentence. Code, status and every carried field are unchanged.
+  
+  What changes for you:
+  
+  - **Refused now:** the owner restoring a key the forced reset revoked: `403 PERMISSION_DENIED`, naming the platform administrator and the new-key road. The administrator's restore works as before and clears the reason.
+  - **Unchanged:** revoking and restoring a key from the API Keys list, by its owner or an administrator; a forced reset with `revokeSessionsAndKeys: false`, which revokes nothing.
+  - **Keys revoked by a forced reset before this release** carry no reason, so their owner can still restore them. Such keys exist only where `18.0.0-next.2` or a `main` build since 2026-10-14 ran a forced reset; nothing backfills them, because the reset's audit row records counts, not key ids.
+
+### Patch Changes
+
+- 4ffdebe: Clause-②: no
+  
+  A call with a revoked API key no longer hears "a revoked key never works again". The key row's own Restore API Key action clears the flag and the same key works again at once, so the `403 API_KEY_REVOKED` message now says the key was revoked, that its owner or a platform administrator can restore it (the Restore API Key action on the API Keys list), and otherwise to create a new key (`POST /api/v1/keys`, or the API Keys page) and replace this one wherever it is configured. The code, the status, the fields the refusal carries and the expired and inactive messages are unchanged. The error catalog's `API_KEY_REVOKED` Fix line says the same.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

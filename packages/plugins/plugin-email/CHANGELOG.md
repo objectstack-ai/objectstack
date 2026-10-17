@@ -1,5 +1,63 @@
 # @objectstack/plugin-email
 
+## 18.0.0-next.3
+
+### Patch Changes
+
+- 33228c5: Clause-②: no
+  
+  fix(plugin-email): a template send issued before `EmailServicePlugin`'s own `kernel:ready` renders, persists its `sys_email` row and delivers, instead of throwing `TEMPLATE_NOT_FOUND: no templateLoader configured on EmailService`
+  
+  `EmailServicePlugin` now wires `sys_email` persistence and the registry template loader in `init`, before it registers the `email` service. Before this, both were wired in the plugin's own `kernel:ready` hook, and a plugin that starts earlier runs its `kernel:ready` hooks first. The dev admin seed (`objectstack dev --seed-admin`, the default) signs its account up from one of those hooks, so on a boot with email verification required the seed's verification mail failed. Each such boot logged `ERROR [Better Auth]: Failed to run background task: Error: TEMPLATE_NOT_FOUND …` and left no `sys_email` row. That send now goes through the transport and default sender the boot was configured with. The `mail` settings namespace is still applied at `kernel:ready`. Sends made after boot behave as before.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

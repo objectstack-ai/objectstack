@@ -1,5 +1,220 @@
 # @objectstack/objectql
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- d050a8f: fix(spec,objectql)!: an installed or stored page carrying a declaration spec 18 retires converts at load instead of stopping the kernel build — `isDefault` off a bound record page is deleted and `template: 'full-width'` re-spelled `default`, each with a named notice; the authoring, save and publish doors keep refusing
+  
+  Clause-②: yes (widening)
+  
+  **What changes.** Protocol 18 refused `isDefault: true` on a page that is not a record page bound to an object, and closed the page `template` set (retiring `full-width`), at every door — the page parse (`definePage`, `defineStack`, so `os validate` / `os build`, and the metadata save door) and the kernel's package registration (`SchemaRegistry.installPackage` / `registerItem`, `MisplacedDefaultPageError`). The registration refusal also fired when a kernel was built from a package that was installed BEFORE the retirement: every hosted environment holding such a package failed its kernel build, with no remedy short of upgrading the package in each one. Data at rest now converts, and only data at rest:
+  
+  | Door | Before | Now |
+  | :--- | :--- | :--- |
+  | `definePage` / `defineStack` (`os validate`, `os build`), the metadata save door, package publish | refused at `isDefault` / `template` | **unchanged** — refused with the same sentence |
+  | a `sys_metadata` page row read back | served with `_diagnostics.valid: false` | converted on read: the flag deleted, `full-width` → `default`, `OS_METADATA_CONVERTED` notice |
+  | a compiled artifact inside the window its `engines.protocol` opens | the artifact door refused the artifact | converted before the strict parse, as every retired entry is |
+  | a package body registered through `manifest.register` / `ObjectQL.registerApp` that declares `engines.protocol` (an installed package, a marketplace install) | `MisplacedDefaultPageError`, kernel build stopped | converted before anything registers, with one `warn` per (package, conversion) naming the conversion id and the first site; the body is left unchanged on disk |
+  | the same body with NO declared range (a manifest a plugin builds in code), or declaring a floor newer than every retirement | refused | **unchanged** — refused |
+  
+  **The two ADR-0087 D2 entries**, both `retiredFromLoadPath` from the day they land (the authoring funnel never replays them):
+  
+  - `page-is-default-off-record-page-removed` (`page.isDefault`): deletes `isDefault: true` from exactly the pages `misplacedDefaultPageRefusal` refuses — a `home`, `app`, `utility` or `list` page, or a record page with no `object`. Lossless: nothing read the flag there (an app opens on its first navigation item). A default record page bound to an object keeps its flag.
+  - `page-template-full-width-to-default` (`page.template`): `'full-width'` → `'default'`. Lossless: the console drew both names with one template component. An unregistered template name (`centered`, `two-column`) and a region the template does not place have no lossless rewrite and are NOT converted — they stay with the parse, and the D3 entries `page-is-default-off-record-page-refused` / `page-template-closed-region-unplaced-refused` name the hand edits.
+  
+  **`@objectstack/objectql`** — `ObjectQL.registerApp` (and the `manifest` service, for an artifact carrying `packages[]`) replays the versioned forward conversion (`applyArtifactForwardConversions`, `@objectstack/metadata-core`) over a package body that declares its protocol range, before `installPackage`; the converted copy is what the package record and every registered item carry. Public: `ObjectQL.convertPackageBodyForward(body)`.
+  
+  **`@objectstack/metadata-core`** — `applyArtifactForwardConversions` reads the declared range off a FLAT package body (the manifest half beside its collections, no `manifest` key) when the definition carries no `manifest`; a definition with a `manifest` object is read there, as before.
+  
+  Migration: none for authors — the authoring doors refuse exactly what they refused. An installed package converts again at every registration until it is rebuilt (`os build`) and re-published with tooling from a release that ships the retirement; the boot log's warn names the conversion and the site.
+  
+  <!-- adr-0087: registered page-is-default-off-record-page-removed, page-template-full-width-to-default -->
+- b25d98a: Clause-②: yes (widening)
+  
+  On insert, `previous` is now bound to `null` in validation rules and in declarative hook
+  conditions, so a rule or condition that reads it decides the insert — the binding a flow's start
+  condition already gets on its create leg. Until now `previous` was unbound on insert: any
+  reference to it faulted `Unknown variable: previous`, and the write was refused (validation) or
+  aborted (hook) as `unevaluable`. So this widens what an insert can pass: a rule shaped
+  `previous != null && …` ("judge updates only") now ADMITS the inserts it used to refuse with that
+  fault, and a field's `requiredWhen: previous == null` now requires the field on insert instead of
+  refusing every insert. `previous == null || …` judges an insert, `previous != null && …` skips
+  one. A column read off `previous` on insert (`previous.stage`) still has no value and still
+  refuses the write; the refusal now names that read and the guard to add.
+  
+  A violating insert under a rule that reads `previous` now answers with the rule's own message.
+  The platform's own `validity_window_order` on `sys_user_permission_set` is the measured case: an
+  inverted grant window answers `400 VALIDATION_FAILED` with "Valid Until must be later than Valid
+  From …", not a CEL fault.
+  
+  The binding is the same for every predicate a write evaluates — a `script` / `cross_field`
+  condition, a `conditional`'s `when`, a field's `requiredWhen` and an option's `visibleWhen` —
+  and for a hook's `condition` on `beforeInsert` / `afterInsert`; the validate-only preview judges
+  an insert the same way. Only the CEL binding is `null`: a hook's `ctx.previous` is unchanged. No
+  shipped rule's verdict changes: every rule and hook this repository ships that reads `previous`
+  refused and admitted the same inserts before and after; only the refusal's reason moved. A write
+  to an existing row whose prior state is not in hand keeps `previous` unbound and still fails
+  closed, so `previous == null` never reads an update as an insert.
+- 66d2757: feat(spec)!: every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
+  
+  Clause-②: yes (narrowing — the served row gains two declared keys, and the record schema, the served-row union and the registry's installPackage signature each refuse what they accepted before)
+  
+  **BREAKING** — three published accept sets narrow. `InstalledPackageSchema` refuses a row without `source`, or with a value outside `code` / `marketplace` / `authored`. The served-row union `InstalledPackageAtEitherStageSchema` refuses a row without a boolean `writable`. `SchemaRegistry.installPackage` and `EngineSchemaRegistryView.installPackage` take `source` as their second argument and refuse a call without it. The migration is below. None of it is mechanically convertible, because only the door that registers a package knows where it came from.
+  
+  **What is new on the wire.** `GET /api/v1/packages` and `GET /api/v1/packages/:id` serve two declared keys on every row:
+  
+  - `source` names the package's origin. `code` means the deployment's own code registered it (a `defineStack()` host, a plugin's bundled manifest, a platform package). `marketplace` means the marketplace install-local plugin installed it, and that holds after a restart too, when the plugin rehydrates it from its ledger. `authored` means it is a database-authored package (a Studio base, a duplicate, an HTTP install), including after the restart that rehydrates it from `sys_packages`. The door that registers the package stamps the value. No reader derives it.
+  - `writable` is the server's own writability verdict (ADR-0070 D2), served on these rows since #14375 and now declared. It is computed per read and never stored, so it is declared on the served row (`InstalledPackageAtEitherStageSchema`) and not on the registry record.
+  
+  FROM → TO for a reader of these rows:
+  
+  | you did | do instead |
+  | --- | --- |
+  | treated `writable: true` as authored, and looked up each non-writable row in the marketplace's installed list (the control plane's, else install-local's) to tell marketplace from code | read `row.source` |
+  | read the undeclared `writable` | read the declared `writable` (unchanged value) |
+  
+  The two keys are separate statements: `source` says where the package came from, and `writable` says what this server lets an org do to it.
+  
+  **`InstalledPackageSchema` requires `source`.** It is `InstalledPackageSourceSchema`, exported from `@objectstack/spec/kernel`. A row without it, or with a value outside the closed set, is refused at the `source` key.
+  
+  **API change for code that registers packages (`@objectstack/objectql`).** The registry records the origin and never infers it:
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `registry.installPackage(manifest)` | `registry.installPackage(manifest, 'code')` (or `'marketplace'` / `'authored'`, whichever is where the package came from) |
+  | `registry.installPackage(manifest, settings, scope)` | `registry.installPackage(manifest, source, settings, scope)` |
+  | `ctx.getService('manifest').register(artifact)` for a marketplace install | `ctx.getService('manifest').register(artifact, { source: 'marketplace' })` |
+  
+  `SchemaRegistry.installPackage` throws a `TypeError` naming the closed set when `source` is missing or unknown, before anything is recorded. `ObjectQL.registerApp(body, scope?, source?)` and the `manifest` service record `'code'` when no source is given. They accept `'code'` or `'marketplace'` and refuse `'authored'`. The `IObjectQLEngine` registry contract (`@objectstack/spec/contracts`) declares the same `installPackage(manifest, source, settings?)`.
+  
+  **The one-line fix:** pass the package's origin as `installPackage`'s second argument.
+  
+  Readers: objectui's Setup → Packages Source column and its `?source=` filter (it switches from the two-read join to `source` in its own follow-up), and the client SDK's `packages.list()` / `packages.get()` row types.
+  
+  <!-- adr-0087: registered installed-package-row-source-required, registry-install-package-source-argument -->
+
+### Patch Changes
+
+- a69a40a: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  feat(spec)!: a page declares nothing the console does not honour — `isDefault: true` is refused off a record page bound to an object, `template` closes to the registered layouts, and a region the template does not place is refused
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** two accept sets of `PageSchema` narrow to what the console runs, and the `PageTypeSchema` text stops promising what it does not.
+  
+  | Writing | Before | Now |
+  | :--- | :--- | :--- |
+  | `isDefault: true` on a `home`, `app`, `utility` or `list` page, or on a record page with no `object` | accepted, stored and served; nothing read it | refused at `isDefault` — by `definePage`, `defineStack` (so `os validate` and `os build`, `STACK_SCHEMA_INVALID` 422), the metadata save door (`422 INVALID_METADATA`) and package registration (`SchemaRegistry.installPackage` / `registerItem`, `422 INVALID_METADATA`) |
+  | `template: 'full-width'` | accepted; drawn exactly as `default` | refused by name: "Page `template: 'full-width'` was removed in @objectstack/spec 18 … Use `template: 'default'`" |
+  | any other `template` outside `default`, `header-sidebar-main`, `three-column`, `dashboard` (`two-column`, `single-column`, …) | accepted; drawn as the page type's default layout | refused at `template` |
+  | on a `kind: 'full'` page, a region its template does not place (`left_sidebar`, `right_sidebar`, `content`, …) | accepted; stacked under `main` at full width, its `width` ignored | refused at `regions.N.name`, naming the template's slots and the rename |
+  | on a `kind: 'full'` page, a second region filling a slot an earlier one fills (two `main` regions; on `dashboard`, a second `header` or `footer`) | accepted; not drawn at all — the console draws the first region of a name and leaves that name out of the rest | refused at `regions.N.name`, naming the region that already fills the slot |
+  
+  Migration:
+  
+  - **`isDefault` on a non-record page** → delete it. A page does not choose where an app opens: an app's landing page is its **first navigation item** (by `order`), so to land on the page put its entry first in the app's `navigation`; the root landing follows the app's own `isDefault`. A record page meant as an object's default record page binds that object with `object`.
+  - **`template: 'full-width'`** → `template: 'default'` (or delete the key — `default` is the default). The page renders exactly as before.
+  - **A `template` held in a widened `string`** (a shared base object, `{ template: 'default' }` spread into `definePage`) no longer type-checks against the closed set → `template: 'default' as const`.
+  - **An unregistered template** → one of `default` (header, sidebar, main, aside, footer), `header-sidebar-main` (header, sidebar, main), `three-column` (header, sidebar, main, aside, footer) or `dashboard` (header, footer, and every other region a grid cell).
+  - **An unplaced region** → name it for the slot it fills: `left_sidebar` → `sidebar`, `right_sidebar` → `aside`, `content` → `main`; or choose `dashboard` when the regions are a grid. Names match case-insensitively, as the console's do. `slotted`, `html` and `react` pages are not judged on region names.
+  - **A second region for a filled slot** → move its components into the first region of that name, or name it for an unfilled slot. On `dashboard`, two regions of any other one name stay two grid cells and are accepted.
+  
+  The template set and each template's slots are now published: `PageTemplateSchema`, `PAGE_TEMPLATE_SLOTS` and `PAGE_TEMPLATE_OPEN_GRID` (`@objectstack/spec/ui`), with the two checks `checkPageDefaultPlacement` and `checkPageRegionPlacement` and the one refusal sentence `misplacedDefaultPageRefusal` that the parse and the registry share.
+  
+  `os migrate meta` lists both as hand edits — the D3 entries `page-is-default-off-record-page-refused` and `page-template-closed-region-unplaced-refused`. No D2 conversion rewrites them: where an app opens, and which slot a region fills, are the author's calls.
+  
+  **Stored metadata keeps loading.** No conversion touches these shapes and the read path does not refuse them, so a `sys_metadata` page row already stored with a non-record `isDefault: true`, `template: 'full-width'` or an unplaced region is served unchanged and renders as before (a stored row hydrates into the registry without a package, so the registry does not judge it either). Saving such a row again through the metadata API is refused until it is fixed.
+  
+  The text, without a contract change: `PageTypeSchema`'s docblock and enum comments now say that `home`, `app` and `utility` are the same region layout at three content widths — `home` is not a landing declaration, and `utility` is an ordinary inline page (the console has no floating or docked shell slot for it); `utility` stays a page type, read by the print door and the page-type width. The `print`-on-`utility` refusal no longer calls a utility page "a floating panel".
+  
+  `@objectstack/objectql`: the registry refuses `isDefault: true` on a non-record page a package registers (`MisplacedDefaultPageError`, `INVALID_METADATA` 422), at the package door and at the package-bound item seam, with the page parse's sentence.
+  
+  <!-- adr-0087: registered page-is-default-off-record-page-refused, page-template-closed-region-unplaced-refused -->
+- abb6df0: Clause-②: no
+  
+  fix(cli): `os storage orphans`, the `os secret rewrap` dry run and the `os migrate summary-nulls` dry run say they write no row or table, and that opening a SQLite file can still switch its journal mode, instead of saying nothing was written
+  
+  **What was wrong.** Each of these runs boots through the SQL driver before it prints, and the driver's connect switches a SQLite file to the journal mode it asks for (WAL, unless `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` is set in the command's own environment or the project's `.env`). Measured on a file still on a rollback journal, each run moved the header's journal-mode bytes (18 and 19, from 1,1 to 2,2) and its change counter, and changed no row or table, while printing "nothing was written". Nothing was lost.
+  
+  **What changed.** Each sentence below now claims no row or table. Where the run opened a SQLite file, the report's line is followed by the note the other read-only arms already carry: "Opening a SQLite file can still switch its journal mode (to WAL by default), which changes its header only." On PostgreSQL or MySQL the line ends without it.
+  
+  - `os storage orphans` (`formatStrandedOrphanInventory`, `@objectstack/service-storage`). FROM: "This pass is READ-ONLY: nothing was written, tombstoned or deleted." TO: "This pass is READ-ONLY: no row or table was written, tombstoned or deleted." and the note.
+  - `os secret rewrap` (the dry run's note, `REWRAP_NOTES.dryRun`, also in `--json` `report.notes`). FROM: "Dry run: every attributed row was opened, re-sealed and verified in memory, and nothing was written. Re-run with --apply to write." TO: "… and no row or table was written. Re-run with --apply to write." The note already follows the dry run's closing line on a SQLite file, so this sentence carries none.
+  - `os migrate summary-nulls` (the dry run that found NULL roll-ups, `formatSummaryBackfillReport`, `@objectstack/objectql`). FROM: "Dry run — nothing was written. Re-run with --apply to backfill." TO: "Dry run — no row or table was written. Re-run with --apply to backfill." and the note.
+  
+  **Unchanged.** No exit code, flag, prompt, refusal or export signature changes, and no `--json` document gains a field; the note is printed in the text output only. What the driver does on connect is unchanged: once a file is in the mode the driver asks for, these runs leave it byte-identical.
+- a33f3d5: Clause-②: no
+  
+  fix(cli): `os migrate plan`, a refused `os migrate summary-nulls --recompute-undefined-on-empty` name and every `os secret rewrap` run say what they vouch for, and that opening a SQLite file can still switch its journal mode, instead of saying nothing was written
+  
+  **What was wrong.** Each of these runs boots through the SQL driver before it prints, and the driver's connect switches a SQLite file to the journal mode it asks for (WAL, unless `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` is set in the command's own environment or the project's `.env`). Measured on a file still on a rollback journal, each run moved the header's journal-mode bytes (18 and 19, from 1,1 to 2,2) and its change counter, and changed no row or table, while printing "a plan writes nothing", "nothing was written" or "a finished run writes nothing". Nothing was lost.
+  
+  **What changed.** Each sentence below now names what it vouches for. On a SQLite file, its line is followed by the note the other read-only arms already carry: "Opening a SQLite file can still switch its journal mode (to WAL by default), which changes its header only." On PostgreSQL or MySQL the line ends without it.
+  
+  - `os migrate plan`, the unmanaged-table section. FROM: "They are reported for information only — nothing here drops them, and a plan writes nothing." TO: "… and a plan writes no row or table." and the note.
+  - `os migrate plan`, the declaration boot's note when a plugin's write was refused. FROM: "Refused N write(s) during the declaration boot — a plan writes nothing: …" TO: "… — a plan writes no row or table: …", and the note at the end of that note's line.
+  - `os migrate plan`, the same note when a raw command was forwarded. FROM: "If those commands only read, nothing was written; if one wrote, it landed." TO: "If those commands only read, no row or table was written; if one wrote, it landed.", and the note at the end of that note's line.
+  - `os migrate summary-nulls --recompute-undefined-on-empty` naming a roll-up the run cannot find (`backfillSummaryNulls`, `@objectstack/objectql`), in either mode. FROM: "Refused before any row was read; nothing was written." TO: "Refused before the walk read or wrote any row." and the note. Under `--apply` the boot before it can also create a table a never-started database lacks, so the sentence speaks for the walk only.
+  - `os secret rewrap`, the "Re-running is safe" note, in both modes and in `--json` `report.notes`. FROM: "… and a finished run writes nothing." TO: "… and a finished run writes no sys_secret row." Under `--apply` the note follows it; a dry run's closing line already carries it. A finished `--apply` run on a database that has never been started also creates its tables, so the sentence names the rows the re-wrap writes.
+  
+  **Unchanged.** No exit code, flag, prompt, refusal or export signature changes, and no `--json` document gains a field: the `--json` documents carry the changed sentences, and the note is printed in the text output only. What the driver does on connect is unchanged.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [14aff67]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [6e18016]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [d6bd98a]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/metadata-protocol@18.0.0-next.3
+  - @objectstack/metadata@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

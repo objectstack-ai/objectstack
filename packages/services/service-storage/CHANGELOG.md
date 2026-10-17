@@ -1,5 +1,111 @@
 # @objectstack/service-storage
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- b15f8a1: feat(service-print): print a record's print page to a PDF in headless Chromium, as the requesting user, and archive it as a file attached to the record
+  
+  Clause-②: yes (widening)
+  
+  A new package, `@objectstack/service-print`. `PrintServicePlugin` registers the in-process `print` service (`IPrintService`): `status()` and `printRecordToFile({ app, object, recordId, page, filename? }, context)`. It adds no route, no metadata key and no error code. Compose it explicitly:
+  
+  ```ts
+  import { PrintServicePlugin } from '@objectstack/service-print';
+  plugins: [new PrintServicePlugin()]
+  ```
+  
+  - **One engine, headless Chromium, in one of two placements.** A local executable (`OS_PRINT_CHROMIUM_PATH`, option `chromiumPath`), or a remote browser's DevTools WebSocket endpoint (`OS_PRINT_BROWSER_ENDPOINT`, option `browserEndpoint`). Either one needs `OS_PRINT_CONSOLE_URL` (option `consoleUrl`): the console's URL as that browser reaches it, `/_console` included. Configuring both placements is refused. `playwright-core` is pinned exact on this package only.
+  - **Loud at startup.** `start()` probes the engine and logs its placement and Chromium version. An engine that is not configured, is misconfigured or does not answer is reported once, with the setting to fix, and `status()` says why. A remote endpoint is never logged beyond its scheme and host.
+  - **As the requesting user.** The page is rendered through a short-lived session minted for the caller's own principal by the auth service (`mintPrincipalSession`), and revoked in a `finally`. There is no system principal.
+  - **Refusals first, each with `code` and `status`, before any session is minted or browser started** (an engine that failed its last probe is re-probed only after them all): a caller that is not a human user acting for themselves (`PERMISSION_DENIED` / 403); an engine that is not ready (`SERVICE_UNAVAILABLE` / 503); an unknown page (`RESOURCE_NOT_FOUND` / 404); a page that is not the object's default record page or declares no `print` (`VALIDATION_ERROR` / 400); a record the caller cannot read (`RECORD_NOT_FOUND` / 404); an object without `enable: { files: true }` (`FILES_DISABLED` / 403).
+  - **The archive runs as the requesting user.** `@objectstack/service-storage`'s `file-attachments` service gains a caller-scoped face, `ICallerFileAttachmentService` (exported type), on the same slot and the same writer: `assertMayAttach(parentObject, parentId, context)` throws the insert's own refusal without writing (`PERMISSION_DENIED` / 403 when the caller may not create attachments, `ATTACHMENT_PARENT_ACCESS` / 403 when the attach rule refuses), and `attachFileAs(input, context)` writes one `sys_file` owned by the caller and one `sys_attachment` inserted under the caller's context, so every insert gate judges the caller and the row is stamped `uploaded_by` the caller. The print service asks `assertMayAttach` in its files step, before any session is minted or browser started. `attachFileAs` acts only in the caller's own organization: an `organizationId` other than the context's `tenantId` (or `null` when it names none) is refused `PERMISSION_DENIED` / 403. `attachFile` (the system verb) is unchanged.
+  
+  `@objectstack/spec`'s `llms.txt` counts the new package: the workspace publishes 72 packages.
+- 0b1179f: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  feat(service-storage): the `sys_attachment` read gate writes one `ReadableIds` leaf per parent object and does no pre-scan, so a broad read is judged over every row, not a 2,000-row window (ADR-0139 D4, D5)
+  
+  Clause-②: yes
+  
+  The gate serves an attachment only when the caller may read the record it is attached to. Until now each read first scanned at most 2,000 candidate rows as the system, then asked which of those rows' parent records the caller could read. Past that window the gate failed closed: the unscanned rows were left out, the list's `total` agreed with the short answer, and a warning said so.
+  
+  The gate now writes one branch per object the metadata registry holds (except `sys_attachment` itself): `{ parent_object: P, parent_id: { $in: ReadableIds.of(P) } }`. The engine composes the leaf from the security service's `canReadObject` and `getReadFilter` for `P`, and the SQL drivers evaluate it as one subquery against `P`'s table, inside their own tenant wall. A list, its `total` and a grouped count are each one statement over every row the caller may read. A parent object the caller may not read is answered with no rows, without reading it as the caller, so no denial is logged for it.
+  
+  What a reader sees:
+  
+  - A broad read of `sys_attachment` is served every attachment whose parent record the caller may read, with a true `total`, whatever the table size. An attachment whose parent the caller may not read, whose parent no longer exists, or that names no parent is still never served. A read scoped to one record (the attachments panel) is unchanged.
+  - Three classes still read through the bounded probe, chosen before any leaf is written: a delegated (on-behalf-of) caller; a parent an object-scoped read middleware narrows (for example `sys_comment`, `sys_comment_reaction`, `sys_activity` and `sys_audit_log`); and a parent bound to another datasource than `sys_attachment`. The whole read also stays on the probe when the security service offers no `canReadObject`, or when none is registered.
+  - A read whose probe finds no candidate row is now narrowed to no rows rather than left unfiltered. It served nothing before either.
+  - On a driver that does not compile the leaf (`driver-mongodb`), a read of `sys_attachment` now fails with `INTERNAL_ERROR` / 500 naming the driver and the leaf, instead of serving a capped list. The gate does not turn that refusal into an empty answer. This is ADR-0139's ruled behaviour until a pipeline form is measured for that driver.
+  
+  For a host that installs the gate itself: `installAttachmentReadVisibility(engine, logger, getAdmission?)` takes an optional third argument that resolves the security service on every read. `StorageServicePlugin` passes it. A call without it keeps every read on the bounded probe and says so once.
+
+### Patch Changes
+
+- abb6df0: Clause-②: no
+  
+  fix(cli): `os storage orphans`, the `os secret rewrap` dry run and the `os migrate summary-nulls` dry run say they write no row or table, and that opening a SQLite file can still switch its journal mode, instead of saying nothing was written
+  
+  **What was wrong.** Each of these runs boots through the SQL driver before it prints, and the driver's connect switches a SQLite file to the journal mode it asks for (WAL, unless `OS_DATABASE_SQLITE_JOURNAL_MODE=delete` is set in the command's own environment or the project's `.env`). Measured on a file still on a rollback journal, each run moved the header's journal-mode bytes (18 and 19, from 1,1 to 2,2) and its change counter, and changed no row or table, while printing "nothing was written". Nothing was lost.
+  
+  **What changed.** Each sentence below now claims no row or table. Where the run opened a SQLite file, the report's line is followed by the note the other read-only arms already carry: "Opening a SQLite file can still switch its journal mode (to WAL by default), which changes its header only." On PostgreSQL or MySQL the line ends without it.
+  
+  - `os storage orphans` (`formatStrandedOrphanInventory`, `@objectstack/service-storage`). FROM: "This pass is READ-ONLY: nothing was written, tombstoned or deleted." TO: "This pass is READ-ONLY: no row or table was written, tombstoned or deleted." and the note.
+  - `os secret rewrap` (the dry run's note, `REWRAP_NOTES.dryRun`, also in `--json` `report.notes`). FROM: "Dry run: every attributed row was opened, re-sealed and verified in memory, and nothing was written. Re-run with --apply to write." TO: "… and no row or table was written. Re-run with --apply to write." The note already follows the dry run's closing line on a SQLite file, so this sentence carries none.
+  - `os migrate summary-nulls` (the dry run that found NULL roll-ups, `formatSummaryBackfillReport`, `@objectstack/objectql`). FROM: "Dry run — nothing was written. Re-run with --apply to backfill." TO: "Dry run — no row or table was written. Re-run with --apply to backfill." and the note.
+  
+  **Unchanged.** No exit code, flag, prompt, refusal or export signature changes, and no `--json` document gains a field; the note is printed in the text output only. What the driver does on connect is unchanged: once a file is in the mode the driver asks for, these runs leave it byte-identical.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/observability@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

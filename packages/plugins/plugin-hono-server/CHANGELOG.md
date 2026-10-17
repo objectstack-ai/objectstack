@@ -1,5 +1,91 @@
 # @objectstack/plugin-hono-server
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 75ced06: fix(plugin-hono-server)!: a request body the adapter cannot parse is refused `400 INVALID_REQUEST` when a route handler reads it, never handed to the handler as `{}`
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten or deleted, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of the HTTP transport for request bodies it cannot parse: a malformed declared-JSON body, a malformed form, or a body in a media type it does not read, each of which used to reach the handler as `{}`. The remedy is in the requests a client sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The adapter used to build a route's `req.body` as `{}` and overwrite it only when a parse succeeded, so a body it could not parse reached the handler as an empty object. Measured on a fresh `objectstack dev` showcase boot: `POST /api/v1/data/showcase_account/query` with its closing brace missing, with `{ not json`, or with a valid body sent as `text/plain` answered `200` with all 14 rows where the filter matched 2; a truncated `PATCH` answered `200`, changed no field and moved `updated_at`; and a truncated create answered `400 VALIDATION_FAILED` "Account Name is required", for a body that carried a name.
+  
+  What changes for an integrator. Each refusal is `400` with `{ "success": false, "error": { "code": "INVALID_REQUEST", "message": "…" } }`, raised when the handler reads `req.body`, so the handler acts on nothing past that read and nothing is written. The message names the failure and never echoes the body.
+  
+  - A body sent as `application/json` (matched case-insensitively) that is not blank and does not parse: FROM the handler reading `{}`, TO the refusal "The request body could not be parsed as JSON (it was sent as application/json). It was refused rather than read as an empty body: send a well-formed JSON document, or no body at all."
+  - A body in a media type the adapter does not parse (`text/plain`, `application/octet-stream`, any other type, or no `Content-Type` at all) sent to a route that reads `req.body`: FROM `{}`, TO the refusal "The request body was sent as text/plain, which this server does not read into a request body. It was refused rather than read as an empty body: send it as application/json."
+  - A `multipart/form-data` or `application/x-www-form-urlencoded` body that does not parse: FROM `{}`, TO the refusal naming form data.
+  
+  **Remedy, in one line.** Send a JSON body as well-formed JSON with `Content-Type: application/json`, or send no body.
+  
+  **Unchanged.**
+  
+  - An empty or whitespace-only JSON body is still `{}`, which the REST data doors read as an empty query; a request with no body is still `{}`, whatever it declares.
+  - Well-formed JSON and well-formed forms reach the handler parsed, as before.
+  - A route that reads `req.rawBody()` and never `req.body` receives any media type byte for byte, as before: the storage raw upload stores a JSON-with-comments file sent as `application/json` (the type its presign tells the client to send for a `.json` file) and a text file sent as `text/plain`.
+  - A route, or the unmatched-request fallback, that never reads `req.body` answers as before.
+  - A body is judged present by its framing headers (`Content-Length` other than `0`, or `Transfer-Encoding`), as RFC 9112 defines it; nothing is read to find out.
+
+### Patch Changes
+
+- 7428da0: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  refactor(plugin-hono-server,runtime): the Hono doors and the HTTP dispatcher read the duplicate-record wire code off the shared error classification instead of spelling it themselves (#23714)
+  
+  **No behaviour change.** A repeated unique value still answers `409 UNIQUE_VIOLATION` at both Hono doors (a `HonoHttpServer` route or raw mount, and `createHonoApp`'s catch arms through `declaredEnvelopeForThrow`) and at the dispatcher's doors (`HttpDispatcher`'s thrown-error envelope), with the same `message`, the same `details` (`developerMessage`, `object`, and `field` when the driver named the column) and the same envelope keys. The answers were compared byte for byte at those doors before and after. A client or an app author has nothing to change.
+  
+  **What changed.** Both translations used to spell the wire code as a string literal. They now read it off the classification the REST server answers with (`structuredCodeAnswer` in `@objectstack/types`), as `@objectstack/mcp` already does. So the code has one source, and neither package stamps a code that the error-code ledger does not list under it. The engine's in-process code is unchanged: `DuplicateRecordError.code` is still `DUPLICATE_RECORD`.
+  
+  Clause-②: no
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/observability@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

@@ -1,5 +1,130 @@
 # @objectstack/lint
 
+## 18.0.0-next.3
+
+### Patch Changes
+
+- e375315: fix(lint): the six `data-model-rules.ts` rule ids print a fix line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these six rule ids now carries a `fix` of one remedy sentence of at most 200 characters on every variant measured, including long object and column names. The three ADR-0120 uniqueness ids carry it as the `hint` that `os validate` and `os build` print after `fix: `; all six print it as `os lint --fix`'s `→ fix:` line. The longest of each, FROM → TO (characters of the fix text alone):
+    - `unique/legacy-organization-composite` 592 → 161;
+    - `unique/unscoped-declared-index` 380 → 150;
+    - `object/missing-name-field` 327 → 188;
+    - `unique/double-declaration` 303 → 159 (the contradiction arm; the two redundancy arms were already short and now drop one word);
+    - `rollup/non-numeric-aggregand` 300 → 165 (the line no longer names the parent object, so its length no longer grows with that name);
+    - `field/select-missing-options` 207 → 180.
+  - **What moved.** The text the fix lines stopped saying is in each id's `RULE_EXPLANATIONS` entry, which `os explain RULE_ID` prints:
+    - `unique/unscoped-declared-index`: what `unique: 'organization'` makes the driver build, and the `os migrate meta --from 17` route for existing sources (one new paragraph);
+    - `unique/legacy-organization-composite`: that the respelling makes the listed organization column NULL-safe in place, what the constraint then means, and that duplicate NULL-organization rows block the `recreate_index` with a report rather than failing a boot (one paragraph extended, one new);
+    - `unique/double-declaration`: where each scope word may be written (one new paragraph).
+    - `object/missing-name-field` now points at `os explain title-format-retired`, whose entry already says why a `titleFormat` template does not count. `field/select-missing-options` and `rollup/non-numeric-aggregand` lost only wording; the rollup entry already carries the reasoning.
+  - **Runtime publish gate:** none of the six runs there. The three uniqueness entries are `cli`-only registry rules, and the other three run only in `os lint`'s `lintDataModel` sweep. So no 422 `issues[].hint` and no 2xx `advisories[].hint` changes.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- cbbd96a: fix(lint): seven more rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these 7 rule ids now carries a `hint` (the CLI's `fix:` line, the runtime advisory's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (lengths are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after:
+    - flow reference syntax (`lint-flow-patterns.ts`): `flow-double-brace-interpolation` (1413 → 197) and `flow-bare-dollar-reference` (1234 → 198);
+    - `liveness-ledger-unreadable` (270 → 82), `capability-reference-unknown` (241 → 131), `page-section-count-not-multi-value` (228 → 167), `list-view-filters-in-views-mode` (219 → 135) and `page-field-unknown` (206 → 94).
+  - **The flow ids keep the judge's spelling, and only where it evaluates.** In a value slot the line names the spec value-slot judge's own CEL envelope for the reference, read out of the judge's remedy and never re-spelled: FROM `A value slot reads a CEL value envelope, … so a bare $ reference is stored as written. $source.id names $source, which is not one of the flow engine's own $ variables, … Write {source.id} as { dialect: 'cel', source: 'source.id' }. CEL refuses an absent variable or key … (the guarded form writes null).` (681) TO ``A value slot stores a bare `$` reference as written: write `{source.id}` as { dialect: 'cel', source: 'source.id' }.`` (116). Where an envelope at the string's place would not evaluate (a string inside an object or list literal, a legacy `assignments: [{ variable, value }]` shape, a `$User` path that never resolved), the line names no envelope and points at `os explain`. It never names the build's own refusal for a `{{ }}` string, whose spelling keeps the outer braces as literal text. In a text slot the line names the `{{ }}` hole for each reference the engine binds, and for any other `$` root says to compute the value into a variable with an `assignment` node and write `{{ v }}`. At a notify or http literal it says neither brace dialect resolves there: write the value itself.
+  - **Lists are no longer echoed.** `page-field-unknown` no longer appends the object's whole field list; it names the nearest declared field ("Did you mean") instead.
+  - **`os explain RULE_ID` carries the rest.** What the fix lines stopped saying is each id's `RULE_EXPLANATIONS` entry in `@objectstack/lint`: the `has()` guard for a value that may be absent, the run user's `current_user` null guard and the `sys_user` read for any other `$User` path, the whole-value literal and the canonical `assignments` map, what a filter operand's `null` does, which slots read `{{ }}`, and where a brace token in a literal is refused; that a capability another installed package declares needs no change; why page filter controls do nothing on an object list view (ADR-0047); that a missing liveness ledger is a platform packaging fault; which field types take `multiple: true`. Six ids gain an entry, so their `rule:` line now carries the `os explain` pointer: `flow-double-brace-interpolation`, `flow-bare-dollar-reference`, `liveness-ledger-unreadable`, `page-field-unknown`, `page-section-count-not-multi-value` and `list-view-filters-in-views-mode`. `capability-reference-unknown`'s entry gains one sentence.
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), the two flow ids fire on a `flow` write as 2xx `advisories[].hint`, FROM → TO measured at the door: a value-slot `$source.id` 681 → 116, `$User.Id` 681 → 121, `$User.Email` 742 → 198, a nested literal 1231 → 198, a legacy assignment 1030 → 198; a text-slot `$User.Id` 767 → 144 and `$error.message` 114 → 83; a value-slot `{{ }}` 746 → 116, a notify literal 297 → 137, a value no slot reads 362 → 158. Studio's save-advisory toast prints an advisory's `hint` after its message. `capability-reference-unknown` and `list-view-filters-in-views-mode` run at the CLI only; the two page ids do not fire on a `page` write; `liveness-ledger-unreadable` fires only on an install whose `@objectstack/spec` lost a ledger file.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- b6805ac: fix(lint): the twelve flow anti-pattern rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these 12 rule ids in `lint-flow-patterns.ts` now carries a `hint` (the CLI's `fix:` line, the runtime finding's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (lengths are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after: `flow-loop-body-uncontained` (800 → 174), `flow-multi-write-unfiltered` (695 → 73), `flow-try-catch-without-catch` (594 → 137), `flow-decision-inclusive-overlap` (437 → 159), `flow-approval-revise-target-not-service-owned` (412 → 76), `flow-time-relative-antipattern` (397 → 163), `flow-date-equality-filter` (379 → 123), `flow-runas-unscoped` (372 → 105), `flow-decision-mode-invalid` (295 → 134), `flow-decision-unconditional-branch` (286 → 149; its other arm, 142, is unchanged), `flow-error-label-not-fault` (239 → 81) and `flow-branch-label-unmatched` (224 → 122).
+  - **Examples.** `flow-loop-body-uncontained` FROM ``Contain the failure per iteration: put a `try_catch` INSIDE the body and move this node into its `try` region — … A `catch` region cannot be empty … Measured: with it, all 5 items are processed … See content/docs/automation/flows.mdx §"Per-iteration containment".`` (800) TO ``Move this node into the `try` region of a `type: 'try_catch'` node inside the loop body, with `catch: { nodes: [ { id: 'handled', type: 'assignment', label: 'Handled' } ] }`.`` (174). `flow-multi-write-unfiltered` FROM ``Write the constraint you mean into `filter` (e.g. `{ status: 'closed' }` — see examples/app-showcase `showcase_inquiry_purge`, …). If emptying 'lead' really is the intent, keep it: … Distinct from the run-time erased-condition guard, …`` (684–695) TO ``Write the constraint you mean into `filter`, e.g. `{ status: 'closed' }`.`` (73). `flow-runas-unscoped` FROM ``Declare `runAs:'system'` to make the elevation explicit and intended (the run reads/writes every record). A schedule flow cannot scope to a user — … (ADR-0049, ADR-0073 D5)`` (362–372) TO ``Declare `runAs:'system'` to make the elevation explicit and intended (the run reads/writes every record).`` (105). `flow-time-relative-antipattern` used to spell its range query as ``BETWEEN {TODAY()} and {TODAY()+N}``, in the single-brace dialect flows no longer resolve; its line now names the declared `timeRelative` sweep, and its entry spells the range with `$gte` / `$lt`.
+  - **`os explain RULE_ID` carries the rest.** Each of the 12 ids gains a `RULE_EXPLANATIONS` entry in `@objectstack/lint`, so its `rule:` line now carries the `os explain` pointer. What the fix lines stopped saying is there: which node types count as able to fail and how containment is judged; the two empty `catch` spellings the parse refuses, what the minimal handler may omit, and the measured result with it; when failing fast or retry-then-fail is a legitimate reading; the worked `showcase_inquiry_purge` example, keeping a meant whole-object write, and how the rule differs from the run-time erased-condition guard; when to keep `mode: 'inclusive'` and where `os migrate meta` left it on a flow authored against protocol major 17; what ends the revise window and why ADR-0044's amendment moved it off `wait`; the declared `timeRelative` sweep and the hand-written range-query alternative; why abutting one-day windows match each row once; why a user-less run is refused rather than run unscoped, and the anonymous-endpoint exception (ADR-0138 D2b); that `registerFlow` refuses an invalid `mode` with the same sentence; dropping `type: 'decision'` for a meant fan-out; which failures a `fault` edge routes and which labels read as an error path; and one branching mechanism per decision.
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), all 12 ids fire on a `flow` write, FROM → TO measured at the door. As 422 `issues[].hint`: `flow-approval-revise-target-not-service-owned` 412 → 76, `flow-runas-unscoped` 367 → 105 (schedule), 372 → 105 (time-relative) and 362 → 105 (api), `flow-decision-mode-invalid` 295 → 134, `flow-branch-label-unmatched` 224 → 122. As 2xx `advisories[].hint`: `flow-loop-body-uncontained` 800 → 174, `flow-multi-write-unfiltered` 695 → 73 and 684 → 73, `flow-try-catch-without-catch` 594 → 137, `flow-decision-inclusive-overlap` 437 → 159, `flow-time-relative-antipattern` 397 → 163, `flow-date-equality-filter` 379 → 123, `flow-decision-unconditional-branch` 286 → 149, `flow-error-label-not-fault` 239 → 81. No write changes channel.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- 105902f: feat(spec)!: retire the view form's `visibleOn` and the page component's `visibility` as keys; their ADR-0089 renames leave the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** ADR-0089 made `visibleWhen` the one conditional-visibility key, and through 17 the old spellings were declared `[DEPRECATED]` keys that the parse folded onto `visibleWhen` without a word: `visibleOn` on a form view's fields and sections, and `visibility` on a page component. At 18 all three positions carry a `retiredKey()` tombstone naming `visibleWhen`, the parse-time fold is gone, and the two ADR-0087 D2 conversions `view-visibleOn-to-visibleWhen` and `page-component-visibility-to-visibleWhen` (protocol 15) are retired from the load path (`retiredAfter: '17.7.0'`).
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `visibleOn: "…"` on a form field (`view.form.sections[].fields[]`) | `visibleWhen: "…"` |
+  | `visibleOn: "…"` on a form section (`view.form.sections[]`) | `visibleWhen: "…"` |
+  | `visibility: "…"` on a page component (`page.components[]`, slots and nested containers included) | `visibleWhen: "…"` |
+  
+  **The one-line fix:** rename the key to `visibleWhen`; the CEL predicate is unchanged. Where a node wrote both keys, `visibleWhen` was the one in effect: delete the old key.
+  
+  **What an author who still writes it sees.** `tsc` fails at a typed authoring site (`FormFieldInput`, `FormSection`, `PageComponent` type the key as retired), and the parse refuses it by name at its own path — `defineStack` throws `STACK_SCHEMA_INVALID` (422), `os validate` / `os build` print the issue, and the metadata save door answers 422:
+  
+  > `page.components[].visibility` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the page component's deprecated spelling of the conditional-visibility predicate, which the parse folded into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate) is unchanged. Where a component writes both, `visibleWhen` is the one that was in effect: delete `visibility`.
+  
+  **No tool makes the rename.** Both conversions belong to protocol 15, below the migration floor, so `os migrate meta --from 17` applies no edit for either key and `--write` writes none: it prints each written key among the refusals the migrated stack still has, and lists the D3 entry `ui-visibility-alias-keys-retired` as the hand edit.
+  
+  **Stored metadata needs no edit.** Stored-row rehydration and the artifact-ingestion door inside its window still replay both conversions, so a `sys_metadata` view or page row written with the old key keeps loading with `visibleWhen`. A script that saves a view or page through the metadata API with the old key is refused and needs the same rename.
+  
+  ## The retirement kit
+  
+  - **Tombstones** on `FormFieldSchema`, `FormSectionSchema` and `PageComponentSchema`; `RETIRED_KEYS_BY_MAJOR[18]`: `ui/FormField:visibleOn`, `ui/FormSection:visibleOn`, `ui/PageComponent:visibility`; the authorable-surface rows read `[RETIRED]`.
+  - **The fold is gone.** The three shapes are plain closed objects again (no `.transform` pipe): a section's group-reference rule no longer lists `visibleOn` (the tombstone answers it first), and a slotted page node's `type` refusal now arrives at its own path instead of nested in an `invalid_union`.
+  - **The D3 entry `ui-visibility-alias-keys-retired`**, one for both keys.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  `@objectstack/lint`: the visibility-predicate rules (`visibility-root-mislayered`, `visibility-bare-identifier`, `visibility-predicate-syntax`) and the predicate-path rules read `visibleWhen` only. `os validate`, `os build`, `os verify`, `defineStack` and the metadata save door parse first and refuse either retired key by name, so a body they judge cannot carry one. `os lint` is the one door that hands these rules an unparsed stack: there a predicate written under a retired key is not judged, by design — the parsing doors refuse the key itself, and `os lint` reports no refused shape.
+  
+  `@objectstack/metadata-core`: `detectUnboundFormViewPredicateRoots` reads `visibleWhen` only. Its caller scans an artifact after `applyArtifactForwardConversions`, which renames a legacy `visibleOn` first.
+  
+  Not part of it: `normalizeVisibleWhen` and `VISIBILITY_ALIAS_KEYS` stay exported (no schema here calls them any more); objectui's renderer reads of the old keys leave on the objectui side.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered ui-visibility-alias-keys-retired -->
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/sdui-parser@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

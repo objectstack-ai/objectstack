@@ -1,5 +1,239 @@
 # @objectstack/console
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 265ef64: Console (objectui) refreshed to `5e15928b4631`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 88 releasing of 91 changesets added across 82 non-merge commits; omitted: 3 release-nothing changesets, 2 commits carrying no changeset (they ship no package code).
+  
+  - **minor** — **The AI build conversation stays on the conversation and reads more compactly** (objectui#12724). (objectui `ac5907384`)
+  - **minor** — A section entry written as a bare field name no longer reads the object field's `visibleOn` when sections are normalized (`normalizeSectionField`, used by `ObjectForm`, `ModalForm… (objectui `684f22e84`)
+  - **minor** — Lists at narrow widths: a status chip is never cut to "Publish…", a table wider than its panel shows that it scrolls, and the Actions column is drawn only when a row offers an act… (objectui `4839f5caf`)
+  - **minor** — A `list-view` block drawn as a compact list in a narrow page region now shows a "View all" link under its rows (objectui#12703). (objectui `33ee9de4c`)
+  - **minor** — A list block in a page region narrower than half the page draws a compact list (objectui#12703). (objectui `a8add5c71`)
+  - **minor** — On a record page, a related list's "View all" opens the child object's list (objectui#12741). The destination is the ADR-0055 bare data surface, `/apps/APP/OBJECT/data?filter[FIEL… (objectui `8df26086d`)
+  - **minor** — `RelatedRecordHandlers` gains an optional `onViewAll` (objectui#12741). A host returns it from `resolve` to open the child object's full list page, scoped to the parent on the rel… (objectui `8df26086d`)
+  - **minor** — `record:related_list` now draws the "View all" link its `showViewAll` key declares (objectui#12741, ENFORCE, the objectui half of objectstack-ai/objectstack#23941). (objectui `8df26086d`)
+  - **minor** — The identity import no longer offers "Update existing (skip if no match)" (objectui#12697). (objectui `3e2c7634b`)
+  - **minor** — The import wizard offers only the write modes its host says the target accepts (objectui#12697). (objectui `3e2c7634b`)
+  - **minor** — **BREAKING** — The metadata-admin designer reads and writes the form-view visibility predicate as `visibleWhen` only (objectui#12696). **BREAKING** for a host that still spells the retired `visi… (objectui `236624d56`)
+  - **minor** — The console page header folds its actions before it cuts the description (objectui#12705). (objectui `80863adea`)
+  - **minor** — `LoginForm` no longer tells an SSO-enforced environment's users to use a password (objectui#12682). (objectui `9b69e1325`)
+  - **minor** — The audit log browser (`audit:log`) offers `sys_audit_log`'s list views as presets and links to the object list (objectui#12667, the objectui half of objectstack#23890). (objectui `8296c6c3c`)
+  - **minor** — App pages lay a region's blocks out on a 12-column grid, and the page description sits under its title (objectui#12624). (objectui `c9e67425e`)
+  - **minor** — Seven `marketplace.*` keys are removed from all ten language packs: `installedTitle`, `installedSubtitle`, `installedEmpty`, `installedAt`, `installedBy`, `installedPackageId` and… (objectui `9d857c998`)
+  - **minor** — Setup → Packages is the one list of what is installed: every package carries a Source, and marketplace installs carry their actions on their own row (objectui#12675, ruling B on o… (objectui `9d857c998`)
+  - **minor** — A settings page's `info_banner` row speaks the session locale, draws a warning in amber, and renders its body as Markdown (objectui#12671, the objectui half of objectstack#23855). (objectui `a2f38ddff`)
+  - **minor** — **BREAKING** — A page `list-view` node is judged in its `properties` bag, in `@objectstack/spec`'s list view spelling, and the retired `objectName` / `viewType` are refused by name (objectui#126… (objectui `378896da6`)
+  - **minor** — A navigation entry whose `visible` predicate cannot be evaluated is no longer drawn for everyone (objectui#12700). (objectui `71243db0d`)
+  - **minor** — New export `isRecordPageOf(page, objectName)` (objectui#12715): true when `page` is a record page bound to `objectName` (`type: 'record'` and `object` names it). It is the one rea… (objectui `c7462e7c8`)
+  - **minor** — The console renders a record on a NAMED record page (objectui#12715, the objectui layer of the print-page series). (objectui `c7462e7c8`)
+  - **minor** — Setup draws one page header on every page: the `sys_*` record lists, the metadata-type pages, the settings pages and the component pages. (objectui `c41ce3f24`)
+  - **minor** — The console's form page (`FormPage`, the `/forms/:name` and public `/f/:slug` routes) reads a form view field's and section's visibility predicate from `visibleWhen` only (objectu… (objectui `611566b4d`)
+  - **minor** — A form view field's `visibleOn` is no longer read when sections are normalized (`normalizeSectionField`, used by `ObjectForm`, `ModalForm` and the record form page) (objectui#1265… (objectui `611566b4d`)
+  - **minor** — `SchemaRenderer` no longer reads a page component's `visibility` key (objectui#12654). `@objectstack/spec` 18 retires it as a `retiredKey` tombstone naming `visibleWhen` (objectst… (objectui `611566b4d`)
+  - **minor** — **BREAKING** — A page `list-view` node is written in `@objectstack/spec`'s list view spelling, `data` and `type`, and a metadata page reads `properties.type` as the list kind (objectstack-ai/obj… (objectui `5c0846ebd`)
+  - **minor** — Show a write answer's advisory `warnings` to the user after save (objectui#12107). (objectui `6757a932b`)
+  - **minor** — A list names what an `object-ref` or `recipient-picker` field references, instead of printing its api name (objectui#12613). The Sharing Rules list read `crm_account` and `sales_m… (objectui `278bc29ea`)
+  - **patch** — Clause-②: no (objectui `5e15928b4`)
+  - **patch** — The console's startup sends one `get-session` and one `runtime/config` request instead of two of each: the session check and the early-branding request now hand their answers to t… (objectui `5d69b0e73`)
+  - **patch** — Opening the Cloud pricing or Welcome page now asks for the organisation's environment entitlements once. The plan cards, the onboarding next step and the workspace-timezone notice… (objectui `5d69b0e73`)
+  - **patch** — `AuthProvider` no longer asks `get-session` a second time when the console has just validated the stored session before rendering. The validated answer becomes the provider's firs… (objectui `5d69b0e73`)
+  - **patch** — Studio names what it shows by label on two more surfaces (objectui#12693). (objectui `cda4076be`)
+  - **patch** — `aggregate()` no longer reads a served `null` measure as a missing one. The analytics answer's `null` (the max or min over rows whose field is all NULL) now reaches the caller as… (objectui `35ef75036`)
+  - **patch** — The kanban board's drag-and-drop tells a screen reader the card's title and the column's label, in the console's language, instead of the record id and the option value (objectui#… (objectui `36e2f7b67`)
+  - **patch** — fix(app-shell): the Studio Validations editor says why it is read-only, to hover and to the keyboard (objectui#12691) (objectui `d0a00d795`)
+  - **patch** — The console's create / edit record modal now opens at the size an object's default form view authors in `modalSize` (`sm`, `default`, `lg`, `xl` or `full`). On desktop the authore… (objectui `2ff84f8bf`)
+  - **patch** — The "N eligible approver(s)" figure beside an approval's decision progress counts people, not slots (objectui#12781). The record page's approvals panel and the approval request pa… (objectui `f3a7b870a`)
+  - **patch** — fix(app-shell): "Discard draft" on the metadata editor names the item by its label, not its machine id (objectui#12690) (objectui `0f42aaf80`)
+  - **patch** — The developer Flow Runs page's flow picker names each labelled flow by its label again, on the list a real server serves (objectui#12783). (objectui `b52415010`)
+  - **patch** — The flow designer's start node offers each field on exactly the triggers the engine reads it for (objectui#12780). (objectui `79270e7c4`)
+  - **patch** — The app header titles a view stored with no `label` by its object's plural label, the name its tab shows (objectui#12805). (objectui `3288c12f7`)
+  - **patch** — A link from one doc to another in the docs portal now carries the console's base path (objectui#12686). The portal rewrites a doc body's `[x](./other_doc.md)` cross-reference to t… (objectui `8cf9cf305`)
+  - **patch** — **`marketplace.installedAdditiveNote` says what uninstall does now, in all ten packs** (objectui#12684). The note on a loaded marketplace row's Uninstall (its tooltip and accessib… (objectui `670ea1041`)
+  - **patch** — The metadata directory's "View all issues" link no longer paints warnings as errors (objectui#12768). (objectui `4279c2ed2`)
+  - **patch** — A list view's `date-range` user-filter chip draws the platform date picker on both bounds, and names them in the console's language (objectui#12784). It used to draw two native da… (objectui `99a0d3bf0`)
+  - **patch** — A settings row's source badge reads in the session's language, verb included (objectui#12694). The badge beside a setting's label said where its value comes from as an English ver… (objectui `ff215d934`)
+  - **patch** — A record on a print page prints its own title field (objectui#12787). Off a print page, `record:details` hides the row that the page header's H1 already shows: the declared name f… (objectui `6e4f14442`)
+  - **patch** — The ⌘K command palette closes after every command it runs, including one that does not navigate (objectui#12683). (objectui `3d39ca78c`)
+  - **patch** — The flow designer, canvas, Debug simulator and read-only flow viewer treat `http` as the HTTP node type, and no longer recognise `http_request`, `http_call` or `webhook` as node t… (objectui `5483297ea`)
+  - **patch** — `useActionTextLocalizer` resolves every `I18nLabel` copy an action declares (objectui#12757). It used to collapse a per-locale map only for `label` and `successMessage`, and only… (objectui `655e8977d`)
+  - **patch** — A page's `element:button` shows its inline action's copy in the user's language (objectui#12757). The spec types an inline action's `label`, `confirmText`, `successMessage` and `e… (objectui `655e8977d`)
+  - **patch** — A new report's or dataset's Label in a non-Latin script no longer names it `field` (objectui#12789). The report and dataset designers derive the Name from the Label until you type… (objectui `0b80f501f`)
+  - **patch** — A view stored with no `label` is named by its object's plural label on the object page, never by its qualified name (objectui#12774). The spec gives a view's `label` no default, a… (objectui `c4467ccb2`)
+  - **patch** — The permission set editor's provenance badge decides from `packageId` and the package artifact only (objectui#12753). Spec 18 retired the authored `managedBy` on a permission set… (objectui `c054d018d`)
+  - **patch** — An SSO sign-in reads in the session's language on both login pages (objectui#12762). The console's login page and app-shell's `DefaultLoginPage` passed `LoginForm` none of its fou… (objectui `8d80845af`)
+  - **patch** — The object designer no longer offers a "Relationship name" box on lookup, master-detail and tree fields (objectui#12758). (objectui `b275f5804`)
+  - **patch** — Clause-②: no (objectui `260ef7196`)
+  - **patch** — fix(components): `page:header` reads the spec's `variant: 'danger'` as destructive (objectui#12764) (objectui `69a408f64`)
+  - **patch** — In the collapsed (icon-mode) sidebar, a click on an icon reaches its row again. Before, a hidden group label could take the click instead (objectui#12744). (objectui `f1142634e`)
+  - **patch** — Studio: the "Read-only · Customize with an overlay" link at the end of an item's tab row (an open flow in Automations, an open permission set in Access) now folds to its layers ic… (objectui `2368d7af1`)
+  - **patch** — A new report's or dataset's Name keeps every underscore you type (objectui#12746). The report and dataset designers' Name box normalized each keystroke with the strict identifier… (objectui `94b2489f4`)
+  - **patch** — An inline edit of a `datetime` field on the record page keeps its time (objectui#12759). The record details section and the header highlights edited `date` and `datetime` fields w… (objectui `020d1788c`)
+  - **patch** — A record on a print page no longer prints its approval band: no "Recall approval" button, no approval status badge and no approval tally on paper (objectui#12751). (objectui `6367bfeba`)
+  - **patch** — List filters on `date` and `datetime` fields draw the platform date picker, the face record forms, action dialogs and grid cells already draw (objectui#12743). The native input to… (objectui `ed43c79ce`)
+  - **patch** — The flow designer no longer calls a live time-relative sweep "not in effect" (objectui#12672). (objectui `8cc02b444`)
+  - **patch** — The app bar's breadcrumb folds instead of cutting every segment short (objectui#12702). (objectui `4857cd284`)
+  - **patch** — Studio's Interfaces rail and the dashboard component list show the app's navigation and the widget titles in the session's language (objectui#12688). (objectui `41c1d9e93`)
+  - **patch** — The list toolbar draws Filter, Sort and Display as 28 px icon buttons at every width, on every list that mounts it: app object lists, Setup lists and related lists (objectui#12695… (objectui `0171c2494`)
+  - **patch** — After a reload, the console no longer keeps the previous organization's id once the server says the session has no active organization (objectui#12698). better-auth clears a sessi… (objectui `6e141d999`)
+  - **patch** — The derived highlight strip on a record page no longer picks a field from a field group that declares a `visibleWhen` (objectui#12720). (objectui `360e27a14`)
+  - **patch** — Metadata Diagnostics no longer paints a clean sweep as an error (objectui#12721). (objectui `a214fbe2e`)
+  - **patch** — Browse Marketplace says what it is loading, and a failed catalog read names its class and offers Retry (objectui#12710). (objectui `a23e80464`)
+  - **patch** — Setup → Packages: the Scope badge now reads the server's `writable` verdict for its writable / read-only half (objectui#12723). A marketplace install has no `scope` and the server… (objectui `8dc313530`)
+  - **patch** — The grid's inline cell editor and the kanban required-fields dialog draw `date` and `datetime` fields with the platform date picker, the face record forms and the action dialogs a… (objectui `d66d7e834`)
+  - **patch** — Editing a formula field no longer shows a false "retired `formula` key" error (objectui#12681). (objectui `7ead04904`)
+  - **patch** — Home answers a `current_user.can()` navigation gate from the caller's permissions (objectui#12700). (objectui `2dbe5f533`)
+  - **patch** — A period-over-period delta from a zero baseline no longer claims "100%" (objectui#12677). (objectui `0666a66f3`)
+  - **patch** — A collapsible record details section on a print page prints its header as a plain heading, with no disclosure chevron and no clickable-header chrome (objectui#12732). (objectui `464ae629b`)
+  - **patch** — Opening a record page sends one approvals read and one record read (objectui#12701). (objectui `e219a3d6c`)
+  - **patch** — In the metadata designer's create mode, a Name the author typed is no longer replaced when the Label is typed afterwards (objectui#12680). This holds for the object, report and da… (objectui `1d869199c`)
+  - **patch** — A caller the Setup app refuses gets the access-denied screen on Setup's item pages instead of those pages under another app's chrome (objectui#12706). (objectui `a88c20604`)
+  - **patch** — Console lists link names that point at another object's record, the way the record page does (objectui#12673). (objectui `b393152f7`)
+  - **patch** — A record details section on a print page prints every field it declares, with no "Show N empty fields" button on paper (objectui#12717). (objectui `263e9ddcc`)
+  - **patch** — A form section that declares no `columns` now draws two fields per row from the container's `@md` width (one below it) on every page form host — `ObjectForm`, `SplitForm`, `Tabbed… (objectui `96fa4b9bc`)
+  - **patch** — Setup's permission-set and position holders offer Add and Remove only to a caller holding the grant the server asks for those writes (objectui#12082). (objectui `fac2c2496`)
+  - **patch** — The app bar's Edit app pencil now appears only where Studio can edit: for a metadata author, on an app whose package Studio lists as writable. A read-only package's app (such as a… (objectui `40e587342`)
+  
+  ⚠️ 3 of these carry a breaking change: 3 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+  
+  **In this console build, declared nowhere** — objectui merged 2 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ fix(e2e/live): start-backend.sh records the server's pid, not a subshell's (objectui#12676) (#12737) (objectui `c22068922`)
+  - _(no changeset)_ chore(scripts): raise every eager-closure ceiling by 20% and move the regression the gate must catch to 695 KiB (objectui#12653) (#12699) (objectui `e6175b57f`)
+  
+  Clause-②: no
+  
+  <!-- adr-0087: not-required (no-migration-prescription)
+       This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+       changeset, the re-recorded `scripts/sdui-manifest.record.json` and the regenerated
+       `sdui.manifest.json`, and the re-recorded `packages/sdui-parser/objectui-lockstep.json`.
+       It adds, removes or renames no ObjectStack-authorable key: no Zod
+       shape, no spec declaration and no stored `sys_metadata` shape moves in it, so
+       `objectstack migrate meta` has nothing here to rewrite, and this body carries no FROM/TO
+       prescription of its own. The range carries three objectui changes their authors
+       annotated breaking, and the digest marked all three. Each is answered against this tree:
+       (1) objectui `236624d56`, `@object-ui/app-shell`: the metadata-admin designer reads and
+       writes the form-view predicate as `visibleWhen` only. `@objectstack/spec` here already
+       retires the form view's `visibleOn` (ADR-0089 D2, `packages/spec/src/ui/view.zod.ts`),
+       and its stored rows are carried by the `view-visibleOn-to-visibleWhen` conversion.
+       (2) objectui `378896da6`, `@object-ui/types`: a page `list-view` node is judged in its
+       `properties` bag and `objectName` / `viewType` are refused by name.
+       (3) objectui `5c0846ebd`, `@object-ui/plugin-list`: the `list-view` registration
+       publishes `data` / `type` in place of `objectName` / `viewType`.
+       For (2) and (3): `ListViewSchema` here declares neither `objectName` nor `viewType`;
+       its object binding is `data` and its kind is `type`, the only spellings, and the react
+       tier's `ListView` block already names the two aliases retired
+       (`packages/spec/src/ui/react-blocks.ts`). No list view this tree accepts is written in
+       the spelling objectui stops reading. -->
+  
+  objectui range: `f8267df93aba...5e15928b4631`
+- a69a40a: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  Console (objectui) refreshed to `daeb77fc84dd`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 4 releasing of 4 changesets added across 5 non-merge commits; omitted: 1 commit carrying no changeset (they ship no package code).
+  
+  - **minor** — Studio, Interfaces pillar: an html or react page reads like a code page. The source editor's plain-text fallback numbers its lines and wraps long ones as the code editor does, and… (objectui `830eb1f2d`)
+  - **patch** — A new record page seeded in Studio is saved with the `default` layout template instead of `full-width`, and the page node's `template` member is typed by reference to the spec's (… (objectui `daeb77fc8`)
+  - **patch** — Two Studio pickers are named by the labels shown beside them (objectui#12510). Nothing changes on screen. (objectui `3e09c1e8d`)
+  - **patch** — Studio's empty surfaces now carry the action that fills them (objectui#12514). (objectui `f23eb01cb`)
+  
+  **In this console build, declared nowhere** — objectui merged 1 commit in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared it, so it appears in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ docs(studio-redesign): move the 61 PR screenshots under after/ to an evidence branch and remove them from main (#12583) (objectui `7066dae53`)
+  
+  objectui range: `f96f771140f1...daeb77fc84dd`
+- e66f13c: Console (objectui) refreshed to `f8267df93aba`. Frontend changes in this range:
+  
+  Derived from the changesets objectui declared over the range — 46 releasing of 46 changesets added across 40 non-merge commits; omitted: 3 commits carrying no changeset (they ship no package code).
+  
+  - **minor** — **BREAKING** — The page renderer no longer compiles a `kind: 'jsx'` page node as `html`. This completes the retirement of the page kind `jsx` that `@objectstack/spec` 18 made (objectstack-ai/obj… (objectui `f8267df93`)
+  - **minor** — The page schemas no longer import or attach `@objectstack/spec`'s page-parse judge of a view-data component's retired `api` binding, which objectstack#23784 removed from the spec… (objectui `15d8ca6da`)
+  - **minor** — Home: "Recently accessed" brings you back to the records and list views you opened, beside the activity feed (objectui#12604). (objectui `f0e760afe`)
+  - **minor** — The details grid passes a pointer field's `referenceDeletedWhen` to `resolveRecordPointer` (objectui#12489). (objectui `023087f63`)
+  - **minor** — The record details grid draws a platform-deleted pointer target as a tombstone in the declared option's label (objectui#12489). (objectui `023087f63`)
+  - **minor** — `resolveRecordPointer` reads `referenceDeletedWhen`, so a pointer pair can say the platform deleted its target (objectui#12489). (objectui `023087f63`)
+  - **minor** — The console top bar is 48 px (`h-12`) in every frame, the height both approved console artboards draw (objectui#12639). It was 56 px (`h-14`). (objectui `dcd104102`)
+  - **minor** — List grids show the record a pointer field names, and the Approvals Inbox says who else is waiting (objectui#12608). (objectui `f78efdd1e`)
+  - **minor** — Locale keys for the console home's "My work" section (objectui#12602), in all ten packs. (objectui `db8ce2f41`)
+  - **minor** — The console home's "Needs your attention" card becomes the "My work" section of the approved home artboard (objectui#12602), and the pending-drafts banner above the greeting moves… (objectui `db8ce2f41`)
+  - **minor** — Resolve `@objectstack/*` `18.0.0-next.2` (objectui#12626). (objectui `f62b6ff4e`)
+  - **minor** — A kanban under a list view puts every record of the view in its column, not the list's first page, and its cards carry the view's first columns (objectui#12619). (objectui `8614705c1`)
+  - **minor** — **BREAKING** — `page:header` no longer reads `showStar`, ahead of `@objectstack/spec` 18 retiring the key (objectstack#23650). (objectui `608033b82`)
+  - **minor** — The console home's top half follows the approved home artboard (objectui#12601): a search field in the top bar, a greeting with a one-line work summary, two compact builder chips,… (objectui `6c4d00da0`)
+  - **minor** — `DefaultLoginPage` passes the translated names of `LoginForm`'s new password reveal toggle, `auth.login.showPasswordText` and `auth.login.hidePasswordText` (objectui#12600). It ke… (objectui `8ed7e5a8f`)
+  - **minor** — `LoginForm` gains an optional `hideHeader` prop and a password reveal toggle, and the shared auth form styles take the console login artboard's sizes (objectui#12600). (objectui `8ed7e5a8f`)
+  - **minor** — The console's login page follows the approved "refined centred" artboard (objectui#12600). (objectui `8ed7e5a8f`)
+  - **minor** — New `auth.login` strings for the console login page, in all ten language packs (objectui#12600): `welcomeTitle`, `welcomeDescription`, `showPasswordText`, `hidePasswordText`, `foo… (objectui `8ed7e5a8f`)
+  - **minor** — Every wide centred dialog keeps a 1rem gutter on each side of the window from `sm` (640px) up, by one shared class (objectui#12603). (objectui `726d8c9fc`)
+  - **minor** — A grouped grid now draws one table with one sticky column header. Each group is a 36 px band row between the rows: a chevron, the group value and its count, in one cell that spans… (objectui `619e3f7a4`)
+  - **minor** — The Studio's Publish and Changes buttons no longer open the pending-changes sheet the same way. (objectui `92c2a6976`)
+  - **minor** — **A record dialog with no authored layout opens bounded, and draws two fields per row wherever no `columns` is declared** (objectui#12521). Three defaults of `ModalForm` change. N… (objectui `7b5e55893`)
+  - **minor** — **BREAKING** — The console's list toolbar no longer has a write into the shared view, and the data-source method that write used is retired (objectui#12504). (objectui `3eb3ec138`)
+  - **minor** — Studio's Add field asks for the label and type before it creates the field, and the field type picker also searches descriptions (objectui#12516). (objectui `1b3b5b102`)
+  - **patch** — Action-param and bulk-action dialogs draw `date` and `datetime` params with the platform date picker, the same face record forms draw since objectui#12622 (objectui#12642). (objectui `c6b7d8203`)
+  - **patch** — The cloud-connection panel's "Not connected" card no longer repeats the page subtitle (objectui#12655). (objectui `efa9cb4fa`)
+  - **patch** — Record page sections: a collapsible section's header is now a real button named by the section title (objectui#12625). It carries `aria-expanded`, is reachable by Tab, and Enter o… (objectui `4be76e030`)
+  - **patch** — Studio's permission-set editor no longer offers the two delegated-admin switches that `@objectstack/spec` 18 retired (objectui#12406, the objectui half of objectstack#23488). (objectui `a98a23c78`)
+  - **patch** — Inside an app, the product mark stays in the top bar as the way home, and the app menu gains Back to home, All apps and Settings (objectui#12605). (objectui `a5bb7ac2f`)
+  - **patch** — Setup › Packaged automation keeps a flow row to the table's height when the platform says why the flow is not armed (objectui#12609). (objectui `8a8bcf3dd`)
+  - **patch** — Record forms draw `date` and `datetime` fields with the platform date picker instead of the browser's native date input (objectui#12622). (objectui `ca7a4c316`)
+  - **patch** — The record header draws one primary action and the rest as secondary buttons (objectui#12617). (objectui `ef71a09f9`)
+  - **patch** — **`marketplace.installedAdditiveNote` is plain text in all ten packs** (objectui#12610). Each value dropped its leading `<strong>Note:</strong>` markup (in that pack's language);… (objectui `f74638c1b`)
+  - **patch** — **Installed Apps' kernel note is the tooltip of the Uninstall it qualifies** (objectui#12610). The "kernel API is additive only" note was a paragraph at the foot of the list, show… (objectui `f74638c1b`)
+  - **patch** — **A settings action row draws its label once, on the button** (objectui#12610). The settings renderer's `action_button` row printed the manifest's `label` as the row label and aga… (objectui `f74638c1b`)
+  - **patch** — Marketplace cards show the whole app name, and the id keeps its package name (objectui#12616). (objectui `07b063249`)
+  - **patch** — Studio at a narrow width keeps the words that matter readable (objectui#12611). (objectui `a8560b228`)
+  - **patch** — The list toolbar's Display menu now closes once a layout is chosen (segmented or dropdown switcher), returning focus to the Display button, as Escape already does; the panel's tog… (objectui `79c199692`)
+  - **patch** — The Studio's Automations rail orders its object groups the way the package's app presents its objects (objectui#12612). The groups used to follow the alphabet of the object labels… (objectui `0a41305b0`)
+  - **patch** — Metric tiles keep their title readable in narrow tiles. The title now owns the first line (up to two lines, with an ellipsis on the second), the value never wraps and steps down o… (objectui `63d00da3d`)
+  - **patch** — The pending-changes sheet no longer lists the package stamp as one of the author's own changes (objectui#12594). Expanding a new object draft showed `_packageId` under "Also chang… (objectui `33fbc861d`)
+  - **patch** — An `lg` or `xl` `ModalForm` dialog keeps a 1rem gutter on each side of the window from `sm` (640px) up (objectui#12593). (objectui `85e8961f2`)
+  - **patch** — A boolean cell's read-only checkbox is named by its field (objectui#12584). (objectui `7d0c174ba`)
+  - **patch** — Studio's way home leads back to the Studio landing, and the two links that leave for Setup say so (objectui#12513). (objectui `f5eec6383`)
+  - **patch** — **The console's New and Edit dialog on a field-heavy object opens bounded on desktop** (objectui#12521). For an object with twelve or more authorable fields, `@objectstack/spec`'s… (objectui `7b5e55893`)
+  - **patch** — Studio: the draft status chip sits in the same place in every pillar's item header (objectui#12524). "Unpublished draft" in Data, Automations and Interfaces, and Access's "saved a… (objectui `ae923ece2`)
+  
+  ⚠️ 3 of these carry a breaking change: 3 by the author's own breaking annotation in the changeset body — objectui declares no `major` inside a launch window (`scripts/check-changeset-no-major.mjs`). Each is marked **BREAKING** in the list above — read them before compiling the release record.
+  
+  **In this console build, declared nowhere** — objectui merged 3 commits in this range with no `.changeset/*.md`. The code is inside the pin above and ships here, but nothing upstream declared them, so they appear in no objectui CHANGELOG and in no entry above. Listed by subject rather than counted, because a count cannot tell a dependency bump from a form-behaviour change (objectstack#6174); the upstream gate that would prevent this is objectui#3387.
+  
+  - _(no changeset)_ fix(live-e2e): the backend cold install writes overrides.vitest so npm 10 can install the published graph (objectui#12649) (#12674) (objectui `d66ceea5a`)
+  - _(no changeset)_ docs(skills): point two published member counts at their declarations instead of numbers (objectui#12588) (#12591) (objectui `8415d9f11`)
+  - _(no changeset)_ ci: delete the spec-main-shape-gate copy, the spec shape gate runs in objectstack (objectui#12352) (#12596) (objectui `c6a42be39`)
+  
+  Clause-②: no
+  
+  <!-- adr-0087: not-required (no-migration-prescription)
+       This diff moves `.objectui-sha` and the artefacts that travel with it: this console
+       changeset, the re-recorded `scripts/sdui-manifest.record.json` and the regenerated
+       `sdui.manifest.json`, and the re-recorded `packages/sdui-parser/objectui-lockstep.json`.
+       It adds, removes or renames no ObjectStack-authorable key: no Zod shape, no spec
+       declaration and no stored `sys_metadata` shape moves in it, so `objectstack migrate meta`
+       has nothing here to rewrite, and this body carries no FROM/TO prescription of its own.
+       The range carries three objectui changes their authors annotated breaking, and the
+       digest marked all three. Each is answered against this tree:
+       (1) objectui#12486 (`f8267df93`), `@object-ui/types`: `PageNodeSchema.kind` drops `jsx`
+       and the page renderer stops compiling it as `html`. `@objectstack/spec` here already
+       refuses page `kind: 'jsx'` at parse (`packages/spec/src/ui/page.zod.ts`), so no page
+       this tree accepts reaches that arm.
+       (2) objectui#12627 (`608033b82`), `@object-ui/components`: `page:header` stops reading
+       `showStar`. `@objectstack/spec` here already retires the key; its conversion is the
+       registered `page.component.page:header.showStar` entry in
+       `packages/spec/src/conversions/registry.ts`.
+       (3) objectui#12504 (`3eb3ec138`), `@object-ui/types` and `@object-ui/data-objectstack`:
+       `DataSource.updateViewConfig` and its capability gate are removed. No package or example
+       here depends on any `@object-ui/*` package; the name survives in this tree only in two
+       test comments and one checklist step, none of which calls it.
+       Scope of the claim, stated rather than implied: it is a claim about THIS diff, not a
+       per-entry re-measurement of the upstream declared-breaking entries.
+  -->
+  
+  objectui range: `daeb77fc84dd...f8267df93aba`
+
 ## 18.0.0-next.2
 
 ### Major Changes

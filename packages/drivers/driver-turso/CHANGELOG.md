@@ -1,5 +1,111 @@
 # @objectstack/driver-turso
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- ae4dfaf: feat(driver-turso,cli): the v18 organization-ownership ceremony runs on a Turso remote database
+  
+  Clause-②: yes (widening)
+  
+  `os migrate organization-ownership`, the plan and `--apply --backup-taken`, now completes against a Turso database reached over the remote transport (`libsql://…`), the transport hosted environments use. Before, the plan stopped at its boot with `Deferred schema DDL is not supported by the Turso REMOTE transport`, and the apply's column drops had no remote path either.
+  
+  - **`@objectstack/driver-turso`**, remote face:
+    - `detectManagedDrift()` answers instead of refusing with `NOT_IMPLEMENTED` / 501. The verdict is the shared differ's, the one the local face runs; the physical schema it diffs is read from the remote catalog (`pragma_table_info`, `sqlite_master`, `pragma_index_list` / `pragma_index_info`, and the ADR-0120 D4 duplicate probe). The declarations it diffs against are recorded by every remote schema door and by the DDL-free `registerObjectMetadata`, so a boot that skipped schema sync is covered too.
+    - `applyMigrationEntries()` applies `drop_index`, `create_index`, `recreate_index`, `replace_unique_index` and `drop_column` instead of refusing. Each entry runs as one libSQL `write` batch, so it lands whole or not at all: a `drop_column` drops the column's indexes with it in the same transaction, and a re-created index that fails to build leaves the old one in place. An entry is reported `applied` only once a read-back shows its target state. Every other column entry (nullability, width, a dropped DEFAULT) needs the SQLite table rebuild, which this transport does not run, so it is reported `skipped` and logged, as the in-place dialects report an op they cannot perform.
+    - The remote face declares `driftReportCaveat`: a sentence saying its drift report is for reading only and naming the reason. The OS_ARTIFACT_URL boot gate reads it (below). The local and embedded-replica faces declare `null`.
+    - The remote driver's `config` now carries its `url`, so the CLI labels a remote database by its URL (credential-free) instead of `better-sqlite3`. The ceremony writes that label into its plan and refuses an apply whose plan names another database; that refusal can now tell two remote databases apart.
+  - **`@objectstack/cli`**: the ceremony's plan and apply boots skip schema sync, instead of arming deferred DDL, when the primary datasource is a Turso remote one. No DDL is attempted, so the plan stays read-only, and every other datasource the boot connects is still deferred. The environment's own boot has already run the additive sync the ceremony reads. Every other `os migrate` command keeps refusing on that transport: their dry runs list held-back schema work, which a boot that holds nothing back cannot list.
+  - **`@objectstack/runtime`**: `createStandaloneStack` takes `skipSchemaSync`, passed to `ObjectQLPlugin` as the option `OS_SKIP_SCHEMA_SYNC=1` names. Unset, the plugin reads the variable as before.
+  
+  On a Turso remote primary, the `OS_ARTIFACT_URL` boot migration gate on `os serve` keeps its earlier answer: cannot judge, warn and boot. It applies no drift and refuses no boot. Only its warning's wording changes, from `Could not check the physical schema` to `Did not check the physical schema against the artifact: …`, followed by the driver's reason. The gate now decides this from a capability the driver declares (`driftReportCaveat`, a string on the remote face and `null` on the local and embedded-replica faces), not from a refusal it catches. Two follow-ups, filed separately and not closed by this change, have to land before that gate may act on a remote report:
+  - #23847: the remote transport's schema sync honours `storage.notNull` on create and add column, so the report stops naming a tightening its own sync produced;
+  - #23848: `os migrate apply` works on a Turso remote database, so the destructive drift the gate would refuse on has a remedy there.
+- 61e5ee9: fix(cli,driver-turso): `os migrate plan` and `os migrate apply` run on a Turso REMOTE database, and the apply names every drift entry it could not apply
+  
+  Clause-②: yes
+  
+  On a primary reached over the Turso REMOTE transport (`libsql://…`, every hosted tenant), `os migrate plan` and `os migrate apply` used to stop at their boot with `Deferred schema DDL is not supported by the Turso REMOTE transport`, so the remedy the drift report and the `OS_ARTIFACT_URL` boot gate print for destructive drift, `os migrate apply --allow-destructive`, could not run there at all. Both commands now boot the way `os migrate organization-ownership` does on that transport: with schema sync skipped instead of deferred. What an operator on a remote primary now sees:
+  
+  - **The drift half runs.** `os migrate plan` lists the drift; `os migrate apply` applies what the transport can express, after the same confirmation: a column drop (with the indexes keyed on it, in one transaction) and every index entry. Nothing is written before the prompt, as before.
+  - **The additive half is reported as NOT examined, never as "nothing to create".** Both commands print a warning under the database line saying that tables and columns the metadata declares and the database lacks are neither listed nor created by this run, and that the serving boot (`os serve` / `os start`) creates them on this transport. The `--json` documents carry `schemaSync: "skipped"`, so their `pending: []` reads as not examined; an apply with no drift answers `message: "in_sync_partial"`, not `"in_sync"`.
+  - **Every entry the driver did not apply is named,** by table, column and kind, in both faces (`--json`: a new `notApplied` array on the post-apply document). The REMOTE transport runs no SQLite table rebuild, so a tightening, a relaxed NOT NULL, a width change or a dropped DEFAULT is not applied there.
+  - **A destructive entry confirmed with `--allow-destructive` that was not applied makes the run PARTIAL:** the human face ends `PARTIAL apply: …` and the command exits `1`; `--json` carries `message: "partial"` and exits `1`. A non-destructive entry that was not applied is named and the exit stays `0`.
+  
+  On every other database the apply behaves as before, with one difference in the same direction: a destructive change confirmed with `--allow-destructive` that the driver could not apply (its DDL failed, or the dialect cannot perform it) now exits `1` and is named, where the run used to exit `0` with a count. Its human line for the entries held back without `--allow-destructive` now reads `Skipped N destructive change(s) (re-run with --allow-destructive to include them)`.
+  
+  `@objectstack/driver-turso`: the REMOTE face's `driftReportCaveat` no longer says a destructive entry has no remedy on this transport; it says `os migrate apply --allow-destructive` applies a column drop or an index change there and names the rest.
+  
+  The other `os migrate` commands whose dry run arms deferred DDL (`duplicates`, `account-issuer`, `unmapped-columns`, `multi-value-columns`, and the dry runs of the data commands) still refuse on the REMOTE transport, unchanged.
+- c4111c6: fix(cli,driver-turso): `os migrate plan` and `os migrate apply` on a Turso REMOTE database no longer offer `--allow-destructive` for a change that database cannot apply
+  
+  Clause-②: yes (widening)
+  
+  On a primary reached over the Turso REMOTE transport (`libsql://…`), `os migrate plan` listed a NOT NULL tightening with the remedy `Run "os migrate apply --allow-destructive".` and closed with `(add --allow-destructive for drops / tightenings)`. That transport runs no SQLite table rebuild, so the apply then named the tightening as not applied and exited 1. The plan now says so before the apply: each change the database cannot apply (a tightened or relaxed NOT NULL, a dropped DEFAULT) is still listed, with its finding and `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.` in place of the remedy. The footer offers `--allow-destructive` only for the destructive changes the database can apply (a column drop, an index change) and says how many listed changes remain drift after the apply. The listing `os migrate apply` prints before its prompt reads the same way. Its counts of held-back destructive changes, before the prompt and after the run, offer a re-run with `--allow-destructive` only for the ones that re-run could apply, and name the rest as drift it cannot apply either. On every other database both commands read exactly as before, and their `--json` documents are unchanged on every database.
+  
+  `@objectstack/driver-turso`: `TursoDriver.driftApplyLimit(opType)` is new. It returns why the driver's `applyMigrationEntries` cannot perform a drift op of that type on this face, or `null` when it can. It answers from the same per-op declaration the REMOTE apply door dispatches by, and returns `null` for every op on the local and embedded-replica faces. A driver that does not implement it is read as applying every op the differ means it to.
+  
+  `@objectstack/driver-sql`: `driftFindingWithoutRemedy(entry)` is a new export. It returns a drift entry's finding without the `os migrate apply --allow-destructive` sentence that a destructive column entry's message ends with, and returns every other message unchanged; the messages themselves keep their exact text.
+
+### Patch Changes
+
+- 2034975: fix(driver-turso): a Turso remote database enforces the `storage.notNull` a field declares, on the tables and columns its schema sync creates
+  
+  Clause-②: no
+  
+  **What was wrong.** On a Turso database reached over the remote transport (`libsql://…`, the transport hosted environments use), schema sync created every declared column nullable. A field declared `storage: { notNull: true }` was not enforced there: an insert that left it empty was stored. The same declaration on a local SQLite file (`file:`) has always produced a `NOT NULL` column. The drift report, which compares the database with the declarations through the shared differ, also read each such column as destructive `tighten_not_null` drift on a database the remote sync had just created.
+  
+  **What changes.** The remote face's `CREATE TABLE` and `ALTER TABLE … ADD COLUMN` add `NOT NULL` to a column whose field declares `storage.notNull`, wherever the local face adds it: on every field type, multi-value fields included, and never for `required` alone. On a remote database synced after this release, an insert that leaves such a field empty is refused by the database, and the drift report names no `tighten_not_null` for it.
+  
+  **What does not change.**
+  
+  - A column that already exists is not touched. A remote database synced by an earlier release keeps its nullable columns, and its drift report still names them `tighten_not_null`; no data at rest is migrated. So the remote face still declares its drift-report caveat (reworded to say this), and the `OS_ARTIFACT_URL` boot gate still does not act on a remote report.
+  - Adding a `storage.notNull` field to a remote table that already holds rows is refused by SQLite (`Cannot add a NOT NULL column with default value NULL`), as it is on a local SQLite file, and that object's schema sync fails loudly. The remote error now names the refused statement. One case still differs: when the field also declares a literal `defaultValue`, the local face creates the column with that DEFAULT and accepts it, while the remote face emits no declared column DEFAULT and refuses it.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [c4111c6]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/driver-sql@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

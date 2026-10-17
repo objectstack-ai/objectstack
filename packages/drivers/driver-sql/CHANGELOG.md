@@ -1,5 +1,86 @@
 # @objectstack/driver-sql
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- c4111c6: fix(cli,driver-turso): `os migrate plan` and `os migrate apply` on a Turso REMOTE database no longer offer `--allow-destructive` for a change that database cannot apply
+  
+  Clause-②: yes (widening)
+  
+  On a primary reached over the Turso REMOTE transport (`libsql://…`), `os migrate plan` listed a NOT NULL tightening with the remedy `Run "os migrate apply --allow-destructive".` and closed with `(add --allow-destructive for drops / tightenings)`. That transport runs no SQLite table rebuild, so the apply then named the tightening as not applied and exited 1. The plan now says so before the apply: each change the database cannot apply (a tightened or relaxed NOT NULL, a dropped DEFAULT) is still listed, with its finding and `"os migrate apply" cannot apply it on this database: it needs the SQLite table rebuild, which the Turso REMOTE transport does not run.` in place of the remedy. The footer offers `--allow-destructive` only for the destructive changes the database can apply (a column drop, an index change) and says how many listed changes remain drift after the apply. The listing `os migrate apply` prints before its prompt reads the same way. Its counts of held-back destructive changes, before the prompt and after the run, offer a re-run with `--allow-destructive` only for the ones that re-run could apply, and name the rest as drift it cannot apply either. On every other database both commands read exactly as before, and their `--json` documents are unchanged on every database.
+  
+  `@objectstack/driver-turso`: `TursoDriver.driftApplyLimit(opType)` is new. It returns why the driver's `applyMigrationEntries` cannot perform a drift op of that type on this face, or `null` when it can. It answers from the same per-op declaration the REMOTE apply door dispatches by, and returns `null` for every op on the local and embedded-replica faces. A driver that does not implement it is read as applying every op the differ means it to.
+  
+  `@objectstack/driver-sql`: `driftFindingWithoutRemedy(entry)` is a new export. It returns a drift entry's finding without the `os migrate apply --allow-destructive` sentence that a destructive column entry's message ends with, and returns every other message unchanged; the messages themselves keep their exact text.
+
+### Patch Changes
+
+- 8776119: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  feat(spec): `referenceDeletedWhen` beside `referenceVia` marks a polymorphic pointer's target as platform-deleted
+  
+  Clause-②: yes
+  
+  `FieldSchema` gains one optional key beside `referenceVia`: `referenceDeletedWhen: { field, value }`. On rows where the sibling `select` field `field` holds the option `value`, the record the pointer names was deleted by the platform's own assertion, and a renderer draws a tombstone from that option's own label instead of a link. Example: `record_id: Field.text({ referenceVia: 'object_name', referenceDeletedWhen: { field: 'cancel_reason', value: 'record_deleted' } })`.
+  
+  Any other shape is refused at parse, naming the field and the option:
+  
+  - the key on a field that declares no `referenceVia` (`FieldSchema`), or an unknown key inside it;
+  - a `field` that is the declaring field itself, is not declared on the object, is not a `select`, is a `multiple: true` select, or declares no inline `options` (a `picklist`-backed select); a `value` that is not one of the sibling's option values (`ObjectSchema`, at every door: `ObjectSchema.create()`, `defineStack`, raw `.parse()` and the metadata save door).
+  
+  Nothing that parsed before is refused: the key is new. Its liveness row is `planned` until the renderer that reads it ships.
+  
+  The other packages classify the new key where every field key is classified:
+  
+  - **`@objectstack/metadata-core`.** `FIELD_REFERENCE_POSITIONS` deletes a served field's `referenceDeletedWhen` when its `field` names a field the caller cannot read (field-level security); `value` is an option value and never a field name.
+  - **`@objectstack/driver-sql`.** `FIELD_KEY_STORAGE_CLASS` classifies it `presentation`: no DDL reads it.
+  - **`@objectstack/platform-objects`.** The field form's new `referenceDeletedWhen` row carries its labels and help text in zh-CN, ja-JP and es-ES.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/observability@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

@@ -1,5 +1,116 @@
 # @objectstack/rest
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- aefab7c: fix(rest)!: the `/meta` item and list reads serve a view stored with no `label` without the `label` the translator invents from its name
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the document two `/meta` reads serve for a view whose stored row carries no `label`: it no longer carries one the serving layer made up. The stored row was never touched and is not touched now. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a `/meta` read stops serving a value nobody authored), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A view's `label` is optional in the spec, with no default. When the translation catalog carried no string for a view, the read-side translator answered the view's own name, so a view stored without a `label` was served one: `GET /api/v1/meta/view/NAME` and `GET /api/v1/meta/view` returned `label: "OBJECT.KEY"`, on the standalone server and on the runtime dispatcher alike. The console drew that machine name as the view tab. The view-container read already dropped this value; the item read and the list read now drop it too.
+  
+  What a client reads now:
+  
+  - A view stored with no `label` is served with no `label` key, in every locale, with or without a translation catalog.
+  - A view with an authored `label` is served that label, unchanged, including a label that happens to equal the view's name.
+  - A catalog translation (`objects.OBJECT._views.KEY.label`) is still served, for a view with a `label` and for one without.
+  - A read that resolves no locale is served the stored document as before, and the layered read (`?layers=true`) never carried the invented value.
+  
+  Who reads differently: a client that displays a served view's `label` now finds the key absent for a view stored without one, where it used to find the qualified name; it shows its own wording for such a view (the object's plural label, for example). The console's view tab falls back to the view's name on its own, so it keeps showing a machine name for such a view until its own fallback changes.
+
+### Patch Changes
+
+- 1eac7ad: fix(rest): `GET /forms/:slug` serves a public form's section headings in the visitor's language, beside the field labels it already translated
+  
+  Clause-②: no
+  
+  An anonymous visitor of a published form cannot load the translation bundle in the browser, so the server is the only place its section titles can be translated. The route translated `objectSchema` (the field labels) under `Accept-Language` and returned each form section as authored, so a zh-CN visitor read English section titles over Chinese field labels. It now localizes each section's `label` and `description` through the same `objects.OBJECT._sections.NAME` keys the signed-in console reads, with the request's locale, the deployment's fallback chain and default locale, and the packaged view as the override base.
+  
+  With `Accept-Language: zh-CN` over a form whose section `about` is labelled `Tell us about yourself`, and a zh-CN bundle carrying `objects.crm_lead._sections.about.label: 介绍一下你自己`:
+  
+  - FROM: `form.sections[0].label` is `Tell us about yourself`, and `objectSchema.fields.first_name.label` is `名`.
+  - TO: `form.sections[0].label` is `介绍一下你自己`; the field label is unchanged (`名`). A section `description` follows the same key's `description`.
+  
+  What does not change: a section whose key the bundle lacks keeps its authored text; a section with no `name` is served as authored; a section that authors no heading is not given one; a heading edited on top of the packaged view keeps the edit. The response shape (`slug`, `object`, `label`, `form`, `objectSchema`), its top-level `label`, `Vary: Accept-Language`, the declared-field narrowing, the lookup / master-detail / user strip and `POST /forms/:slug/submit` are unchanged.
+- 5c2ac83: fix(rest): a client refusal its producer declared is no longer logged as `[REST] Unhandled error` with a stack trace
+  
+  Clause-②: no
+  
+  - **What the server log stops printing.** A refused request whose thrown error declares both a 4xx `status` (or `statusCode`) and a registered ADR-0112 `code`, and whose answer carries that same status and code, now prints nothing on the `[REST] Unhandled error` channel every REST route catch shares. Before, each one printed an error-level `[REST] Unhandled error:` line plus the error's full stack, once per request. Two measured cases: a record write whose file violates a field's declared `accept` / `maxSize` (`400 ERR_FILE_CONSTRAINT` on `POST /api/v1/data/:object` and `PATCH /api/v1/data/:object/:id`), and a metadata save that fails spec validation (`422 INVALID_METADATA` on `PUT /api/v1/meta/:type/:name`). Other registered codes thrown with a declared 4xx, such as `FILE_FIELD_BULK_WRITE_REFUSED`, go quiet too, with no per-code list to extend.
+  - **What still logs, unchanged:** a handler bug or any other undeclared fault (answered `500`); a 4xx that carries no `code` (for example a sandboxed hook's business-rule `400`); a 4xx whose `code` is not registered (it reaches the wire as `declaredCode`); a registered `code` on a status the producer did not declare; a declared `5xx` without `refusal: true`; and a sandboxed body that crashed, whatever it declared. The anonymous public-form submit route keeps its own `[REST] Public form submit error` line as before.
+  - **Unchanged:** every response's status, `code` and body. Only the server log line moves.
+- c1c0a90: fix(rest): the API-exposure check on every `/data` request reads only the object it checks, not the whole object list
+  
+  Clause-②: no
+  
+  - **Faster `/data` requests.** Before each `/data` read or write, the REST layer checks the object's `enable.apiEnabled` and `enable.apiMethods`. To read that one object's flags, the check used to load every object's metadata and run a full schema diagnostic on each one. It now reads only the object named in the URL. Measured on the showcase app on a shared machine: 33 `GET /api/v1/data/showcase_account` calls took 647 ms instead of 2421 ms (-73 %), and the metadata read behind the check fell from 56-61 ms to about 4.5 ms per request.
+  - **Same answers.** Code-registered objects, objects stored in the environment and objects that another package extends get the same `404 OBJECT_API_DISABLED` and `405 OBJECT_API_METHOD_NOT_ALLOWED` as before. An unknown object is still answered by the data path's `404 OBJECT_NOT_FOUND`. When the metadata store cannot be read, the check still lets the request through and logs its `api-exposure gate` warning. Nothing is cached, so a metadata change applies from the next request.
+  - **One refusal changes, for an object whose package is disabled.** A denied operation on such an object now gets the exposure answer instead of the disabled-package one:
+    - an operation outside `apiMethods`: FROM `404 OBJECT_PACKAGE_DISABLED` TO `405 OBJECT_API_METHOD_NOT_ALLOWED`;
+    - any operation on an object with `apiEnabled: false`: FROM `404 OBJECT_PACKAGE_DISABLED` TO `404 OBJECT_API_DISABLED`.
+  
+    An allowed operation still answers `404 OBJECT_PACKAGE_DISABLED`. No accepted request is now refused, and no refused request is now accepted.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [c7168ac]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/metadata@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/service-package@18.0.0-next.3
+  - @objectstack/observability@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

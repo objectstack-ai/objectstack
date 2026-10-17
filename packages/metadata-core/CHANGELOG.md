@@ -1,5 +1,204 @@
 # @objectstack/metadata-core
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- d050a8f: fix(spec,objectql)!: an installed or stored page carrying a declaration spec 18 retires converts at load instead of stopping the kernel build — `isDefault` off a bound record page is deleted and `template: 'full-width'` re-spelled `default`, each with a named notice; the authoring, save and publish doors keep refusing
+  
+  Clause-②: yes (widening)
+  
+  **What changes.** Protocol 18 refused `isDefault: true` on a page that is not a record page bound to an object, and closed the page `template` set (retiring `full-width`), at every door — the page parse (`definePage`, `defineStack`, so `os validate` / `os build`, and the metadata save door) and the kernel's package registration (`SchemaRegistry.installPackage` / `registerItem`, `MisplacedDefaultPageError`). The registration refusal also fired when a kernel was built from a package that was installed BEFORE the retirement: every hosted environment holding such a package failed its kernel build, with no remedy short of upgrading the package in each one. Data at rest now converts, and only data at rest:
+  
+  | Door | Before | Now |
+  | :--- | :--- | :--- |
+  | `definePage` / `defineStack` (`os validate`, `os build`), the metadata save door, package publish | refused at `isDefault` / `template` | **unchanged** — refused with the same sentence |
+  | a `sys_metadata` page row read back | served with `_diagnostics.valid: false` | converted on read: the flag deleted, `full-width` → `default`, `OS_METADATA_CONVERTED` notice |
+  | a compiled artifact inside the window its `engines.protocol` opens | the artifact door refused the artifact | converted before the strict parse, as every retired entry is |
+  | a package body registered through `manifest.register` / `ObjectQL.registerApp` that declares `engines.protocol` (an installed package, a marketplace install) | `MisplacedDefaultPageError`, kernel build stopped | converted before anything registers, with one `warn` per (package, conversion) naming the conversion id and the first site; the body is left unchanged on disk |
+  | the same body with NO declared range (a manifest a plugin builds in code), or declaring a floor newer than every retirement | refused | **unchanged** — refused |
+  
+  **The two ADR-0087 D2 entries**, both `retiredFromLoadPath` from the day they land (the authoring funnel never replays them):
+  
+  - `page-is-default-off-record-page-removed` (`page.isDefault`): deletes `isDefault: true` from exactly the pages `misplacedDefaultPageRefusal` refuses — a `home`, `app`, `utility` or `list` page, or a record page with no `object`. Lossless: nothing read the flag there (an app opens on its first navigation item). A default record page bound to an object keeps its flag.
+  - `page-template-full-width-to-default` (`page.template`): `'full-width'` → `'default'`. Lossless: the console drew both names with one template component. An unregistered template name (`centered`, `two-column`) and a region the template does not place have no lossless rewrite and are NOT converted — they stay with the parse, and the D3 entries `page-is-default-off-record-page-refused` / `page-template-closed-region-unplaced-refused` name the hand edits.
+  
+  **`@objectstack/objectql`** — `ObjectQL.registerApp` (and the `manifest` service, for an artifact carrying `packages[]`) replays the versioned forward conversion (`applyArtifactForwardConversions`, `@objectstack/metadata-core`) over a package body that declares its protocol range, before `installPackage`; the converted copy is what the package record and every registered item carry. Public: `ObjectQL.convertPackageBodyForward(body)`.
+  
+  **`@objectstack/metadata-core`** — `applyArtifactForwardConversions` reads the declared range off a FLAT package body (the manifest half beside its collections, no `manifest` key) when the definition carries no `manifest`; a definition with a `manifest` object is read there, as before.
+  
+  Migration: none for authors — the authoring doors refuse exactly what they refused. An installed package converts again at every registration until it is rebuilt (`os build`) and re-published with tooling from a release that ships the retirement; the boot log's warn names the conversion and the site.
+  
+  <!-- adr-0087: registered page-is-default-off-record-page-removed, page-template-full-width-to-default -->
+
+### Patch Changes
+
+- 105902f: feat(spec)!: retire the view form's `visibleOn` and the page component's `visibility` as keys; their ADR-0089 renames leave the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** ADR-0089 made `visibleWhen` the one conditional-visibility key, and through 17 the old spellings were declared `[DEPRECATED]` keys that the parse folded onto `visibleWhen` without a word: `visibleOn` on a form view's fields and sections, and `visibility` on a page component. At 18 all three positions carry a `retiredKey()` tombstone naming `visibleWhen`, the parse-time fold is gone, and the two ADR-0087 D2 conversions `view-visibleOn-to-visibleWhen` and `page-component-visibility-to-visibleWhen` (protocol 15) are retired from the load path (`retiredAfter: '17.7.0'`).
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `visibleOn: "…"` on a form field (`view.form.sections[].fields[]`) | `visibleWhen: "…"` |
+  | `visibleOn: "…"` on a form section (`view.form.sections[]`) | `visibleWhen: "…"` |
+  | `visibility: "…"` on a page component (`page.components[]`, slots and nested containers included) | `visibleWhen: "…"` |
+  
+  **The one-line fix:** rename the key to `visibleWhen`; the CEL predicate is unchanged. Where a node wrote both keys, `visibleWhen` was the one in effect: delete the old key.
+  
+  **What an author who still writes it sees.** `tsc` fails at a typed authoring site (`FormFieldInput`, `FormSection`, `PageComponent` type the key as retired), and the parse refuses it by name at its own path — `defineStack` throws `STACK_SCHEMA_INVALID` (422), `os validate` / `os build` print the issue, and the metadata save door answers 422:
+  
+  > `page.components[].visibility` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the page component's deprecated spelling of the conditional-visibility predicate, which the parse folded into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate) is unchanged. Where a component writes both, `visibleWhen` is the one that was in effect: delete `visibility`.
+  
+  **No tool makes the rename.** Both conversions belong to protocol 15, below the migration floor, so `os migrate meta --from 17` applies no edit for either key and `--write` writes none: it prints each written key among the refusals the migrated stack still has, and lists the D3 entry `ui-visibility-alias-keys-retired` as the hand edit.
+  
+  **Stored metadata needs no edit.** Stored-row rehydration and the artifact-ingestion door inside its window still replay both conversions, so a `sys_metadata` view or page row written with the old key keeps loading with `visibleWhen`. A script that saves a view or page through the metadata API with the old key is refused and needs the same rename.
+  
+  ## The retirement kit
+  
+  - **Tombstones** on `FormFieldSchema`, `FormSectionSchema` and `PageComponentSchema`; `RETIRED_KEYS_BY_MAJOR[18]`: `ui/FormField:visibleOn`, `ui/FormSection:visibleOn`, `ui/PageComponent:visibility`; the authorable-surface rows read `[RETIRED]`.
+  - **The fold is gone.** The three shapes are plain closed objects again (no `.transform` pipe): a section's group-reference rule no longer lists `visibleOn` (the tombstone answers it first), and a slotted page node's `type` refusal now arrives at its own path instead of nested in an `invalid_union`.
+  - **The D3 entry `ui-visibility-alias-keys-retired`**, one for both keys.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  `@objectstack/lint`: the visibility-predicate rules (`visibility-root-mislayered`, `visibility-bare-identifier`, `visibility-predicate-syntax`) and the predicate-path rules read `visibleWhen` only. `os validate`, `os build`, `os verify`, `defineStack` and the metadata save door parse first and refuse either retired key by name, so a body they judge cannot carry one. `os lint` is the one door that hands these rules an unparsed stack: there a predicate written under a retired key is not judged, by design — the parsing doors refuse the key itself, and `os lint` reports no refused shape.
+  
+  `@objectstack/metadata-core`: `detectUnboundFormViewPredicateRoots` reads `visibleWhen` only. Its caller scans an artifact after `applyArtifactForwardConversions`, which renames a legacy `visibleOn` first.
+  
+  Not part of it: `normalizeVisibleWhen` and `VISIBILITY_ALIAS_KEYS` stay exported (no schema here calls them any more); objectui's renderer reads of the old keys leave on the objectui side.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered ui-visibility-alias-keys-retired -->
+- 8776119: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  feat(spec): `referenceDeletedWhen` beside `referenceVia` marks a polymorphic pointer's target as platform-deleted
+  
+  Clause-②: yes
+  
+  `FieldSchema` gains one optional key beside `referenceVia`: `referenceDeletedWhen: { field, value }`. On rows where the sibling `select` field `field` holds the option `value`, the record the pointer names was deleted by the platform's own assertion, and a renderer draws a tombstone from that option's own label instead of a link. Example: `record_id: Field.text({ referenceVia: 'object_name', referenceDeletedWhen: { field: 'cancel_reason', value: 'record_deleted' } })`.
+  
+  Any other shape is refused at parse, naming the field and the option:
+  
+  - the key on a field that declares no `referenceVia` (`FieldSchema`), or an unknown key inside it;
+  - a `field` that is the declaring field itself, is not declared on the object, is not a `select`, is a `multiple: true` select, or declares no inline `options` (a `picklist`-backed select); a `value` that is not one of the sibling's option values (`ObjectSchema`, at every door: `ObjectSchema.create()`, `defineStack`, raw `.parse()` and the metadata save door).
+  
+  Nothing that parsed before is refused: the key is new. Its liveness row is `planned` until the renderer that reads it ships.
+  
+  The other packages classify the new key where every field key is classified:
+  
+  - **`@objectstack/metadata-core`.** `FIELD_REFERENCE_POSITIONS` deletes a served field's `referenceDeletedWhen` when its `field` names a field the caller cannot read (field-level security); `value` is an option value and never a field name.
+  - **`@objectstack/driver-sql`.** `FIELD_KEY_STORAGE_CLASS` classifies it `presentation`: no DDL reads it.
+  - **`@objectstack/platform-objects`.** The field form's new `referenceDeletedWhen` row carries its labels and help text in zh-CN, ja-JP and es-ES.
+- 30ce56e: Clause-②: no
+  
+  Setup pages describe their records in plain admin sentences. Business Units now reads "Your
+  company structure — divisions, departments, regions and offices — used to scope data and
+  reports.", Notification Events "Every notification the platform sent, one row per event.",
+  Notification Preferences "Which topics and channels each user receives; admins set the
+  defaults.", Notification Templates "The subject and body each notification topic sends, per
+  channel and language." and HTTP Deliveries "Outgoing HTTP calls made by webhooks and flows, one
+  row per call, with its delivery status." Field help on Users, Organizations, Invitations and SSO
+  Providers, and the metadata-storage and notification-delivery object descriptions, no longer
+  carry design-record numbers; those references stay in the code comments. The zh-CN, ja-JP and
+  es-ES translations follow. Wording only: no field, permission or behaviour changes.
+- df2c551: fix(metadata-core): the package installs on npm 10 again, and into projects that use vitest 5, because it no longer declares an optional `vitest` peer
+  
+  Clause-②: no
+  
+  On npm 10, the npm that Node 22 bundles, `npm install @objectstack/metadata-core` exited 1 with `Cannot read properties of null (reading 'edgesOut')`. So did installing a package that depends on it, such as `@objectstack/objectql`. The cause was this package's optional peer `vitest: ^4.0.0`. It led npm 10 to vitest 4.1.12, whose own peer declarations contradict each other, and npm 10's resolver crashes on that. The same peer also made npm refuse (`ERESOLVE`) to install the package into a project that already uses vitest 5.
+  
+  The package's main entry never imports `vitest`. Only the test-only `@objectstack/metadata-core/testing` entry does, so the peer is removed. Nothing the package exports changes.
+  
+  If you import `@objectstack/metadata-core/testing`, list `vitest` in your own `devDependencies`, as that entry's documentation already says. This package runs that suite on vitest 4. In a pnpm workspace with hoisting turned off (`hoist=false`), that entry can no longer find `vitest` from inside a workspace package. Declare the peer back in your `pnpm-workspace.yaml`:
+  
+  ```yaml
+  packageExtensions:
+    '@objectstack/metadata-core':
+      peerDependencies:
+        vitest: '*'
+  ```
+  
+  `@objectstack/plugin-auth` still fails the same way on npm 10, because its `better-auth` dependency declares its own optional `vitest` peer. Install it with npm 11, or add `"overrides": { "vitest": "~4.0.0" }` to your project's `package.json`.
+- adad73f: feat(spec)!: a select option declares its lifecycle `kind` (`open` / `won` / `lost`), and every option of an object's `stageField` must declare it
+  
+  Clause-②: yes (narrowing)
+  
+  `SelectOptionSchema` gains one optional key, `kind`, a closed vocabulary of three lifecycle categories that means the same on every object: `open` (a step on the way), `won` (the successful end: a deal's Closed Won, a lead's Converted, a task's Done, a case's Resolved) and `lost` (the unsuccessful end: Closed Lost, Unqualified, Cancelled). It is the spelling `record:path` `stages[].terminal` already takes, so the data layer and the page say one thing one way. Example: `{ label: 'Closed Lost', value: 'closed_lost', kind: 'lost' }`. The exported type `SelectOptionKind` names the three values.
+  
+  - On a plain single-value `select` / `radio` the key is optional, and an absent kind reads as `open`. Nothing is written in at parse: an option without `kind` parses without it.
+  - On any other field's options (`multiselect`, `checkboxes`, `tags`, a `multiple: true` select, a lookup's static options) `FieldSchema` refuses it at `options.<i>.kind`: a lifecycle is one value per record.
+  - A shared `picklist`'s options accept it (the same option shape). A form view's option list does not (`FormSelectOptionSchema`): it is refused there as an unknown key whose message points at the object field's own option.
+  
+  **BREAKING (authoring):** when an object's `stageField` names a field, every option of that field must declare `kind`. `ObjectSchema` refuses the object otherwise, at every door that parses one (`ObjectSchema.create()`, `defineStack`, `os validate`, `os build`, the metadata save door), with one issue per option at `fields.<field>.options.<i>.kind` naming the field and the option. There is no default under `stageField`. Also refused, at `stageField`: a stage field that takes its options from a `picklist` (the object cannot see them to check), and a stage field carrying options that holds no single option code per record (`multiselect`, a `multiple: true` select). Unchanged: `stageField: false`, a `stageField` naming no declared field, and one naming a field with no options.
+  
+  Migration: add `kind` to each option of the stage field, marking each terminal state `won` or `lost` and every other state `open`:
+  
+  - `status: Field.select({ options: [{ label: 'New', value: 'new' }, { label: 'Converted', value: 'converted' }, { label: 'Unqualified', value: 'unqualified' }] })` with `stageField: 'status'` → the same options with `kind: 'open'`, `kind: 'won'` and `kind: 'lost'`.
+  - A picklist-backed stage field → declare its options inline on the field.
+  - An object with no linear lifecycle → `stageField: false`.
+  
+  No conversion makes this edit, because which option ends a record's life successfully is the author's to say. `os migrate meta` lists the D3 entry `stage-field-option-kind-required` with the prescription.
+  
+  The Studio object designer's options repeater offers `kind`; the field form's options repeater lists it.
+  
+  The other packages follow the new key:
+  
+  - **`@objectstack/platform-objects`.** The metadata-form translation bundles (`./metadata-translations`) carry the options repeater's new `kind` row, with its label and help text in zh-CN, ja-JP and es-ES.
+  - **`@objectstack/metadata-core`.** The published contract fixture `FLS_CONTRACT_OBJECT` (`@objectstack/metadata-core/testing`) names `salary_grade` as its `stageField`, so its two options now declare `kind: 'open'`, and the fixture meets the stage-field rule: `ObjectSchema` raises no issue at `stageField` or under `fields.salary_grade.options`. The fixture is not otherwise a spec-valid object (its `script` actions carry no `body` or `target`), and this change leaves that as it was.
+  
+  <!-- adr-0087: registered stage-field-option-kind-required -->
+- 077b75f: fix(metadata-core): the protocol handshake reads an `engines.protocol` `||` union, so `'^17.7.0 || ^18.0.0'` loads on protocol 18 instead of being refused as incompatible
+  
+  Clause-②: no
+  
+  - **What was wrong.** `rangeAdmitsMajor` had no branch for `||`. A union reached the caret branch and was read as a caret on its first alternative, so `'^17.7.0 || ^18.0.0'` answered `OS_PROTOCOL_INCOMPATIBLE` on protocol 18. Every door that runs the ADR-0087 D1 handshake refused it: `sys_packages` boot rehydration, the marketplace install-local POST and rehydrate, and `protocol.installPackage`.
+  - **What it does now.** A union admits a major when any alternative admits it. When none does and any alternative is unrecognized (an empty one included, `'^17 ||'`), the union answers `unparsed-range`: the package loads with the existing `[protocol]` warning and is never refused. A union whose every alternative refuses is refused as before. Each alternative is read with the unchanged single-range grammar (caret, tilde, hyphen, comparators, `x`, `*`), so a range without `||` reads exactly as it did.
+  - **The refusal's `targetMajor`.** For a refused union it is the lowest alternative's major, whatever order the alternatives are written in, so `'^17 || ^16'` and `'^16 || ^17'` both name `objectstack migrate meta --from 16`. It used to read the first alternative.
+  - **The artifact forward-conversion floor.** `parseRangeFloor` reads a union's floor as its lowest alternative's (`'^18.0.0 || ^17.1.0'` → `17.1.0`, as for `'^17.1.0 || ^18.0.0'`), and `null` when an alternative is unreadable. It used to read the first alternative, so a union written high-first opened a narrower conversion window than the same range written low-first.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

@@ -1,5 +1,113 @@
 # @objectstack/plugin-security
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- b9dbc3d: feat(plugin-security): under a walled posture, the deployment-level acceptance of package defaults can be host configuration (`acceptedDefaultPermissionSets`, ADR-0131 D5) (#23385)
+  
+  Clause-②: yes (widening)
+  
+  **What was wrong.** On a walled (`group` / `isolated`) deployment with several organizations and none of slug `default`, the audience-binding suggestion record has no organization to own it. Every boot logged `[security] audience-binding suggestion sync failed (non-fatal)`, and the accept door answered `409 SUGGESTION_STATE` with the remedy "create the Default Organization (slug 'default')". That is a reserved organization for deployment-level rows, the shape ADR-0131 §1.5 rejects.
+  
+  **What is new.** `SecurityPluginOptions.acceptedDefaultPermissionSets?: readonly string[]` is read only under a walled posture. When it is declared, possibly as `[]`:
+  
+  - the `everyone` anchor derives from the baseline plus the declared sets. Each name passes the same checks an accepted suggestion does: the security catalog serves it under some package, it declares `isDefault: true`, and it carries no bit the `everyone` anchor forbids (ADR-0090 D7). A name that fails a check grants nothing and is reported, at `error` for a forbidden bit;
+  - the `sys_audience_binding_suggestion` record is neither read nor written, so the boot no longer warns. Existing rows are counted once and reported, not deleted;
+  - the record's list, accept and dismiss doors answer `409 SUGGESTION_STATE` naming the option.
+  
+  ```ts
+  new SecurityPlugin({ acceptedDefaultPermissionSets: [] });              // nothing beyond the baseline
+  new SecurityPlugin({ acceptedDefaultPermissionSets: ['crm_readonly'] }); // every member also holds crm_readonly
+  ```
+  
+  A walled deployment that declares nothing keeps today's behaviour. When it has no organization to own the record, the refusal now names `acceptedDefaultPermissionSets` instead of "create the Default Organization".
+  
+  **Refused loudly.** A value that is not a list of non-empty names is refused at construction. A declaration under the `single` posture is refused at `start()`: there the record owned by the Default Organization is the acceptance. The `single` posture is otherwise unchanged, including its refusal text.
+  
+  **Exported for callers of the module's functions.** `readAcceptedEveryoneSets`, `syncAudienceBindingSuggestions` and `reconcileAudienceBindingSuggestions` take an optional trailing `DeploymentAcceptance` (`{ posture, acceptedDefaultPermissionSets }`), and `SuggestionDeps` gains `acceptedDefaultPermissionSets`. Omitted, they read the record as before. `WithheldAcceptance` gains `source: 'record' | 'host-configuration'`.
+
+### Patch Changes
+
+- 099cc9d: Clause-②: no
+  
+  The approval, security, automation and sharing objects describe their records in plain admin
+  sentences. Approval Delegations now reads "While someone is away, approvals assigned to them
+  personally go to their delegate.", Record Shares "Records shared beyond their owner, one row per
+  grant.", User Positions "Which positions each user holds, one row per assignment.", Audience
+  Binding Suggestions "A package's suggestion to give one of its permission sets to everyone who
+  signs in, and the decision taken on it." and Automation Runs "Paused automation runs waiting to
+  resume, and the recent history of finished runs." Field help on Approval Requests, Approval
+  Delegations, User Positions, User Permission Sets and Audience Binding Suggestions, the
+  descriptions of the `organization_admin_no_bypass`, `mcp_agent_data_read` and
+  `mcp_agent_data_write` permission sets, the flow-dispatch ledger's description and the
+  reserved-position refusal no longer carry design-record numbers or runtime vocabulary; those
+  references stay in the code comments. The zh-CN, ja-JP and es-ES translations follow. Wording
+  only: no field, permission or behaviour changes.
+- 5fb8d15: Clause-②: no
+  
+  The Everyone and Guest built-in positions describe themselves in plain admin sentences. Setup's
+  Positions page now reads "Built-in audience anchor: every authenticated member holds this position
+  implicitly. Permission sets bound to it are the default grants for the tenant. High-privilege sets
+  cannot be bound here." for Everyone, and "Built-in audience anchor: unauthenticated principals hold
+  this position implicitly and exclusively. Bindings face the strictest checks — named objects only,
+  read-mostly, never a wildcard." for Guest; the design-record references stay in the code comments.
+  An upgraded deployment shows the same text: the page lists the declared positions, and a stored
+  position row an earlier release wrote is neither read nor rewritten. Wording only: no permission or
+  behaviour change.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

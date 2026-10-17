@@ -1,5 +1,77 @@
 # @objectstack/example-todo
 
+## 4.0.100-next.3
+
+### Patch Changes
+
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [9fcea20]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [7428da0]
+- Updated dependencies [b55be42]
+- Updated dependencies [abb6df0]
+- Updated dependencies [8776119]
+- Updated dependencies [f7a5ebe]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9d4fb3c]
+- Updated dependencies [c5cf546]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [34b740f]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2e15620]
+- Updated dependencies [6d1660d]
+- Updated dependencies [0cb45e9]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [605aa01]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [d050a8f]
+- Updated dependencies [9e797a8]
+- Updated dependencies [b25d98a]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [a65a59b]
+- Updated dependencies [6dede7a]
+- Updated dependencies [62f959d]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+- Updated dependencies [cdf3777]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/runtime@18.0.0-next.3
+  - @objectstack/metadata@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/client@18.0.0-next.3
+  - @objectstack/mcp@18.0.0-next.3
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.3
+  - @objectstack/knowledge-memory@18.0.0-next.3
+  - @objectstack/service-i18n@18.0.0-next.3
+  - @objectstack/service-knowledge@18.0.0-next.3
+
 ## 4.0.100-next.2
 
 ### Patch Changes
