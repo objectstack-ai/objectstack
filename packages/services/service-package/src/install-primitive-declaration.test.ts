@@ -97,12 +97,12 @@ async function refusalOf(run: () => Promise<unknown>): Promise<Error & { statusC
 }
 
 /** The shape cloud's AI authoring (`ensureNamedBasePackage`, `ensureAppPackage`) wrote. */
-const AI_BASE = { id: 'com.example.ai_base', name: 'AI base', version: '1.0.0', type: 'application', scope: 'environment' };
+const AI_BASE = { id: 'com.example.ai-base', name: 'AI base', version: '1.0.0', type: 'application', scope: 'environment' };
 
 const REFUSED: ReadonlyArray<readonly [string, Bag, string]> = [
-  ["type 'application'", { id: 'com.example.app_typed', name: 'A', version: '1.0.0', type: 'application' }, 'manifest.type'],
-  ["scope 'environment'", { id: 'com.example.env_scoped', name: 'E', version: '1.0.0', type: 'app', scope: 'environment' }, 'manifest.scope'],
-  ["scope 'cloud'", { id: 'com.example.cloud_scoped', name: 'C', version: '1.0.0', type: 'app', scope: 'cloud' }, 'manifest.scope'],
+  ["type 'application'", { id: 'com.example.app-typed', name: 'A', version: '1.0.0', type: 'application' }, 'manifest.type'],
+  ["scope 'environment'", { id: 'com.example.env-scoped', name: 'E', version: '1.0.0', type: 'app', scope: 'environment' }, 'manifest.scope'],
+  ["scope 'cloud'", { id: 'com.example.cloud-scoped', name: 'C', version: '1.0.0', type: 'app', scope: 'cloud' }, 'manifest.scope'],
 ];
 
 describe('[#24086] the install primitive refuses what the install declaration refuses — real stack', () => {
@@ -147,9 +147,9 @@ describe('[#24086] rows stored before the change keep hydrating (stated toleranc
 
     // The tolerance is the read's only: a fresh write of the same manifest is refused.
     const err = await refusalOf(() => second.protocol.installPackage({
-      manifest: { ...AI_BASE, id: 'com.example.ai_base_two' },
+      manifest: { ...AI_BASE, id: 'com.example.ai-base-two' },
     } as never));
     expect(err.statusCode).toBe(400);
-    expect(await second.packages.get('com.example.ai_base_two')).toBeNull();
+    expect(await second.packages.get('com.example.ai-base-two')).toBeNull();
   });
 });

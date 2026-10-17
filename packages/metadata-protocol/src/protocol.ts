@@ -31471,9 +31471,9 @@ export class ObjectStackProtocolImplementation implements
         // manifest exactly as handed, and no forward conversion runs here (the
         // window the registration door, the `sys_packages` hydration and the
         // marketplace install open is for bodies at rest). Its callers hand it
-        // a manifest being written now: `POST /api/v1/packages` parses the
-        // whole body through the closed `ManifestSchema` first, which refuses
-        // a metadata collection such as `pages` outright; `duplicatePackage`
+        // a manifest being written now, and the declaration parse above
+        // (#24086, the one `POST /api/v1/packages` also runs) has already
+        // refused a metadata collection such as `pages` outright; `duplicatePackage`
         // copies the registry's own record, already judged; the unmanaged
         // install's base carries identity keys only; and AI Studio's blueprint
         // tools author in-process. A retired declaration there is the author's
