@@ -52,7 +52,7 @@ describe('DeclaredDatasourceConnectionPlugin', () => {
     ['managed (the default)', undefined, 'skipped-no-infra'],
     ['external', 'external', 'skipped-policy'],
     ['validate-only', 'validate-only', 'skipped-policy'],
-  ] as const)('a %s datasource -> %s', async (_label, schemaMode, status) => {
+  ] as const)('a %s datasource (schemaMode %s) -> %s', async (_label, schemaMode, status) => {
     const service = await publishedService();
     const result = await service.connect(
       { name: 'qa_main', driver: 'sqlite', config: { filename: ':memory:' }, ...(schemaMode ? { schemaMode } : {}) },
