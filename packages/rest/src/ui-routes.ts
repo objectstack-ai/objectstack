@@ -38,59 +38,20 @@
  * `handleRouteError` is imported from the module `rest-server.ts` imports it
  * from. `GetUiViewRequest`, which only this body read, is imported here from
  * `@objectstack/spec/api` instead of there. One module-level declaration moved
- * here with the body: the meta doors' request envelope, below. No export was
- * added to `rest-server.ts`, so the published surface does not move.
+ * here with the body, the meta doors' request envelope; it moved on to
+ * `meta-collection-routes.ts` with the first `/meta` groups (#23050 slice 13a),
+ * and this body imports it from there. No export was added to `rest-server.ts`,
+ * so the published surface does not move.
  */
 
 import type { GetUiViewRequest } from '@objectstack/spec/api';
 import { handleRouteError } from './error-response.js';
+import type { TransportScopedMetaRequest } from './meta-collection-routes.js';
 import type { RestServer } from './rest-server.js';
 
-// [#23050 slice 10] Moved here from `rest-server.ts`, verbatim, because this module is
-// the first one outside that file to need it: exporting it from there changed the
-// published `dist/*.d.ts` by one line, and a second copy is not an option. The meta
-// doors and listing helpers still in `rest-server.ts` import it from here, and the
-// block's "here" and "this file" still mean `rest-server.ts`, where they live.
-/**
- * [commit 2a29caa53] Typed TRANSPORT envelope for the meta-read doors.
- *
- * `environmentId` is the multi-kernel routing key, and it is OUT of the
- * protocol request shape **by explicit maintainer decision** (ruling recorded
- * 2026-08-18, landed as commit 2a29caa53): `resolveProtocol(environmentId)` selects the target
- * kernel *before* the protocol call, and the implementation's parameter types
- * (`@objectstack/metadata-protocol`) never read it off the request — the spec
- * schemas (`protocol.zod.ts`) record the same exclusion schema-side. The doors
- * here still spread it into the outgoing payload (long-standing wire shape,
- * deliberately unchanged by the ruling), so this alias declares that one
- * transport-level member on top of the declared request type. The point is
- * what it makes the compiler do: every OTHER key in a door's request literal
- * is now checked against the spec contract — an undeclared member is a compile
- * error at the call site, not a cast-and-hope. Never add protocol members
- * here; a key that belongs to the request belongs in the spec schema.
- *
- * [commit 45862a53d] The same typing now covers the NON-door `getMetaItems` helper call
- * sites in this file (the object, book, doc, view and dataset listings). Two
- * spellings those sites carry deliberately SURVIVE the tightening, because
- * retiring either would change behaviour rather than typing:
- *
- *   - The OPTIONAL CALL (`getMetaItems?.(…)`) and the
- *     `typeof … === 'function'` guards. `getMetaItems` is a REQUIRED
- *     `MetadataProtocol` member, so these are not feature detection in the
- *     type sense — but a host may occupy the protocol slot with an object
- *     that does not implement the whole surface, which is the measured reason
- *     they exist (`metaTypeIsLive` documents the same deliberate spelling for
- *     `getMetaTypes`). Retiring one turns a tolerated absence into a
- *     `TypeError`.
- *   - The RESULT handling. `getMetaItems` is declared to return
- *     `{ type, items }`, while these sites also tolerate the bare-array shape
- *     older hosts and stubs return (see `metaItemsArray`), so the response
- *     stays runtime-shaped on purpose.
- *
- * The REQUEST is what is fully typeable today, and the request is what is
- * typed — which is the whole point: an undeclared key in one of these
- * literals is now a compile error instead of a cast-and-hope.
- */
-export type TransportScopedMetaRequest<R> = R & { environmentId?: string };
+// [#23050 slice 13a] `TransportScopedMetaRequest`, the meta doors' request envelope that slice 10
+// moved here with this body, moved on, verbatim, to `meta-collection-routes.ts` (imported above),
+// the module of the first `/meta` groups out of `rest-server.ts`. This body still reads it.
 
 /**
  * The `RestServer` members {@link registerUiEndpoints} reads — every one of

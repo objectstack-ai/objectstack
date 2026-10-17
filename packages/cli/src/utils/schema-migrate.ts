@@ -199,6 +199,19 @@ export interface SchemaStack {
    */
   pendingSchemaWork: PendingSchemaWork[];
   /**
+   * [#24059] The physical tables this boot's composition declares OUTSIDE the
+   * object set: the package registry's `sys_packages`, named by the same
+   * `package.storage` declaration {@link pendingSchemaWork} plans it from
+   * (#23022) — or `[]` when the boot composed no package registry.
+   *
+   * Named whether or not the table exists, and on every boot: the plan lists the
+   * table as `create_table` only while it is absent, so once `os migrate apply`
+   * has created it the pending work names nothing. `os migrate plan`'s
+   * unmanaged-table sweep reads this, so the table the apply created is not
+   * reported as declared by nothing.
+   */
+  nonObjectTables: readonly string[];
+  /**
    * [#21529] Did this boot MEASURE `objectName`'s table as absent? `true` only
    * when the held-back sync above would CREATE it (`create_table`), which the
    * driver decides with `hasTable` — a fact about the database, not a guess
@@ -331,29 +344,21 @@ interface PackageStorageDeclaration {
 }
 
 /**
- * [#23022] `sys_packages` as pending schema work, when it is absent.
+ * [#23022] The package registry's declaration of `sys_packages`, as this boot
+ * composed it — or `null` when the boot composed no package registry.
  *
- * ## Why the plan needs this
+ * [#24059] The ONE reader of that declaration. {@link planPackageTable} plans
+ * the table from what this returns, and {@link SchemaStack.nonObjectTables}
+ * names the table from the same object, so `os migrate plan`'s unmanaged-table
+ * sweep knows the table by the source the plan creates it from — and knows it
+ * whether or not the table exists, which the plan's pending work cannot say:
+ * that lists the table only while it is absent.
  *
- * `PackageServicePlugin.start()` creates `sys_packages` with raw DDL, because
- * the table cannot be a declared object (`service-package`'s
- * `package-table.ts` records the measurement: the driver's managed tables key
- * on `id` alone, and this one keys on `(id, version)`). So no driver deferral
- * ever listed it, and a deployment that sets `OS_SKIP_SCHEMA_SYNC=1` — whose
- * boot now creates nothing — was left with no way to get it from the documented
- * path. The plugin declares the table in `init()`, which a migrate boot runs,
- * and this lists it as `create_table` beside the objects' tables; `apply`'s
- * flush then runs the plugin's own statements, so `apply` creates exactly what
- * the boot creates.
- *
- * `null` when there is nothing to plan: the plugin is not composed, or the
- * table exists. When its presence could not be READ, that is not absence: a
- * note says the table was not examined, and nothing is planned.
+ * Throws when the service answers in a shape this CLI does not read: the two
+ * packages come from different releases, and neither the plan nor the sweep can
+ * name the table.
  */
-async function planPackageTable(
-  kernel: unknown,
-  notes: string[],
-): Promise<{ storage: PackageStorageDeclaration; work: PendingSchemaWork } | null> {
+function findPackageStorage(kernel: unknown): PackageStorageDeclaration | null {
   let service: unknown;
   try {
     service = (kernel as { getService?: (name: string) => unknown }).getService?.(PACKAGE_STORAGE_SERVICE);
@@ -372,7 +377,33 @@ async function planPackageTable(
       + 'from the same release.',
     );
   }
-  const declared = storage as PackageStorageDeclaration;
+  return storage as PackageStorageDeclaration;
+}
+
+/**
+ * [#23022] `sys_packages` as pending schema work, when it is absent.
+ *
+ * ## Why the plan needs this
+ *
+ * `PackageServicePlugin.start()` creates `sys_packages` with raw DDL, because
+ * the table cannot be a declared object (`service-package`'s
+ * `package-table.ts` records the measurement: the driver's managed tables key
+ * on `id` alone, and this one keys on `(id, version)`). So no driver deferral
+ * ever listed it, and a deployment that sets `OS_SKIP_SCHEMA_SYNC=1` — whose
+ * boot now creates nothing — was left with no way to get it from the documented
+ * path. The plugin declares the table in `init()`, which a migrate boot runs,
+ * and this lists it as `create_table` beside the objects' tables; `apply`'s
+ * flush then runs the plugin's own statements, so `apply` creates exactly what
+ * the boot creates.
+ *
+ * `null` when there is nothing to plan: the table exists. When its presence
+ * could not be READ, that is not absence: a note says the table was not
+ * examined, and nothing is planned.
+ */
+async function planPackageTable(
+  declared: PackageStorageDeclaration,
+  notes: string[],
+): Promise<{ storage: PackageStorageDeclaration; work: PendingSchemaWork } | null> {
   const present = await declared.present();
   if (present === true) return null;
   if (present === undefined) {
@@ -1386,7 +1417,11 @@ export async function bootSchemaStack(
   // [#23022] …and the one table outside the object set, `sys_packages`, which
   // no driver deferral can see. Read-only here; `flushSchemaDdl` creates it.
   // Not on a skip-sync boot: the table lives on the primary, which held nothing back.
-  let packageTable = defer ? await planPackageTable(kernel, composition.notes) : null;
+  // [#24059] The declaration itself is read on every boot, a skip-sync one
+  // included: `nonObjectTables` below names the table from it whether or not
+  // anything is planned for it.
+  const packageStorage = findPackageStorage(kernel);
+  let packageTable = defer && packageStorage ? await planPackageTable(packageStorage, composition.notes) : null;
   if (packageTable) pendingSchemaWork.push(packageTable.work);
   sortPendingSchemaWork(pendingSchemaWork);
   // [#21529] The tables the held-back sync would create: measured absent.
@@ -1454,6 +1489,7 @@ export async function bootSchemaStack(
     managedTableCount,
     kernel,
     pendingSchemaWork,
+    nonObjectTables: packageStorage ? [packageStorage.table] : [],
     // The driver keys its deferred work by physical table, so ask in the same
     // name (`StorageNameMapping`, the mapping the driver itself applies).
     tableAbsent: (objectName: string): boolean =>

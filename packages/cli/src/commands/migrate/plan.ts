@@ -232,6 +232,9 @@ export default class MigratePlan extends Command {
         // resolved from it are two connections to one file.
         drivers: distinctDatabaseDrivers(stack.drivers),
         declaredObjects: stack.allObjects(),
+        // [#24059] …and the tables the composition declares outside the object
+        // set — `sys_packages`, which `os migrate apply` creates.
+        nonObjectTables: stack.nonObjectTables,
         composition: stack.composition,
         normalize: normalizeRows,
       });

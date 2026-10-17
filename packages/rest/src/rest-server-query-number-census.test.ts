@@ -339,7 +339,11 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // [#23050 slice 12] Nor do the six CRUD doors (`crud-routes.ts`): they
         // hand the query to the protocol whole and coerce no number of it:
         // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 12 → 13.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(13);
+        // [#23050 slice 13a] Nor do the first three `/meta` groups
+        // (`meta-collection-routes.ts`): the type list, the whole-store family and
+        // the per-type list coerce no number of the query:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 13 → 14.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(14);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });
