@@ -76,8 +76,8 @@ on:
     # Nightly. The minute is offset off the top of the hour ON PURPOSE (scheduled
     # workflows queue behind everyone else's `:00` cron) and off every sibling
     # patrol's minute, so two of them never contend for the same runner minute;
-    # 05:29 sits after `rerun-safety-nightly` (04:00) and `coverage-nightly`
-    # (05:00) have started and well before `showcase-smoke` (07:00).
+    # 05:29 sits after `coverage-nightly` (05:00) has started and well before
+    # `showcase-smoke` (07:00).
     #
     # ⚠️ Two readers, one fact. This value is restated as `PATROL_SCHEDULE` in
     # the `env:` block below, where the report step computes the deadline the

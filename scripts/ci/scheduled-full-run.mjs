@@ -229,7 +229,6 @@ const titlePrefix = (cadence) => `${cadence} full run: red on main`;
 export const CARD_CADENCES = Object.freeze({
   CI: 'hourly',
   'Lint & Type Check': 'hourly',
-  'Rerun Safety': 'nightly',
 });
 
 // The words each cadence puts in the body. The `hourly` entry is the text the
@@ -958,7 +957,6 @@ async function selfTest() {
   // -- The cadence (#23880): each cadence, the back-compat pins for the card
   //    already open under the hourly identity, and the refusal of a workflow
   //    the closed map does not name.
-  const rerun = cardIdentity('Rerun Safety');
   const OPEN_CI_TITLE = 'hourly full run: red on main (CI)';
   const OPEN_CI_MARKER = 'os-hourly-full-run-ci';
   const OPEN_CI_MARKER_LINE =
@@ -998,24 +996,6 @@ async function selfTest() {
     }
   });
   await check(() => {
-    if (
-      rerun.cadence !== 'nightly' ||
-      rerun.title !== 'nightly full run: red on main (Rerun Safety)' ||
-      rerun.marker !== 'os-nightly-full-run-rerun-safety'
-    ) {
-      throw new Error(`cadence: Rerun Safety is not nightly ('${rerun.title}', '${rerun.marker}')`);
-    }
-  });
-  await check(() => {
-    for (const b of bodiesOf(rerun)) {
-      if (/hourly|every hour|an hour ago/.test(b)) throw new Error(`cadence: a nightly card body says hourly:\n${b}`);
-      if (!b.includes('every night') || !b.includes('## What landed since the last green nightly run')) {
-        throw new Error(`cadence: a nightly card body lacks its own cadence words:\n${b}`);
-      }
-    }
-    if (!bodiesOf(rerun)[1].includes('green the night before')) throw new Error('cadence: the nightly flake reading is not nightly');
-  });
-  await check(() => {
     for (const b of bodiesOf(ci)) {
       if (/nightly|every night|the night before/.test(b)) throw new Error(`cadence: an hourly card body says nightly:\n${b}`);
     }
@@ -1035,11 +1015,6 @@ async function selfTest() {
     const { cadence: _dropped, ...handBuilt } = ci;
     if (!threw(() => renderBody({ identity: handBuilt, runUrl: 'u', headSha: 'a', conclusion: 'failure', sweptAt: 't' }))) {
       throw new Error('cadence: renderBody defaulted the cadence of an identity that carries none');
-    }
-  });
-  await check(() => {
-    if (matchesCard(issue(1, { title: ci.title, body: ci.marker }), rerun) || matchesCard(issue(1, { title: rerun.title, body: rerun.marker }), ci)) {
-      throw new Error("cadence: the nightly and hourly identities matched each other's cards");
     }
   });
 
