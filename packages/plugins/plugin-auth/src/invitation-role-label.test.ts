@@ -235,7 +235,7 @@ describe('#24154 — AuthPlugin wires the i18n accessor lazily', () => {
     };
     const plugin = new AuthPlugin({ secret: 'test-secret-at-least-32-chars-long', baseUrl: 'http://localhost:3000' });
     await plugin.init(ctx);
-    const manager = registerService.mock.calls.find(([name]: [string]) => name === 'auth')?.[1] as AuthManager;
+    const manager = registerService.mock.calls.find((call) => call[0] === 'auth')?.[1] as AuthManager;
     expect(manager, 'AuthPlugin registered no auth service').toBeDefined();
     return (manager as any).config.getI18n as () => unknown;
   }
