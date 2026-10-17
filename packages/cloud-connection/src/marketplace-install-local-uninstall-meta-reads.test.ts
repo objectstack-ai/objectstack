@@ -192,9 +192,9 @@ async function bootPlugin(opts: { refuseUnregister?: string; before?: (metadata:
     await plugin.start(ctx as never);
     await hooks.get('kernel:ready')?.();
 
-    const install = () => routes.get(`POST ${ROUTE}`)!(makeC(`http://localhost:3000${ROUTE}`, { body: { manifest: MANIFEST } }));
-    const uninstall = () => routes.get(`DELETE ${ROUTE}/:manifestId`)!(
-        makeC(`http://localhost:3000${ROUTE}/${APP_ID}`, { manifestId: APP_ID }),
+    const install = (manifest: Bag = MANIFEST) => routes.get(`POST ${ROUTE}`)!(makeC(`http://localhost:3000${ROUTE}`, { body: { manifest } }));
+    const uninstall = (id: string = APP_ID) => routes.get(`DELETE ${ROUTE}/:manifestId`)!(
+        makeC(`http://localhost:3000${ROUTE}/${id}`, { manifestId: id }),
     );
     /** The uninstall's own warnings: each one opens with `uninstalled <id>`. */
     const warnings = () => logger.warn.mock.calls
@@ -327,5 +327,46 @@ describe('#24070: an install-local uninstall withdraws the package from every me
         expect(warned).toHaveLength(1);
         expect(warned[0]).toContain('metadata store is read-only');
         expect(warned[0]).toContain(OBJECTS[0]);
+    });
+});
+
+/** [#24182] A package whose only content is a field on another package's object. */
+const EXTENDER_ID = 'com.example.crmliteext';
+const EXTENDER: Bag = {
+    id: EXTENDER_ID,
+    version: '1.0.0',
+    type: 'app',
+    name: 'CRM Lite Score',
+    objectExtensions: [{ extend: OBJECTS[0], fields: { ext_score: { type: 'number', label: 'Score' } } }],
+};
+
+/** The field names `GET /meta/object/NAME` serves for `name`, read through the protocol the route calls. */
+async function servedFields(protocol: any, name: string): Promise<string[]> {
+    const res = await protocol.getMetaItem({ type: 'object', name });
+    return Object.keys(res?.item?.fields ?? {});
+}
+
+describe('#24182: an install-local uninstall of an extender restores the owner\'s object at the by-name read', () => {
+    it('owner + extender installed → DELETE the extender: the by-name read serves the owner\'s body without the field', async () => {
+        const h = await bootPlugin();
+        expect((await h.install()).status).toBe(200);
+        const extended = await h.install(EXTENDER);
+        expect(extended.status, JSON.stringify(extended.payload)).toBe(200);
+        // Identity: the extender's bridge rewrote the OWNER's copy, which the
+        // by-name read serves before the registry.
+        expect((await h.copyOf(OBJECTS[0]))?._packageId).toBe(APP_ID);
+        expect(await servedFields(h.protocol, OBJECTS[0])).toEqual(expect.arrayContaining(['name', 'ext_score']));
+
+        const res = await h.uninstall(EXTENDER_ID);
+
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(res.payload.data.cleanups).toEqual([]);
+        const fields = await servedFields(h.protocol, OBJECTS[0]);
+        expect(fields).not.toContain('ext_score');
+        expect(fields).toEqual(Object.keys(h.ql.registry.getObject(OBJECTS[0])!.fields ?? {}));
+        // CONTROL: the owner's own field, its copy's stamp and its package stay.
+        expect(fields).toContain('name');
+        expect((await h.copyOf(OBJECTS[0]))?._packageId).toBe(APP_ID);
+        expect(await listed(h.protocol, 'object')).toEqual(expect.arrayContaining(OBJECTS));
     });
 });

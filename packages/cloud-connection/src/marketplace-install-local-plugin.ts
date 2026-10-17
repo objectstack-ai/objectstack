@@ -2001,6 +2001,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const declared = captureUninstallDeclared(registry, manifestId);
         const withdrawal = this.withdrawFromRunningKernel(ctx, manifestId);
         const copies = withdrawal ? undefined : await this.withdrawObjectCopies(ctx, manifestId);
+        // [#24182] …and the copies of OTHER packages' objects that this one's
+        // extensions rewrote: the bridge that wrote them restores the owner's
+        // definition (`manifest.restoreExtendedObjectCopies`, never rejects).
+        if (!withdrawal) {
+            let manifestService: { restoreExtendedObjectCopies?(id: string): Promise<void> } | undefined;
+            try { manifestService = ctx.getService('manifest') as typeof manifestService; } catch { /* no engine — nothing bridged */ }
+            await manifestService?.restoreExtendedObjectCopies?.(manifestId);
+        }
         const cleanups = [
             ...(withdrawal ? [withdrawal] : []),
             ...(copies ? [copies] : []),
