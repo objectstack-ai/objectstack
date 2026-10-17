@@ -1782,9 +1782,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // [#7557, #24097] The registry answers a disabled package's
                     // object too, so it does not answer for one here: the
                     // protocol read below refuses it `404 OBJECT_PACKAGE_DISABLED`,
-                    // the answer the listing and the data plane give.
-                    const disabled = typeof registry?.isObjectPackageDisabled === 'function'
-                        && registry.isObjectPackageDisabled(name) === true;
+                    // the answer the listing and the data plane give. The
+                    // predicate is `SchemaRegistry`'s and is not on the engine's
+                    // registry view, so it is asked when present, as the
+                    // protocol's data plane asks it.
+                    const predicate = (registry as { isObjectPackageDisabled?: (n: string) => boolean } | undefined)
+                        ?.isObjectPackageDisabled;
+                    const disabled = typeof predicate === 'function' && predicate.call(registry, name) === true;
                     const data = disabled ? undefined : registry?.getObject(name);
                     // [#5563] The registry hands back the bare ObjectSchema, so this
                     // fallback used to answer a different body shape than the
