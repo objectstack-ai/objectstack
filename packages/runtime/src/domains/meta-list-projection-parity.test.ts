@@ -507,6 +507,11 @@ const TYPE_AXIS = new Set(TYPE_CELLS.map(singular));
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REST_SERVER_SOURCE = resolve(HERE, '../../../rest/src/rest-server.ts');
+// [#23050 slice 13a] `RestServer`'s `GET ${metaPath}/:type` handler moved, with the
+// type list and the whole-store family, from `registerMetadataEndpointsInner` to
+// `meta-collection-routes.ts`; the list derivation reads it there. The item, tree
+// and layers handlers are still in `rest-server.ts`.
+const META_COLLECTION_ROUTES_SOURCE = resolve(HERE, '../../../rest/src/meta-collection-routes.ts');
 const SHARED_CHAIN_SOURCE = resolve(HERE, '../../../rest/src/meta-item-read-gate.ts');
 
 interface Derived { params: Set<string>; types: Set<string>; found: boolean }
@@ -551,7 +556,7 @@ function propertyInitializer(sf: ts.SourceFile, literal: ts.ObjectLiteralExpress
 /** `RestServer`'s `GET ${metaPath}/:type` handler, and the shared list chain it hands its answer to. */
 function deriveListReads(): Derived {
     const derived: Derived = { params: new Set(), types: new Set(), found: false };
-    const rest = parse(REST_SERVER_SOURCE);
+    const rest = parse(META_COLLECTION_ROUTES_SOURCE);
     const visit = (n: ts.Node): void => {
         if (ts.isObjectLiteralExpression(n)) {
             const method = propertyInitializer(rest, n, 'method');
@@ -578,7 +583,7 @@ describe('[#20320] the census axes cover every read of RestServer\'s list handle
     const derived = deriveListReads();
 
     it('the handler is found where the census looks for it', () => {
-        expect(derived.found, `GET \${metaPath}/:type in ${REST_SERVER_SOURCE}`).toBe(true);
+        expect(derived.found, `GET \${metaPath}/:type in ${META_COLLECTION_ROUTES_SOURCE}`).toBe(true);
     });
 
     it('every query parameter read is a census cell', () => {

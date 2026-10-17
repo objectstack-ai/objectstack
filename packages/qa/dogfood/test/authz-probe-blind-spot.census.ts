@@ -240,7 +240,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 // [#23050 slice 3] THE list of the files `RestServer`'s registrars live in —
 // see the `rest-server.ts` row's population rule.
+// [#23050 slice 13a] …and its named subset of the modules that hold a moved
+// `/meta` group — see the same row's `reachable` rule.
 import {
+  REST_SERVER_META_ROUTE_FILES,
   REST_SERVER_REGISTRAR_DIR,
   REST_SERVER_REGISTRAR_FILES,
 } from '../../../rest/src/rest-server-registrar-files.js';
@@ -537,13 +540,17 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'module on the registrar list (`packages/rest/src/rest-server-registrar-files.ts`) — ' +
       '`data-action-routes.ts`, `batch-routes.ts`, `approvals-routes.ts`, `sharing-routes.ts`, ' +
       '`analytics-routes.ts`, `security-routes.ts`, `discovery-routes.ts`, `email-routes.ts`, ' +
-      '`search-routes.ts`, `ui-routes.ts`, `form-routes.ts` and `crud-routes.ts`, the modules the bodies of ' +
+      '`search-routes.ts`, `ui-routes.ts`, `form-routes.ts`, `crud-routes.ts` and `meta-collection-routes.ts`, ' +
+      'the modules the bodies of ' +
       '`registerDataActionEndpoints`, `registerBatchEndpoints`, `registerApprovalsEndpoints`, ' +
       '`registerSharingEndpoints`, `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, ' +
       '`registerSecurityExplainEndpoints`, `registerSecurityEndpoints`, `registerDiscoveryEndpoints`, ' +
       '`registerOpenApiEndpoints`, `registerEmailEndpoints`, `registerSearchEndpoints`, ' +
-      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints` moved to; ' +
-      'reachable = those inside registerMetadataEndpoints',
+      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints`, and the first three `/meta` ' +
+      'groups of `registerMetadataEndpointsInner`, moved to; ' +
+      'reachable = those inside registerMetadataEndpoints, PLUS every site in the registrar list\'s named `/meta` ' +
+      'subset (`REST_SERVER_META_ROUTE_FILES`: `meta-collection-routes.ts`), whose registrations the inner method ' +
+      'runs inside the umbrella\'s swap',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
     //
@@ -815,10 +822,37 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // four new occurrences are this slice's seam, the same two spellings once
     // (the host literal's forwarder, two; the host interface's member, two). No
     // call site was added.
+    // [#23050 slice 13a] 70 / 19 / 51 UNCHANGED, and this time `reachable` is the
+    // reading that had to be taught: the first three `/meta` groups of
+    // `registerMetadataEndpointsInner` (six direct registration sites: `GET
+    // {metaPath}` and `/types`, `/diagnostics`, `/_drafts`, `POST
+    // /_migrate-stored` and `GET /:type`, all REACHABLE through the umbrella key
+    // `meta:rest-server.ts:registerMetadataEndpoints`) moved to
+    // `meta-collection-routes.ts`, which joins the list (length 13 -> 14) with
+    // its own control. The six still register inside the umbrella's swap — the
+    // inner method builds their host literal, capturing the wrapping registrar
+    // by value, and calls the module at their old position — but no line of
+    // them is lexically inside `registerMetadataEndpoints` any more, so the
+    // lexical rule alone read 70 / 13 / 57: six guarded routes counted as blind
+    // spots, a false reading. Measured, not argued, before the rule widened: an
+    // anonymous request at each of the six (both bases) answers `401` with the
+    // module in place, and hoisting the route manager's capture above the swap
+    // makes every one of them answer without the gate. The rule therefore adds
+    // every site in `REST_SERVER_META_ROUTE_FILES`, the list's NAMED `/meta`
+    // subset — ⛔ never a file-name convention — and the new control
+    // `/meta subset ↔ .call( inside registerMetadataEndpointsInner` holds that
+    // subset's length against the module calls inside the inner method, so a
+    // `/meta` module called without joining the subset (or a subset entry the
+    // inner method no longer calls) moves it. `this.routeManager.register(`
+    // stays 63 over the fourteen files
+    // (6 here + 9 + 5 + 7 + 8 + 1 + 6 + 4 + 1 + 1 + 1 + 2 + 6 + 6),
+    // `private register*Endpoints(` stays 16, `registerPerItemRoute(` stays 8 and
+    // `enforceAuth` stays 112: the moved groups spell neither term, and the seam
+    // spells neither (the umbrella's wrapper is what gates them).
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
-      'registrar list length': 13,
+      'registrar list length': 14,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
       'approvals-routes.ts: this.routeManager.register(': 7,
@@ -831,6 +865,11 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'ui-routes.ts: this.routeManager.register(': 1,
       'form-routes.ts: this.routeManager.register(': 2,
       'crud-routes.ts: this.routeManager.register(': 6,
+      'meta-collection-routes.ts: this.routeManager.register(': 6,
+      // [#23050 slice 13a] Recorded AS the subset's length, not as a literal: the
+      // measured side is the module calls inside the inner method, so the two
+      // can only move together.
+      '/meta subset ↔ .call( inside registerMetadataEndpointsInner': REST_SERVER_META_ROUTE_FILES.length,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -1324,9 +1363,21 @@ export function deriveProbeFileCensus(): {
     const metaIdx = decls.findIndex((d) => d.text.includes('registerMetadataEndpoints'));
     const start = decls[metaIdx]?.at ?? 0;
     const end = decls[metaIdx + 1]?.at ?? src.length;
+    // [#23050 slice 13a] ONE REACH, NOW TWO PLACES. A `/meta` group moved out of
+    // `registerMetadataEndpointsInner` still registers inside the umbrella's
+    // swap — the inner method builds its host literal (the wrapping registrar
+    // captured by value) and calls its module from inside its own body — so its
+    // sites are as reachable as the ones still lexically inside the slice above.
+    // They are read off the registrar list's NAMED `/meta` subset, never off a
+    // file-name convention, and its control below holds that subset against the
+    // module calls inside the inner method (that method's own extent: from its
+    // declaration to the umbrella slice's end).
+    const metaModules = movedModules.filter(([file]) => REST_SERVER_META_ROUTE_FILES.includes(file));
+    const innerAt = src.search(/private\s+registerMetadataEndpointsInner\s*\(/);
+    const inner = innerAt < start || innerAt >= end ? '' : src.slice(innerAt, end);
     files.set('packages/rest/src/rest-server.ts', {
       population: sites(all),
-      reachable: sites(src.slice(start, end)),
+      reachable: sites(src.slice(start, end)) + metaModules.reduce((n, [, text]) => n + sites(text), 0),
       controls: {
         'private register*Endpoints(': occurrences(src, /private\s+register[A-Za-z]*Endpoints\s*\(/g),
         'this.routeManager.register(': occurrences(all, /this\.routeManager\.register\(/g),
@@ -1346,6 +1397,9 @@ export function deriveProbeFileCensus(): {
         // real population drop. The four counts around it cannot — all four are
         // green while the slice is running 3873 lines long.
         'forwarder slice: this.routeManager.register(': occurrences(forwarderSlice(src), mountRe),
+        // [#23050 slice 13a] The module calls inside the inner method — one per
+        // moved `/meta` group's module — recorded against the subset's length.
+        '/meta subset ↔ .call( inside registerMetadataEndpointsInner': occurrences(inner, /\.call\(/g),
         enforceAuth: occurrences(all, /enforceAuth/g),
       },
     });

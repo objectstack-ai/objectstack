@@ -1146,7 +1146,14 @@ describe('[#13214] §4 preconditions', () => {
         // that slice's forwarder (the six CRUD doors' call sites moved with the
         // body and are counted in both readings); the CRUD body never calls the
         // ownership guard, so it is still 1 call site and 1 forwarder.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(13);
+        // [#23050 slice 13a] 13 → 14 (`meta-collection-routes.ts`): 60 unchanged
+        // and 75 → 76. The moved `/meta` groups call `resolveExecCtx` at three
+        // sites and `enforceAuth` at none (the umbrella's wrapper gates them), so
+        // the host literal the inner method builds forwards the first only; the
+        // three call sites moved and are counted in both readings. The
+        // moved groups never call the ownership guard, so it is still 1 call site
+        // and 1 forwarder.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(14);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
         // ...and the ownership guard is NOT sprayed across the file — it is a
