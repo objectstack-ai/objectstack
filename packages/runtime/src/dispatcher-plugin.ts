@@ -1051,9 +1051,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // coordinates. PUT and PATCH ran that way while this arm named
             // only get/post/delete — `/keys`, `/notifications`, `/packages/:id`,
             // `/automation/:name`, the `/ai/*` wildcards and service-emitted
-            // PATCH routes among them. The counter and the histogram are
-            // unaffected either way on a transport implementing `afterResponse`
-            // (the flags below hand both to the transport for every verb alike).
+            // PATCH routes among them. Widening the arm adds no second metrics
+            // emitter: on a transport implementing `afterResponse` the two
+            // `emit*` flags below leave the counter and the histogram to the
+            // transport for every verb alike, and on one without it PUT and
+            // PATCH now get both from the wrapper, as the other three always did.
             const instrumentedRouteVerbs: ReadonlySet<PropertyKey> = new Set(
                 ['get', 'post', 'put', 'delete', 'patch'] satisfies ReadonlyArray<keyof IHttpServer>,
             );
