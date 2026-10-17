@@ -157,6 +157,13 @@ export * from './utils/temporal-storage-form.js';
 // because those two do not depend on each other at runtime.
 export * from './utils/multi-value-storage-form.js';
 
+// [#24131] …and the emptiness rule a `required` declaration is judged by.
+// `@objectstack/objectql`'s record validator judges an object field's
+// `required` with it, and `@objectstack/rest`'s public-form submit door the
+// form's own `required` — one rule, here because rest does not depend on the
+// engine at runtime.
+export * from './utils/required-emptiness.js';
+
 // [#21007] …and the refusal a scalar comparison gets on a field stored as a
 // JSON column: the operator set and the words. `driver-sql` refuses it on
 // `where`, and `@objectstack/objectql` on the per-aggregation `filter` it

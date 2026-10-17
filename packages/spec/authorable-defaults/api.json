@@ -123,6 +123,8 @@
     "api/OpenApiGenerationConfig:version = \"3.0.3\"",
     "api/OpenApiSpec:openapi = \"3.0.0\"",
     "api/OpenApiSpec:servers = []",
+    "api/PackageInstallManifest:defaultDatasource = \"default\"",
+    "api/PackageInstallManifest:scope = \"project\"",
     "api/PackageRollbackRequest:rollbackCustomizations = true",
     "api/PackageUpgradeRequest:createSnapshot = true",
     "api/PackageUpgradeRequest:dryRun = false",

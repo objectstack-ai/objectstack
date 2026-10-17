@@ -105,7 +105,10 @@ import {
   classifyFilterToken,
 } from '@objectstack/spec/data';
 import type { FieldErrorCode } from '@objectstack/spec/api';
-import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretableTemporalComparand, multiValueStorageForm } from '@objectstack/core';
+// [#24131] `isMissing` / `isEmptyForRequired` — the emptiness rule `required`
+// is judged by — live in core, so the public-form submit door in
+// `@objectstack/rest` judges a form's `required` by the same rule.
+import { SUPPORTED_TEMPORAL_YEARS, isOutsideTemporalYearRange, isUninterpretableTemporalComparand, multiValueStorageForm, isMissing, isEmptyForRequired } from '@objectstack/core';
 import { isValueDomainMember, type ValueDomain } from '@objectstack/spec/shared';
 import {
   renderValidationMessage,
@@ -301,27 +304,13 @@ interface FieldDef {
   picklist?: string;
 }
 
-function isMissing(v: unknown): boolean {
-  return v === undefined || v === null || (typeof v === 'string' && v.trim() === '');
-}
-
-/**
- * #9476 — the emptiness judgment the `required` check runs, def-aware where
- * `isMissing` is not. The #9447 maintainer ruling (2026-08-18) sets the
- * contract: `required` on a multi-value field means NON-EMPTY array — the
- * empty set is representable (it reads back as `[]`, never `null`), so an
- * explicit `[]` is an empty value exactly as `null` / `''` are.
- *
- * Judged only where the DECLARED value is a set (`isMultiValueField`,
- * ADR-0104 D1): a structured-JSON field's `[]` is a legitimate document, not
- * an emptied set, and every other type keeps the def-free `isMissing`
- * semantics. Only the two `required` read sites call this — a bare `[]` on a
- * non-required multi-value field still flows to the array-shape branch.
- */
-function isEmptyForRequired(def: FieldDef, value: unknown): boolean {
-  if (isMissing(value)) return true;
-  return isMultiValueField(def) && Array.isArray(value) && value.length === 0;
-}
+// [#24131] `isMissing` (the def-free "missing": `undefined`, `null`, a blank
+// string) and `isEmptyForRequired` (#9476 — that, plus `[]` where the DECLARED
+// value is a set, per the #9447 ruling) moved to `@objectstack/core`
+// (`utils/required-emptiness.ts`, which carries their contract) unchanged, and
+// are imported above. Only the two `required` read sites call
+// `isEmptyForRequired` — a bare `[]` on a non-required multi-value field still
+// flows to the array-shape branch.
 
 /**
  * How many decimal places a finite number carries (#7501).
