@@ -66,6 +66,7 @@ import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
 import { MarketplaceProxyPlugin } from './marketplace-proxy-plugin.js';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { RuntimeConfigPlugin } from './runtime-config-plugin.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 // ── Shared harness ───────────────────────────────────────────────────────────
 
@@ -177,6 +178,12 @@ async function mountCloudConnection(opts: {
     environmentId?: string;
     userId?: string;
     resolvesEnvironment?: boolean;
+    /**
+     * [#24148] Whether the signed-in caller holds `setup.access`, which the
+     * connection-changing doors demand. Default: yes, so the exits below that
+     * are about something else reach the code they are about.
+     */
+    setupAccess?: boolean;
 } = {}) {
     const rawApp = makeRawApp();
     const hooks = new Map<string, any>();
@@ -185,13 +192,22 @@ async function mountCloudConnection(opts: {
             getSession: async () => (opts.userId ? { user: { id: opts.userId }, session: {} } : null),
         },
     };
+    const grantRows: Record<string, any[]> = opts.userId && opts.setupAccess !== false
+        ? {
+            sys_user_permission_set: [{ id: 'ups_1', user_id: opts.userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: null }],
+            sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
+        }
+        : {};
+    const objectql = bindCatalogFromTables({ find: async (object: string) => grantRows[object] ?? [] }, grantRows);
+    const envKernelServices: Record<string, unknown> = { auth, objectql };
     const services: Record<string, any> = {
         'env-registry': {
             resolveByHostname: async () =>
                 (opts.resolvesEnvironment ? { environmentId: 'env-123' } : undefined),
         },
-        'kernel-manager': { getOrCreate: async () => ({ getServiceAsync: async () => auth }) },
+        'kernel-manager': { getOrCreate: async () => ({ getServiceAsync: async (name: string) => envKernelServices[name] }) },
         auth,
+        objectql,
         manifest: { register: vi.fn() },
     };
     const ctx: any = {
@@ -272,6 +288,20 @@ describe('plugin-route door — CloudConnectionPlugin error exits (#9267)', () =
             { status: 401, code: 'UNAUTHENTICATED' },
         );
     });
+
+    /**
+     * [#24148] The three connection-changing doors refuse a signed-in caller
+     * without `setup.access` with the standard catalog's `PERMISSION_DENIED`,
+     * which `ApiErrorSchema` admits without a registration.
+     */
+    for (const door of ['bind/start', 'bind/poll', 'unbind'] as const) {
+        it(`POST /${door} with a session lacking setup.access → 403 in the declared envelope`, async () => {
+            const routes = await mountCloudConnection({ resolvesEnvironment: true, userId: 'usr_1', setupAccess: false });
+            const captured = await driveCloudConnection(routes, `POST ${CC}/${door}`, { body: { device_code: 'dc_1' } });
+            expectDeclaredErrorEnvelope(captured, { status: 403, code: 'PERMISSION_DENIED' });
+            expect(captured.body.error.message).toContain('`setup.access`');
+        });
+    }
 
     it('POST /install without a session → 401 in the declared envelope', async () => {
         const routes = await mountCloudConnection({ resolvesEnvironment: true });

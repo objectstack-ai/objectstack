@@ -187,6 +187,7 @@ const TRANSPORT_LEDGER: Record<string, 'guarded' | 'propagates'> = {
   'packages/services/service-storage/src/storage-service-plugin.ts': 'guarded',
   'packages/plugins/plugin-sharing/src/sharing-plugin.ts': 'guarded',
   'packages/cloud-connection/src/marketplace-install-local-plugin.ts': 'guarded',
+  'packages/cloud-connection/src/cloud-connection-plugin.ts': 'guarded',
 };
 
 /** Test scaffolding is not a transport — it drives the resolver, it does not authorize for anyone. */

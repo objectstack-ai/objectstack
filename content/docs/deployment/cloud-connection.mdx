@@ -74,12 +74,10 @@ the server reads as not connected until you connect it again.
 - *On the server*, you sign in with a user of this server. The Cloud
   Connection page is in the Setup app, which takes the **Setup Access**
   permission (`setup.access`); the default platform-administrator and
-  organization-administrator permission sets carry it. A known defect in the
-  connect and disconnect requests: today these requests check only that the
-  caller is signed in, not Setup Access
-  ([#24148](https://github.com/objectstack-ai/objectstack/issues/24148));
-  until that is fixed, give sign-in on this server only to people who may
-  change its cloud connection. A session
+  organization-administrator permission sets carry it. The connect and
+  disconnect requests take the same permission: a signed-in user without
+  Setup Access is refused with `403` (`PERMISSION_DENIED`) before the server
+  calls the cloud. A session
   that the authentication policy is holding (an expired password, or
   multi-factor sign-in required but not yet set up) is refused with `403`
   until it is fixed.
@@ -213,7 +211,7 @@ The routes the Cloud Connection page uses, all on the server's own origin:
 
 | Route | Sign-in | What it does |
 |:---|:---|:---|
-| `GET /api/v1/cloud-connection/status` | not required | `bound`, `runtimeId`, and `connection`, the connection as the cloud reports it. `bound` is `true` whenever the server holds a credential; `connection` is `null` when the cloud cannot be reached. Narrowing what unprivileged callers see is tracked in [#24148](https://github.com/objectstack-ai/objectstack/issues/24148). |
+| `GET /api/v1/cloud-connection/status` | not required | Every caller gets `bound`, `runtimeId` and `provider`. A signed-in user with Setup Access (`setup.access`) also gets `environmentId` and `connection`, the connection as the cloud reports it (the approving account and the organization). `bound` is `true` whenever the server holds a credential; `connection` is `null` when the cloud cannot be reached. |
 | `POST /api/v1/cloud-connection/bind/start` | required | Asks the cloud for a device code; answers with `user_code`, `verification_uri`, `verification_uri_complete`, `interval`, `expires_in`. |
 | `POST /api/v1/cloud-connection/bind/poll` | required | Body `{ "device_code": "…" }`. Answers `{ "pending": true }` while the cloud waits for approval, and the connection once it is approved. |
 | `POST /api/v1/cloud-connection/unbind` | required | Disconnects; answers `{ "revoked", "cleared" }`. |
