@@ -312,6 +312,13 @@ for (const mode of ['single', 'multi'] as const) {
             expect(Object.keys(res.payload.data).sort()).toEqual(NARROWED_KEYS);
         });
 
+        it('a permission store that cannot be read withholds the details and still answers 200', async () => {
+            const { drive } = await mount(mode, { outage: true });
+            const res = await drive(`GET ${CC}/status`, `${CC}/status`, { user: ADMIN });
+            expect(res.status).toBe(200);
+            expect(Object.keys(res.payload.data).sort()).toEqual(NARROWED_KEYS);
+        });
+
         it('CONTROL — a caller holding setup.access is served the connection record and the environment', async () => {
             const { drive } = await mount(mode);
             const res = await drive(`GET ${CC}/status`, `${CC}/status`, { user: ADMIN });

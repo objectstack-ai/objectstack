@@ -457,7 +457,11 @@ export class CloudConnectionPlugin implements Plugin {
              * `status` never refuses: no session, a session the ADR-0069 policy
              * holds, and a session without the capability all get the narrowed
              * answer, never a `401`/`403` — the route stays session-less in what
-             * it answers, and narrows only what it serves.
+             * it answers, and narrows only what it serves. For the same reason a
+             * permission store that cannot be read does not turn `status` into
+             * a `503`: the details are withheld (nothing was established that
+             * would license serving them) and the outage is logged, while the
+             * three connection-changing doors re-raise it.
              */
             const servedStatus = async (
                 environmentId: string | undefined,
@@ -465,7 +469,12 @@ export class CloudConnectionPlugin implements Plugin {
                 full: { environmentId: string | null; runtimeId: string | null; bound: boolean; provider: string; connection: unknown },
             ) => {
                 const caller = await resolveSession(environmentId ?? '', rawReq);
-                if (caller && !caller.authGate && await holdsSetupAccess(rawReq, caller)) return full;
+                try {
+                    if (caller && !caller.authGate && await holdsSetupAccess(rawReq, caller)) return full;
+                } catch (err) {
+                    if (!isAuthzStoreUnavailableError(err)) throw err;
+                    ctx.logger?.warn?.(`[CloudConnectionPlugin] status served without the connection details — ${err.message}`);
+                }
                 return { bound: full.bound, runtimeId: full.runtimeId, provider: full.provider };
             };
 
