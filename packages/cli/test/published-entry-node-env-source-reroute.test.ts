@@ -109,8 +109,8 @@ const NEUTRALISER = resolve(HERE, 'fixtures/published-entry-auto-transpile-neutr
  * vitest's 5000ms DEFAULT, which nobody here chose. Against costs of 2.5-3.6s
  * that is a margin thinner than the run-to-run variance on an idle machine, so
  * WHICH leg reddens is decided by how busy the box is and by nothing this file
- * tests. Both halves of that were measured: in `Rerun Safety` (the workflow
- * that deliberately runs the whole suite twice on one runner) the three
+ * tests. Both halves of that were measured: in `Rerun Safety` (a since-retired
+ * nightly that ran the whole suite twice on one runner) the three
  * non-neutralised legs timed out while both CONTROL legs passed; locally, on a
  * quiet box, the opposite happened — the neutralised CONTROL leg took 5710ms
  * and was the only one to fail. Same file, same commit, disjoint casualties.

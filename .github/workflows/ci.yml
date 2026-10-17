@@ -828,6 +828,24 @@ jobs:
               pnpm turbo run build "--filter=$PKG" --concurrency=4 --log-order=stream
           done < "$RUNNER_TEMP/shard-packages.txt"
 
+      # ── Test leftovers, step 1 of 2: the snapshot (#23880, ruling 乙) ──────
+      #
+      # REPORT ONLY, never a gate; the rationale, the listing and the closed
+      # exclusion list are in the `scripts/ci/report-test-leftovers.mjs` header.
+      # Taken HERE, after both dependency-closure builds above and before the
+      # tests, so the report after the tests can tell what the test run added
+      # from what the builds wrote. A package's OWN build (a test task that
+      # turbo.json makes depend on `build` without `^`) still runs inside the
+      # test step; the report excludes its declared outputs, read from
+      # turbo.json on every run. The snapshot goes to $RUNNER_TEMP, outside the
+      # tree, or the report would count it.
+      #
+      # ⛔ No `if:` and no `continue-on-error`: the script exits 0 on every
+      # path, by construction (a failure prints one NOT MEASURED warning), so
+      # this step cannot fail the shard or withhold its attestation.
+      - name: Snapshot the working tree before this shard's tests
+        run: node scripts/ci/report-test-leftovers.mjs snapshot --out "$RUNNER_TEMP/test-leftovers/before.json"
+
       # --concurrency=4: turbo's default (10) oversubscribes the 4-vCPU
       # hosted runner; matching the core count bounds peak memory and the
       # job is CPU-bound anyway.
@@ -1055,6 +1073,27 @@ jobs:
             fi
           done
           exit $STATUS
+
+      # ── Test leftovers, step 2 of 2: the report (#23880, ruling 乙) ────────
+      #
+      # Every path this shard's test run ADDED to the working tree since the
+      # snapshot, ignored paths included -- `.objectstack/` is gitignored, so
+      # `git status` cannot see that class -- grouped by package directory: a
+      # table in the job summary and one `::warning::` annotation per package.
+      # Placed directly after the test step so no later step's writes are
+      # charged to the tests, and `if: always()` so a red shard still reports.
+      #
+      # ⛔ REPORT ONLY by ruling, never a gate: the script exits 0 on findings,
+      # on a missing snapshot and on a crash, so the step carries no
+      # `continue-on-error` and cannot fail the shard. Making it block is the
+      # maintainer's word, not an edit here. It stays ABOVE the attestation
+      # pair at the bottom of the job (#6082), like every step after the tests.
+      - name: Report what this shard's tests left in the working tree
+        if: always()
+        run: |
+          node scripts/ci/report-test-leftovers.mjs report \
+            --before "$RUNNER_TEMP/test-leftovers/before.json" \
+            --label "Test Core (${{ matrix.shard }}/6)"
 
       # --summarize above costs nothing at runtime and writes
       # `.turbo/runs/<id>.json`: one per-task record with the execution window
@@ -2106,6 +2145,13 @@ jobs:
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
             pnpm turbo run build --filter=@objectstack/dogfood --concurrency=4 --log-order=stream
 
+      # Test leftovers, step 1 of 2 (#23880, ruling 乙): the snapshot, after the
+      # closure build and before the tests. Report only; the same pair as Test
+      # Core's, whose comments carry the rationale. `dogfood#test` depends on
+      # `^build` alone, so the step above builds everything the tests need.
+      - name: Snapshot the working tree before the dogfood tests
+        run: node scripts/ci/report-test-leftovers.mjs snapshot --out "$RUNNER_TEMP/test-leftovers/before.json"
+
       # Boots real example apps in-process (in-memory SQLite) and exercises them
       # through the real HTTP + service stack — catches runtime regressions that
       # build / unit tests / spec-liveness pass over (e.g. the #2018 tz-bucketing
@@ -2146,6 +2192,16 @@ jobs:
           node scripts/run-with-stall-guard.mjs --log "$RUNNER_TEMP/dogfood.log" --stall-minutes 10 \
             --report-dir "$RUNNER_TEMP/stall-reports" -- \
             pnpm turbo run test --filter=@objectstack/dogfood --log-order=stream
+
+      # Test leftovers, step 2 of 2 (#23880, ruling 乙): what the dogfood test
+      # run added to the working tree. Report only -- exits 0 on every path, no
+      # `continue-on-error` -- and `if: always()`; see Test Core's pair.
+      - name: Report what the dogfood tests left in the working tree
+        if: always()
+        run: |
+          node scripts/ci/report-test-leftovers.mjs report \
+            --before "$RUNNER_TEMP/test-leftovers/before.json" \
+            --label "Dogfood Regression Gate (${{ matrix.shard }}/3)"
 
       # Dogfood boots real apps in-process, so a native/OOM abort is likelier
       # here than in the unit suites — and a shard that dies silently looks like

@@ -52,8 +52,8 @@ on:
     # The HOURS keep out of this repository's crowded scheduled windows, read
     # from `grep -rn 'cron:' .github/workflows/` on the day this landed: 01–05
     # UTC carry most of the nightlies (stale, CodeQL, validate-deps,
-    # rerun-safety, coverage, the release-coverage and required-set patrols,
-    # the smokes and nightly tiers), 07 carries showcase-smoke, and the board
+    # coverage, the release-coverage and required-set patrols, the smokes and
+    # nightly tiers), 07 carries showcase-smoke, and the board
     # snapshot owns :07 of 02, 08, 14 and 20. Of the six six-hour sets, only
     # 0/6/12/18 and 1/7/13/19 have hours with nothing scheduled after :00; the
     # first is taken because its :00 neighbours are short (release.yml's
