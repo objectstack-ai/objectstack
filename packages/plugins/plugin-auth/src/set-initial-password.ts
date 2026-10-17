@@ -22,6 +22,7 @@
  */
 
 import { inProcessSessionReadInput } from '@objectstack/types';
+import { readJsonRequestBody } from './request-json-body.js';
 
 /**
  * Minimal shape of the better-auth server API we depend on. `query` carries
@@ -50,12 +51,16 @@ export async function runSetInitialPassword(
   authApi: SetPasswordCapableApi,
   request: Request,
 ): Promise<SetInitialPasswordResult> {
-  let parsed: unknown;
-  try {
-    parsed = await request.json();
-  } catch {
-    parsed = {};
+  // [#24032] A declared-JSON body that does not parse is refused before
+  // `setPassword` is reached: it was read as `{}`, which answered
+  // "newPassword is required" for a body that carried `newPassword` (see
+  // request-json-body.ts). Same status and code as that answer; only the
+  // message differs, and a body that parses is read exactly as before.
+  const reading = await readJsonRequestBody(request);
+  if (!reading.ok) {
+    return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: reading.message } } };
   }
+  const parsed: unknown = reading.body;
   const newPassword: unknown = (parsed as { newPassword?: unknown } | null)?.newPassword;
   if (typeof newPassword !== 'string' || newPassword.length === 0) {
     return {
