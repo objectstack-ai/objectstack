@@ -3,7 +3,8 @@
 /**
  * `os start` and `os create` refuse a directory that can never be made at
  * once, naming the path and the operating system's code, instead of hanging
- * in Node's recursive mkdir (#23858).
+ * in Node's recursive mkdir (#23858). `os serve` stops hanging on its runtime
+ * state file's directory the same way.
  *
  * ## The defect, measured on `origin/main` 0744f94366 (built CLI, Node v22.22.0)
  *
@@ -17,6 +18,12 @@
  *     `Location:` row and hung the same way: 889,246 failing calls in 20 s.
  *     That is the author-chosen output-path class (`--dir`, `--out`,
  *     `--output`).
+ *   - `OS_HOME=/proc/os-23858-r2 OS_DATABASE_URL=:memory: os serve` (on
+ *     `origin/main` b6805ac0f) bound its port and then looped on the runtime
+ *     state file's directory, `OS_HOME` itself, before the banner: 794,594
+ *     failing `mkdir` calls in 20 s and no `Press Ctrl+C to stop`. The
+ *     database URL keeps the SQLite default out of `OS_HOME`, whose own
+ *     bounded refusal (#23737) would otherwise end the boot first.
  *
  * ## Why every run is a bounded child of the BUILT entry
  *
@@ -24,8 +31,10 @@
  * group with a hard SIGKILL of the whole group at `CHILD_BOUND_MS`, so a
  * reintroduced loop fails this file at the bound instead of hanging the suite.
  * `bin/run.js` with `NODE_ENV` unset is the entry an operator runs, and it
- * starts in about 3 s where the tsx source entry takes about 10 s, so the four
- * children (run concurrently) keep this file under the 10 s line.
+ * starts in about 3 s where the tsx source entry takes about 10 s, so the six
+ * children (run concurrently) keep this file under the 10 s line. The two
+ * `serve` children never exit by themselves: each is killed whole as soon as
+ * its banner tail is out, and `--port 0` keeps both off any fixed port.
  *
  * ## What is asserted — kind, exit code and named subject, never the prose
  *
@@ -34,12 +43,18 @@
  *   2. CONTROL: `os start` under a creatable `OS_HOME` three levels deep makes
  *      `<home>/data` and goes on to its next refusal. `--port 70000` is that
  *      refusal: start's own invalid-port door, AFTER the home step and BEFORE
- *      any `serve` child, so no leg of this file ever boots a server. The
- *      `/proc` leg passes it too, for the same reason.
+ *      any `serve` child, so neither `start` leg boots a server. The `/proc`
+ *      leg passes it too, for the same reason.
  *   3. `os create plugin --dir /proc/<missing>/foo`: settles, exits 1, names the
  *      path and `ENOENT`.
  *   4. CONTROL: `os create plugin --dir <tmp>/a/b/foo` exits 0 and writes the
  *      project.
+ *   5. `os serve` under `OS_HOME=/proc/<missing>`: prints its banner tail
+ *      inside the bound. The state file cannot be written there, and the
+ *      write's best-effort catch lets the boot go on without it.
+ *   6. CONTROL: `os serve` under a creatable `OS_HOME` three levels deep
+ *      prints its banner tail, and by then that home holds one
+ *      `runtime.env_local.<project>.json` naming the child's own pid.
  *
  * They need a `/proc` that refuses `mkdir` with ENOENT, so the `/proc` legs
  * run where `/proc/self` exists (Linux, which CI is).
@@ -47,11 +62,11 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RUN_JS_RESOLVES_FROM_DIST, requireBuiltCli } from './helpers/serve-process.js';
+import { E2E_SECRET_KEY, RUN_JS_RESOLVES_FROM_DIST, requireBuiltCli } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const RUN_JS = resolve(HERE, '../bin/run.js');
@@ -65,21 +80,34 @@ const UNSERVABLE_PORT = '70000';
 const RUNS_PROC = existsSync('/proc/self');
 const PROC_TOP = `/proc/os-23858-${process.pid}`;
 
+/** The last line of `os serve`'s ready banner. */
+const BANNER_TAIL = 'Press Ctrl+C to stop';
+
+/** The platform with no application — the cheapest project that reaches a banner. */
+const BARE_CONFIG = 'export default {};\n';
+
 interface Run {
   code: number | null;
   signal: NodeJS.Signals | null;
   killedAtBound: boolean;
+  /** `until` appeared in the output, and the group was killed on it. */
+  reached: boolean;
+  pid: number | undefined;
   output: string;
 }
 
 let workdir: string;
+let serveDir: string;
 const runs = new Map<string, Run>();
 
-/** Run the built CLI in its own process group, killed whole at the bound. */
-function runCli(args: string[], env: Record<string, string>): Promise<Run> {
+/**
+ * Run the built CLI in its own process group, killed whole at the bound — or,
+ * with `until`, as soon as that text is in its output (a server never exits).
+ */
+function runCli(args: string[], env: Record<string, string>, opts: { cwd?: string; until?: string } = {}): Promise<Run> {
   return new Promise((resolveRun) => {
     const child = spawn(process.execPath, [RUN_JS, ...args], {
-      cwd: workdir,
+      cwd: opts.cwd ?? workdir,
       detached: true,
       // Declared in full: no vitest worker variables, a HOME of this file's
       // own, and `NODE_ENV` unset — the built entry must resolve `dist/`.
@@ -94,8 +122,16 @@ function runCli(args: string[], env: Record<string, string>): Promise<Run> {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let output = '';
-    child.stdout.on('data', (d) => { output += d; });
-    child.stderr.on('data', (d) => { output += d; });
+    let reached = false;
+    const onData = (d: Buffer) => {
+      output += d;
+      if (opts.until !== undefined && !reached && output.includes(opts.until)) {
+        reached = true;
+        try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* group already gone */ }
+      }
+    };
+    child.stdout.on('data', onData);
+    child.stderr.on('data', onData);
     let killedAtBound = false;
     const timer = setTimeout(() => {
       killedAtBound = true;
@@ -104,22 +140,40 @@ function runCli(args: string[], env: Record<string, string>): Promise<Run> {
     child.on('exit', (code, signal) => {
       clearTimeout(timer);
       try { process.kill(-child.pid!, 'SIGKILL'); } catch { /* group already gone */ }
-      resolveRun({ code, signal, killedAtBound, output });
+      resolveRun({ code, signal, killedAtBound, reached, pid: child.pid, output });
     });
   });
+}
+
+/**
+ * `os serve --port 0` over {@link BARE_CONFIG}, until its banner tail. The
+ * database is in memory so the SQLite default never lands in `OS_HOME`; the
+ * runtime state file is then the boot's one write there.
+ */
+function runServe(home: string): Promise<Run> {
+  return runCli(
+    ['serve', '--port', '0'],
+    { OS_HOME: home, OS_DATABASE_URL: ':memory:', OS_SECRET_KEY: E2E_SECRET_KEY, OS_DISABLE_CONSOLE: '1' },
+    { cwd: serveDir, until: BANNER_TAIL },
+  );
 }
 
 beforeAll(async () => {
   requireBuiltCli(RUN_JS_RESOLVES_FROM_DIST);
   workdir = mkdtempSync(join(tmpdir(), 'os-23858-doors-'));
+  serveDir = join(workdir, 'serve-project');
+  mkdirSync(serveDir);
+  writeFileSync(join(serveDir, 'objectstack.config.ts'), BARE_CONFIG);
   const legs: Array<[string, Promise<Run>]> = [
     ['start-control', runCli(['start', '-p', UNSERVABLE_PORT], { OS_HOME: join(workdir, 'home', 'a', 'b', 'c') })],
     ['create-control', runCli(['create', 'plugin', 'foo', '--dir', join(workdir, 'create', 'a', 'b', 'foo')], {})],
+    ['serve-control', runServe(join(workdir, 'serve-home', 'a', 'b', 'c'))],
   ];
   if (RUNS_PROC) {
     legs.push(
       ['start-proc', runCli(['start', '-p', UNSERVABLE_PORT], { OS_HOME: `${PROC_TOP}-home` })],
       ['create-proc', runCli(['create', 'plugin', 'foo', '--dir', `${PROC_TOP}-cr/foo`], {})],
+      ['serve-proc', runServe(`${PROC_TOP}-sv`)],
     );
   }
   const settled = await Promise.all(legs.map(([, p]) => p));
@@ -168,5 +222,19 @@ describe('a directory that can never be made is refused at the door, at once (#2
     const run = runOf('create-control');
     expect(run.code, run.output).toBe(0);
     expect(statSync(join(workdir, 'create', 'a', 'b', 'foo', 'package.json')).isFile()).toBe(true);
+  });
+
+  it.runIf(RUNS_PROC)('os serve under OS_HOME=/proc/<missing> prints its banner instead of looping on the state file', () => {
+    const run = runOf('serve-proc');
+    expect(run.reached, run.output).toBe(true);
+  });
+
+  it('CONTROL: os serve under a creatable OS_HOME three levels deep writes its state file before the banner', () => {
+    const run = runOf('serve-control');
+    expect(run.reached, run.output).toBe(true);
+    const home = join(workdir, 'serve-home', 'a', 'b', 'c');
+    const files = readdirSync(home).filter((name) => /^runtime\.env_local\..+\.json$/.test(name));
+    expect(files, `entries in ${home}: ${readdirSync(home).join(', ')}`).toHaveLength(1);
+    expect(JSON.parse(readFileSync(join(home, files[0]), 'utf8')).pid).toBe(run.pid);
   });
 });

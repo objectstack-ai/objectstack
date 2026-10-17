@@ -3,6 +3,7 @@
   "pages": [
     "apps",
     "pages",
+    "print-pages",
     "react-pages",
     "views",
     "actions",

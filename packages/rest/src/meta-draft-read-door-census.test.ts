@@ -256,7 +256,10 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0, length 9 → 10.
         // [#23050 slice 10] Nor does the UI view body (`ui-routes.ts`):
         // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0, length 10 → 11.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
+        // [#23050 slice 11] Nor do the public form doors (`form-routes.ts`): they
+        // read the environment's view and object lists, never a draft:
+        // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0, length 11 → 12.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(12);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });

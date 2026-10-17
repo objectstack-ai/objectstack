@@ -72,7 +72,14 @@ on:
   workflow_run:
     # Byte-exact workflow NAMES (the `name:` at the top of each file), not
     # paths. Quoted because `Lint & Type Check` starts a YAML alias unquoted.
-    workflows: ['CI', 'Lint & Type Check']
+    #
+    # `Rerun Safety` (rerun-safety-nightly.yml, #23880) runs once a night, and
+    # its scheduled runs from 2026-09-17 to 10-16 concluded `success` once in
+    # thirty nights with no filer at all. It gets its own card by the same
+    # identity rule, in its own cadence's words: every name listed here must
+    # have an entry in `CARD_CADENCES` (scripts/ci/scheduled-full-run.mjs),
+    # which refuses a name it does not hold rather than default one.
+    workflows: ['CI', 'Lint & Type Check', 'Rerun Safety']
     types: [completed]
 
 permissions: {}

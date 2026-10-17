@@ -78,8 +78,9 @@ import {
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
     anonymousFormIntakeCandidates,
-    // …and whether another body of the same view name withdraws a candidate.
-    anonymousFormIntakeWithdrawnIn,
+    // `anonymousFormIntakeWithdrawnIn` (whether another body of the same view name withdraws a
+    // candidate), read only by the anonymous form doors, moved with `registerFormEndpoints`'
+    // body to `form-routes.ts` (#23050 slice 11).
     // [#21476] Whether such a form can take intake on this posture, and why not
     // — the one predicate the runtime authoring gate's advisory reads too.
     anonymousFormIntakePosture,
@@ -171,7 +172,8 @@ import type {
 // single-item read path rebuilds its body through, from the spec's own storage
 // predicates — so the signal the grid reads cannot drift from what the runtime
 // doors (#6994/#7095) refuse.
-import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
+// `PUBLIC_FORM_SERVER_MANAGED_FIELDS`, read only by the anonymous form doors, moved with
+// `registerFormEndpoints`' body to `form-routes.ts` (#23050 slice 11).
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
 // `stripReadDecorations`, read only by the analytics dataset door, moved with that door to
 // `analytics-routes.ts` (#23050 slice 5).
@@ -310,6 +312,8 @@ import { registerEmailEndpoints, type EmailRouteHost } from './email-routes.js';
 import { registerSearchEndpoints, type SearchRouteHost } from './search-routes.js';
 // [#23050 slice 10] The UI view route's body moved to its own module — see its header.
 import { registerUiEndpoints, type TransportScopedMetaRequest, type UiRouteHost } from './ui-routes.js';
+// [#23050 slice 11] The public form routes' body moved to its own module — see its header.
+import { registerFormEndpoints, type FormRouteHost } from './form-routes.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -352,7 +356,8 @@ import {
     handleRouteError,
     thrownAnswerIsBareNotFound,
     logUnexpectedRouteError,
-    isExpectedRouteError,
+    // `isExpectedRouteError`, read only by the public form submit door's catch, moved with
+    // `registerFormEndpoints`' body to `form-routes.ts` (#23050 slice 11).
     applyDroppedFieldsHeader,
 } from './error-response.js';
 export { mapDataError };
@@ -2633,8 +2638,27 @@ export class RestServer {
     ): Promise<boolean> {
         const objectName = req?.params?.object;
         if (!objectName) return false;
-        const items = await this.loadObjectItems(p, environmentId);
-        const obj = items.find((o: any) => o?.name === objectName);
+        // [#24031] The ONE object this gate judges, read by name — never the
+        // whole object list, whose decoration diagnosed every object on every
+        // request. Same env-scoped request shape the list read sends
+        // (`metaListSource`); a protocol with no by-name read is asked the list.
+        const listSource = this.metaListSource(p, environmentId);
+        const obj = await metaReadGate.loadObjectItem(
+            typeof p.getMetaItem === 'function'
+                ? {
+                    ...listSource,
+                    getObjectItem: (name) => {
+                        const itemRequest: TransportScopedMetaRequest<GetMetaItemRequest> = {
+                            type: 'object',
+                            name,
+                            ...(environmentId ? { environmentId } : {}),
+                        };
+                        return p.getMetaItem(itemRequest);
+                    },
+                }
+                : listSource,
+            objectName,
+        );
         // [#3770] Unknown object → no declared exposure policy to enforce here;
         // the data path's registry gate 404s it. See the doc comment above.
         if (!obj) return false;
@@ -9081,450 +9105,23 @@ export class RestServer {
      * `mapViewSpecToEmbeddableConfig` expects.
      */
     private registerFormEndpoints(basePath: string): void {
-        const isScoped = basePath.includes('/environments/:environmentId');
-
-        // Which form candidates are open to anonymous intake is ONE rule,
-        // shared with the write-time judgement in `@objectstack/metadata-protocol`
-        // (`anonymousFormIntakeCandidates`): `sharing.enabled === true`,
-        // `sharing.allowAnonymous === true` and a `publicLink` naming the slug.
-        //
-        // A withdrawal is a kill switch: layering may only narrow anonymous
-        // intake, never re-open it. The doors read one list, the
-        // environment's (environment → code), which holds one item per
-        // package of a view name, and judge every candidate against that same
-        // list as the layer beneath it: a candidate is served only when no
-        // body of its view name explicitly withdraws the same form
-        // (`anonymousFormIntakeWithdrawnIn`: matched by slot or by slug, the
-        // link kept with a switch set to `false`), so a withdrawal in one
-        // package closes the name's form in every package (a known limit that
-        // fails closed). Another view publishing the same slug is a different
-        // form and closes nothing.
-        const findPublicFormView = (
-            views: any[],
-            slug: string,
-        ): { view: any; form: any; object: string } | null => {
-            for (const view of views ?? []) {
-                if (!view || typeof view !== 'object') continue;
-                for (const c of anonymousFormIntakeCandidates(view)) {
-                    if (c.slug !== slug) continue;
-                    if (anonymousFormIntakeWithdrawnIn(views, view, c)) continue;
-                    const objectName = anonymousFormObjectName(view, c.form);
-                    if (!objectName) continue;
-                    return { view, form: c.form, object: objectName };
-                }
-            }
-            return null;
+        // [#23050 slice 11] The body moved to `form-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `FormRouteHost`, and that module's header for why no
+        // member is a getter and why the private static `translateOptionsFor`
+        // is handed over too).
+        const host: FormRouteHost = {
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveAnonymousFormTenancy: (...a) => this.resolveAnonymousFormTenancy(...a),
+            readFormObjectDefinitions: (...a) => this.readFormObjectDefinitions(...a),
+            routeManager: this.routeManager,
+            resolveI18nService: (...a) => this.resolveI18nService(...a),
+            buildTranslationBundle: (...a) => this.buildTranslationBundle(...a),
+            extractLocale: (...a) => this.extractLocale(...a),
+            translateOptionsFor: (...a) => RestServer.translateOptionsFor(...a),
+            packagedObjectBase: (...a) => this.packagedObjectBase(...a),
         };
-
-        // [ADR-0131 D6, C7] WHICH metadata an anonymous form request reads:
-        // the environment's, like every other metadata read. Until v18 the
-        // `view` read also kept the Default Organization's legacy layer, so an
-        // organization's withdrawal still closed the form. The v18 ceremony
-        // (`os migrate organization-ownership --apply`, its metadata-promotion
-        // step) carries every organization-layer withdrawal onto the
-        // environment, fail-closed (rulings A on #22008 and #22011), and that
-        // read is deleted with it.
-        //
-        // The tenancy service is still read: it answers the posture the
-        // intake-availability rule judges (#21476).
-        //
-        // Asked ONCE per request, in `resolveFormBySlug`. Every door below
-        // reads the form through that one resolution, so no door keeps its
-        // own copy of "is this form public" — nor, since #21476, of "can it
-        // take intake on this posture", which the same tenancy read answers.
-        //
-        // Fails CLOSED. A tenancy service that is registered but cannot be
-        // reached raises `AuthzStoreUnavailableError`, the classification
-        // `classifyAdmissionTenancyPosture` applies to the same seam. The
-        // door then refuses instead of judging intake without a posture.
-        // Only the registry's own "never registered" brand reads as the
-        // supported no-tenancy composition. The wiring mirrors
-        // `resolveProtocol`, so the tenancy service and the protocol always
-        // come from the same kernel.
-        const resolveFormBySlug = async (
-            environmentId: string | undefined,
-            req: any,
-            slug: string,
-        ): Promise<{ view: any; form: any; object: string } | null> => {
-            const p = await this.resolveProtocol(environmentId, req);
-            if (typeof (p as any).getMetaItems !== 'function') return null;
-            const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
-            const viewsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                type: 'view',
-                ...(environmentId ? { environmentId } : {}),
-            };
-            const listOf = (result: any): any[] => (Array.isArray(result?.items)
-                ? result.items
-                : Array.isArray(result)
-                    ? result
-                    : []);
-            const items = listOf(await p.getMetaItems(viewsRequest));
-            const match = findPublicFormView(items, slug);
-            if (!match) return null;
-            // [#21476] A form that cannot take intake on this posture is not
-            // offered: `null` here IS the withdrawn form's answer on both
-            // doors, so an anonymous caller learns nothing about the tenancy.
-            const unavailable = await anonymousFormIntakeUnavailability(
-                match.object,
-                anonymousFormIntakePosture(tenancy),
-                async () => (await this.readFormObjectDefinitions(p, environmentId))
-                    .find((o: any) => o?.name === match.object),
-            );
-            return unavailable ? null : match;
-        };
-
-        // GET /forms/:slug — resolve and return the public form spec
-        this.routeManager.register({
-            method: 'GET',
-            path: `${basePath}/forms/:slug`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const slug = String(req.params?.slug ?? '').trim();
-                    if (!slug) {
-                        res.status(400).json({ code: 'INVALID_REQUEST', error: 'slug is required' });
-                        return;
-                    }
-                    const match = await resolveFormBySlug(environmentId, req, slug);
-                    if (!match) {
-                        res.status(404).json({
-                            code: 'FORM_NOT_FOUND',
-                            error: `No public form configured at /forms/${slug}`,
-                        });
-                        return;
-                    }
-                    // Embed the target object's schema — limited to exactly the
-                    // fields the form's sections DECLARE — so anonymous
-                    // front-ends can render the form without a separate,
-                    // auth-protected meta lookup.
-                    //
-                    // [#6601] "Exactly" is load-bearing and used not to be. The
-                    // narrowing read `allowed.size === 0 || allowed.has(name)`,
-                    // so a form with no sections (or sections declaring no
-                    // fields) fell through to EVERY non-server-managed field of
-                    // the object — published to an ANONYMOUS caller, with
-                    // labels, types, picklist option values and formula
-                    // expressions. A form created before its sections are wired
-                    // is an ordinary authoring mid-state, so that was reachable
-                    // without an exotic configuration, and this comment claimed
-                    // the opposite. Publication is a DECLARATION now: declare no
-                    // fields and nothing is published (AGENTS.md "Explicit
-                    // composition over default magic").
-                    //
-                    // Do NOT reach for the submit handler as the backstop here.
-                    // It enforces a field whitelist on WRITES, which cannot
-                    // bound a READ disclosure — and when #6601 landed, its own
-                    // accepted set still degenerated identically for a
-                    // section-less form (`allowedFields.size === 0 ||`), so
-                    // narrowing this schema to "what submit would accept" would
-                    // have republished precisely the set being removed. #6920
-                    // has since closed that write-side twin, so the two planes
-                    // now agree — but they agree by each enforcing the
-                    // declaration itself, NOT by one deferring to the other.
-                    let objectSchema: any = null;
-                    // [#23497] The form served below: the matched form, with its
-                    // sections' `label` / `description` localized beside the
-                    // schema's field labels (see the translation block).
-                    let servedForm: any = match.form;
-                    try {
-                        const p = await this.resolveProtocol(environmentId, req);
-                        if (typeof (p as any).getMetaItems === 'function') {
-                            // [#21331] The environment's object schema, as
-                            // every object read is (ADR-0131 D6).
-                            const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                                type: 'object',
-                                ...(environmentId ? { environmentId } : {}),
-                            };
-                            const r: any = await p.getMetaItems(objectsRequest);
-                            const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
-                            const obj = items.find((o: any) => o?.name === match.object);
-                            if (obj && obj.fields && typeof obj.fields === 'object') {
-                                const allowed = new Set<string>();
-                                for (const sec of match.form?.sections ?? []) {
-                                    for (const f of sec?.fields ?? []) {
-                                        if (typeof f === 'string') allowed.add(f);
-                                        else if (f?.field) allowed.add(f.field);
-                                    }
-                                }
-                                const fields: Record<string, any> = {};
-                                for (const [name, def] of Object.entries(obj.fields)) {
-                                    // [#3022] Server-managed anchors are never
-                                    // renderable/writable on the anonymous form
-                                    // surface — the submit route refuses them, so
-                                    // don't advertise them here even when a form
-                                    // (mis)declares one in a section.
-                                    if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)) continue;
-                                    // [#6601] Declared or not published. An empty
-                                    // `allowed` yields an empty `fields`.
-                                    if (!allowed.has(name)) continue;
-                                    fields[name] = def;
-                                }
-                                objectSchema = { name: obj.name, label: obj.label, fields };
-                                // Localize labels / help text / option labels so anonymous
-                                // clients render in the visitor's preferred language.
-                                // `resolveFormBySlug` returns the raw view spec, so both
-                                // halves of the payload are hydrated here: the schema, and
-                                // the form's section headings ([#23497], below).
-                                try {
-                                    const i18n = await this.resolveI18nService(environmentId, req);
-                                    const bundle = this.buildTranslationBundle(i18n);
-                                    const locale = this.extractLocale(req, i18n);
-                                    if (bundle && locale) {
-                                        const { translateMetadataDocument } = await import('@objectstack/spec/system');
-                                        // [#8284] Same rule as the two `/meta/object`
-                                        // reads: the catalog yields to a scalar the
-                                        // package's own extension or the tenant
-                                        // authored. The public form must not be the
-                                        // one surface still serving the packaged
-                                        // string back at a tenant who renamed it.
-                                        objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
-                                            ...RestServer.translateOptionsFor(i18n, locale),
-                                            packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
-                                        });
-                                        // [#23497] The section headings. An anonymous
-                                        // visitor cannot load the bundle client-side (the
-                                        // `/i18n` domain answers it 401), so a section's
-                                        // `objects.OBJECT._sections.NAME` copy reaches it
-                                        // here or not at all. ONE call into the spec's view
-                                        // translator, which owns every rule: the key is the
-                                        // section's `name` (a nameless section is returned
-                                        // as authored), a missing key keeps the authored
-                                        // text, only authored copy is translated, and an
-                                        // explicit override beats the catalog against the
-                                        // packaged view, handed over exactly as the object
-                                        // call above hands its own base. ⛔ No walk of
-                                        // `_sections` and no locale chain here.
-                                        //
-                                        // The protocol's view list serves view ITEMS only
-                                        // (a container is dropped and served as the
-                                        // `viewKind: 'form'` items it expands to), so the
-                                        // matched form is the item's `config`, the address
-                                        // `translateView` translates sections at. A form
-                                        // matched in any other slot is served as matched,
-                                        // never swapped for the item's `config`. It runs
-                                        // BEFORE the strip below and returns each section's
-                                        // `fields` untouched, so it cannot re-introduce a
-                                        // stripped field. The top-level `label` keeps its
-                                        // own reading: the translator falls back to the
-                                        // view's machine name where this route falls back
-                                        // to the form's label.
-                                        const view = translateMetadataDocument('view', match.view, bundle, {
-                                            ...RestServer.translateOptionsFor(i18n, locale),
-                                            packagedBase: this.packagedObjectBase(p, 'view', match.view?.name),
-                                        });
-                                        if (match.form === match.view?.config) servedForm = view?.config;
-                                    }
-                                } catch (e: any) {
-                                    logError('[REST] Public form schema translation failed:', e);
-                                }
-                            }
-                        }
-                    } catch (e: any) {
-                        logError('[REST] Public form schema load failed:', e);
-                    }
-                    // Anonymous public forms NEVER include a lookup, master-detail
-                    // or user field. [#21180] This used to be an opt-in — a
-                    // per-field picker block on the section entry kept the field
-                    // and opened an anonymous record-search route for it. Ruling
-                    // E on #21079 (comment 5933054144) retired the picker and
-                    // deleted that route, so the strip below is now
-                    // unconditional: no declaration can put record search on the
-                    // internet through a public form.
-                    const safeForm = (() => {
-                        if (!servedForm || !Array.isArray(servedForm.sections)) return servedForm;
-                        const allow = (name: string): boolean => {
-                            // [#3022] A declared server-managed anchor (e.g. a
-                            // FormView listing `owner_id`) is a spec mistake —
-                            // drop it from the rendered sections so the form
-                            // never collects a value the submit route refuses.
-                            if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)) return false;
-                            const def = objectSchema?.fields?.[name];
-                            const t = def?.type;
-                            // `user` is a lookup specialized to sys_user — same risk as a
-                            // raw lookup: surfacing it on an anonymous public form would
-                            // expose unrestricted user search to the internet.
-                            return t !== 'lookup' && t !== 'master_detail' && t !== 'user';
-                        };
-                        const sections = servedForm.sections.map((sec: any) => {
-                            const fields = (sec?.fields ?? []).filter((f: any) => {
-                                const name = typeof f === 'string' ? f : f?.field;
-                                if (!name) return false;
-                                return allow(name);
-                            });
-                            return { ...sec, fields };
-                        });
-                        return { ...servedForm, sections };
-                    })();
-                    res.header('Vary', 'Accept-Language');
-                    res.json({
-                        slug,
-                        object: match.object,
-                        label: match.view?.label ?? match.form?.label,
-                        form: safeForm,
-                        objectSchema,
-                    });
-                } catch (error: any) {
-                    logError('[REST] Public form resolve error:', error);
-                    res.status(500).json({
-                        code: 'FORM_RESOLVE_FAILED',
-                        error: String(error?.message ?? error ?? 'resolve failed').slice(0, 500),
-                    });
-                }
-            },
-            metadata: {
-                summary: 'Resolve a public form spec by slug (anonymous)',
-                tags: ['forms', 'public'],
-            },
-        });
-
-        // POST /forms/:slug/submit — INSERT a record on the target object
-        // with the `guest_portal` permission set attached.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${basePath}/forms/:slug/submit`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const slug = String(req.params?.slug ?? '').trim();
-                    if (!slug) {
-                        res.status(400).json({ code: 'INVALID_REQUEST', error: 'slug is required' });
-                        return;
-                    }
-                    const match = await resolveFormBySlug(environmentId, req, slug);
-                    if (!match) {
-                        res.status(404).json({
-                            code: 'FORM_NOT_FOUND',
-                            error: `No public form configured at /forms/${slug}`,
-                        });
-                        return;
-                    }
-
-                    // Only allow the fields declared on the matched FormView.
-                    // This prevents a public visitor from stuffing privileged
-                    // columns (owner_id, status, internal_notes, …) into the
-                    // row. Object hooks (`beforeInsert`) are still responsible
-                    // for stamping server-side defaults — see the CRM
-                    // `lead.hook.ts` / `case.hook.ts` for the canonical pattern.
-                    const allowedFields = new Set<string>();
-                    for (const section of match.form?.sections ?? []) {
-                        for (const f of section?.fields ?? []) {
-                            if (typeof f === 'string') allowedFields.add(f);
-                            else if (f?.field) allowedFields.add(f.field);
-                        }
-                    }
-                    // [#6920] A form that declares NO fields collects nothing, so
-                    // it has nothing to accept — refuse instead of inserting.
-                    //
-                    // The filter below used to read
-                    // `allowedFields.size === 0 || allowedFields.has(k)`, and that
-                    // fall-through was not "accept every field of the object": it
-                    // accepted every KEY THE CALLER SENT, minus the anchors and the
-                    // three prototype keys — measured as
-                    // `["email","internal_margin","internal_tier","not_even_a_field",
-                    // "status","subject"]` on a `sections: []` form, `not_even_a_field`
-                    // not being a field of the object at all. On an ANONYMOUS surface
-                    // that is unbounded mass assignment across the target object, and
-                    // the form created-before-its-sections-are-wired mid-state reaches
-                    // it without anything exotic.
-                    //
-                    // Symmetric with #6601 on the read side of the same pair: declare
-                    // it or it is not published / not accepted, one rule on both planes
-                    // (AGENTS.md "Explicit composition over default magic"). Post-#6601
-                    // such a form publishes `fields: {}`, so no legitimate client can
-                    // even learn what to send here.
-                    //
-                    // REFUSAL, not a silent discard: dropping the keys would leave the
-                    // `201` intact while swallowing data the caller believes it wrote —
-                    // exactly the silence AGENTS.md's warn-vs-error rule forbids. The
-                    // author's fix is to wire the sections, so the message says that;
-                    // the code is the standard ADR-0112 catalog's generic 400
-                    // (`HttpStatusErrorCodeMap[400]`), not a minted synonym, and the
-                    // message names no object, field or slug — this reply is readable
-                    // by anyone on the internet.
-                    //
-                    // NOTE the #3022 pin ('zero declared sections: business fields fall
-                    // through, anchors do NOT') asserted this fall-through as intended.
-                    // Re-judged by maintainer ruling 5229989845 (2026-08-09): the
-                    // anchor half is preserved and still pinned; the fall-through half
-                    // was the wrong invariant.
-                    if (allowedFields.size === 0) {
-                        res.status(400).json({
-                            code: 'VALIDATION_ERROR',
-                            error: 'This form declares no fields, so it cannot accept a submission. '
-                                + "Wire the fields it collects into the form's sections and publish it again.",
-                        });
-                        return;
-                    }
-                    // [#3022] System-managed anchors (owner_id, organization_id,
-                    // audit columns, id, …) are NEVER client-suppliable on this
-                    // anonymous surface, even when a FormView explicitly declares
-                    // one in a section (the insert-forge of #3004, with no
-                    // credentials at all). The SecurityPlugin's publicFormGrant
-                    // branch strips the same set at the data layer, so this filter
-                    // and the engine boundary cannot drift.
-                    const rawBody = (req.body && typeof req.body === 'object') ? req.body : {};
-                    const filteredData: Record<string, unknown> = {};
-                    for (const [k, v] of Object.entries(rawBody)) {
-                        if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(k)) continue;
-                        // JSON.parse yields `__proto__` as an OWN key; assigning it
-                        // here would REPLACE filteredData's prototype and smuggle
-                        // inherited anchors past every own-property check downstream.
-                        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
-                        if (allowedFields.has(k)) filteredData[k] = v;
-                    }
-
-                    // ADR-0056 (Option A): authorization DERIVED from the declared
-                    // form — a narrow create grant scoped to exactly this form's target
-                    // object. The SecurityPlugin honors `publicFormGrant` (create + the
-                    // immediate read-back, that object ONLY), so public forms work under
-                    // secure-by-default (anonymous-deny) WITHOUT a deployment-configured
-                    // `guest_portal`. `guest_portal` + `anonymous` are kept for back-compat
-                    // with object hooks (guest detection via falsy `ctx.user?.id`).
-                    const context: any = {
-                        publicFormGrant: { object: match.object },
-                        permissions: ['guest_portal'],
-                        anonymous: true,
-                    };
-
-                    const p = await this.resolveProtocol(environmentId, req);
-                    const formCreateRequest: ServerScopedDataRequest<CreateDataRequest> = {
-                        object: match.object,
-                        data: filteredData,
-                        ...(environmentId ? { environmentId } : {}),
-                        context,
-                    };
-                    const result = await p.createData(formCreateRequest);
-                    // [#22437] The answer is the created record's id, and
-                    // nothing the insert stored. `createData` answers
-                    // `{ object, id, record, droppedFields? }`, and its `record`
-                    // is the row as stored AFTER the insert pipeline: defaults,
-                    // and whatever a `beforeInsert` / `afterInsert` hook stamped
-                    // — including a value an elevated (`runAs: 'system'`) hook
-                    // derived from existing records this anonymous caller's
-                    // grant may never read. The whitelist above filters what the
-                    // caller WRITES; this line is what filters what it is SHOWN.
-                    // The caller already knows what it submitted, so the one
-                    // fact it lacks is the id. Projecting the row to the form's
-                    // declared fields would not do: a hook may rewrite a
-                    // declared field too. The key stays the top-level `id` of a
-                    // bare body — where the console's public form page reads
-                    // the created id — and no second read builds this answer.
-                    res.status(201).json({ id: result.id });
-                } catch (error: any) {
-                    const mapped = mapDataError(error);
-                    // Distinct message (this is not the "unhandled" channel),
-                    // same shared verdict — see `isExpectedRouteError`.
-                    if (!isExpectedRouteError(mapped.status, mapped.body)) {
-                        logError('[REST] Public form submit error:', error);
-                    }
-                    res.status(mapped.status).json(mapped.body);
-                }
-            },
-            metadata: {
-                summary: 'Submit an anonymous public form',
-                tags: ['forms', 'public'],
-            },
-        });
+        registerFormEndpoints.call(host, basePath);
     }
 
     /**

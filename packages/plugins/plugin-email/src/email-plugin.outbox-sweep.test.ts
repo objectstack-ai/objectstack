@@ -15,6 +15,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 import { DbQueueAdapter } from '@objectstack/service-queue';
+import { LiteKernel } from '@objectstack/core';
+import type { Plugin, PluginContext } from '@objectstack/core';
 import { EmailServicePlugin } from './email-plugin.js';
 import { EmailService, EMAIL_SEND_QUEUE } from './email-service.js';
 import { encodeAttachmentsForRow, encodeHeadersForRow } from './sys-email-payload.js';
@@ -491,5 +493,115 @@ describe('a datasource that re-keys a sys_email insert', () => {
     expect(transport.send).toHaveBeenCalledTimes(1);
     expect(h.sysEmail()).toHaveLength(1);
     expect(h.sysEmail()[0]).toMatchObject({ id: 'db-pk-7', status: 'sent' });
+  });
+});
+
+// ── a send issued before this plugin's own kernel:ready (#23946) ────────────
+
+/**
+ * Registers what the email plugin resolves at `init`, in ObjectQL's slot (its
+ * hard dependency): this file's engine as `objectql`, the manifest door, and a
+ * `protocol` whose layered `email_template` list serves exactly what that door
+ * was handed — the email plugin's own code-declared built-ins.
+ */
+class EngineFixturePlugin implements Plugin {
+  name = 'com.objectstack.engine.objectql';
+  type = 'standard' as const;
+  version = '1.0.0';
+  providesServices = ['objectql', 'manifest', 'protocol'];
+  readonly engine = fakeEngine();
+  private readonly manifests: Array<Record<string, any>> = [];
+  init(ctx: PluginContext): void {
+    ctx.registerService('objectql', this.engine);
+    ctx.registerService('manifest', { register: (m: Record<string, any>) => { this.manifests.push(m); } });
+    ctx.registerService('protocol', {
+      getMetaItemsForExecution: async ({ type }: { type: string }) => ({
+        items: type === 'email_template' ? this.manifests.flatMap((m) => m.emailTemplates ?? []) : [],
+      }),
+    });
+  }
+}
+
+/**
+ * Stands in for plugin-auth's dev admin seed: a plugin that depends on ObjectQL
+ * only (as `AuthPlugin` does), is registered ahead of the email plugin (as the
+ * served composition orders them), and from its own `kernel:ready` hook makes
+ * the verification send plugin-auth hands better-auth. A throw is caught and
+ * kept — better-auth's `runInBackgroundOrAwait` logs it and swallows it.
+ */
+class EarlySenderPlugin implements Plugin {
+  name = 'test.early-verification-sender';
+  type = 'standard' as const;
+  version = '1.0.0';
+  dependencies = ['com.objectstack.engine.objectql'];
+  readonly seen: { drainHooksAtSend?: number; result?: { id: string; status: string }; error?: unknown } = {};
+  constructor(private readonly engine: ReturnType<typeof fakeEngine>) {}
+  init(): void { /* nothing to register */ }
+  start(ctx: PluginContext): void {
+    ctx.hook('kernel:ready', async () => {
+      // The email plugin installs its outbox drain from ITS kernel:ready, so
+      // "none yet" is the measured proof that this send runs ahead of it.
+      this.seen.drainHooksAtSend = this.engine.afterInsertHooks().length;
+      try {
+        const email = ctx.getService<EmailService>('email');
+        this.seen.result = await email.sendTemplate({
+          template: 'auth.verify_email',
+          to: { address: 'admin@example.test', name: 'Dev Admin' },
+          data: {
+            user: { name: 'Dev Admin', email: 'admin@example.test', id: 'usr_seed' },
+            verificationUrl: 'https://example.test/verify?token=t1',
+            token: 't1',
+            expiresInMinutes: 60,
+            appName: 'Acme',
+          },
+          relatedObject: 'sys_user',
+          relatedId: 'usr_seed',
+        });
+      } catch (err) {
+        this.seen.error = err;
+      }
+    });
+  }
+}
+
+describe('a template send from an earlier-starting plugin\'s kernel:ready (#23946)', () => {
+  it('renders, persists its sys_email row and delivers once — no TEMPLATE_NOT_FOUND', async () => {
+    const transport = { send: vi.fn(async (_m: Record<string, any>) => ({ messageId: '<early@x>' })) };
+    const kernel = new LiteKernel({ logger: { level: 'error' } });
+    const fixture = new EngineFixturePlugin();
+    const sender = new EarlySenderPlugin(fixture.engine);
+    const plugin = new EmailServicePlugin({ transport, defaultFrom: { address: 'no-reply@example.test' } });
+    kernel.use(fixture);
+    kernel.use(sender);
+    kernel.use(plugin);
+    await kernel.bootstrap();
+    await plugin.outboxSweepSettled;
+    await flush();
+
+    // POSITIVE CONTROL — the send really ran before the email plugin's own
+    // kernel:ready wiring, and that wiring did run afterwards.
+    expect(sender.seen.drainHooksAtSend).toBe(0);
+    expect(fixture.engine.afterInsertHooks()).toHaveLength(1);
+
+    // THE PIN. Before the fix this was `TEMPLATE_NOT_FOUND: no templateLoader
+    // configured on EmailService`, and no row.
+    expect(sender.seen.error).toBeUndefined();
+    expect(sender.seen.result).toMatchObject({ status: 'sent' });
+    const rows = fixture.engine.rows('sys_email');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      id: sender.seen.result?.id,
+      status: 'sent',
+      message_id: '<early@x>',
+      subject: 'Verify your Acme email address',
+      to_addresses: 'Dev Admin <admin@example.test>',
+      related_object: 'sys_user',
+      related_id: 'usr_seed',
+    });
+    // Delivered once: the boot sweep that runs after it finds nothing stranded.
+    expect(transport.send).toHaveBeenCalledTimes(1);
+    expect(transport.send.mock.calls[0][0]).toMatchObject({ subject: 'Verify your Acme email address' });
+
+    await kernel.shutdown();
   });
 });

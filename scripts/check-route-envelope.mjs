@@ -384,7 +384,14 @@ const MODULES = {
     // implementation'`) left this file with that body for `ui-routes.ts`,
     // declared below at the count it had here; the sum is unchanged
     // (15 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 = 39).
-    stringError: 15,
+    //
+    // 15 → 11 (#23050 slice 11): NOT progress — the same MOVE as slices 1–3, 8
+    // and 10. The public form doors' four literal string `error` bodies (each
+    // door's 400 `INVALID_REQUEST`, `'slug is required'`, and each door's 404
+    // `FORM_NOT_FOUND`) left this file with `registerFormEndpoints`' body for
+    // `form-routes.ts`, declared below at the count they had here; the sum is
+    // unchanged (11 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 = 39).
+    stringError: 11,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -474,7 +481,14 @@ const MODULES = {
     // above. The UI view body's one `{ code, error }` body (that same 501
     // `NOT_IMPLEMENTED`) left with that body for `ui-routes.ts`, declared below;
     // the sum is unchanged (13 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 = 54).
-    siblingCode: 13,
+    //
+    // 13 → 7 (#23050 slice 11): NOT progress — the same MOVE as `stringError`
+    // above. The public form doors' six `{ code, error }` bodies (each door's
+    // 400 `INVALID_REQUEST` and 404 `FORM_NOT_FOUND`, the resolve door's 500
+    // `FORM_RESOLVE_FAILED` and the submit door's 400 `VALIDATION_ERROR`) left
+    // with that body for `form-routes.ts`, declared below; the sum is unchanged
+    // (7 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 = 54).
+    siblingCode: 7,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -689,6 +703,23 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 1,
     siblingCode: 1,
+  },
+
+  // [#23050 slice 11] `RestServer#registerFormEndpoints`' body — the public
+  // (anonymous) form doors, `GET /forms/:slug` and `POST /forms/:slug/submit` —
+  // moved out of `rest-server.ts` whole, on exactly slice 1's terms above: a
+  // MOVE, no wire answer changed, so it inherits `dialectOnly` and the two
+  // dialect facts, and no write-site count. Both counts were measured on the
+  // moved file and equal what left `rest-server.ts` in the same PR (stringError
+  // 15 → 11, siblingCode 13 → 7), so each sum is unchanged. Both only ever tick
+  // down. Discovered by the `*-routes.ts` convention and declared in the same
+  // PR that created the module, so the gap never exists.
+  'packages/rest/src/form-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 11 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 4,
+    siblingCode: 6,
   },
 };
 

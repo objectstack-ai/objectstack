@@ -1,0 +1,63 @@
+{
+  "name": "@objectstack/service-print",
+  "version": "18.0.0-next.2",
+  "license": "Apache-2.0",
+  "description": "Print Service for ObjectStack — renders a record's print page in headless Chromium under the requesting user's own principal and archives the PDF as a file attached to the record.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsup --config ../../../tsup.config.ts && node ../../../scripts/check-dts-emitted.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@objectstack/core": "workspace:*",
+    "@objectstack/service-storage": "workspace:*",
+    "@objectstack/spec": "workspace:*",
+    "playwright-core": "1.63.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.3",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.11"
+  },
+  "keywords": [
+    "objectstack",
+    "service",
+    "print",
+    "pdf",
+    "chromium"
+  ],
+  "author": "ObjectStack",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/objectstack-ai/objectstack.git",
+    "directory": "packages/services/service-print"
+  },
+  "homepage": "https://objectstack.ai/docs",
+  "bugs": "https://github.com/objectstack-ai/objectstack/issues",
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

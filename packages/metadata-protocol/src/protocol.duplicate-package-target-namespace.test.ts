@@ -129,8 +129,8 @@ describe('[#19577] duplicatePackage refuses an explicit targetNamespace the decl
 
             // ⭐ Nothing was minted and nothing was scanned: the refusal
             // precedes the manifest write AND the copy loop. The manifest write
-            // sits inside a best-effort `catch {}`, so a refusal raised only
-            // there would be swallowed and reported as `success: true`.
+            // does not judge a namespace's charset at all, so this is the only
+            // place the refusal can be raised.
             expect(installed).toHaveLength(0);
             expect(engine.registry.installPackage).not.toHaveBeenCalled();
             expect(engine.find).not.toHaveBeenCalled();

@@ -9,7 +9,7 @@
       "title": "transactionalBatch capability bit matches the mounted /batch behavior — atomicity, rollback codes, size cap",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -18,13 +18,13 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "two batch-writable objects (showcase_private_note and showcase_task both accept baseline member creates)",
+          "two batch-writable objects: showcase_private_note (title is enough) and showcase_task — a showcase_task create needs its required `project` lookup (a seeded showcase_project id), or it answers 400 VALIDATION_FAILED 'Project is required'",
           "default maxBatchSize (200 unless RestServerConfig.batch overrides)"
         ]
       },
       "steps": [
         "boot showcase isolated; GET /api/v1/discovery and read capabilities.transactionalBatch.enabled — on the wire each capability is a CapabilityDescriptor object { enabled, features?, description? } (discovery.zod.ts), never a bare boolean. The @objectstack/client getter is the exception: it FLATTENS each descriptor to a real boolean, so client.capabilities.transactionalBatch is a boolean and the two reads are spelled differently on purpose",
-        "POST /api/v1/batch with a well-formed cross-object atomic batch: operations = [create showcase_private_note {title}, create showcase_task {title}] and a TOP-LEVEL atomic: true; verify both rows exist afterwards. ⚠️ CrossObjectBatchRequestSchema declares operations + a top-level atomic and no options key at all — an options wrapper is silently STRIPPED by Zod, so the request runs with atomic defaulting to true",
+        "POST /api/v1/batch with a well-formed cross-object atomic batch: operations = [create showcase_private_note {title}, create showcase_task {title, project: <a seeded showcase_project id>}] and a TOP-LEVEL atomic: true; verify both rows exist afterwards. ⚠️ CrossObjectBatchRequestSchema declares operations + a top-level atomic and no options key at all — an options wrapper is silently STRIPPED by Zod, so the request runs with atomic defaulting to true",
         "POST /api/v1/batch with the same operations and a TOP-LEVEL atomic: false; capture status + error code. ⛔ Spelled as options {atomic: false} the key is stripped, atomic defaults to true, and the batch simply SUCCEEDS — the clause below then reads as a product failure when nothing failed",
         "POST /api/v1/batch where a MIDDLE operation must fail (e.g. create showcase_invoice missing its required name), sandwiched between two valid creates; capture the per-operation results and re-read all three would-be rows",
         "POST /api/v1/batch with operations.length > maxBatchSize (201 no-op creates on the default config); capture the rejection",
@@ -99,6 +99,12 @@
           "date": "2026-10-04",
           "change": "A5 / step 6 re-pointed: \"neither blocks the other\" holds only with options.continueOnError: true; the default (false) stops at the first failure with a NOT_ATTEMPTED tail and nothing rolled back. The clause now names the flag for the mixed-outcome leg and asserts the default stop as a second leg (batch.zod.ts BatchOptionsSchema.continueOnError and the BatchOperationResult errors describe; protocol.ts continueOnError branch). Assertion defect: the clause expected the mixed outcome from the default. Source 744b8f5f5 (#7581)",
           "ref": "#21735"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "the fixture line said showcase_task accepts a baseline create with only a title (#23878 checklist-accuracy finding); its project lookup is required. Re-measured on main c91af8ed6: a task create without project answers 400 VALIDATION_FAILED fields[project] required, alone or inside an atomic /batch, where the whole batch is refused and the sibling note does not persist; with a project the atomic batch answers 200. The fixture line and step 2's operations now carry the project; the rollback clause is unchanged and its re-run passed",
+          "ref": "#24036"
         }
       ]
     },
@@ -172,14 +178,14 @@
       "title": "Removed/retired authoring keys fail at parse/build with located guidance",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "build",
       "steps": [
         "sample retired keys across the ADR-0087 registries, at minimum: a query-surface tombstone (QueryAST cursor / joins / distinct / windowFunctions — retiredKey per #4286), the error-envelope tombstone (EnhancedApiError.fieldErrors, renamed to fields by ADR-0114 D4), and one entry from the retired-filter-operator registry in packages/spec/src/data/filter.zod.ts (RetiredFilterOperatorGuidance)",
         "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors; run ObjectSchema.create / os build where the key is config-side. The retired filter operator is DIFFERENT and is driven at runtime: author a stored filter carrying it (e.g. { name: { $regex: 'acme' } } in a view or widget filter) and confirm parse/build stay GREEN (FilterConditionSchema is an open record keyed by field name — no tombstone can live on it); then send the same predicate as the where of a query request on the running stack (e.g. POST /api/v1/data/<object>/query) and capture the 400 INVALID_FILTER refusal; then run `os migrate meta --from 16` and locate the filter-regex-options-retired advisory",
         "capture each rejection's full text",
-        "author one key documented as silently-stripped-by-design (a pure display annotation) and parse it — the strip must be deliberate, documented behavior, not an accident",
+        "the documented-strip control: parse an UNKNOWN key on the RestServerConfig `routes` sub-object — RestServerConfigSchema.safeParse({ routes: { someUnknownKey: 1 } }) (or RouteGenerationConfigSchema directly) — and confirm it parses clean with the key gone (routes reads back {}). The behavior is declared in packages/spec/src/api/rest-server.zod.ts: RouteGenerationConfigSchema's docblock states the schemas are not `.strict()`, which is exactly why its retired keys carry tombstones. No spec docblock declares a 'pure display annotation' that is stripped by design — that example is not the control; this documented non-strict sub-object is",
         "record which registry each sampled key came from"
       ],
       "acceptance": [
@@ -196,9 +202,9 @@
           "evidence": "error texts"
         },
         {
-          "clause": "the sampled silently-stripped-by-design key still parses clean AND its documentation says so — the strip stays deliberate and documented, not accidental",
+          "clause": "the documented-strip control still parses clean AND its documentation says so: an unknown key on RestServerConfig.routes strips silently, as RouteGenerationConfigSchema's docblock declares (the schemas are not `.strict()`), while that sub-object's RETIRED keys (includeObjects …) are refused with their prescriptions — the strip stays deliberate and documented, not accidental",
           "oracle": "build",
-          "verify": "parse succeeds; cite the doc/schema comment declaring the strip",
+          "verify": "RestServerConfigSchema.safeParse({ routes: { someUnknownKey: 1 } }) succeeds with routes {}; cite the RouteGenerationConfigSchema docblock (packages/spec/src/api/rest-server.zod.ts); and RouteGenerationConfigSchema.safeParse({ includeObjects: ['x'] }) fails with the retired-key prescription, so the same sub-object shows both behaviors",
           "evidence": "parse result + doc cite"
         },
         {
@@ -209,7 +215,7 @@
         }
       ],
       "negative": [
-        "also sample one key documented as silently-stripped-by-design (e.g. pure display annotations) to confirm the strip stays deliberate and documented, not accidental — and a tombstoned key that parses CLEAN anywhere is a P1 FAIL (the silent fourth state ADR-0049/0078 forbids)"
+        "also run the documented-strip control (step 4: an unknown key on RestServerConfig.routes, a sub-object the spec documents as non-strict) to confirm the strip stays deliberate and documented, not accidental — and a tombstoned key that parses CLEAN anywhere is a P1 FAIL (the silent fourth state ADR-0049/0078 forbids)"
       ],
       "source": [
         "#3358 §9",
@@ -238,6 +244,12 @@
           "date": "2026-10-04",
           "change": "A1 / step 2 re-pointed: the retired-filter-operator registry is not a parse/build gate — FilterConditionSchema is an open record, so a stored $regex / $options parses and builds green; it is refused at runtime with 400 INVALID_FILTER and the RETIRED_FILTER_OPERATORS prescription, and `os migrate meta` lists it (semantic entry filter-regex-options-retired). The clause now scores that registry on those terms. Assertion defect. Source filter.zod.ts RETIRED_FILTER_OPERATORS, 85d95e7d92 (#5701 / #5752)",
           "ref": "#21735"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "the strip-by-design leg named no concrete key, and no spec docblock declares a 'pure display annotation' that is stripped by design (#23878 checklist-accuracy finding; searched on main c91af8ed6). The leg now names the documented control the run used: an unknown key on RestServerConfig.routes parses clean to routes {} because RouteGenerationConfigSchema's docblock declares the schemas non-strict, and the same sub-object's retired key includeObjects is refused with its prescription. Re-run against the built @objectstack/spec: safeParse success with {} for the unknown key, failure naming '`routes.includeObjects` was removed …' for the tombstone",
+          "ref": "#24036"
         }
       ]
     },
@@ -246,7 +258,7 @@
       "title": "Server-Timing: the per-request X-OS-Debug-Timing path discloses spans to admins only, OS_SERVER_TIMING global mode to everyone, per-query detail admin-only always — on the server os dev actually runs",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -262,9 +274,9 @@
       ],
       "acceptance": [
         {
-          "clause": "with global mode OFF, the per-request path discloses to an admin: the admin request carrying X-OS-Debug-Timing carries the Server-Timing spans (total/auth/db/hooks/serialize) on the live hono server — the dispatcher opens the disclosure gate only after resolving an admin/service identity",
+          "clause": "with global mode OFF, the per-request path discloses to an admin: the admin request carrying X-OS-Debug-Timing carries the Server-Timing spans (parse, db, serialize, handler, total — the spans the hono adapter and plugin emit; there is no auth or hooks span) on the live hono server — the dispatcher opens the disclosure gate only after resolving an admin/service identity",
           "oracle": "network",
-          "verify": "step-2 response has a Server-Timing header naming the span set",
+          "verify": "step-2 response has a Server-Timing header naming the span set: parse, db, serialize, handler and total (packages/plugins/plugin-hono-server/src/adapter.ts parse/serialize/handler, hono-plugin.ts total and the db details)",
           "evidence": "header dump"
         },
         {
@@ -316,6 +328,12 @@
           "date": "2026-10-04",
           "change": "A1-A3 and steps 1/4 re-pointed: the modes were swapped. With OS_SERVER_TIMING off, X-OS-Debug-Timing is the admin-only per-request gate (admin gets spans, non-admin none); OS_SERVER_TIMING=true is global mode and sends spans to EVERY caller, with only X-OS-Debug-Timing-Detail admin-only (hono-plugin.ts: the serverTiming option doc and the Server-Timing middleware's globalTiming / gate.privileged branches). Title and negative follow; source cites the file. Assertion defect: the clause expected the env flag to be a second admin gate. Source #3163 / #3169",
           "ref": "#21735"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "clause 1's span list total/auth/db/hooks/serialize was stale (#23878 checklist-accuracy finding): no auth or hooks span exists in source. Re-measured on main c91af8ed6 with X-OS-Debug-Timing: 1 and global mode off: the admin's Server-Timing carries parse, db (N queries), serialize, handler and total; the member's identical request carries no Server-Timing header at all (clause 2, re-run); X-OS-Debug-Timing: json adds X-OS-Debug-Timing-Detail for the admin",
+          "ref": "#24036"
         }
       ]
     },
@@ -484,7 +502,7 @@
       "title": "Sampled endpoints return the standard error envelope with ledgered codes — no invented codes, no retired keys, statuses match the map",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -505,7 +523,7 @@
         "auth: anonymous GET /api/v1/data/showcase_private_note — the 401 sample",
         "authorization: as the baseline member POST /api/v1/data/showcase_announcement {\"title\": \"probe\"} — the 403 sample",
         "not-found: GET /api/v1/data/not_a_real_object and GET /api/v1/data/showcase_task/nonexistent-id-0000 — the two 404 flavors",
-        "batch: POST /api/v1/batch with options {\"atomic\": false} — the registered-extension-code sample (BATCH_NOT_ATOMIC)",
+        "batch: POST /api/v1/batch {\"operations\": [{\"object\": \"showcase_private_note\", \"data\": {\"title\": \"probe\"}}], \"atomic\": false} — atomic at the TOP LEVEL — the registered-extension-code sample (400 BATCH_NOT_ATOMIC). ⛔ Not options {\"atomic\": false}: CrossObjectBatchRequestSchema declares operations + a top-level atomic and no options key, so the wrapper is stripped, atomic defaults to true and the batch SUCCEEDS (200, a row created) — the same spelling api-backend.batch-transactional-discovery already warns about",
         "query-rejection: GET /api/v1/data/showcase_account?$pageSize=5 — the UNSUPPORTED_QUERY_PARAM sample",
         "validate every captured body against the spec: code membership in ErrorCode (error-code-ledger.zod.ts — the canonical ADR-0112 D4 union, StandardErrorCode.options ∪ REGISTERED_ERROR_CODES), envelope shape per ErrorResponseSchema/EnhancedApiErrorSchema (noting the REST flat dialect where it is the declared shape), fields[] entries against FieldErrorCode"
       ],
@@ -587,6 +605,12 @@
           "date": "2026-08-21",
           "change": "named the seeded demo personas in fixtures.requires. The 17.1.0 sweep recorded this item's 403 family as unreachable on stock fixtures and scored the item partial, having assumed a runner gets only the dev admin; the filer withdrew that in the same wave after driving Mei to a real 403 PERMISSION_DENIED (6/6 families, superseding #10233 on that point). The personas were always there — the item just never said so, which is what made the wrong assumption cheap. Requirement text now carries both persona emails, the well-known password constant and its source file, so the next runner does not repeat it (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "step 6 sent the BATCH_NOT_ATOMIC sample as options {atomic:false} (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: that body answers 200 and creates the row, because batch.zod strips the options wrapper; a TOP-LEVEL atomic:false answers 400 BATCH_NOT_ATOMIC ('Cross-object batch is always atomic; use POST /data/:object/batch …'), a code ErrorCode carries. The step now uses the top-level spelling; the clauses are unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -595,7 +619,7 @@
       "title": "Bulk write doors (createMany/updateMany/deleteMany, per-object batch): per-row outcomes, size cap, single/bulk parity, no silent full-table writes",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -605,17 +629,17 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "showcase_private_note (baseline create/edit — the bulk probe object)",
+          "showcase_private_note (baseline create/read/edit — the bulk probe object; the baseline member holds NO allowDelete on it, so the delete legs run as admin)",
           "default maxBatchSize 200 unless overridden"
         ]
       },
       "steps": [
-        "boot showcase isolated; as the member POST /api/v1/data/showcase_private_note/createMany with records: [3 notes with unique-marker titles]; GET them back",
+        "boot showcase isolated; as the member POST /api/v1/data/showcase_private_note/createMany with a BARE JSON ARRAY of 3 notes with unique-marker titles (the body is the array; a {records} wrapper answers 400 VALIDATION_FAILED); GET them back",
         "single/bulk parity: POST a 4th note via the single door (POST /api/v1/data/showcase_private_note) and diff its response/stored shape against one createMany row (same fields stamped: owner_id, timestamps, defaults)",
-        "as the member POST /api/v1/data/showcase_private_note/updateMany with a where clause matching ONLY the marker titles and a body change; re-read",
-        "as the member POST updateMany with a where clause matching NOTHING (an impossible marker); capture the response",
+        "as the member POST /api/v1/data/showcase_private_note/updateMany {\"records\": [{\"id\": \"<marker id>\", \"data\": {…}}, …]} naming ONLY the marker rows' ids — updateMany is id-based (UpdateManyRequestSchema); a {where, data} body answers 400 VALIDATION_FAILED naming `records`; re-read",
+        "as the member POST updateMany naming ids that match nothing the member may touch: a nonexistent id, and the id of another user's private note (invisible to the member); capture the per-row results, then re-read the foreign note system-side. Also send {\"records\": []}",
         "as admin POST createMany with records.length == maxBatchSize+1 (201 on default config); capture",
-        "as the member POST deleteMany scoped to the marker titles; re-read; then re-issue the same deleteMany (now matching nothing)",
+        "deleteMany is id-based too ({\"ids\": [...]}; a {where} body answers 400 naming `ids`). As the member, POST deleteMany on two of its own marker notes and capture the refusal — the member baseline holds no allowDelete on showcase_private_note (row 0 PERMISSION_DENIED, the rest NOT_ATTEMPTED); then as admin POST deleteMany with the marker ids; re-read; then re-issue the same deleteMany (the ids are gone now)",
         "throughout: capture per-row result arrays and any ERR_BULK_RESULT_MISMATCH appearance"
       ],
       "acceptance": [
@@ -626,15 +650,15 @@
           "evidence": "the reads + diff"
         },
         {
-          "clause": "updateMany applies exactly to the where-matched set: marker rows changed, every other row untouched (spot-check via a system-context read of a non-marker note)",
+          "clause": "updateMany applies exactly to the rows it names: marker rows changed, every other row untouched (spot-check via a system-context read of a non-marker note)",
           "oracle": "api",
           "verify": "re-reads: all marker rows carry the change; the control row does not",
           "evidence": "re-reads"
         },
         {
-          "clause": "an empty match is a calm no-op: updateMany/deleteMany matching nothing answer 2xx reporting 0 affected — NOT an error, and NEVER a full-table write (the #2982 failure shape was bulk writes escaping their scope)",
+          "clause": "a write that names nothing the caller may touch is a calm per-row no-op, never a wider write: updateMany naming a nonexistent id, or another user's invisible note, answers 2xx with that row failed RECORD_NOT_FOUND (the same code for both — no existence oracle) and the foreign row unchanged; an empty records list answers 2xx with total 0; a repeated deleteMany reports its now-missing ids RECORD_NOT_FOUND (the #2982 failure shape was bulk writes escaping their scope — an id-based door cannot match more rows than it names)",
           "oracle": "api",
-          "verify": "step-4/6 responses report zero affected; a follow-up unfiltered system read shows no unexpected mutations/deletions",
+          "verify": "step-4/6 responses: per-row RECORD_NOT_FOUND for the nonexistent and the foreign id, success false, succeeded 0; the foreign note re-reads unchanged system-side; the empty list reports total 0; the repeated deleteMany's first row RECORD_NOT_FOUND",
           "evidence": "responses + control read"
         },
         {
@@ -644,9 +668,9 @@
           "evidence": "response + count"
         },
         {
-          "clause": "deleteMany removes exactly the scoped set and the deletion persists",
+          "clause": "deleteMany removes exactly the ids it names and the deletion persists — and it is gated per row on delete permission: the member (no allowDelete) is refused row by row, the admin's run succeeds",
           "oracle": "api",
-          "verify": "post-delete GET finds zero marker rows; the member's other notes remain",
+          "verify": "the member's deleteMany: row 0 PERMISSION_DENIED, later rows NOT_ATTEMPTED, nothing deleted; the admin's deleteMany: every named row success, a post-delete GET finds those rows gone and the member's other notes remain",
           "evidence": "re-reads"
         },
         {
@@ -657,7 +681,7 @@
         }
       ],
       "negative": [
-        "run the updateMany-matching-nothing probe as a persona with rows it CANNOT see and confirm the invisible rows are not counted or mutated (bulk writes are RLS-scoped, #2982) — a nonzero affected-count there is a security FAIL, not a bookkeeping quirk"
+        "run the updateMany probe as a persona with rows it CANNOT see — name another user's note id — and confirm the invisible row is neither counted nor mutated and answers the same RECORD_NOT_FOUND as a nonexistent id (bulk writes are RLS-scoped, #2982) — a success on that row is a security FAIL, not a bookkeeping quirk"
       ],
       "variants": [
         "door:createMany",
@@ -685,6 +709,12 @@
           "date": "2026-08-07",
           "change": "new — bulk-write contract item (boundaries, parity, per-row outcomes), per the deep-test contract",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-16",
+          "change": "re-pointed to the id-based bulk doors (#23878 checklist-accuracy findings, re-measured on main c91af8ed6). updateMany takes {records:[{id,data}]} and deleteMany {ids:[…]} (a where body answers 400 VALIDATION_FAILED naming records / ids), and createMany a bare array. The where-clause steps and the 'empty match' clause are rewritten for that contract: a nonexistent id and another user's invisible note both answer per-row RECORD_NOT_FOUND with the foreign row unchanged, and records [] answers total 0 — the clause still fails if a row the caller cannot see is written. The baseline member holds no allowDelete on showcase_private_note (member deleteMany: PERMISSION_DENIED then NOT_ATTEMPTED; single DELETE 403), so the delete legs name the member's refusal and run the deletion as admin. BATCH_TOO_LARGE at 201 records re-measured: 400, zero rows",
+          "ref": "#24036"
         }
       ]
     },
@@ -693,7 +723,7 @@
       "title": "Every route family across all ELEVEN route ledgers — REST, dispatcher, auth, storage/i18n/settings/datasource services, metadata HMR, trigger-api, cloud-connection, console static — is actually mounted on the live server — no route that exists only in unit tests",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -707,14 +737,14 @@
         ]
       },
       "steps": [
-        "boot the real HTTP stack (os dev); read REST_ROUTE_LEDGER and pick at least one representative route per family (discovery, openapi, metadata, ui, crud, batch, data-actions, forms, search, security, security-explain, record-shares, sharing-rules, reports, approvals, email, analytics, packages, external-datasource)",
+        "boot the real HTTP stack (os dev); read REST_ROUTE_LEDGER and pick at least one representative route per family (discovery, openapi, metadata, ui, crud, batch, data-actions, forms, search, security, security-explain, record-shares, sharing-rules, approvals, email, analytics, packages, external-datasource)",
         "fire each sampled route as admin with a minimal-valid shape (GETs verbatim; parameterized routes filled with real seeded names, e.g. GET /api/v1/data/showcase_task, GET /api/v1/meta/object/showcase_task, GET /api/v1/security/explain)",
         "capture status + code per route",
         "read the OTHER ledgers and fire one representative route each: the dispatcher ledger (packages/runtime/src/route-ledger.ts) families share-links/keys/notifications/suggested-bindings/i18n/analytics (e.g. GET /api/v1/share-links, POST /api/v1/keys, GET /api/v1/notifications, GET /api/v1/security/suggested-bindings, GET /api/v1/i18n/locales, POST /api/v1/analytics/query), AUTH_ROUTE_LEDGER (GET /api/v1/auth/get-session), the storage + i18n service ledgers",
         "fire the two service families that were UNLEDGERED when this item was first written and are ledgered at head — the run must NOT file the old unledgered finding: as admin GET /api/settings (settings-route-ledger.ts, #7526 — note the /api/settings base, NOT /api/v1) and GET /api/v1/datasources (datasource-route-ledger.ts, #7744). For the datasource family probe BOTH sides of the #9391/#9593 floor: anonymous GET /api/v1/datasources/drivers → 401 UNAUTHENTICATED (the 401 proves the route is mounted AND the floor holds — it is NOT the routing 404, and NOT the pre-#9391 'always-available static catalog'), then the same GET as admin (manage_platform_settings via admin_full_access) → 200 driver catalog; GET /api/v1/datasources as admin → 200 (or 503 naming the unwired service, which still proves the mount)",
         "fire the RAW-APP-mounted families — these registrars mount via getRawApp() and are structurally invisible to IHttpServer.getMountedRoutes(), so the #7526 parity dogfood gate CANNOT observe them and this item's live probes are their only live-HTTP observation (each ledger header says so): metadata HMR GET /api/v1/dev/metadata-events (metadata-route-ledger.ts — an SSE stream: read only the status line + headers with a short timeout, never wait for the stream to end; mounted ONLY under a literal NODE_ENV=development, which os dev sets — #12140/#5673) and POST /api/v1/dev/metadata-events; trigger-api POST /api/v1/automation/hooks/no_such_flow/bogus (trigger-api-route-ledger.ts — the handler answers a structured JSON refusal, distinguishable from the routing 404); cloud-connection GET /api/v1/runtime/config (anonymous 200 by design) and GET /api/v1/cloud-connection/status (cloud-connection-route-ledger.ts — 16 rows across four registrar families; sample only for MOUNT parity here, platform-core owns the marketplace lifecycle depth); console static GET /_console (console-route-ledger.ts — disposition static-asset)",
         "fire the dispatcher meta state route: GET /api/v1/meta/object/showcase_task/state/status?from=in_review, the same with ?from omitted, and GET /api/v1/meta/object/not_a_real_object/state/status as the 404 control",
-        "fire one deliberately-unmounted path (GET /api/v1/definitely-not-a-route) as the 404 control",
+        "fire one deliberately-unmounted path (GET /api/v1/definitely-not-a-route) as the 404 control; GET /api/v1/reports answers that same routing-404 shape — the reports family was RETIRED (#20102: its eight saved-report rows left the REST ledger with their routes and the SDK namespace), so it is no longer a variant",
         "compare GET /api/v1/discovery capability bits against the families that answered (search/export/transactionalBatch at minimum)"
       ],
       "acceptance": [
@@ -749,7 +779,7 @@
           "evidence": "trace"
         },
         {
-          "clause": "the sweep reaches the OTHER ledgers, not just the 19 REST families: the DISPATCHER ledger's representative routes each answer non-routing-404 on the live hono server — share-links (GET /api/v1/share-links), keys (POST /api/v1/keys), notifications (GET /api/v1/notifications), suggested-bindings (GET /api/v1/security/suggested-bindings), i18n (GET /api/v1/i18n/locales), analytics (POST /api/v1/analytics/query, capability-conditional) — the #3361 dispatcher-vs-hono class this item exists for, now covered on the dispatcher's OWN table (packages/runtime/src/route-ledger.ts), not just the REST one",
+          "clause": "the sweep reaches the OTHER ledgers, not just the 18 REST families: the DISPATCHER ledger's representative routes each answer non-routing-404 on the live hono server — share-links (GET /api/v1/share-links), keys (POST /api/v1/keys), notifications (GET /api/v1/notifications), suggested-bindings (GET /api/v1/security/suggested-bindings), i18n (GET /api/v1/i18n/locales), analytics (POST /api/v1/analytics/query, capability-conditional) — the #3361 dispatcher-vs-hono class this item exists for, now covered on the dispatcher's OWN table (packages/runtime/src/route-ledger.ts), not just the REST one",
           "oracle": "api",
           "verify": "per-route status table for the six dispatcher families vs the 404 control; a dispatcher route answering the routing-404 shape is a FAIL (dispatcher-mounted-in-tests-only)",
           "evidence": "the dispatcher status table + control trace"
@@ -802,7 +832,6 @@
         "security-explain",
         "record-shares",
         "sharing-rules",
-        "reports",
         "approvals",
         "email",
         "analytics",
@@ -830,7 +859,7 @@
         "absence-inference"
       ],
       "source": [
-        "packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (variant source — the 19 REST families — re-pointed #18104: the bare word REST is carried in this file only as a substring of longer tokens)",
+        "packages/rest/src/rest-route-ledger.ts#REST_ROUTE_LEDGER (variant source — the 18 REST families — re-pointed #18104: the bare word REST is carried in this file only as a substring of longer tokens)",
         "packages/rest/src/rest-route-ledger.conformance.test.ts",
         "packages/runtime/src/route-ledger.ts#ROUTE_LEDGER (dispatcher ledger — share-links/keys/notifications/suggested-bindings/i18n/analytics families + the meta.getLegalNextStates state route — re-pointed #18104: getLegalNextStates is a CLIENT METHOD name, carried here only inside a dotted string value)",
         "packages/plugins/plugin-auth/src/auth-route-ledger.ts#AUTH_ROUTE_LEDGER (AUTH_ROUTE_LEDGER — the enumerated better-auth table, #3656; raw-app mount)",
@@ -865,6 +894,12 @@
           "date": "2026-08-30",
           "change": "de-staled against the head ledger universe, re-derived from source (find '*route-ledger.ts' — ELEVEN files). Three revision-2 claims had gone false and a run following them files false findings: (a) the 'unledgered:/api/settings' and 'unledgered:/api/v1/datasources' variants/clauses/sources — both families are ledgered at head (settings-route-ledger.ts #7526; datasource-route-ledger.ts + conformance test #7744) and the tranche-3 discipline-gap finding is retired; (b) step 5's 'always-available static catalog' for GET /datasources/drivers — since #9391/#9593 ALL eleven datasource-admin routes (catalog included) answer 401/403 without manage_platform_settings, so the step now drives all three personas and pins the 401-means-mounted reading; (c) the PENDING-GAPS.md source refs — that file was deleted after the 2026-08 sweep (FOLLOW-UPS.md records it). Extended the sweep to the five raw-app ledgers the revision-2 universe missed (metadata HMR with its #12140 dev posture, trigger-api #11863, cloud-connection #11882 with 16 rows, console static #11882 — each header states getMountedRoutes() cannot see them, making this item their only live-HTTP observation); added the corresponding variants and the absence-inference trap",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "the REST ledger carries 18 families, not 19: 'reports' was RETIRED (#20102 — packages/rest/src/rest-route-ledger.ts keeps only a RETIRED comment where its rows were), so the variant is dropped, the family list in step 1 no longer names it, and clause 6 and source[0] say 18 (#23878 checklist-accuracy finding). Re-run on main c91af8ed6: one route per remaining REST family answered non-routing-404 (eighteen of eighteen), GET /api/v1/reports answered the same 404 ENDPOINT_NOT_FOUND as the GET /api/v1/definitely-not-a-route control, and the tree still holds eleven *route-ledger.ts files",
+          "ref": "#24036"
         }
       ]
     },
@@ -873,7 +908,7 @@
       "title": "Metadata-authored `api` endpoints mount as real URLs with their declared auth/cache policy",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -883,7 +918,7 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the two live declarative endpoints in examples/app-showcase/src/system/apis/index.ts (a GET task feed at /api/v1/apps/showcase/tasks and a flow-delegating endpoint) — ADR-0121 / #5040"
+          "the three live declarative endpoints in examples/app-showcase/src/system/apis/index.ts — a GET task feed at /api/v1/apps/showcase/tasks (object_operation, showcase_task_feed) and two flow-delegating endpoints, showcase_inquiry_purge_api (/api/v1/apps/showcase/inquiries/purge) and showcase_recalc_estimates_api (/api/v1/apps/showcase/recalc); `os build` reports them as '3 APIs' — ADR-0121 / #5040"
         ]
       },
       "variants": [
@@ -937,7 +972,7 @@
         "dispatcher-vs-hono-route"
       ],
       "source": [
-        "examples/app-showcase/src/system/apis/index.ts (the two live endpoints)",
+        "examples/app-showcase/src/system/apis/index.ts (the three live endpoints)",
         "ADR-0121 / #5040 (declarative endpoint E-series)",
         "packages/runtime notFound-fallback mount seam",
         "packages/spec/src/api/endpoint-publish-gate.ts#validateApiEndpointDeclarations (the authoring refusal of script / proxy targets, run by the stack schema) + packages/spec/src/kernel/metadata-plugin.zod.ts (api is code-only: allowRuntimeCreate false, #5488) + packages/runtime/src/endpoint-executor.ts#planEndpointTarget (the runtime's 501 second door)"
@@ -954,6 +989,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21720 parked on #22017 (row 13), re-pointed clause. A3 asserted a live 501 from a script / proxy endpoint authored in a scratch package, and the run found no way to author one without editing source. No public door produces one: api is code-only (#5488), and the stack schema refuses script / proxy targets (validateApiEndpointDeclarations, packages/spec/src/api/endpoint-publish-gate.ts). The runtime's 501 is a second door for a declaration that reaches the store another way, pinned by endpoint-executor.test.ts. A3 now asserts the authoring refusal (oracle build) and cites the pins; step 4, variant 5, `automated` and source follow",
           "ref": "#22017"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "the fixture text named two live declarative endpoints while the showcase declares three and os build reports '3 APIs' (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: apis/index.ts declares showcase_task_feed (object_operation), showcase_inquiry_purge_api and showcase_recalc_estimates_api (both flow). Wording only, no re-run owed; the feed's live answers still hold (authed 200 with Cache-Control: private, max-age=30; anonymous 401 UNAUTHENTICATED; an unmatched /apps path 404)",
+          "ref": "#24036"
         }
       ]
     },
@@ -962,7 +1003,7 @@
       "title": "Package REST lifecycle: POST /packages creates (201), a duplicate name is refused 409 (no silent manifest clobber), PATCH partial-patches the manifest, and an explicit overwrite re-install replaces in place without duplicating",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -979,7 +1020,7 @@
       },
       "steps": [
         "boot showcase isolated; sign in as admin; choose a scratch id com.example.qa-pkg-lifecycle-probe",
-        "POST /api/v1/packages with { manifest: { id: 'com.example.qa-pkg-lifecycle-probe', name: 'QA Probe', version: '1.0.0', scope: 'custom', type: 'app' } }; capture status + body; then GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe to confirm it persisted (the dispatcher install lands in BOTH the in-memory registry and durable sys_packages)",
+        "POST /api/v1/packages with { manifest: { id: 'com.example.qa-pkg-lifecycle-probe', name: 'QA Probe', version: '1.0.0', scope: 'project', type: 'app' } }; capture status + body; then GET /api/v1/packages/com.example.qa-pkg-lifecycle-probe to confirm it persisted (the dispatcher install lands in BOTH the in-memory registry and durable sys_packages) (scope must be one of cloud | system | project — 'custom' answers 400 VALIDATION_ERROR naming manifest.scope — and the install derives a namespace from the id)",
         "POST the SAME manifest again with NO overwrite flag; capture status + body",
         "PATCH /api/v1/packages/com.example.qa-pkg-lifecycle-probe with { name: 'QA Probe Renamed', description: 'edited', version: '1.1.0' }; GET the package back and confirm the patch persisted and that id/scope/type and the lifecycle fields (enabled/status/installedAt) are untouched",
         "PATCH three malformed bodies: { name: '' }, { version: 'not-semver' }, and {} (nothing to update); capture each rejection",
@@ -1007,9 +1048,9 @@
           "evidence": "before/after package reads"
         },
         {
-          "clause": "PATCH validates its inputs: an empty name → 400 ('name must not be empty'), a non-semver version → 400 ('version must be semantic (e.g. 1.0.0)'), and a nothing-to-update body → 400 — each a caller-fixable 400, never a 500",
+          "clause": "PATCH validates its inputs: an empty name, a non-semver version and a nothing-to-update body each answer 400 VALIDATION_ERROR — a caller-fixable 400, never a 500",
           "oracle": "api",
-          "verify": "the three step-5 responses are 400 with the located messages",
+          "verify": "the three step-5 responses are each status 400 with error.code VALIDATION_ERROR (the message wording is not pinned: it names the field and, for the version, the SemVer 2.0.0 form)",
           "evidence": "the three rejections"
         },
         {
@@ -1052,6 +1093,12 @@
           "date": "2026-09-20",
           "change": "the scratch probe id these steps POST is rewritten to a reverse-domain spelling (com.example.qa-pkg-lifecycle-probe) — `ManifestSchema.id` now carries `MANIFEST_ID_PATTERN`, so the underscored spellings this item used to name are refused by every door but the HTTP install door, and a checklist that teaches one is the trap the pattern was added to close. Steps, legs and expected verdicts are otherwise unchanged",
           "ref": "#18319"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "step 2's manifest used scope 'custom', which POST /api/v1/packages refuses 400 VALIDATION_ERROR ('manifest.scope: Invalid option: expected one of cloud|system|project'), so the install the rest of the item builds on never happened (#23878 checklist-accuracy finding). It now uses scope 'project'. Clause 4 pinned two message sentences, one of which had changed ('version must be a SemVer 2.0.0 string …'); it now scores status 400 and code VALIDATION_ERROR for all three bodies. Re-run on main c91af8ed6: 201 install, 409 RESOURCE_CONFLICT duplicate, partial PATCH 200, the three malformed PATCHes 400 VALIDATION_ERROR, overwrite re-install 201 with exactly one row",
+          "ref": "#24036"
         }
       ]
     },
@@ -1368,7 +1415,7 @@
       "title": "A retired metadata DEFINITION (whole schema type withdrawn) refuses at every authoring door — distinct from a retired key, and the door that must not fall through to 'unknown type, ignored'",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "build",
       "personas": [
@@ -1381,16 +1428,16 @@
           "a scratch authoring source tree (os build target) plus a live boot for the metadata-write door"
         ],
         "knownGaps": [
-          "Some retired defs were removed by ADR-0087 Route 3 ('no tombstone, no D2 conversion — this table plus the D3 semantic entry are the declaration', e.g. data/ExternalDataSource per #8075). For those, the correct behavior may be the GENERIC unknown-type refusal rather than a def-specific prescription. The run must read each sampled entry's route BEFORE deciding what a pass looks like — scoring a Route-3 def against a prescription it was never given is a false fail, and scoring it against 'anything 4xx' is a false pass."
+          "Some retired defs were removed by ADR-0087 Route 3 ('no tombstone, no D2 conversion — this table plus the D3 semantic entry are the declaration', e.g. data/ExternalDataSource per #8075). For those, the correct behavior may be the GENERIC unknown-type refusal rather than a def-specific prescription. The run must read each sampled entry's route BEFORE deciding what a pass looks like — scoring a Route-3 def against a prescription it was never given is a false fail, and scoring it against 'anything 4xx' is a false pass. Measured on main c91af8ed6: a zero-consumer def's only author-reachable door is the import of its schema export, refused generically (no prescription), so it scores as Route-3-shaped whatever route its entry names; the def-specific prescription, where one exists, is surfaced by its CARRIER's retired-key tombstone"
         ]
       },
       "steps": [
         "enumerate packages/spec/src/migrations/entries/retired-defs/ and record the count and the version prefixes present (the registry currently carries entries at both the current major and the next)",
         "sample at least four entries spanning BOTH version prefixes and at least three different domains (e.g. data/, system/, identity/, ui/)",
-        "for each sampled def, read its entry file and record which ADR-0087 route retired it and whether a prescription was authored",
-        "author a stack that declares metadata of each sampled retired type and run os build",
-        "attempt the same through the runtime metadata-write door (POST/PUT /meta/<type>) against a live boot",
-        "as a control, author metadata of a type that was NEVER declared (a typo'd/invented type name) and compare its refusal to the retired-def refusals"
+        "for each sampled def, read its entry file and record which ADR-0087 route retired it, whether a prescription was authored, and its CARRIER: the authored key that embedded it, retired as a retiredKey() tombstone (e.g. manifest.loading for kernel/PluginLoadingConfig and its closure; agent.lifecycle for automation/StateMachine and its family), or none — most entries are schema-export definitions with zero consumers: no metadata-type binding, no stack collection, no embedding (e.g. data/ExternalDataSource, automation/ScheduleState). Sample at least one def of each kind",
+        "build door, per sampled def, each in its own scratch stack run through os build: for a def WITH a carrier, author the carrier key (e.g. manifest.loading: { strategy: 'lazy' }; an agent carrying lifecycle) — the refusal is the carrier's tombstone. For a def WITHOUT one there is no metadata of that type to author ('a stack that declares metadata of the retired type' could only be an invented key, which is the control below), so drive the door it actually had: import its Zod export from its @objectstack/spec subpath in the config (e.g. ExternalDataSourceSchema from '@objectstack/spec/data') and confirm json-schema/DOMAIN/NAME.json is absent from packages/spec/json-schema",
+        "runtime door against a live boot: PUT /api/v1/meta/TYPE/NAME carrying the carrier key where its type is runtime-writable, and record a code-only type's up-front refusal where it is not (agent is code-only); for a zero-consumer def, PUT a type name spelled after it (e.g. external_data_source) — no type was ever bound, so the expected answer is the same refusal as the control",
+        "as a control, author an invented top-level stack key (e.g. qaInventedFamily) at the build door and PUT an invented type name at the runtime door, and compare their refusals to the retired-def refusals"
       ],
       "acceptance": [
         {
@@ -1438,6 +1485,12 @@
           "date": "2026-08-17",
           "change": "new — api-backend.enforce-or-remove-authoring-gates samples the retired-KEY registries and explicitly requires three key-level surfaces, but nothing exercised the retired-DEF registry, which is a materially different door: a withdrawn KEY loses one property, a withdrawn DEFINITION loses an entire metadata family, and the fall-through failure mode ('unknown type, ignored') is different from the strip-mode failure the key item guards. The registry has grown substantially since the ledger was built and now carries entries for the next major as well as the current one",
           "ref": "#9299"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-17",
+          "change": "steps re-pointed (checklist-accuracy finding, #23878 close-out): RETIRED_DEFS entries are schema-export definitions, most with no metadata-type binding or stack collection, so 'a stack that declares metadata of each sampled retired type' could only be an invented key. Steps 3–6 now sample by carrier (an authored key retired as a tombstone, or none), drive the carrier key or the schema-export import at os build, name the runtime type each reaches, and make the control an invented stack key and an invented type; knownGaps[0] records the reading. No clause changed. Re-run with os build on a minimal scratch stack (baseline exit 0): 17 data/ExternalDataSource (zero consumers) import → exit 2 \"The requested module '@objectstack/spec/data' does not provide an export named 'ExternalDataSourceSchema'\"; 18 automation/ScheduleState (zero consumers) import → exit 2, the same generic shape; 17 kernel/PluginLoadingConfig via manifest.loading → exit 2 'manifest.loading was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block …'; 18 automation/StateMachine via agent.lifecycle → exit 2 'agent.lifecycle was removed in @objectstack/spec 17.7.0 … Delete the key …'; control qaInventedFamily → exit 2 'Unrecognized key(s) on this stack definition'. The carrier refusals name the retirement and differ from the control; the zero-consumer ones are generic, which knownGaps[0] scores as correct. json-schema/data/ExternalDataSource.json, automation/ScheduleState.json and automation/StateMachine.json are absent. Runtime door on stock showcase: PUT /meta/agent/NAME with lifecycle → 403 'Metadata type agent is code-only …'; PUT /meta/external_data_source/NAME and the invented control → the same 400 \"… is not a metadata type\"",
+          "ref": "#24036"
         }
       ]
     },
@@ -1702,12 +1755,12 @@
       "title": "Server-side aggregation contract: every AggregationFunction × DateGranularity gives known answers — ruled empty-set values, ISO-Monday week buckets, retired array_agg/string_agg refuse with prescriptions, and aggregate stays secured (engine-only, never raw driver)",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
         "admin (known-answer runs over the seeded baseline)",
-        "a restricted non-admin persona for the secured-aggregate leg (Mei Phone phone.demo@example.com or Ada Auditor auditor.demo@example.com, DEMO_PERSONA_PASSWORD 'showcase123' — same seeded personas api-backend.error-envelope-ledger names)"
+        "a restricted non-admin persona for the secured-aggregate leg whose visible row set provably DIFFERS from the admin's: the search:qa-contributor-bound-member persona (a contributor-bound member who reads only its own showcase_invoice rows — give it one of its own, on an ACTIVE account). ⛔ Not the seeded demo personas: Mei Phone is refused showcase_invoice at the object gate (403 PERMISSION_DENIED, no answer to compare) and Ada Auditor holds viewAllRecords (her counts equal the admin's), so neither can tell a secured aggregate from a raw one"
       ],
       "fixtures": {
         "app": "showcase",
@@ -1715,6 +1768,10 @@
           "seeded showcase_account rows (numeric annual_revenue, date signed_on, select status/sales_region) — the same known-answer dataset api-backend.query-contract-matrix uses; expected values are ALWAYS computed locally from an unfiltered baseline read, never hardcoded",
           "a boolean field for the #11152 min/max-over-boolean leg (showcase_field_zoo carries checkbox-typed fields)"
         ],
+        "provisioning": {
+          "use": "search:qa-contributor-bound-member",
+          "why": "supplies acceptance[4]'s restricted persona: a contributor-bound member whose showcase_invoice read is its own rows only, so its grouped count must differ from the admin's. Without it the secured-aggregate clause has no discriminating persona on stock (the demo personas are refused at the object gate or read everything) and scores blocked(fixture)"
+        },
         "knownGaps": [
           "Stock seed dates may not spread signed_on across enough DISTINCT buckets for every granularity to be answer-discriminating (e.g. all rows in one ISO week proves week-bucketing resolved, not that it bucketed correctly). Same discipline as api-backend.date-range-preset-matrix: record which granularities were answer-discriminating vs merely well-formed; seeding a few rows at known date offsets during the run is the honest close — record it if done.",
           "Whether a given aggregate is answered by driver pushdown or by the in-memory path (packages/objectql/src/in-memory-aggregation.ts) depends on driver + timezone (tz≠UTC date buckets take the in-memory path per the #1982 note); the two paths must label identically (#3773/#3839 seam). Record which path answered when it is observable (e.g. via the timezone lever), and score the CONTRACT, which is path-independent."
@@ -1727,7 +1784,7 @@
         "granularity matrix: record wall clock + timezone, then for each of the 5 granularities POST { groupBy: [{ field: 'signed_on', dateGranularity }], aggregations: [{ function: 'count', alias: 'n' }] }; reconcile the returned bucket KEYS and counts against locally computed ISO-8601 buckets (bucketDateValue's own shapes: 'YYYY', 'YYYY-Qn', 'YYYY-MM', 'YYYY-MM-DD', 'YYYY-Wnn' with weeks starting Monday / week 1 = first Thursday); rows with null/unparseable dates must land in ONE real-null-keyed bucket (#3839 — never a '(null)' sentinel string)",
         "empty-set semantics: (a) a query whose where matches nothing, grouped and ungrouped; (b) a per-aggregation filter (#10576 — aggregations[].filter, SQL FILTER(WHERE …) semantics) that empties one measure while a sibling measure keeps the full bucket. Expected per the platform ruling (emptyGroupValueFor, packages/spec/src/data/aggregation-policy.ts): count/count_distinct/sum → 0, avg/min/max → null — a 0 flattened onto avg (or a null on count) is a FAIL either direction (objectui#3136)",
         "negatives: aggregations [{ function: 'array_agg', field: 'name', alias: 'x' }] and the string_agg twin → 400 with the RETIREMENT prescriptions (each message ends with the 'os migrate meta --from 16' instruction; only those two spellings get it); an unknown function ('median') → 400 whose issue lists the six legal functions (zod's own enum error, deliberately NOT the retirement text — telling a typo'd author their value 'was removed' would misinform); aggregations naming a nonexistent field → the located protocol refusal (protocol.ts assertAggregationFieldsExist); aggregations as a non-array → the shape refusal with the worked example",
-        "secured-aggregate leg: run one grouped count as the restricted persona over an object where their visible row set provably differs from the admin's; compute their expectation from THEIR OWN filtered baseline. The rule under test is the one packages/runtime/src/action-execution.ts states for the aggregate door: aggregate MUST run through the ObjectQL engine (RLS/tenant middleware + the FLS aggregate-input gate) — a raw driver.aggregate() evaluates over every row"
+        "secured-aggregate leg: run one grouped count (count by status on showcase_invoice) as the provisioned contributor-bound member, whose visible row set provably differs from the admin's; compute their expectation from THEIR OWN filtered baseline. The rule under test is the one packages/runtime/src/action-execution.ts states for the aggregate door: aggregate MUST run through the ObjectQL engine (RLS/tenant middleware + the FLS aggregate-input gate) — a raw driver.aggregate() evaluates over every row"
       ],
       "acceptance": [
         {
@@ -1811,6 +1868,12 @@
           "date": "2026-08-30",
           "change": "new — the aggregation vocabulary (6 functions × 5 granularities) had no matrix item: api-backend.query-contract-matrix covers the filter/select/sort axes of the same door and stops short of groupBy/aggregations. Register claims verified against source before authoring: the 6/5 member counts, the empty-set ruling (count/count_distinct/sum→0, avg/min/max→null — the register's 'count→0, avg/min/max→null' was correct but incomplete), the ISO-Monday week rule, the two retirement messages, and the engine-only security rule at action-execution.ts. Only one enumSource pin fits an item, so AggregationFunction carries it and DateGranularity (also a named export, pinnable in principle) is hand-counted in step 1",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-16",
+          "change": "the secured-aggregate leg named Mei Phone or Ada Auditor as the restricted persona, and neither gives a differing visible set (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: Mei's grouped count on showcase_invoice answers 403 PERMISSION_DENIED at the object gate and Ada's equals the admin's (viewAllRecords). The item now opts into search:qa-contributor-bound-member, and the re-run on that persona — one own invoice on an active account — gave [{draft: 1}] against the admin's [{draft: 3}, {paid: 5}, {sent: 5}]",
+          "ref": "#24036"
         }
       ]
     },
@@ -2283,7 +2346,7 @@
       "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, four endpoint switches each gate exactly the face its name states (#15542/#15854), maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2295,7 +2358,7 @@
         "app": "showcase",
         "requires": [
           "a stock showcase boot for the default-config half (prefix /meta, cache on, masking ON by default)",
-          "a persona whose field-level security hides at least one field of a served object — without one, the masking clause scores blocked(fixture), never green",
+          "a persona whose field-level security hides at least one field of a served object — on stock that is the client_liaison position's showcase_client_liaison set, which withholds showcase_project.budget, .spent and .budget_remaining (readable:false); no stock persona carries FLS on any showcase_account field, so a showcase_account diff is empty for everyone. Without such a persona the masking clause scores blocked(fixture), never green",
           "a scratch vitest harness in packages/rest for the variant half (construct, registerRoutes(), getRoutes())"
         ],
         "knownGaps": [
@@ -2306,7 +2369,7 @@
       "steps": [
         "boot showcase isolated; as admin fire the default-prefix metadata mounts and capture status: GET /api/v1/meta, /meta/types, /meta/diagnostics, /meta/_drafts, GET /meta/object, GET /meta/object/showcase_task, /meta/object/showcase_task/references, /meta/object/showcase_task/layers, /meta/book/<a seeded book>/tree; fire the routing-404 control alongside",
         "GET /api/v1/discovery and read routes.metadata — it must equal the base plus the configured prefix",
-        "as the restricted persona GET /api/v1/meta/object/showcase_account and diff the served fields against the admin's copy of the same document",
+        "as the restricted persona (a member bound to the client_liaison position) GET /api/v1/meta/object/showcase_project and diff the served fields against the admin's copy of the same document",
         "harness: construct with { metadata: { prefix: '/metadata' } } and confirm every metadata mount re-bases and the discovery body advertises the new prefix",
         "harness: construct with { metadata: { endpoints: { types: false } } } — GET {prefix} and GET {prefix}/types both disappear (one handler, two paths)",
         "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type and NOTHING else — exactly the one mount its describe() names (#15542 moved the whole-store family off this switch; a run that still sees /diagnostics, /_drafts or POST /_migrate-stored leave with it is the old radius returning)",
@@ -2338,7 +2401,7 @@
         {
           "clause": "`maskObjectFields` defaults ON and is a real disclosure gate: a caller who cannot read a field gets a served object schema without that field at all — not its name, label, type, options, formula, visibleWhen, defaultValue or requiredPermissions — and `false` serves the full schema to every authenticated caller (ADR-0106 D8)",
           "oracle": "api",
-          "verify": "diff the restricted persona's /meta/object/showcase_account against the admin's on the default config: the hidden field is absent, not blanked. Then in the harness confirm maskObjectFields:false is preserved through normalizeConfig (it must not be re-defaulted to true) and that resolveObjectMasker returns the pass-through masker for it and for any metaType other than 'object'",
+          "verify": "diff the client_liaison member's /meta/object/showcase_project against the admin's on the default config: budget, spent and budget_remaining are absent, not blanked. Then in the harness confirm maskObjectFields:false is preserved through normalizeConfig (it must not be re-defaulted to true) and that resolveObjectMasker returns the pass-through masker for it and for any metaType other than 'object'",
           "evidence": "the two served documents + the normalized value"
         },
         {
@@ -2405,6 +2468,12 @@
           "date": "2026-09-08",
           "change": "the knownGaps were semantically re-characterised, not merely annotated: what they describe as the harness-scoring workaround is now the PERMANENT method, by ruling (#15543, director seat, summon #17, decision batch #2, 2026-09-07) that the crud / metadata / batch keys stay, are embedder-only, and get their reachability written into the schema docblocks and the liveness ledger instead of being re-derived from the boot paths at every run. A runner reading the old text would be waiting for a boot-path flag that is not coming, which is the semantic change this bump records. Two factual corrections ride along, both measured rather than inherited: the door `createHonoServerPlugin({ restConfig })` these gaps named DOES NOT EXIST (HonoServerPlugin is a class whose restConfig reader takes only api.basePath for the SPA fallback and never constructs a REST server), and `os serve` does read a config file — the stack's own top-level `api:` block — forwarding exactly two keys out of it (`packages/cli/src/commands/serve.ts#apiConfig`), so 'nothing the CLI reads' was an over-claim. The acceptance clauses, steps, variants and oracles are untouched: what moved is what a runner should conclude from a non-default clause being unreachable, not what it must measure.",
           "ref": "#15543"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "the masking step named showcase_account, but no stock persona has field-level security there (#23878 checklist-accuracy finding), so the diff was empty for everyone and the clause could only pass vacuously or block. Re-measured on main c91af8ed6: the served /meta/object/showcase_project for a client_liaison member lacks exactly budget, budget_remaining and spent against the admin's copy, while showcase_account is identical for the liaison and a contributor. The fixture line, step 3 and clause 4's verify now name showcase_project and the client_liaison persona",
+          "ref": "#24036"
         }
       ]
     },

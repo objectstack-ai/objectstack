@@ -211,8 +211,50 @@ export function concurrencyVerdict(groupExpression, { workflow = 'W' } = {}) {
 // ⛔ The marker is PLAIN TEXT, never an HTML comment. This platform's body
 // sanitizer is measured to eat short angle-bracket fragments, and a de-dup key
 // that can be swallowed files a duplicate an hour.
-const MARKER_PREFIX = 'os-hourly-full-run';
-const TITLE_PREFIX = 'hourly full run: red on main';
+//
+// Both prefixes carry the watched workflow's CADENCE (#23880): the card for a
+// nightly workflow must not call itself hourly. For an hourly workflow they
+// spell exactly what they always did -- `hourly full run: red on main` and
+// `os-hourly-full-run` -- so an open card filed before the cadence existed is
+// still found by its title and by its marker, and refreshed, never duplicated.
+const markerPrefix = (cadence) => `os-${cadence}-full-run`;
+const titlePrefix = (cadence) => `${cadence} full run: red on main`;
+
+// THE CADENCE OF EACH WATCHED WORKFLOW, by its byte-exact `name:` -- the same
+// spelling `scheduled-full-run-card.yml` lists in `workflow_run.workflows`.
+// CLOSED on purpose: a workflow missing here is REFUSED by `cardIdentity`,
+// never defaulted, because a defaulted cadence prints the wrong one on the card
+// and the card is the only reader of that run. Adding a workflow to the card's
+// watched list therefore means adding its cadence here in the same change.
+export const CARD_CADENCES = Object.freeze({
+  CI: 'hourly',
+  'Lint & Type Check': 'hourly',
+  'Rerun Safety': 'nightly',
+});
+
+// The words each cadence puts in the body. The `hourly` entry is the text the
+// body has always carried, byte for byte.
+const CADENCE_WORDS = Object.freeze({
+  hourly: Object.freeze({
+    every: 'every hour',
+    previous: 'an hour ago',
+    about: (name) => [
+      `\`${name}\` runs the FULL battery on \`main\` every hour (#16467). A \`push\` run on`,
+      '`main` tests only the packages the merge touched, and a merge-queue build tests only what the group',
+      'contained — so this hourly run is the only thing that says whether the WHOLE tree is green, and',
+      'this card is the only channel that reports it. Nothing is blocked by it.',
+    ],
+  }),
+  nightly: Object.freeze({
+    every: 'every night',
+    previous: 'the night before',
+    about: (name) => [
+      `\`${name}\` runs on \`main\` once a night, and no pull request, merge-queue build or other`,
+      'scheduled run takes its measurement -- so this nightly run is the only thing that reports it, and',
+      'this card is the only channel that carries it. Nothing is blocked by it.',
+    ],
+  }),
+});
 
 // ONE CARD PER WORKFLOW, not one card for both, and that is a decision rather
 // than an oversight. `CI` and `Lint & Type Check` are two different batteries
@@ -229,10 +271,19 @@ export function cardIdentity(workflowName) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '');
   if (slug === '') throw new Error(`cardIdentity: '${name}' slugs to nothing, so it cannot be an identity`);
+  if (!Object.hasOwn(CARD_CADENCES, name)) {
+    throw new Error(
+      `cardIdentity: '${name}' has no cadence in CARD_CADENCES (${Object.keys(CARD_CADENCES).join(', ')}). ` +
+        'Add it there in the same change that makes scheduled-full-run-card.yml watch it -- a defaulted ' +
+        'cadence would print the wrong one on the only card that reports this run.'
+    );
+  }
+  const cadence = CARD_CADENCES[name];
   return {
     workflowName: name,
-    title: `${TITLE_PREFIX} (${name})`,
-    marker: `${MARKER_PREFIX}-${slug}`,
+    cadence,
+    title: `${titlePrefix(cadence)} (${name})`,
+    marker: `${markerPrefix(cadence)}-${slug}`,
     labels: ['bug', 'domain:devx', 'priority:p1'],
   };
 }
@@ -298,8 +349,9 @@ export async function fileOrRefreshCard({ identity, body, listPage, createIssue,
 }
 
 // The card body. The run link and the commit range are the whole product: a red
-// hourly run says "main broke somewhere in the last hour", and the commits
-// between the previous GREEN scheduled run and this one are that hour.
+// scheduled run says "main broke somewhere since the last green one" -- the last
+// hour for an hourly workflow, the last night for a nightly one -- and the
+// commits between the previous GREEN scheduled run and this one are that span.
 export function renderBody({
   identity,
   runUrl,
@@ -316,6 +368,13 @@ export function renderBody({
   // opposite directions.
   rangeNote = null,
 }) {
+  // The cadence's words. `cardIdentity` refuses a workflow with no cadence; an
+  // identity built by hand without one is refused here for the same reason.
+  const words = CADENCE_WORDS[identity?.cadence];
+  if (!words) {
+    throw new Error(`renderBody: the identity carries no known cadence ('${identity?.cadence}') -- build it with cardIdentity`);
+  }
+  const heading = `## What landed since the last green ${identity.cadence} run`;
   const range = previousGreen
     ? `\`${String(previousGreen.head_sha).slice(0, 10)}\` (run ${previousGreen.run_id}, the last green ` +
       `\`${identity.workflowName}\` schedule run) .. \`${String(headSha).slice(0, 10)}\``
@@ -324,7 +383,7 @@ export function renderBody({
   const suspects = previousGreen
     ? commits.length > 0
       ? [
-          `## What landed since the last green hourly run`,
+          heading,
           '',
           `Range: ${range}${compareUrl ? ` — [compare](${compareUrl})` : ''}`,
           commitsTruncated
@@ -335,17 +394,17 @@ export function renderBody({
           '',
         ]
       : [
-          `## What landed since the last green hourly run`,
+          heading,
           '',
           `Range: ${range}`,
           '',
-          '⚠️ Nothing landed in that range. The same tree was green an hour ago and is red now, so',
+          `⚠️ Nothing landed in that range. The same tree was green ${words.previous} and is red now, so`,
           'this is a FLAKE, an infrastructure fault, or a suite that depends on wall-clock time or on',
           'something outside the repository. ⛔ Do not go looking for the commit that broke it.',
           '',
         ]
     : [
-        `## What landed since the last green hourly run`,
+        heading,
         '',
         '⚠️ No commit range could be named for this red run.',
         rangeNote ?? '',
@@ -356,19 +415,16 @@ export function renderBody({
 
   return [
     `${identity.marker} — machine-findable marker for this generated card. ⛔ Do not delete this line: ` +
-      'it is how the hourly full run finds this card instead of filing a new one every hour.',
+      `it is how the ${identity.cadence} full run finds this card instead of filing a new one ${words.every}.`,
     '',
     `# ${identity.title}`,
     '',
     `_Swept ${sweptAt} · [run log](${runUrl}) · commit \`${headSha}\` · conclusion \`${conclusion}\`._`,
     '',
-    `\`${identity.workflowName}\` runs the FULL battery on \`main\` every hour (#16467). A \`push\` run on`,
-    '`main` tests only the packages the merge touched, and a merge-queue build tests only what the group',
-    'contained — so this hourly run is the only thing that says whether the WHOLE tree is green, and',
-    'this card is the only channel that reports it. Nothing is blocked by it.',
+    ...words.about(identity.workflowName),
     '',
-    '⛔ The remedy is never to narrow, skip or delete the failing check to make the hourly run green.',
-    'Fix what it names and let the next hourly run refresh this card; a card nobody reopens is closed by',
+    `⛔ The remedy is never to narrow, skip or delete the failing check to make the ${identity.cadence} run green.`,
+    `Fix what it names and let the next ${identity.cadence} run refresh this card; a card nobody reopens is closed by`,
     'the next green run being uneventful, not by editing this one.',
     '',
     ...suspects,
@@ -632,7 +688,7 @@ async function releaseGate(argv) {
 // remedy is to find what stopped registering, never to lower the number.
 const SELF_TEST_BATTERIES = Object.freeze({
   'scheduled-full-run concurrency isolation': 20,
-  'scheduled-full-run card identity and de-dup': 23,
+  'scheduled-full-run card identity and de-dup': 34,
   'release gate: the selection rule on the recorded 2026-10-12 listing': 8,
   'release gate: the selection rule on synthetic runs': 17,
   'release gate: release.yml wiring': 6,
@@ -897,6 +953,94 @@ async function selfTest() {
     const pages = [Array.from({ length: 100 }, (_, i) => issue(i + 1)), [firstCard]];
     const found = await findExistingCard({ identity: ci, listPage: async (n) => pages[n - 1] ?? [], maxPages: 3 });
     if (found?.number !== 42) throw new Error('de-dup: a multi-page scan lost the card');
+  });
+
+  // -- The cadence (#23880): each cadence, the back-compat pins for the card
+  //    already open under the hourly identity, and the refusal of a workflow
+  //    the closed map does not name.
+  const rerun = cardIdentity('Rerun Safety');
+  const OPEN_CI_TITLE = 'hourly full run: red on main (CI)';
+  const OPEN_CI_MARKER = 'os-hourly-full-run-ci';
+  const OPEN_CI_MARKER_LINE =
+    'os-hourly-full-run-ci — machine-findable marker for this generated card. ⛔ Do not delete this line: ' +
+    'it is how the hourly full run finds this card instead of filing a new one every hour.';
+  const bodiesOf = (identityUnderTest) => [
+    renderBody({ identity: identityUnderTest, runUrl: 'u', headSha: 'a', conclusion: 'failure', sweptAt: 't',
+      previousGreen: { run_id: 4, head_sha: 'b' }, commits: [{ sha: 'c', title: 'x' }] }),
+    renderBody({ identity: identityUnderTest, runUrl: 'u', headSha: 'a', conclusion: 'failure', sweptAt: 't',
+      previousGreen: { run_id: 4, head_sha: 'b' }, commits: [] }),
+    renderBody({ identity: identityUnderTest, runUrl: 'u', headSha: 'a', conclusion: 'failure', sweptAt: 't', rangeNote: 'n' }),
+  ];
+  await check(() => {
+    if (ci.cadence !== 'hourly' || ci.title !== OPEN_CI_TITLE || ci.marker !== OPEN_CI_MARKER) {
+      throw new Error(`cadence: the CI identity moved (${ci.cadence}, '${ci.title}', '${ci.marker}') -- the open card would be duplicated`);
+    }
+  });
+  await check(() => {
+    for (const b of bodiesOf(ci)) {
+      if (b.split('\n')[0] !== OPEN_CI_MARKER_LINE) throw new Error(`cadence: the CI marker line moved: '${b.split('\n')[0]}'`);
+    }
+  });
+  await check(async () => {
+    // The open CI card exactly as it was filed before the cadence existed.
+    const open = { number: 23885, title: OPEN_CI_TITLE, body: `${OPEN_CI_MARKER_LINE}\n# ${OPEN_CI_TITLE}` };
+    const found = await findExistingCard({ identity: cardIdentity('CI'), listPage: page([issue(7), open]) });
+    if (found?.number !== 23885) throw new Error(`cadence: the open CI card was not found by its title (${found?.number})`);
+  });
+  await check(async () => {
+    const renamed = { number: 23885, title: 'renamed by a human', body: `${OPEN_CI_MARKER_LINE}\n` };
+    const found = await findExistingCard({ identity: cardIdentity('CI'), listPage: page([renamed]) });
+    if (found?.number !== 23885) throw new Error('cadence: the open CI card was not found by its marker alone');
+  });
+  await check(() => {
+    if (lint.cadence !== 'hourly' || lint.title !== 'hourly full run: red on main (Lint & Type Check)') {
+      throw new Error(`cadence: Lint & Type Check is not hourly ('${lint.title}')`);
+    }
+  });
+  await check(() => {
+    if (
+      rerun.cadence !== 'nightly' ||
+      rerun.title !== 'nightly full run: red on main (Rerun Safety)' ||
+      rerun.marker !== 'os-nightly-full-run-rerun-safety'
+    ) {
+      throw new Error(`cadence: Rerun Safety is not nightly ('${rerun.title}', '${rerun.marker}')`);
+    }
+  });
+  await check(() => {
+    for (const b of bodiesOf(rerun)) {
+      if (/hourly|every hour|an hour ago/.test(b)) throw new Error(`cadence: a nightly card body says hourly:\n${b}`);
+      if (!b.includes('every night') || !b.includes('## What landed since the last green nightly run')) {
+        throw new Error(`cadence: a nightly card body lacks its own cadence words:\n${b}`);
+      }
+    }
+    if (!bodiesOf(rerun)[1].includes('green the night before')) throw new Error('cadence: the nightly flake reading is not nightly');
+  });
+  await check(() => {
+    for (const b of bodiesOf(ci)) {
+      if (/nightly|every night|the night before/.test(b)) throw new Error(`cadence: an hourly card body says nightly:\n${b}`);
+    }
+  });
+  await check(() => {
+    let message = '';
+    try {
+      cardIdentity('Spec Coverage');
+    } catch (error) {
+      message = error.message;
+    }
+    if (!message.includes('CARD_CADENCES')) {
+      throw new Error(`cadence: a workflow outside the map was not refused by name (${message || 'accepted'})`);
+    }
+  });
+  await check(() => {
+    const { cadence: _dropped, ...handBuilt } = ci;
+    if (!threw(() => renderBody({ identity: handBuilt, runUrl: 'u', headSha: 'a', conclusion: 'failure', sweptAt: 't' }))) {
+      throw new Error('cadence: renderBody defaulted the cadence of an identity that carries none');
+    }
+  });
+  await check(() => {
+    if (matchesCard(issue(1, { title: ci.title, body: ci.marker }), rerun) || matchesCard(issue(1, { title: rerun.title, body: rerun.marker }), ci)) {
+      throw new Error("cadence: the nightly and hourly identities matched each other's cards");
+    }
   });
 
   // -- THE ACCEPTANCE SHAPE, driven end to end against a mutable board: one red

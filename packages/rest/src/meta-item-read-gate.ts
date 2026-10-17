@@ -145,6 +145,14 @@ export interface MetaReadGateListSource {
      * an empty doc corpus is "every doc unclaimed, so `org`" — both GRANT.
      */
     listMetaItems(type: 'book' | 'doc' | 'object'): Promise<unknown> | undefined;
+    /**
+     * [#24031] One `getMetaItem` BY-NAME read of the object `name`, env-scoped
+     * the way {@link listMetaItems} is — absent when this transport's protocol
+     * has no by-name read, and then {@link loadObjectItem} asks the list as
+     * before. Answers the read's envelope (`{ item }`). A THROW is a fault,
+     * ⛔ never "no such object".
+     */
+    getObjectItem?(name: string): Promise<unknown>;
 }
 
 /** Everything {@link createMetaItemReadGate} reads, supplied by the transport. */
@@ -402,9 +410,9 @@ export type NavDocAudienceGate = (entry: any) => boolean;
  * Load the object metadata items for the current protocol/environment,
  * coerced to a plain array. Returns `[]` when metadata is unavailable so
  * callers fail OPEN (the data call itself needs the same metadata and will
- * surface any real error). Shared by `enforceApiAccess` (one object), the
- * cross-object batch route (all ops, fetched once) and the nav-servability
- * gate.
+ * surface any real error). Shared by the cross-object batch route (all ops,
+ * fetched once) and the nav-servability gate; the single-object exposure gate
+ * reads its one object by name ({@link loadObjectItem}).
  */
 export async function loadObjectItems(source: MetaReadGateListSource): Promise<any[]> {
     try {
@@ -428,6 +436,49 @@ export async function loadObjectItems(source: MetaReadGateListSource): Promise<a
             (err as Error)?.message ?? err,
         );
         return [];
+    }
+}
+
+/**
+ * [#24031] The ONE object the API-exposure gate judges, read by name — or
+ * `undefined` when no object is behind the name (no declared exposure policy,
+ * so the gate passes the request on, #3770).
+ *
+ * The gate used to ask {@link loadObjectItems} and search the list for the
+ * name. The list read serves every object decorated, and the decoration is a
+ * full schema diagnostic of each one, so every `/data` request paid a
+ * diagnostic pass over the whole registry to read one object's `enable`. The
+ * by-name read decorates only the object it serves.
+ *
+ * The answers are the list's:
+ *
+ *  - The item counts only under its own name, the match the list search made,
+ *    so a name the by-name read resolves to some other object is still "no
+ *    object here".
+ *  - A THROWN read fails OPEN and logs, as {@link loadObjectItems} does and
+ *    for the reason it records (#3545); "no object" is an answer, not a fault,
+ *    and logs nothing.
+ *  - A source with no by-name read (`getObjectItem` absent) asks the list, as
+ *    before.
+ *
+ * ⛔ Nothing here is cached: each request reads the object's current
+ * document, so a metadata change is honoured on the next request.
+ */
+export async function loadObjectItem(source: MetaReadGateListSource, name: string): Promise<any | undefined> {
+    if (typeof source.getObjectItem !== 'function') {
+        return (await loadObjectItems(source)).find((o: any) => o?.name === name);
+    }
+    try {
+        const envelope: any = await source.getObjectItem(name);
+        const item = envelope?.item;
+        return item !== null && typeof item === 'object' && item.name === name ? item : undefined;
+    } catch (err) {
+        logWarn(
+            '[REST] api-exposure gate: object metadata read failed — failing open ' +
+                '(auth + CRUD/FLS/RLS still enforce on the data call)',
+            (err as Error)?.message ?? err,
+        );
+        return undefined;
     }
 }
 

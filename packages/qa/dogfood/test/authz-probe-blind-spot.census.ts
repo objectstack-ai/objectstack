@@ -529,11 +529,12 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'module on the registrar list (`packages/rest/src/rest-server-registrar-files.ts`) — ' +
       '`data-action-routes.ts`, `batch-routes.ts`, `approvals-routes.ts`, `sharing-routes.ts`, ' +
       '`analytics-routes.ts`, `security-routes.ts`, `discovery-routes.ts`, `email-routes.ts`, ' +
-      '`search-routes.ts` and `ui-routes.ts`, the modules the bodies of `registerDataActionEndpoints`, ' +
-      '`registerBatchEndpoints`, `registerApprovalsEndpoints`, `registerSharingEndpoints`, ' +
-      '`registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, `registerSecurityExplainEndpoints`, ' +
-      '`registerSecurityEndpoints`, `registerDiscoveryEndpoints`, `registerOpenApiEndpoints`, ' +
-      '`registerEmailEndpoints`, `registerSearchEndpoints` and `registerUiEndpoints` moved to; ' +
+      '`search-routes.ts`, `ui-routes.ts` and `form-routes.ts`, the modules the bodies of ' +
+      '`registerDataActionEndpoints`, `registerBatchEndpoints`, `registerApprovalsEndpoints`, ' +
+      '`registerSharingEndpoints`, `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, ' +
+      '`registerSecurityExplainEndpoints`, `registerSecurityEndpoints`, `registerDiscoveryEndpoints`, ' +
+      '`registerOpenApiEndpoints`, `registerEmailEndpoints`, `registerSearchEndpoints`, ' +
+      '`registerUiEndpoints` and `registerFormEndpoints` moved to; ' +
       'reachable = those inside registerMetadataEndpoints',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -778,10 +779,24 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // new occurrences are this slice's seam, the same two spellings once (the
     // host literal's forwarder, two; the host interface's member, two). No call
     // site was added.
+    // [#23050 slice 11] 70 / 19 / 51 UNCHANGED, the same measurement again:
+    // `registerFormEndpoints`' body (two registration sites, `GET
+    // {base}/forms/:slug` and `POST {base}/forms/:slug/submit`, outside
+    // `registerMetadataEndpoints`, so in the blind spot) moved to
+    // `form-routes.ts`, which joins the list (length 11 -> 12) with its own
+    // control. `this.routeManager.register(` stays 63 over the twelve files
+    // (18 here + 9 + 5 + 7 + 8 + 1 + 6 + 4 + 1 + 1 + 1 + 2),
+    // `private register*Endpoints(` stays 16 (the registrar is still declared
+    // here), and `enforceAuth` stays 108: the two doors never call it (their
+    // authorization is the form's own declaration), so no call site moved, and
+    // this slice's host literal and interface name no such member. Measured at
+    // the move commit, before the list learned the module: population 68 and
+    // `this.routeManager.register(` 61 over eleven files, the two sites out of
+    // reach.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
-      'registrar list length': 11,
+      'registrar list length': 12,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
       'approvals-routes.ts: this.routeManager.register(': 7,
@@ -792,6 +807,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'email-routes.ts: this.routeManager.register(': 1,
       'search-routes.ts: this.routeManager.register(': 1,
       'ui-routes.ts: this.routeManager.register(': 1,
+      'form-routes.ts: this.routeManager.register(': 2,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
