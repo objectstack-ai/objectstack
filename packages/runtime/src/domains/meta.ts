@@ -1766,6 +1766,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         // renders it), never a fall-through to a registry that
                         // would serve the canonical schema for it.
                         if (memberNamed) throw e;
+                        // [#7557, #24097] …and so is the refusal of an object
+                        // whose package is disabled: the registry below keeps
+                        // serving that object (it is a resolution reader), so
+                        // falling through would serve what the protocol refused.
+                        if ((e as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') throw e;
                         return undefined; // fall through to registry / 404
                     }
                 };
@@ -1773,7 +1778,14 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 let found: any = protocolFirst ? await readFromProtocol() : undefined;
                 if (found === undefined && !memberNamed) {
                     const qlService = await deps.getObjectQL(_context);
-                    const data = qlService?.registry?.getObject(name);
+                    const registry = qlService?.registry;
+                    // [#7557, #24097] The registry answers a disabled package's
+                    // object too, so it does not answer for one here: the
+                    // protocol read below refuses it `404 OBJECT_PACKAGE_DISABLED`,
+                    // the answer the listing and the data plane give.
+                    const disabled = typeof registry?.isObjectPackageDisabled === 'function'
+                        && registry.isObjectPackageDisabled(name) === true;
+                    const data = disabled ? undefined : registry?.getObject(name);
                     // [#5563] The registry hands back the bare ObjectSchema, so this
                     // fallback used to answer a different body shape than the
                     // protocol branch above for the very same request. Wrap it in
