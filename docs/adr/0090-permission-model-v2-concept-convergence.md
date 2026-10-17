@@ -579,19 +579,27 @@ not just "who did".
 >
 > Unchanged: strict containment; the `everyone` / `guest` anchors, which no organization-level or
 > delegated administrator binds and no caller assigns (D9); and the ADR-0068 D2 identity names,
-> which `sys_user_position.position` refuses from every non-system writer.
+> which `sys_user_position.position` refuses from every writer.
 >
-> **Measured on `origin/main` `eda6f14b7b`.** Each of the eight permission sets `plugin-security`
-> ships (`default-permission-sets.ts`) is settled by the three conditions. Inside: `member_default`,
-> `viewer_readonly` and the three D10 agent ceilings (`mcp_agent_data_read`, `mcp_agent_data_write`,
-> `mcp_agent_restricted`). Outside: `admin_full_access` (a, c), `organization_admin` (a, c) and
-> `organization_admin_no_bypass` (c: `setup.access`). The ruling's fallback — an explicit denylist
-> for a shipped set the conditions cannot settle, in place of a wider rule — therefore names no set
-> at this date; a set shipped later that the conditions cannot settle joins that denylist by an
-> amendment here. The delegated-administration gate's `isTenantAdmin` (a wildcard
-> `modifyAllRecords` holder) reads the walled `organization_admin` as tenant-level today; under this
-> note it is organization-level. No spec key is added, and the v18 upgrade entry's `replacement`
-> text (`18.walled-catalog-tenant-writes-retired`) stands as published: this note makes it true.
+> **Measured on `origin/main` `eda6f14b7b`.** Of the eight permission sets `plugin-security` ships
+> (`default-permission-sets.ts`), the three conditions settle five. Inside: `member_default` and
+> `viewer_readonly`. Outside: `admin_full_access` (a, c), `organization_admin` (a, c) and
+> `organization_admin_no_bypass` (c: `setup.access`). Outside (denylist): the three D10 agent
+> ceilings — `mcp_agent_data_read`, `mcp_agent_data_write` and, by kind, `mcp_agent_restricted`, since
+> an agent ceiling is not a person's set. The conditions place them inside and so mis-settle them: an
+> agent ceiling's bound is the delegating principal's own grants (D10 rule 1), not the organization
+> wall. Held by a person as a direct grant, the two reading ceilings carry no row scope on the
+> Layer-0-inert SCIM projection tables (no organization column), and in a walled deployment with no
+> platform baseline they read every organization's rows there — a read the granting organization
+> administrator does not hold. The ruling's fallback — an explicit denylist for a shipped set the conditions cannot settle,
+> in place of a wider rule — therefore names those three sets; a set shipped later that the conditions
+> cannot settle joins that denylist by an amendment here. The general case — an authored set with a
+> `'*'` read and no row scope on a Layer-0-inert readable object, in a deployment with no platform
+> baseline — is not settled by this note: it is held for a maintainer decision on a separate card.
+> The delegated-administration gate's `isTenantAdmin` (a wildcard `modifyAllRecords` holder) reads
+> the walled `organization_admin` as tenant-level today; under this note it is organization-level.
+> No spec key is added, and the v18 upgrade entry's `replacement` text
+> (`18.walled-catalog-tenant-writes-retired`) stands as published: this note makes it true.
 
 ---
 
