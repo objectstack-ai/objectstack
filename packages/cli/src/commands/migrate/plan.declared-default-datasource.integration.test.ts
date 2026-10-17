@@ -42,7 +42,9 @@ import Database from 'better-sqlite3';
  *  - the plan examined every declared object (`unexaminedObjects: 0`) and
  *    names who chose its database (`config-datasource`, `qa_main`);
  *  - its unmanaged-table sweep counts that database's tables once, although
- *    the primary and `qa_main` are two connections to the one file.
+ *    the primary and `qa_main` are two connections to the one file;
+ *  - `os migrate unmapped-columns`, a filter over the plan's own findings,
+ *    reads the platform object's unmapped column from the same datasource.
  *
  * `os dev` runs as the operator runs it, compiling the config, with
  * `OS_MIGRATE_AND_EXIT=1` (its `serve --dev` child boots, syncs and exits) and
@@ -141,11 +143,12 @@ function devBootOnce(): string {
   return output;
 }
 
-function planJson(): any {
-  const r = spawnSync(TSX, [RUN_DEV, 'migrate', 'plan', '--json'], {
+/** One read-only `os migrate` door's `--json` document. */
+function migrateJson(args: string[]): any {
+  const r = spawnSync(TSX, [RUN_DEV, 'migrate', ...args, '--json'], {
     cwd: dir, env: env(), encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS,
   });
-  expect(r.status, `os migrate plan failed:\n${`${r.stdout}\n${r.stderr}`.slice(-1500)}`).toBe(0);
+  expect(r.status, `os migrate ${args.join(' ')} failed:\n${`${r.stdout}\n${r.stderr}`.slice(-1500)}`).toBe(0);
   return JSON.parse(r.stdout);
 }
 
@@ -183,7 +186,7 @@ describe('os migrate plan on a datasourceMapping-default declared datasource (#2
     try { db.exec('ALTER TABLE sys_user ADD COLUMN fx24120_legacy TEXT'); } finally { db.close(); }
 
     const reported = new Set([...devBootOnce().matchAll(DRIFT_LINE)].map((m) => m[1]));
-    const plan = planJson();
+    const plan = migrateJson(['plan']);
     const planned = new Set((plan.changes as Array<{ table: string; column?: string }>).map((c) => `${c.table}.${c.column}`));
 
     expect([...reported].sort()).toEqual(expect.arrayContaining([`${APP_OBJECT}.extra`, 'sys_user.fx24120_legacy']));
@@ -193,5 +196,11 @@ describe('os migrate plan on a datasourceMapping-default declared datasource (#2
     expect(plan.managedTables).toBeGreaterThan(0);
     expect(plan.unmanagedTables?.status, JSON.stringify(plan.unmanagedTables)).toBe('read');
     expect(plan.unmanagedTables.physicalTables).toBe(tableCount(join(dir, DATABASE)));
+
+    // The door an unmapped column's finding leads to filters the plan's own
+    // findings over the same set: the platform object's column is read there,
+    // not refused as "not in the set os migrate plan diffs".
+    const unmapped = migrateJson(['unmapped-columns', '--object', 'sys_user']);
+    expect((unmapped.columns as Array<{ column: string }>).map((c) => c.column)).toEqual(['fx24120_legacy']);
   }, CASE_TIMEOUT_MS);
 });

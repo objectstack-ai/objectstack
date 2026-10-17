@@ -145,6 +145,13 @@ export interface SchemaStack {
    */
   drivers: readonly SqlDriverLike[];
   /**
+   * [#24120] The database a planned driver ({@link drivers}) addresses, as an
+   * operator reads it: {@link dbLabel} for the primary, {@link telemetryDatabase}
+   * for the sibling, the connection a declared datasource's driver describes —
+   * or `null` for a driver this stack does not plan.
+   */
+  databaseOf: (driver: SqlDriverLike) => string | null;
+  /**
    * [#22579] Managed drift over every datasource this boot plans against: the
    * primary, then the `telemetry` sibling when there is one. Each entry stays
    * tied to the driver that reported it, which is where
@@ -1136,7 +1143,8 @@ export async function bootSchemaStack(
      * — and plan each one the deployment's objects live in beside the primary
      * ({@link SchemaStack.drivers}). Set by `os migrate plan` and `os migrate
      * apply`, so the plan an operator reads and the apply that confirms it
-     * cover the same datasources; by nothing else.
+     * cover the same datasources, and by `os migrate unmapped-columns`, a
+     * filter over that plan's own findings; by nothing else.
      *
      * Without it a `datasourceMapping` rule routing objects to a declared
      * datasource left them bound to no driver here, the declared DEFAULT's
@@ -1396,6 +1404,11 @@ export async function bootSchemaStack(
     schemaSync: defer ? 'deferred' : skipSchemaSync ? 'skipped' : 'performed',
     telemetryDatabase: telemetryDriver ? telemetryDatabase : null,
     drivers: plannedDrivers,
+    databaseOf: (d: SqlDriverLike): string | null => {
+      if (d === driver) return describeDb(driver);
+      if (d === telemetryDriver) return telemetryDatabase;
+      return declaredDrivers.some((x) => x.driver === d) ? describeDb(d) : null;
+    },
     detectManagedDrift: async (): Promise<ManagedDriftEntry[]> => {
       const drift: ManagedDriftEntry[] = [];
       for (const d of plannedDrivers) {
