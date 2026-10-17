@@ -24,7 +24,7 @@
     {
       "id": 3,
       "prompt": "Run an automation only when a support case has just become `escalated` — on single updates and on bulk updates alike.",
-      "expected_output": "Writes the transition once as `P`previous.status != 'escalated' && record.status == 'escalated'``: `record` is the record's post-write state (true on every update of an already-escalated case), so only a `previous` comparison says \"just became\"; `previous` is bound per matched row on `before*` and `after*` update events, bulk included. Not usable on insert events (unbound `previous` aborts the write). There is no `ISCHANGED()` function.",
+      "expected_output": "Writes it once as `P`previous.status != 'escalated' && record.status == 'escalated'``: `record` is the post-write state (true on every later update too), so only `previous` says \"just became\"; `previous` is bound per row on `before*`/`after*` update events, bulk too. On insert `previous` is `null`: the `previous.status` read faults and aborts the write, so to run on inserts guard with `previous != null &&`. No `ISCHANGED()` function.",
       "files": [],
       "assertions": {
         "must_contain": ["previous.status", "record.status", "!="],
