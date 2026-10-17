@@ -86,7 +86,7 @@ function makeProtocol(
             seeded.filter((r) => matches(r, opts?.where ?? {}))),
         registry: {
             getPackage: vi.fn(() => ({
-                manifest: { id: 'app.iojn', name: 'Repair', namespace: 'iojn', version: '1.0.0', type: 'application' },
+                manifest: { id: 'app.iojn', name: 'Repair', namespace: 'iojn', version: '1.0.0', type: 'app' },
             })),
             installPackage: vi.fn(),
         },

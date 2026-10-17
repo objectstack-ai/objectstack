@@ -101,7 +101,6 @@ export const zhCN: TranslationData = {
 
         nav_sessions: { label: '会话' },
         nav_audit_logs: { label: '审计日志' },
-        nav_audit_log_browser: { label: '审计日志浏览器' },
         nav_notifications: { label: '通知' },
 
         // Integrations — contributed at RUNTIME by the owning capability
@@ -178,10 +177,6 @@ export const zhCN: TranslationData = {
   },
 
   pages: {
-    marketplace_installed: {
-      label: '已安装应用',
-      subtitle: '当前已安装到此运行时内核的应用市场包。',
-    },
     cloud_connection_settings: {
       label: '云连接',
       subtitle: '将此运行时连接到 ObjectStack 控制平面，即可浏览并安装组织的私有包。',

@@ -213,6 +213,9 @@ import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@ob
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
+// [#24086] The install door's own manifest declaration — `ManifestSchema` with
+// `scope` narrowed to `project` — judged whole at the top of `installPackage`.
+import { PackageInstallManifestSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { REFERENCE_SITES } from './reference-sites.js';
 // [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
@@ -15559,14 +15562,39 @@ export class ObjectStackProtocolImplementation implements
                         : []);
             const fieldByName = new Map(fields.map(f => [f.name, f]));
             const hasField = (n: string) => fieldByName.has(n);
-            // Resolve title for a record using titleFormat → the declared
-            // primary-title pointer → common conventional fields → id.
+            // Resolve title for a record: the declared primary-title pointer →
+            // titleFormat → common conventional fields → id. [ADR-0079 D3]
+            // `nameField` takes precedence over the deprecated `titleFormat`
+            // (the spec's own describe says so), the same order as
+            // `resolveDisplayField`, which never consults `titleFormat` at all.
+            // The registry's `provisionPrimary` stamps a derived `nameField`
+            // at registration, and authorship is not recoverable after that
+            // stamp (see `ObjectTitleCompleteness.status`), so a stamped
+            // pointer outranks the template too: `titleFormat` titles a row
+            // only when the object has no pointer, or its value is empty.
             // titleFormat supports simple `{field}` placeholders (the
             // `template` dialect); unresolved placeholders fall through to the
             // next strategy.
             const titleFormatSource = (obj.titleFormat && (obj.titleFormat.source || obj.titleFormat))
                 || undefined;
+            // [ADR-0079] `nameField` is the canonical primary-title pointer;
+            // `displayNameField` is the deprecated alias (still honored).
+            // Reading the alias ALONE made this the one consumer a canonical
+            // designation could not reach: `provisionPrimary` — the
+            // designation seat the registry runs on every object at
+            // registration — stamps `nameField` only
+            // (`spec/src/data/display-name.ts`), so an object that declares its
+            // title canonically and does not also carry the alias fell through
+            // to `String(row.id)` and the palette showed a raw id. Same
+            // precedence as `resolveDisplayField`, the #4254 ingress gate, and
+            // this function's own search-field resolution below — a fourth
+            // spelling here would re-split what those merged.
+            const titlePointer = obj.nameField ?? obj.displayNameField;
             const renderTitle = (row: any): string => {
+                if (typeof titlePointer === 'string' && hasField(titlePointer)) {
+                    const v = row[titlePointer];
+                    if (v != null && String(v).trim()) return String(v);
+                }
                 if (typeof titleFormatSource === 'string') {
                     let allResolved = true;
                     const rendered = titleFormatSource.replace(/\{\{?\s*([a-zA-Z0-9_.]+)\s*\}?\}/g, (_m, key) => {
@@ -15578,23 +15606,8 @@ export class ObjectStackProtocolImplementation implements
                     if (rendered) return rendered.replace(/\s+-\s+$/, '').replace(/^\s+-\s+/, '').trim() || row.id;
                 }
                 const candidates = [
-                    // [ADR-0079] `nameField` is the canonical primary-title
-                    // pointer; `displayNameField` is the deprecated alias
-                    // (still honored). Reading the alias ALONE made this the
-                    // one consumer a canonical designation could not reach:
-                    // `provisionPrimary` — the designation seat the registry
-                    // runs on every object at registration — stamps
-                    // `nameField` only (`spec/src/data/display-name.ts`), so
-                    // an object that declares its title canonically and does
-                    // not also carry the alias fell through this list to
-                    // `String(row.id)` and the palette showed a raw id. Same
-                    // precedence as `resolveDisplayField`, the #4254 ingress
-                    // gate, and this function's own search-field resolution 44
-                    // lines below — a fourth spelling here would re-split what
-                    // those merged.
-                    obj.nameField ?? obj.displayNameField,
                     'name', 'full_name', 'title', 'subject', 'label', 'company',
-                ].filter((c): c is string => typeof c === 'string' && hasField(c));
+                ].filter(hasField);
                 for (const c of candidates) {
                     const v = row[c];
                     if (v != null && String(v).trim()) return String(v);
@@ -31372,10 +31385,9 @@ export class ObjectStackProtocolImplementation implements
         // reach `deriveNamespaceFromPackageId` below, which already ASSUMES the
         // reverse-domain shape it was never given a chance to enforce.
         //
-        // ⛔ SCOPE — THE `id` LEG ALONE. `InstallPackageRequestSchema` /
-        // `ManifestSchema` are still not parsed whole here; the residual
-        // classes the HTTP door's own docblock records are untouched by this
-        // and are each their own narrowing of a published contract.
+        // The id leg keeps its own gate, ahead of the whole-manifest parse
+        // below (#24086), so its sentence and its repair arm are not
+        // displaced by a generic issue list.
         const rawId = (request.manifest as { id?: unknown } | undefined)?.id;
         const declaredId = ManifestSchema.shape.id.safeParse(rawId);
         if (!declaredId.success) {
@@ -31396,6 +31408,43 @@ export class ObjectStackProtocolImplementation implements
         const manifest: any = { ...(request.manifest as any) };
         if (typeof manifest.version !== 'string' || !manifest.version) {
             manifest.version = '0.1.0';
+        }
+
+        // [#24086] ⭐ THE WHOLE MANIFEST IS JUDGED BY THE DOOR'S DECLARATION —
+        // `PackageInstallManifestSchema`, the one `POST /api/v1/packages`
+        // parses its body through, ⛔ not `ManifestSchema`, which still admits
+        // the platform scopes (`cloud` / `system`) that declaration refuses
+        // for an authored install. The id leg above was the only leg judged
+        // here, so an in-process caller could store what the door answers
+        // `400` for — an off-spec `type` such as `'application'`, an off-spec
+        // `scope` such as `'environment'`, an unknown key — and the row was
+        // read back on every boot.
+        //
+        // Placed AFTER the version default and BEFORE the namespace one, on
+        // purpose: the declaration REQUIRES `version`, and the versionless
+        // manifest this primitive has completed since #2532 keeps installing;
+        // `namespace` is optional in the declaration, so its derivation needs
+        // nothing from the parse. Nothing else is supplied — a manifest with
+        // no `type` is refused, as the door refuses it.
+        //
+        // A GATE, not a normaliser, as at the door: the parse's defaults
+        // (`scope`, `defaultDatasource`) are not copied onto the manifest that
+        // is stored. Each issue is surfaced as the declaration words it, under
+        // its `manifest.<key>` path — no sentence of this file's own for a rule.
+        //
+        // ⛔ Rows already in `sys_packages` are not judged by this: they are
+        // data at rest, and the boot hydration (`PackageServicePlugin.start`,
+        // `@objectstack/service-package`) replays them as stored — see the
+        // tolerance stated there.
+        const declaredManifest = PackageInstallManifestSchema.safeParse(manifest);
+        if (!declaredManifest.success) {
+            const located = declaredManifest.error.issues
+                .map((issue) => `${['manifest', ...issue.path.map(String)].join('.')}: ${issue.message}`)
+                .join('; ');
+            throw Object.assign(
+                new Error(`Invalid package manifest — ${located}`),
+                { statusCode: 400 },
+            );
         }
 
         // Studio-authored writable packages arrive WITHOUT a namespace. The
@@ -31432,9 +31481,9 @@ export class ObjectStackProtocolImplementation implements
         // manifest exactly as handed, and no forward conversion runs here (the
         // window the registration door, the `sys_packages` hydration and the
         // marketplace install open is for bodies at rest). Its callers hand it
-        // a manifest being written now: `POST /api/v1/packages` parses the
-        // whole body through the closed `ManifestSchema` first, which refuses
-        // a metadata collection such as `pages` outright; `duplicatePackage`
+        // a manifest being written now, and the declaration parse above
+        // (#24086, the one `POST /api/v1/packages` also runs) has already
+        // refused a metadata collection such as `pages` outright; `duplicatePackage`
         // copies the registry's own record, already judged; the unmanaged
         // install's base carries identity keys only; and AI Studio's blueprint
         // tools author in-process. A retired declaration there is the author's

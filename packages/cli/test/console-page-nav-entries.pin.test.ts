@@ -16,8 +16,8 @@
 // regression anywhere between the declaration and the wire turns it red.
 //
 // The other two pages are pinned where they belong:
-//  - `nav_audit_log_browser` → `audit:log` is contributed by
-//    `@objectstack/plugin-audit`; its ref is pinned beside it in
+//  - `nav_audit_logs` → `audit:log` (Setup's one audit entry) is contributed
+//    by `@objectstack/plugin-audit`; its ref is pinned beside it in
 //    `packages/plugins/plugin-audit/src/audit-nav-contribution.test.ts`.
 //    Importing that plugin from this package's tests would resolve to its
 //    `dist/`, which `check:test-source-alias` refuses for a new import.

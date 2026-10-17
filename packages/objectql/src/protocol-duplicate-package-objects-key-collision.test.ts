@@ -161,7 +161,7 @@ describe('ADR-0070 D4 — duplicatePackage refuses a renamed reference that meet
         expect(res.success).toBe(true);
     }
     async function seed(type: string, item: { name: string }): Promise<void> {
-        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'application' } });
+        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
         expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
         await save('object', customerBody);
         await save(type, item);

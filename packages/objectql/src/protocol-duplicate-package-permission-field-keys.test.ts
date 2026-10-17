@@ -200,9 +200,9 @@ describe('ADR-0070 D4 — duplicatePackage re-points a copied permission set\'s 
 
     /** Seeds the source and the third package, duplicates, and returns the copy's `fields`. */
     async function duplicate(): Promise<Record<string, unknown>> {
-        await protocol.installPackage({ manifest: { id: R, name: 'Other', type: 'application' } });
+        await protocol.installPackage({ manifest: { id: R, name: 'Other', type: 'app' } });
         await save(R, 'object', accountBody);
-        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'application' } });
+        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
         expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
         await save(P, 'object', customerBody);
         await save(P, 'object', ticketBody);
@@ -265,7 +265,7 @@ describe('ADR-0070 D4 — duplicatePackage re-points a copied permission set\'s 
     });
 
     it('a renamed key that meets a key the set already holds is refused, never merged', async () => {
-        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'application' } });
+        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
         await save(P, 'object', customerBody);
         // `dupdst_customer.full_name` names no object of the package, so it
         // keeps its name, and `dupsrc_customer.full_name` follows onto it.

@@ -20,6 +20,12 @@ export default defineConfig({
     disableConsoleIntercept: true,
     globals: true,
     environment: 'node',
+    // #13517: quiet the registry's per-item registration chatter — the
+    // engine's own `OS_REGISTRY_LOG` seam, not a change to its shipped
+    // default. Enforced by scripts/check-registry-log-declared.mjs, which
+    // reads this suite as engine-booting since `audit-nav-contribution.test.ts`
+    // folds the Setup app through a real `SchemaRegistry` (#23890).
+    env: { OS_REGISTRY_LOG: 'warn' },
   },
   resolve: {
     // Array form with ANCHORED patterns, deliberately — the same correction

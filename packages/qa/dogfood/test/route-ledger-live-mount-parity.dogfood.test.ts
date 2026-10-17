@@ -71,6 +71,7 @@ import { REST_ROUTE_LEDGER } from '../../../rest/src/rest-route-ledger.js';
 import { STORAGE_ROUTE_LEDGER } from '../../../services/service-storage/src/storage-route-ledger.js';
 import { I18N_ROUTE_LEDGER } from '../../../services/service-i18n/src/i18n-route-ledger.js';
 import { SETTINGS_ROUTE_LEDGER } from '../../../services/service-settings/src/settings-route-ledger.js';
+import { PRINT_ROUTE_LEDGER } from '../../../services/service-print/src/print-route-ledger.js';
 
 /** One ledger row, normalized to a wire pattern this gate can probe. */
 interface LedgerRow {
@@ -106,6 +107,7 @@ function collectLedgerRows(): LedgerRow[] {
   for (const r of STORAGE_ROUTE_LEDGER) add('service-storage/storage-route-ledger.ts', r.route, '');
   for (const r of I18N_ROUTE_LEDGER) add('service-i18n/i18n-route-ledger.ts', r.route, '');
   for (const r of SETTINGS_ROUTE_LEDGER) add('service-settings/settings-route-ledger.ts', r.route, '');
+  for (const r of PRINT_ROUTE_LEDGER) add('service-print/print-route-ledger.ts', r.route, '');
   return rows;
 }
 
