@@ -278,7 +278,10 @@ function claimsOf(token: string): Record<string, unknown> {
 /** A real AuthManager verifying against the running server's JWKS. */
 function verifier(server: Server): AuthManager {
   const m = new AuthManager({ secret: SECRET, baseUrl: BASE_URL });
-  vi.spyOn(m, 'getApi').mockResolvedValue({ getJwks: async () => await server.auth.api.getJwks() } as any);
+  // `getJwks` is the jwt plugin's endpoint; the inferred API type of a server
+  // built from plugins assembled at runtime does not name it.
+  const api = server.auth.api as unknown as { getJwks: () => Promise<unknown> };
+  vi.spyOn(m, 'getApi').mockResolvedValue({ getJwks: async () => await api.getJwks() } as any);
   return m;
 }
 
