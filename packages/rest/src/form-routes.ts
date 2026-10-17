@@ -56,8 +56,9 @@
  * body that changed.
  *
  * Module-level names stay where they are declared. The meta doors' request
- * envelope `TransportScopedMetaRequest` is imported from `ui-routes.ts`, where
- * slice 10 moved it, and the data doors' `ServerScopedDataRequest` from
+ * envelope `TransportScopedMetaRequest` is imported from
+ * `meta-collection-routes.ts`, where slice 13a moved it on from `ui-routes.ts`
+ * (slice 10's home for it), and the data doors' `ServerScopedDataRequest` from
  * `data-action-routes.ts`, where slice 1 moved it. `anonymousFormIntakeWithdrawnIn`,
  * `PUBLIC_FORM_SERVER_MANAGED_FIELDS` and `isExpectedRouteError`, which only
  * this body read, are imported here instead of there. No export was added
@@ -79,8 +80,8 @@ import { validationFailure } from '@objectstack/types';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import { isExpectedRouteError, mapDataError } from './error-response.js';
 import { logError } from './log.js';
+import type { TransportScopedMetaRequest } from './meta-collection-routes.js';
 import type { RestServer } from './rest-server.js';
-import type { TransportScopedMetaRequest } from './ui-routes.js';
 
 /**
  * The `RestServer` members {@link registerFormEndpoints} reads — every one of

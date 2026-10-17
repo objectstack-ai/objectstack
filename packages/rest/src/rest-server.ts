@@ -256,9 +256,10 @@ type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>
 export type RestProtocol = DataProtocol & MetadataProtocol;
 
 // [#23050 slice 10] `TransportScopedMetaRequest`, the meta doors' request envelope, moved to
-// `ui-routes.ts` (imported below) with the UI view door's body, its first reader outside this
-// file: exporting it from here changed the published `dist/*.d.ts` by one line, and a second
-// copy is not an option.
+// `ui-routes.ts` with the UI view door's body, its first reader outside this file: exporting
+// it from here changed the published `dist/*.d.ts` by one line, and a second copy is not an
+// option. [#23050 slice 13a] It moved on, verbatim, to `meta-collection-routes.ts` (imported
+// below), the module of the first `/meta` groups the split took out of this file.
 
 // [#23050 slice 1] `ServerScopedDataRequest`, the data doors' request envelope, moved to
 // `data-action-routes.ts`: exporting it from this file for that module changed the published
@@ -307,11 +308,20 @@ import { registerEmailEndpoints, type EmailRouteHost } from './email-routes.js';
 // [#23050 slice 9] The global search route's body moved to its own module — see its header.
 import { registerSearchEndpoints, type SearchRouteHost } from './search-routes.js';
 // [#23050 slice 10] The UI view route's body moved to its own module — see its header.
-import { registerUiEndpoints, type TransportScopedMetaRequest, type UiRouteHost } from './ui-routes.js';
+import { registerUiEndpoints, type UiRouteHost } from './ui-routes.js';
 // [#23050 slice 11] The public form routes' body moved to its own module — see its header.
 import { registerFormEndpoints, type FormRouteHost } from './form-routes.js';
 // [#23050 slice 12] The CRUD routes' body moved to its own module — see its header.
 import { registerCrudEndpoints, type CrudRouteHost } from './crud-routes.js';
+// [#23050 slice 13a] The `/meta` type list, whole-store maintenance and per-type list
+// groups moved to their own module — see its header. That module is also the home of the
+// meta doors' request envelope `TransportScopedMetaRequest` and of `MetaRouteScope`.
+import {
+    registerMetaCollectionRoutes,
+    type MetaCollectionRouteHost,
+    type MetaRouteScope,
+    type TransportScopedMetaRequest,
+} from './meta-collection-routes.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -5301,448 +5311,33 @@ export class RestServer {
             this.routeManager.register(entry);
         };
 
-        // GET /meta - List all metadata types
-        //
-        // Also mounted at `/meta/types`, the spelling the dispatcher's `/meta`
-        // branch has always implemented (`parts[0] === 'types'`) and the
-        // spelling `route-ledger.ts` has always declared. ONE handler, two
-        // paths, deliberately: the dispatcher's two branches return the same
-        // `protocol.getMetaTypes()` body, so a second REST handler would be a
-        // second thing to keep true.
-        if (metadata.endpoints.types !== false) {
-            const listMetaTypes = async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const p = await this.resolveProtocol(environmentId, req);
-                    const types = await p.getMetaTypes();
-                    const translated = await this.translateMetaTypesResponse(req, environmentId, types);
-                    res.header('Vary', 'Accept-Language');
-                    res.json(translated);
-                } catch (error: any) {
-                    handleRouteError(res, error);
-                }
-            };
-            this.routeManager.register({
-                method: 'GET',
-                path: metaPath,
-                handler: listMetaTypes,
-                metadata: {
-                    summary: 'List all metadata types',
-                    tags: ['metadata'],
-                },
-            });
+        // [#23050 slice 13a] The four head bindings above, handed to each moved
+        // `/meta` group as ONE parameter, built once here per base. See
+        // `MetaRouteScope` (`meta-collection-routes.ts`) for what each binding is
+        // and why all four stay in this head.
+        const scope: MetaRouteScope = { metadata, metaPath, isScoped, registerPerItemRoute };
 
-            // GET /meta/types — REGISTERED BEFORE `/meta/:type`, and that is
-            // the entire fix (#7526).
-            //
-            // The branch existed in the dispatcher and the row existed in the
-            // ledger; the REST mount is a THIRD place and nobody wrote it here.
-            // So `/meta/types` fell into the `:type` catch-all below and
-            // answered `{"type":"types","items":[]}` — byte-shaped like
-            // `/meta/zzz_not_a_type`, a 200 no client can tell from "that type
-            // is empty". Hono is first-match-wins (MEASURED, not assumed —
-            // `plugin-hono-server`'s `mounted-route-introspection.test.ts`
-            // registers a literal and a `:param` sibling in both orders and
-            // pins that the later one never runs), so moving this below
-            // `/meta/:type` silently re-breaks it — the same shape that already
-            // put `diagnostics` / `_drafts` / `_migrate-stored` above it. The
-            // order is pinned by `meta-route-registration-order.test.ts`.
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/types`,
-                handler: listMetaTypes,
-                metadata: {
-                    summary: 'List all metadata types (explicit `/types` spelling)',
-                    tags: ['metadata'],
-                },
-            });
-        }
-
-        // GET /meta/diagnostics - Cross-type spec-validation sweep
-        //
-        // Returns every metadata entry that fails its registered Zod
-        // schema, scoped to the environment (and optionally org /
-        // package) of the request. Powers the Studio governance
-        // dashboard and `os doctor`-style CLI checks.
-        //
-        // Registered BEFORE `/meta/:type` so the `diagnostics` segment
-        // is not captured as a `:type` parameter.
-        //
-        // [#15542] First of the three WHOLE-STORE operations, and they share
-        // one switch of their own — `metadata.endpoints.maintenance`. They
-        // used to ride `endpoints.items`, whose declared meaning is the
-        // per-type list, so closing a listing read silently took this sweep,
-        // `/_drafts` and the `POST /_migrate-stored` write door with it.
-        if (metadata.endpoints.maintenance !== false) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/diagnostics`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        if (typeof (p as any).getMetaDiagnostics !== 'function') {
-                            res.status(501).json({
-                                error: { code: 'NOT_IMPLEMENTED', message: 'protocol.getMetaDiagnostics() is not available in this kernel' },
-                            });
-                            return;
-                        }
-                        // [#6877] All three narrow the diagnostics query to ONE
-                        // value each; the `as string` casts are exactly the
-                        // laundering that kept `tsc` silent about the array arm.
-                        if (refuseRepeatedQueryParams(req, res, ['severity', 'type', 'package'])) return;
-                        const severityParam = (req.query?.severity as string | undefined) ?? 'error';
-                        const severity = severityParam === 'warning' ? 'warning' : 'error';
-                        const diagnosticsType = (req.query?.type as string | undefined) || undefined;
-                        // [ADR-0131 D6] No organization: the sweep reads each
-                        // type environment → code, the partition every `/meta`
-                        // write now lands in. A legacy organization-scoped row
-                        // is not swept; its promotion is ADR-0131 C7's.
-                        const result = await (p as any).getMetaDiagnostics({
-                            type: diagnosticsType,
-                            severity,
-                            // [#22188] The list's reading ({@link metaItemPackageBinding}):
-                            // each swept type is a list read, so `all` names no package.
-                            packageId: metaItemPackageBinding(req.query?.package),
-                        });
-                        res.json(result);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'List metadata entries that fail spec validation',
-                    tags: ['metadata'],
-                },
-            });
-        }
-
-        // GET /meta/_drafts - Pending DRAFT items (ADR-0033)
-        //
-        // Surfaces draft-state metadata that the active-only `/meta/:type`
-        // list hides, so the console can show a "pending changes" view and
-        // draft-aware package contents (a just-built app package no longer
-        // looks empty). Optionally narrowed by `?packageId=` and/or `?type=`.
-        //
-        // Registered BEFORE `/meta/:type` so the `_drafts` segment is not
-        // captured as a `:type` parameter.
-        //
-        // [#15542] Whole-store operation — `metadata.endpoints.maintenance`.
-        if (metadata.endpoints.maintenance !== false) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/_drafts`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        // [ADR-0106 D5(4) / #6599] `_drafts` is an AUTHORING
-                        // surface — the console's pending-changes view and
-                        // draft-aware package reads — not a general read. A
-                        // pending object draft carries its full `fields` map, so
-                        // serving it unfiltered leaks every hidden field's
-                        // label, type, options, formula and `requiredPermissions`
-                        // to any authenticated caller, which is the disclosure
-                        // ADR-0106 closes one route over. The other `/meta`
-                        // exits MASK per field; this one GATES per caller, on the
-                        // SAME `systemPermissions` judgement D4 uses for its
-                        // read exemption (`isObjectSchemaMaskExempt`) — a caller
-                        // who could not see a field on `/meta/object` has no
-                        // authoring reason to see the draft that carries it. The
-                        // gate is intentionally independent of the D8 field-mask
-                        // escape hatch: opting out of per-field masking is not
-                        // consent to expose pending drafts to non-authors.
-                        //
-                        // Gate FIRST — before resolving the protocol — so an
-                        // unauthorized caller cannot use the 501-vs-200 answer to
-                        // probe which kernels support drafts (same posture as
-                        // `_migrate-stored` below).
-                        //
-                        // [#20338] Asked through {@link mayReadPendingDrafts},
-                        // the one question every draft door in this file asks.
-                        const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                        if (!mayReadPendingDrafts(ctx)) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: 'Reading pending metadata drafts requires an authoring capability (studio.access, setup.access or manage_metadata).',
-                                },
-                            });
-                            return;
-                        }
-                        const p = await this.resolveProtocol(environmentId, req);
-                        if (typeof (p as any).listDrafts !== 'function') {
-                            res.status(501).json({
-                                error: { code: 'NOT_IMPLEMENTED', message: 'protocol.listDrafts() is not available in this kernel' },
-                            });
-                            return;
-                        }
-                        // [#6877] Both narrow the draft list to one package /
-                        // one type; an array reached `listDrafts` untouched.
-                        // [#23214] The list lives beside the shared decision, so the
-                        // runtime dispatcher's twin refuses the same names.
-                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.drafts)) return;
-                        // [ADR-0131 D6] No organization: a draft is saved
-                        // environment-wide, so the list reads the environment
-                        // partition, symmetric with the save door. A legacy
-                        // organization-scoped draft is not listed; its
-                        // promotion is ADR-0131 C7's.
-                        const result = await (p as any).listDrafts({
-                            packageId: (req.query?.packageId as string | undefined) || undefined,
-                            type: (req.query?.type as string | undefined) || undefined,
-                        });
-                        res.json(result);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'List pending draft metadata items',
-                    tags: ['metadata'],
-                },
-            });
-        }
-
-        // POST /meta/_migrate-stored — rewrite stored sys_metadata rows into
-        // today's canonical shape (ADR-0087; #4327 / #4454 / #4498).
-        //
-        // The server-side form of `os migrate meta --stored`. The CLI form
-        // needs shell access to the deployment's database, which a hosted
-        // operator does not have — so without this route the stored-metadata
-        // chain has no finish line on a managed deployment, only the per-read
-        // conversion that runs forever. Flow rows are covered here for free:
-        // `migrateStoredMetadata` resolves the automation engine from the
-        // services registry (#4498), and a server always has a live one.
-        //
-        // Registered BEFORE `/meta/:type` so the leading-underscore segment is
-        // not captured as a `:type` parameter (same reason as `_drafts`).
-        //
-        // [#15542] Whole-store operation — `metadata.endpoints.maintenance`.
-        // This is the WRITE door the card was filed about: it used to be
-        // unmounted by `endpoints.items: false`, a switch declared as "list
-        // items of type".
-        if (metadata.endpoints.maintenance !== false) {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${metaPath}/_migrate-stored`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        // Gate FIRST — before resolving the protocol — so an
-                        // unauthorized caller cannot use the 501 vs 200 answer
-                        // to probe which kernels can be migrated.
-                        //
-                        // This rewrites every eligible row in the deployment,
-                        // so unlike the single-item `PUT /meta/:type/:name` it
-                        // demands an explicit capability rather than only a
-                        // session. `manage_metadata` is ADR-0066 D1's authoring
-                        // capability, and a canonicalization rewrite is
-                        // authoring; `isSystem` bypasses, matching every other
-                        // capability gate on the platform.
-                        //
-                        // [#12702] Deliberately NOT `metaWriteCapabilityVerdict`:
-                        // an install-wide stored-metadata rewrite is env-wide by
-                        // definition, so `manage_org_presentation`'s "org-scoped
-                        // to the caller's own active organization" condition can
-                        // never hold here. `manage_metadata`-only, unchanged —
-                        // do not copy the item doors' acceptance in.
-                        const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                        const held = new Set<string>(
-                            Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                        );
-                        if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: 'Rewriting stored metadata requires the `manage_metadata` capability.',
-                                },
-                            });
-                            return;
-                        }
-                        // [ADR-0131 D12 items 7–8] The walled refusal, after the
-                        // capability gate and before the protocol is resolved or
-                        // a row is read: this rewrites every stored row of the
-                        // environment's metadata, which under `isolated` /
-                        // `group` is the platform operator's (ruling A on
-                        // #23231). A preview is refused too: it is the same
-                        // install-wide pass, without the write. Inert under
-                        // `single`. See {@link walledCatalogRefusal}.
-                        {
-                            const walled = await this.walledCatalogRefusal('sys_metadata', ctx, environmentId, req);
-                            if (!walled.allowed) {
-                                res.status(403).json({
-                                    error: {
-                                        code: 'FORBIDDEN',
-                                        message: walled.message,
-                                    },
-                                });
-                                return;
-                            }
-                        }
-                        const p = await this.resolveProtocol(environmentId, req);
-                        if (typeof (p as any).migrateStoredMetadata !== 'function') {
-                            res.status(501).json({
-                                error: {
-                                    code: 'NOT_IMPLEMENTED',
-                                    message: 'protocol.migrateStoredMetadata() is not available in this kernel',
-                                },
-                            });
-                            return;
-                        }
-                        const rawTypes = (req.body as any)?.types;
-                        const types = Array.isArray(rawTypes)
-                            ? rawTypes.filter((t: unknown): t is string => typeof t === 'string' && t.length > 0)
-                            : [];
-                        // Preview by default — `apply` must be explicitly true,
-                        // the same posture the CLI takes. A caller who sends an
-                        // empty body gets a report and no writes.
-                        // Attributed to the caller: this writes history rows,
-                        // and "who ran the migration" is the question they
-                        // exist to answer. [#23068] By user id alone — the
-                        // identity this request was authorized as, read by the
-                        // producer every `/meta` write door shares — or by
-                        // nobody. It lands in `recorded_by` / `updated_by`,
-                        // `lookup('sys_user')` columns, so ⛔ never the route's
-                        // name: the pass records its origin on `source`.
-                        const actor = await this.resolveMetaWriteActor(environmentId, req);
-                        const report = await (p as any).migrateStoredMetadata({
-                            apply: (req.body as any)?.apply === true,
-                            ...(types.length > 0 ? { types } : {}),
-                            ...(actor ? { actor } : {}),
-                        });
-                        res.json(report);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'Rewrite stored metadata rows into the canonical protocol shape',
-                    tags: ['metadata'],
-                },
-            });
-        }
-
-        // GET /meta/:type - List items of a type
-        //
-        // [#15542] The whole of `metadata.endpoints.items` — this one mount,
-        // and nothing else, which is what its `describe()` has always said.
-        if (metadata.endpoints.items !== false) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/:type`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        // [#6877] Five single-valued parameters on this list
-                        // route, declared together at the top so the gate cannot
-                        // be missed by whichever branch reads its parameter
-                        // several hundred lines down: `?object=` (the view
-                        // switcher's `String(req.query.object)`, which turned
-                        // `['a','b']` into the object name `'a,b'` — a name no
-                        // view has, so the switcher silently emptied) and
-                        // `?include=` (repeated, it stopped equalling
-                        // `'content'`, so a caller who asked for doc bodies got
-                        // the slimmed list back with a 200).
-                        //
-                        // [#7566] `?id=` joined them when the app branch below
-                        // started honouring it. It is declared HERE, with the
-                        // rest, rather than beside the filter that reads it, for
-                        // the reason this block exists: a filter that arrives as
-                        // `['crm','account']` and is compared against one app
-                        // name matches nothing, and an empty app list is exactly
-                        // the plausible-looking wrong answer #7566 was filed
-                        // against. Refused, not resolved — see
-                        // `query-multiplicity.ts` for why picking one of two
-                        // conflicting intents is worse than a 400.
-                        // [#23214] The list lives beside the shared decision, so the
-                        // runtime dispatcher's twin refuses the same names.
-                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.list)) return;
-                        // [#22188] Read through {@link metaItemPackageBinding}:
-                        // `all`, this list's "show everything" scope, names no package.
-                        const packageId = metaItemPackageBinding(req.query?.package);
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        // [#9488] …and BEFORE any listing work: a `:type` that
-                        // names no metadata type is refused here rather than
-                        // served as a real-but-empty collection, which the write
-                        // door has refused since #8421. See
-                        // {@link refuseUnknownMetaListType} for the union it
-                        // consults, why the static verdict alone is the wrong
-                        // rule on a READ door, and why it throws instead of
-                        // building a body.
-                        await this.refuseUnknownMetaListType(p, req.params?.type);
-                        // [#20338] The caller, for the draft-preview admission
-                        // below. The list names no organization (ADR-0131 D6):
-                        // it reads environment → code.
-                        const listCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(rethrowAuthzStoreUnavailable);
-                        // ADR-0033/0037 draft-overlay preview: `?preview=draft`
-                        // overlays pending drafts on the active list, exactly as
-                        // the runtime dispatcher's /metadata/:type route does —
-                        // the console's draft preview (Live Canvas) reads THIS
-                        // route, so dropping the flag here silently renders the
-                        // published-only world.
-                        //
-                        // [#20338] …for a caller who may read drafts. Anyone
-                        // else is answered the list as if the switch were
-                        // absent — {@link mayReadPendingDrafts} says why that,
-                        // and not a refusal. Declared WITH its admission so no
-                        // later branch of this handler can read the switch past it.
-                        const previewDrafts = typeof req.query?.preview === 'string'
-                            && req.query.preview.toLowerCase() === 'draft'
-                            && mayReadPendingDrafts(listCtx);
-                        // [commit 2a29caa53] Typed against the spec request shape plus the
-                        // transport-level `environmentId` — the `as any` this
-                        // literal used to carry is retired now that the spec
-                        // declares `previewDrafts`.
-                        const listRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                            type: req.params.type,
-                            packageId,
-                            ...(previewDrafts ? { previewDrafts: true } : {}),
-                            ...(environmentId ? { environmentId } : {}),
-                        };
-                        const items = await p.getMetaItems(listRequest);
-
-                        // [#20320] Everything this route does to the list after
-                        // the read — the #5224 `api` served-set face, THE
-                        // per-caller list gate (#20237), `?id=` for apps (#7566),
-                        // `?object=` for views, the ADR-0046 doc locale collapse
-                        // and content slim, the ADR-0106 object mask and the
-                        // translation step — is ONE chain,
-                        // `createMetaListAnswer` in `./meta-item-read-gate.ts`,
-                        // which the runtime dispatcher's `/meta` list branch
-                        // calls too. Its docblock carries each step's rule and
-                        // their order; ⛔ a list step is added there, never here
-                        // (`meta-list-projection-parity.test.ts` in
-                        // `@objectstack/runtime` derives its census from this
-                        // handler and fails on one added here). `getMetaItems`
-                        // answers a bare array or the `{ type, items }` envelope;
-                        // the chain answers the same shape.
-                        //
-                        // `previewDrafts` is handed in ADMITTED — the one
-                        // declaration above — and the chain never re-reads it.
-                        const answer = await metaReadGate.createMetaListAnswer(
-                            this.metaListAnswerSources(environmentId, req, p),
-                            { metaType: RestServer.metaTypeSingular(req.params.type), query: req.query, previewDrafts },
-                        )(items);
-                        if (!answer.ok) {
-                            sendFieldVisibilityFault(res, answer.object);
-                            return;
-                        }
-                        // [ADR-0106 D6 tier 2] The chain's cache posture — an
-                        // undetermined field visibility serves the list
-                        // `private, no-store`, exactly as this route always has.
-                        if (answer.cacheControl) res.header('Cache-Control', answer.cacheControl);
-                        res.header('Vary', 'Accept-Language');
-                        res.json(answer.data);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'List metadata items of a type',
-                    tags: ['metadata'],
-                },
-            });
-        }
+        // [#23050 slice 13a] The type list, the whole-store maintenance family and
+        // the per-type list (`GET {metaPath}`, `/types`, `/diagnostics`, `/_drafts`,
+        // `POST /_migrate-stored` and `GET /:type`) moved to
+        // `meta-collection-routes.ts`, and are registered HERE so they keep their
+        // place in the order. This literal hands that body every member it reads
+        // (see `MetaCollectionRouteHost`). It is built inside this method on
+        // purpose: the umbrella has swapped the route manager for its wrapping
+        // registrar for exactly the duration of this call, so the value captured
+        // here is the gated one. Read that module's header before moving it.
+        const collectionHost: MetaCollectionRouteHost = {
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            translateMetaTypesResponse: (...a) => this.translateMetaTypesResponse(...a),
+            routeManager: this.routeManager,
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            walledCatalogRefusal: (...a) => this.walledCatalogRefusal(...a),
+            resolveMetaWriteActor: (...a) => this.resolveMetaWriteActor(...a),
+            refuseUnknownMetaListType: (...a) => this.refuseUnknownMetaListType(...a),
+            metaListAnswerSources: (...a) => this.metaListAnswerSources(...a),
+            metaTypeSingular: (...a) => RestServer.metaTypeSingular(...a),
+        };
+        registerMetaCollectionRoutes.call(collectionHost, scope);
 
         // GET /meta/:type/:name - Get specific item
         //

@@ -405,6 +405,14 @@ const MODULES = {
     // `'Invalid update request'`) left this file with `registerCrudEndpoints`'
     // body for `crud-routes.ts`, declared below at the count they had here; the
     // sum is unchanged (8 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 = 39).
+    //
+    // 8 → 8 (#23050 slice 13a): the first three `/meta` groups of
+    // `registerMetadataEndpointsInner` left this file for
+    // `meta-collection-routes.ts` carrying NO literal string `error` body (their
+    // refusals are nested `{ error: { code, message } }` bodies and their catches
+    // go through `handleRouteError`), so this count does not move and that module
+    // declares 0 below; the sum is unchanged
+    // (8 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 + 0 = 39).
     stringError: 8,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
@@ -507,6 +515,11 @@ const MODULES = {
     // above. Those same three `{ error, code }` bodies (each request gate's 400
     // `VALIDATION_FAILED`) left with that body for `crud-routes.ts`, declared
     // below; the sum is unchanged (4 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 = 54).
+    //
+    // 4 → 4 (#23050 slice 13a): those same three `/meta` groups carried NO
+    // `{ code, error }` body either, so this count does not move and
+    // `meta-collection-routes.ts` declares 0 below; the sum is unchanged
+    // (4 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 + 0 = 54).
     siblingCode: 4,
   },
 
@@ -757,6 +770,23 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 3,
     siblingCode: 3,
+  },
+
+  // [#23050 slice 13a] The first three `/meta` groups of
+  // `RestServer#registerMetadataEndpointsInner`' body — the type list, the
+  // whole-store maintenance family and the per-type list — moved out of
+  // `rest-server.ts` on exactly slice 1's terms above: a MOVE, no wire answer
+  // changed, so it inherits `dialectOnly` and the two dialect facts, and no
+  // write-site count. Both counts were measured on the moved file at 0 and
+  // `rest-server.ts` keeps its 8 / 4, so each sum is unchanged. Both only ever
+  // tick down. Discovered by the `*-routes.ts` convention and declared in the
+  // same PR that created the module, so the gap never exists.
+  'packages/rest/src/meta-collection-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13a and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
   },
 };
 

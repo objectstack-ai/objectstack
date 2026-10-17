@@ -262,7 +262,13 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // [#23050 slice 12] Nor do the six CRUD doors (`crud-routes.ts`): they
         // read and write records, never a draft:
         // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 12 → 13.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(13);
+        // [#23050 slice 13a] The first three `/meta` groups moved to
+        // `meta-collection-routes.ts` with three of `rest-server.ts`' six switches:
+        // the `_drafts` door's two (the 501 probe and the listing) and the
+        // per-type list's `?preview=draft`. A key names its route, never its file,
+        // so no ledger row changed:
+        // 8 = 3 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3, length 13 → 14.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(14);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });
