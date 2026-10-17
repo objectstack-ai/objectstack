@@ -54,30 +54,35 @@
  * 422. How the executor tells that 422 from the "nothing to merge" one, and
  * how it confirms a 202, is `execute.mjs`'s (`confirmUpdateBranch`).
  *
- * ## The one row whose SECOND request reads the FIRST's answer — `pr_create` with `assignees`
+ * ## The rows whose LATER requests read the FIRST's answer — `pr_create` with `assignees` or `labels`
  *
- * A pull request's assignees are written on its issue endpoint,
- * `POST /repos/{o}/{r}/issues/{n}/assignees`, and `{n}` exists only once the
- * create has answered. So a `pr_create` carrying `assignees` is TWO requests
- * in one action: the draft create, then the assignee POST, whose path is
- * spelled with the placeholder `answerPlaceholder('number')` and which
- * carries `fromAnswer: 'number'` — the executor fills the placeholder from
- * the create's ANSWER (a positive integer at that field; ⛔ never from the
- * request) and refuses to send the leg at all when the answer carries none,
- * a FAILED action that says the leg was NOT SENT. The leg also carries
- * `assigned`, the logins its answer must list: GitHub's documentation of the
- * endpoint says an assignee the caller cannot apply is "silently ignored",
- * with the 201 still answered, so a 2xx whose `assignees` lacks a login sent
- * is a FAILED action naming it, never a quiet partial. The leg is
- * `issues: write` (`alsoSpends`), a grant every stroke's token carries as a
- * literal mint input, so the row stays `pull-requests` and the mint widens
- * nothing. Why the assignee rides the create's stroke rather than a second
+ * A pull request's assignees and labels are written on its issue endpoints,
+ * `POST /repos/{o}/{r}/issues/{n}/assignees` and `POST /repos/{o}/{r}/issues/{n}/labels`,
+ * and `{n}` exists only once the create has answered. So a `pr_create`
+ * carrying `assignees` or `labels` is TWO or THREE requests in one action:
+ * the draft create, then the assignee POST, then the label POST — each later
+ * leg's path spelled with the placeholder `answerPlaceholder('number')` and
+ * carrying `fromAnswer: 'number'`. The executor fills the placeholder from
+ * the CREATE's answer, the action's first (a positive integer at that field;
+ * ⛔ never from the request, never from a later leg's answer) and refuses to
+ * send the leg at all when that answer carries none, a FAILED action that
+ * says the leg was NOT SENT. Each leg also carries what its answer must
+ * list: `assigned`, the logins — GitHub's documentation of the endpoint says
+ * an assignee the caller cannot apply is "silently ignored", with the 201
+ * still answered; `labelled`, the names — the labels endpoint answers the
+ * pull's whole label set, so a name sent and not listed is a write that did
+ * not land. Either way a 2xx whose answer lacks one sent is a FAILED action
+ * naming it, never a quiet partial. Both legs are `issues: write`
+ * (`alsoSpends`), a grant every stroke's token carries as a literal mint
+ * input, so the row stays `pull-requests` and the mint widens nothing. Why
+ * the assignee and the label ride the create's stroke rather than a second
  * write: a seat's second write is a second permission verdict in its own
- * session, measured to vary on an identical command, and the assignee is
- * part of opening the pull, not a later act. `validate.mjs --self-test` pins
- * that this is the ONE descriptor carrying `fromAnswer` and that it is never
- * the first request of its action; `execute.mjs --self-test` pins the fill,
- * the refusal to send and the landing.
+ * session, measured to vary on an identical command, and both are part of
+ * opening the pull, not a later act — a dev's `skip-changeset` is a
+ * declaration about the diff the pull opens with. `validate.mjs --self-test`
+ * pins that these are the TWO descriptors carrying `fromAnswer` and that
+ * neither is the first request of its action; `execute.mjs --self-test` pins
+ * the fill, the refusal to send and the landing.
  *
  * ## The permissions the relay's token is narrowed to
  *
@@ -488,10 +493,10 @@ export function transferRemedy(source, target) {
  *   `alsoSpends`  (optional) grants the row spends beside `permission` —
  *                 each a literal mint input, never a stroke-scoped one
  *                 (`validate.mjs --self-test` pins it): `pr_create`'s
- *                 assignees leg, a LATER request, and `automerge_enable` on
+ *                 assignees and labels legs, LATER requests, and `automerge_enable` on
  *                 a pull that changes `.github/workflows/**` (header above);
  *   `requests`    the request descriptors the executor issues, in order:
- *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, fromAnswer?, assigned? }`
+ *                 `{ verb, path, body?, idempotent404?, graphql?, updateBranch?, fromAnswer?, assigned?, labelled? }`
  *                 — a `graphql` descriptor names the mutation and the pull (or
  *                 the issue and target) whose node ids it needs; a pull's
  *                 descriptor also carries `landed`, its `PR_LANDED_STATE`
@@ -499,11 +504,12 @@ export function transferRemedy(source, target) {
  *                 bare 200; an `updateBranch` descriptor carries the pull and
  *                 the expected head `confirmUpdateBranch` (execute.mjs) judges
  *                 the answer against; a `fromAnswer` descriptor names the
- *                 field of the PREVIOUS request's answer that fills the
+ *                 field of its action's FIRST request's answer that fills the
  *                 `answerPlaceholder` in its path (`fillFromAnswer`,
  *                 execute.mjs); an `assigned` descriptor lists the logins its
- *                 answer's `assignees` must carry for the request to have
- *                 landed (`requestLanded`, execute.mjs).
+ *                 answer's `assignees` must carry, and a `labelled` one the
+ *                 names its answer (the label set) must carry, for the request
+ *                 to have landed (`requestLanded`, execute.mjs).
  */
 export const OPS = Object.freeze({
   comment: Object.freeze({
@@ -566,18 +572,20 @@ export const OPS = Object.freeze({
       return [{ verb: 'POST', path: `/repos/${repo}/issues`, body }];
     },
   }),
-  // With `assignees`, two requests in one action (header): the create, then the assignee POST at the number
-  // the create ANSWERED — the executor fills `answerPlaceholder('number')` from that answer and judges the
-  // leg's answer against `assigned`. The leg is `issues: write`, a literal grant on every stroke's token.
+  // With `assignees` or `labels`, two or three requests in one action (header): the create, then the assignee
+  // POST and the label POST at the number the create ANSWERED — the executor fills `answerPlaceholder('number')`
+  // from that first answer and judges each leg's answer against `assigned` / `labelled`. Both legs are
+  // `issues: write`, a literal grant on every stroke's token. A dev's `skip-changeset` rides here.
   pr_create: Object.freeze({
     permission: 'pull-requests',
     alsoSpends: Object.freeze(['issues']),
     required: Object.freeze(['title', 'head', 'base']),
-    optional: Object.freeze(['body', 'assignees']),
+    optional: Object.freeze(['body', 'assignees', 'labels']),
     // `draft: true` is FORCED — a seat cannot open a ready PR through the relay.
     requests: (a, repo) => [
       { verb: 'POST', path: `/repos/${repo}/pulls`, body: { title: a.title, head: a.head, base: a.base, ...('body' in a ? { body: a.body } : {}), draft: true } },
       ...('assignees' in a ? [{ verb: 'POST', path: `${issues(repo, answerPlaceholder('number'))}/assignees`, body: { assignees: [...a.assignees] }, fromAnswer: 'number', assigned: [...a.assignees] }] : []),
+      ...('labels' in a ? [{ verb: 'POST', path: `${issues(repo, answerPlaceholder('number'))}/labels`, body: { labels: [...a.labels] }, fromAnswer: 'number', labelled: [...a.labels] }] : []),
     ],
   }),
   pr_request_reviewers: Object.freeze({

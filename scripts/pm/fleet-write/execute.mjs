@@ -95,23 +95,30 @@
  * Any other status is FAILED as every REST 4xx is. The PUT is paced like
  * every other write verb.
  *
- * ## The assignees leg — `pr_create` with `assignees`, the one request that reads an earlier answer
+ * ## The assignees and labels legs — `pr_create` with `assignees` / `labels`, the requests that read an earlier answer
  *
- * The op table spells that leg's path with a placeholder and `fromAnswer:
+ * The op table spells each leg's path with a placeholder and `fromAnswer:
  * 'number'` (`ops.mjs`, its header). Within one action the requests run in
- * order and each answer is kept; a descriptor carrying `fromAnswer` is
- * filled from the PREVIOUS request's answer — `fillFromAnswer`: the field
- * must be a positive integer, and the path is the placeholder replaced by
- * it, so the pull the assignee lands on is the one the platform answered,
- * ⛔ never one the request named. An answer without it is a FAILED action
- * with the leg NOT SENT — its row says so, status `not sent` — and the
- * stroke stops there as on any failure. The leg's landing is judged by its
- * answer's `assignees` against `assigned`, the logins sent (`requestLanded`):
- * GitHub documents a login the caller cannot apply as "silently ignored",
- * the 201 still answered, so an answer listing fewer than sent is a FAILED
- * action naming the missing login, never a quiet partial — and the row
- * prints the assignees as the platform lists them (`resultOf`). The leg is
- * paced like every other write verb.
+ * order and the FIRST answer — the create's — is kept; a descriptor carrying
+ * `fromAnswer` is filled from that answer, ⛔ never from a later leg's
+ * (the assignee POST answers the issue object, which happens to carry a
+ * number, and the label POST answers an array, which carries none; neither
+ * is the create) — `fillFromAnswer`: the field must be a positive integer,
+ * and the path is the placeholder replaced by it, so the pull the assignee
+ * or label lands on is the one the platform answered, ⛔ never one the
+ * request named. An answer without it is a FAILED action with the leg NOT
+ * SENT — its row says so, status `not sent` — and the stroke stops there as
+ * on any failure. Each leg's landing is judged by its answer against what
+ * was sent (`requestLanded`): the assignee leg's `assignees` against
+ * `assigned` — GitHub documents a login the caller cannot apply as "silently
+ * ignored", the 201 still answered; the label leg's answer, the pull's whole
+ * label set, against `labelled` — a name sent and not listed did not land.
+ * An answer listing fewer than sent is a FAILED action naming the missing
+ * login or name, never a quiet partial; MORE than sent is not judged (the
+ * Auto Label workflow writes `documentation` and `size/*` on open, additively,
+ * so both sets land). The row prints the assignees, or the labels, as the
+ * platform lists them (`resultOf`). Both legs are paced like every other
+ * write verb.
  *
  * ## The step summary — what a person reads back
  *
@@ -246,6 +253,14 @@ export function requestLanded(req, { status, json } = {}) {
         return { ok: false, why: `HTTP ${status}, but the answer lists ${listed.length ? listed.join(', ') : 'no assignees'} — ${missing.join(', ')} not assigned (GitHub ignores a login the repository cannot assign without a word: it must be a collaborator the repository can assign)` };
       }
     }
+    // The labels leg (header): the answer is the pull's whole label set; a name sent and not listed did not land.
+    if (Array.isArray(req.labelled)) {
+      const listed = labelNames(json);
+      const missing = req.labelled.filter((name) => !listed.some((l) => l.toLowerCase() === name.toLowerCase()));
+      if (missing.length) {
+        return { ok: false, why: `HTTP ${status}, but the answer lists ${listed.length ? listed.join(', ') : 'no labels'} — ${missing.join(', ')} not applied (the labels endpoint answers the pull's whole label set, so a name it lacks was not written; read the pull on the board before anything else)` };
+      }
+    }
     return { ok: true, why: '' };
   }
   if (status === 404 && req.idempotent404) return { ok: true, why: 'already absent', idempotent: true };
@@ -257,11 +272,16 @@ export function assigneeLogins(json) {
   return Array.isArray(json?.assignees) ? json.assignees.map((u) => (typeof u?.login === 'string' ? u.login : null)).filter(Boolean) : [];
 }
 
+/** The names a labels answer (an array of label objects) lists, in the platform's order; `[]` when it lists none. Pure. */
+export function labelNames(json) {
+  return Array.isArray(json) ? json.map((l) => (typeof l?.name === 'string' ? l.name : null)).filter(Boolean) : [];
+}
+
 /**
- * A descriptor carrying `fromAnswer` filled from the PREVIOUS request's answer
- * (header): `{ req }` with the placeholder replaced by the positive integer
- * that answer carries at the field, or `{ fail }` — the sentence the row
- * prints — when no answer carries it. Pure; never throws.
+ * A descriptor carrying `fromAnswer` filled from its action's FIRST request's
+ * answer — the create's (header): `{ req }` with the placeholder replaced by
+ * the positive integer that answer carries at the field, or `{ fail }` — the
+ * sentence the row prints — when no answer carries it. Pure; never throws.
  */
 export function fillFromAnswer(req, prev) {
   const field = req.fromAnswer;
@@ -350,7 +370,8 @@ export function resultOf(req, json, status = null) {
     if (!pr) return 'ok';
     return pullStateText(pr);
   }
-  if (Array.isArray(json)) return `${json.length} label(s) now on the issue`;
+  // The labels leg's row prints the labels as the platform lists them (header); a plain labels_add is counted.
+  if (Array.isArray(json)) return Array.isArray(req.labelled) ? `${json.length} label(s) now on the pull · labels ${labelNames(json).join(', ') || 'none'}` : `${json.length} label(s) now on the issue`;
   if (!json || typeof json !== 'object') return 'ok';
   const bits = [];
   if (Number.isInteger(json.number)) bits.push(`#${json.number}`);
@@ -555,10 +576,10 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
   for (let i = 0; i < payload.actions.length && stoppedAt === null; i++) {
     const action = payload.actions[i];
     const requests = OPS[action.op].requests(action, payload.repo);
-    let prev = null;
+    let opener = null;
     for (const spelled of requests) {
-      // A leg that reads an earlier answer (header) is filled from the previous request's answer, or NOT SENT.
-      const filled = spelled.fromAnswer === undefined ? { req: spelled } : fillFromAnswer(spelled, prev);
+      // A leg that reads an earlier answer (header) is filled from the action's FIRST answer — the create's — or NOT SENT.
+      const filled = spelled.fromAnswer === undefined ? { req: spelled } : fillFromAnswer(spelled, opener);
       if (filled.fail) {
         const why = scrub(filled.fail, [token]);
         rows.push({ action: i + 1, op: action.op, call: `${spelled.verb} ${spelled.path}`, status: 'not sent', result: `FAILED: ${why}` });
@@ -581,7 +602,7 @@ export async function executeFleetWrite({ payload: raw, sender, token, api = DEF
       }
       // The GraphQL leg is spelled with its literal verb: every mutation is a POST to one path.
       const r = req.graphql ? await rest(api, '/graphql', { method: 'POST', body }, t) : await rest(api, req.path, { method: req.verb, body }, t);
-      prev = r;
+      if (opener === null) opener = r;
       // The base sync is confirmed by MEASURE (header): the head polled off the expected sha, or a 422 judged by the compare.
       const landed = req.updateBranch ? await confirmUpdateBranch(req, r, payload, api, t, ub) : requestLanded(req, r);
       const call = req.graphql ? `POST /graphql ${req.graphql.mutation}` : r.call;
@@ -624,7 +645,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   'the GraphQL ops: the node id first, then the mutation; an errors array is a failure': 5,
   'the PR-state landing: a 200 lands only when the answer SHOWS the state the op asked for — armed or queued for auto-merge, off for its disable, ready and draft for the flips': 12,
   "the base sync: the PUT carries the expected head; a 202 is confirmed by polling the head off that sha inside the window and reading the merge commit's author; a 422 is a no-op only when the compare measures the head not behind its base; a moved head, a head still behind, an unreadable measure or an expired window is FAILED with nothing after it attempted": 10,
-  "the assignees leg: pr_create with assignees is the create, then ONE POST to the created pull's issue-assignees endpoint at the number the create ANSWERED — never the request; the answer must list every login sent; no assignees, no second request; an answer without a number stops the stroke with the leg not sent": 11,
+  "the assignees and labels legs: pr_create with assignees is the create, then ONE POST to the created pull's issue-assignees endpoint at the number the create ANSWERED — never the request; the answer must list every login sent; no assignees, no second request; an answer without a number stops the stroke with the leg not sent; with labels, ONE POST to the issue-labels endpoint at that same number — the create's, never the assignee answer's — whose answer must list every name sent": 19,
   'the summary: request, sender and role, session, target, one row per request': 5,
   'redaction: the token reaches no summary line, log line or error': 3,
   'the wiring: both halves around every write verb, on the roster': 4,
@@ -890,7 +911,7 @@ export async function selfTest() {
     }
 
     // ── the assignees leg ───────────────────────────────────────────────────
-    battery("the assignees leg: pr_create with assignees is the create, then ONE POST to the created pull's issue-assignees endpoint at the number the create ANSWERED — never the request; the answer must list every login sent; no assignees, no second request; an answer without a number stops the stroke with the leg not sent");
+    battery("the assignees and labels legs: pr_create with assignees is the create, then ONE POST to the created pull's issue-assignees endpoint at the number the create ANSWERED — never the request; the answer must list every login sent; no assignees, no second request; an answer without a number stops the stroke with the leg not sent; with labels, ONE POST to the issue-labels endpoint at that same number — the create's, never the assignee answer's — whose answer must list every name sent");
     {
       const PULLS = `POST /repos/${REPO}/pulls`;
       const ASSIGN = (n) => `POST /repos/${REPO}/issues/${n}/assignees`;
@@ -916,6 +937,25 @@ export async function selfTest() {
       const refused = await run(create(['marchtian']), { ...allowed, [PULLS]: opened, [ASSIGN(22700)]: { status: 403, json: { message: 'Resource not accessible by integration' } } });
       t("a refused assignee POST is a FAILED action with the platform's sentence, the pull already open", [refused.exit, refused.rows.map((r) => r.status), refused.rows[1]?.result.includes('Resource not accessible by integration')], [EXIT_ACTION_FAILED, [201, 403], true]);
       t('no annotation is emitted for it — pr_create is not an annotated op, assignees or not', [ok.annotations, ok.logs.some((l) => l.startsWith('::notice'))], [[], false]);
+
+      // The labels leg — the same shape, a dev's `skip-changeset` riding the create.
+      const LABEL = (n) => `POST /repos/${REPO}/issues/${n}/labels`;
+      const createWith = (fields, extra = []) => base([{ op: 'pr_create', title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B', ...fields }, ...extra]);
+      const labelsOn = (names) => ({ status: 200, json: names.map((name) => ({ name })) });
+      const both = OPS.pr_create.requests({ op: 'pr_create', title: 'T', head: 'h', base: 'main', assignees: ['marchtian'], labels: ['skip-changeset'] }, REPO);
+      t('the table half: with labels the row carries a POST to the issue-labels path at the placeholder, fromAnswer number, the names as labelled — after the assignees leg when both are sent', both.map((r) => [r.verb, r.path, r.fromAnswer ?? null, r.assigned ?? null, r.labelled ?? null]), [['POST', `/repos/${REPO}/pulls`, null, null, null], ['POST', `/repos/${REPO}/issues/${answerPlaceholder('number')}/assignees`, 'number', ['marchtian'], null], ['POST', `/repos/${REPO}/issues/${answerPlaceholder('number')}/labels`, 'number', null, ['skip-changeset']]]);
+      // The assignee answer here carries a DIFFERENT number: the label leg must still land on the pull the CREATE answered.
+      const labelled = await run(createWith({ assignees: ['marchtian'], labels: ['skip-changeset'] }), { ...allowed, [PULLS]: opened, [ASSIGN(22700)]: assignedTo(['marchtian'], 99999), [LABEL(22700)]: labelsOn(['skip-changeset', 'documentation']) }, { file: paceFile });
+      t("the run: the create, the assignee POST, then the label POST — at the number the CREATE answered, not the assignee answer's — exit 0", [labelled.exit, writes(labelled.seen).map((s) => [s.call, s.body])], [EXIT_OK, [[PULLS, { title: 'T', head: 'claude/issue-1-x', base: 'main', body: 'B', draft: true }], [ASSIGN(22700), { assignees: ['marchtian'] }], [LABEL(22700), { labels: ['skip-changeset'] }]]]);
+      t("…and the leg's row prints the labels as the platform lists them — more than sent (the Auto Label workflow's additive writes) is a landing, never a failure", labelled.rows[2], { action: 1, op: 'pr_create', call: LABEL(22700), status: 200, result: '2 label(s) now on the pull · labels skip-changeset, documentation' });
+      const labelsOnly = await run(createWith({ labels: ['skip-changeset'] }), { ...allowed, [PULLS]: opened, [LABEL(22700)]: labelsOn(['skip-changeset']) }, { file: paceFile });
+      t('labels without assignees: the create, then the label POST alone', [labelsOnly.exit, writes(labelsOnly.seen).map((s) => s.call)], [EXIT_OK, [PULLS, LABEL(22700)]]);
+      const unlabelled = await run(createWith({ labels: ['skip-changeset', 'no-such-label'] }, [{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: opened, [LABEL(22700)]: labelsOn(['skip-changeset']), [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
+      t('⛔ a 200 whose answer lacks a name sent is a FAILED action naming it — never a quiet partial — and the stroke stops there', [unlabelled.exit, unlabelled.rows[1]?.result.includes('no-such-label not applied'), unlabelled.rows[1]?.result.includes('lists skip-changeset'), writes(unlabelled.seen).length, unlabelled.summary.includes('1 later action(s) NOT attempted')], [EXIT_ACTION_FAILED, true, true, 2, true], unlabelled.rows[1]?.result);
+      t('…a name is matched as GitHub matches one, case-insensitively', requestLanded({ verb: 'POST', path: '/x', labelled: ['Skip-Changeset'] }, { status: 200, json: [{ name: 'skip-changeset' }] }).ok, true);
+      t("…and a plain labels_add answer is counted, not judged — labelled is the leg's alone", [requestLanded({ verb: 'POST', path: '/x' }, { status: 200, json: [] }).ok, resultOf({ verb: 'POST', path: '/x' }, [{ name: 'a' }], 200)], [true, '1 label(s) now on the issue']);
+      const blankLabel = await run(createWith({ labels: ['skip-changeset'] }, [{ op: 'comment', issue: 1, body: 'after' }]), { ...allowed, [PULLS]: { status: 201, json: { html_url: 'https://github.test/x' } }, [`POST /repos/${REPO}/issues/1/comments`]: { status: 201, json: { id: 1 } } });
+      t('a create whose answer carries no number: the label leg is NOT SENT, exit 5, the later action never attempted', [blankLabel.exit, blankLabel.rows.map((r) => r.status), writes(blankLabel.seen).map((s) => s.call)], [EXIT_ACTION_FAILED, [201, 'not sent'], [PULLS]]);
     }
 
     // ── the transfer ────────────────────────────────────────────────────────
