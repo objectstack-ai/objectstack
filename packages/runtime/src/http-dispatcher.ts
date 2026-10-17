@@ -20,7 +20,7 @@ import {
 import { isMcpServerEnabled, looksLikeInternalErrorLeak, INTERNAL_ERROR_MESSAGE, resolveThrownHttpError, demotedDeclaredCode, declaredUserMessage, inProcessSessionReadInput, isEngineDuplicateRecordEnvelope, structuredCodeAnswer } from '@objectstack/types';
 import { measureServerTiming, allowPerfDisclosure, isPerfDisclosurePrincipal } from '@objectstack/observability';
 import { CoreServiceName, serviceUnavailableMessage, inProcessServiceMessage } from '@objectstack/spec/system';
-import type { IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, IDataEngine, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type { PrimaryDatasourceVerdict } from '@objectstack/objectql';
 import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribableChannel, DispatcherErrorCode, resolveDiscoveryEnvironment } from '@objectstack/spec/api';
 import type { ServiceInfo } from '@objectstack/spec/api';
@@ -56,6 +56,9 @@ import { createActionsDomain, handleActionsRequest } from './domains/actions.js'
 import { createMcpDomains, handleMcpRequest, handleMcpSkillRequest, buildMcpBridge } from './domains/mcp.js';
 import { createMetaDomain, handleMetadataRequest } from './domains/meta.js';
 import { createDataDomain, handleDataRequest } from './domains/data.js';
+
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 /** Minimal local interface — full EnvironmentScopeManager was removed in Phase R. */
 interface EnvironmentScopeManager {
@@ -1529,7 +1532,8 @@ export class HttpDispatcher {
             // `.catch(() => undefined)` on it — that converts a THROW into the
             // same `undefined` a gate-less session produces, which is the
             // collapse #23245 repaired.
-            let session: any;
+            // [#24222] Typed as `AuthSessionApi` declares the answer, not `any`.
+            let session: SessionRead | null;
             try {
                 let api: any = authService.api;
                 if (!api && typeof authService.getApi === 'function') api = await authService.getApi();
@@ -1675,7 +1679,8 @@ export class HttpDispatcher {
             const authService = await this.resolveService(this.requestKernel(context), CoreServiceName.enum.auth);
             const api = authService?.api ?? (typeof authService?.getApi === 'function' ? await authService.getApi() : undefined);
             // [#22258] The in-process session-read rule, as in `enforceAuthGate`.
-            const sessionData = await api?.getSession?.(inProcessSessionReadInput(context.request?.headers));
+            // [#24222] Typed as `AuthSessionApi` declares the answer, not `any`.
+            const sessionData: SessionRead | null = await api?.getSession?.(inProcessSessionReadInput(context.request?.headers));
             userId = sessionData?.user?.id ?? sessionData?.session?.userId;
             activeOrganizationId = sessionData?.session?.activeOrganizationId;
         } catch {

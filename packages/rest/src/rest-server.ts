@@ -215,7 +215,7 @@ import {
 // [#22141] The `PUT /meta/:type/:name` door's precondition and lifecycle, read
 // through the ONE mapping the runtime dispatcher's `/meta` domain asks too.
 import { metaSaveRequestOptions } from './meta-save-request.js';
-import type { ISecurityService } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
     effectiveOperationsArray,
@@ -242,6 +242,9 @@ import {
 // and this file is audited `dialectOnly` for the two non-conforming dialects it
 // still emits — which this deliberately is not.
 import { sendError as sendEnvelopeError } from '@objectstack/types';
+
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 /**
  * The protocol slice the REST layer actually consumes (ADR-0076 D9 / #2462
@@ -3198,7 +3201,8 @@ export class RestServer {
             // carrying a session cookie therefore reads without renewal (only
             // `/get-session`, which re-issues the cookie, renews it); a
             // bearer-only request renews as before.
-            const getSession = async (h: any) => {
+            // [#24222] Answers as `AuthSessionApi` declares the read, not `any`.
+            const getSession = async (h: any): Promise<SessionRead | null> => {
                 try { return await api.getSession(inProcessSessionReadInput(h)); } catch { return undefined; }
             };
             // [#8287] The EFFECTIVE tenancy posture, from the kernel's `tenancy`
@@ -3404,7 +3408,8 @@ export class RestServer {
                 }
             }
             if (gateActive) {
-                let gatedSession: any;
+                // [#24222] Typed as `AuthSessionApi` declares the answer, not `any`.
+                let gatedSession: SessionRead | null;
                 try {
                     // ⛔ NOT the `getSession` closure above, and not its
                     // `.catch(() => undefined)`: both convert a THROW into the

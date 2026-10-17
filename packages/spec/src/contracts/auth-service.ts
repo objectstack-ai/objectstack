@@ -385,6 +385,11 @@ export interface IAuthService {
  * as that reader takes it. Read undeclared, through `any` or a cast, a field
  * better-auth drops or renames compiles and reads `undefined` — for
  * `impersonatedBy`, an impersonation refusal switched off.
+ *
+ * [#24222] The other in-process readers read the result as declared here too.
+ * None reads a top-level `activeOrganizationId`: the read answers
+ * `{ user, session }`, and the active organization is
+ * `session.activeOrganizationId`.
  */
 export interface AuthSessionApi {
     getSession?(input: { headers: unknown; query?: { disableRefresh?: boolean } }): Promise<{
@@ -393,12 +398,32 @@ export interface AuthSessionApi {
             /** Read by `resolveAuthzContext`'s session arm (`@objectstack/core`) onto `ctx.email`. */
             email?: string;
             /**
+             * better-auth's projection of `sys_user.name`. Read by `dispatcher-plugin`'s
+             * concrete AI-route `req.user` resolver (`@objectstack/runtime`) as the
+             * actor's display name.
+             */
+            name?: string;
+            /**
              * The ADR-0069 posture plugin-auth's `customSession` attaches. Read by
              * `normalizeAuthGate` (`@objectstack/core`) from `resolveAuthzContext`'s
              * session arm, which validates it against the closed posture vocabulary,
              * so it is declared as that reader takes it: unvalidated.
              */
             authGate?: unknown;
+            /**
+             * The ADR-0068 D2 platform-admin posture rung plugin-auth's `customSession`
+             * derives (`false` when not held). Read by `judgePlatformAdmin`
+             * (`@objectstack/plugin-auth`, through `isPlatformAdminUser`), which admits
+             * on `true` alone, so an absent field refuses.
+             */
+            isPlatformAdmin?: boolean;
+            /**
+             * better-auth's `admin` plugin role scalar (`type: 'string'`, `required: false`,
+             * so a row may hold it as null). Read by `judgePlatformAdmin`
+             * (`@objectstack/plugin-auth`, through `isPlatformAdminUser`) as the legacy
+             * back-compat signal, which admits on `'admin'` alone, so an absent field refuses.
+             */
+            role?: string | null;
         };
         session?: {
             userId?: string;

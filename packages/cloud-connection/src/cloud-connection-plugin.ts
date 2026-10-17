@@ -116,7 +116,7 @@ import {
     classifyAdmissionTenancyPosture,
     type TenancyPostureSource,
 } from '@objectstack/core';
-import type { IAuthService, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, IAuthService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
@@ -167,6 +167,9 @@ interface EnvironmentKernel {
     getService?<T = unknown>(name: string): T;
 }
 
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
+
 /**
  * A signed-in caller of this surface, and the ADR-0069 posture its session
  * carries (`authGate`, present only for a session the policy holds).
@@ -182,7 +185,7 @@ interface ResolvedSession {
      * kernel, whose grants are the ones that apply.
      */
     readFrom: {
-        sessionData: unknown;
+        sessionData: SessionRead | null;
         authService: IAuthService | undefined;
         kernel?: EnvironmentKernel;
     };
@@ -313,8 +316,9 @@ export class CloudConnectionPlugin implements Plugin {
                 const api = typeof authSvc?.getApi === 'function' ? await authSvc.getApi() : authSvc?.api ?? authSvc;
                 // [#22258] The in-process session-read rule: a request carrying a
                 // session cookie reads without renewal, because this route's
-                // response never carries a renewed cookie.
-                const session = await api?.getSession?.(inProcessSessionReadInput(rawReq.headers));
+                // response never carries a renewed cookie. [#24222] Typed as
+                // `AuthSessionApi` declares the answer (`api` itself is `any`).
+                const session: SessionRead | null = await api?.getSession?.(inProcessSessionReadInput(rawReq.headers));
                 const userId = session?.user?.id ? String(session.user.id) : undefined;
                 if (!userId) return null;
                 // ADR-0069: the ONE consult of the authentication-policy gate for

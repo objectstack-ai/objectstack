@@ -59,6 +59,10 @@
  */
 
 import { evaluateAuthGate } from '@objectstack/core';
+import type { AuthSessionApi } from '@objectstack/spec/contracts';
+
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 /** The caller a passing gate hands back to the route. */
 export interface PlatformAdminActor {
@@ -163,9 +167,12 @@ export function judgeHeldSession(sessionUser: unknown): PlatformAdminRefusal | n
  * the posture refusal rather than `PERMISSION_DENIED`, the same 403 status.
  */
 export function judgePlatformAdmin(session: unknown): PlatformAdminVerdict {
-  const user = (session as { user?: unknown } | null | undefined)?.user as
-    | Record<string, unknown>
-    | undefined;
+  // [#24222] Read as `AuthSessionApi.getSession` declares its answer, so every
+  // user field this judge reads (`id`, `email`, `authGate`, `isPlatformAdmin`,
+  // `role`) is one the contract names for it. The parameter stays `unknown`:
+  // it is a published signature, and narrowing it would break a caller that
+  // hands over what it holds.
+  const user = (session as SessionRead | null)?.user;
 
   if (!user?.id) {
     return {

@@ -31,7 +31,7 @@ import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platf
 import { PLATFORM_OWNER_EMAIL_ENV, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
-import type { IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {
   AuthManager,
   resolveOidcProviderEnabled,
@@ -146,6 +146,13 @@ interface SettingsReadSurface {
 
 /** [#23367] The auth setting that records when the API-key lifecycle policy took effect. */
 const API_KEY_POLICY_STARTED_AT_KEY = 'api_key_policy_started_at';
+
+/**
+ * [#24222] What the in-process session read answers, as `AuthSessionApi` declares
+ * it. better-auth's own handle answers `null` for no session, hence the
+ * `| null` at each read.
+ */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 /**
  * The `protocol` slot's metadata reader, as the user-import route uses it.
@@ -2773,7 +2780,8 @@ export class AuthPlugin implements Plugin {
         // Platform-admin gate (ADR-0068 D2) — one shared judge for every
         // ObjectStack `/admin/*` mount; see platform-admin-gate.ts.
         const authApi = await this.authManager!.getApi();
-        const session = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+        // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`).
+        const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
         const verdict = judgePlatformAdmin(session);
         if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
 
@@ -2836,7 +2844,8 @@ export class AuthPlugin implements Plugin {
     // spelling instead of accreting per-mount copies.
     const gateAdmin = async (c: any): Promise<PlatformAdminActor | Response> => {
       const authApi = await this.authManager!.getApi();
-      const session = await (authApi as any).getSession(inProcessSessionReadInput(c.req.raw.headers));
+      // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`), not through `any`.
+      const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
       const verdict = judgePlatformAdmin(session);
       if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
       return verdict.actor;
@@ -2908,7 +2917,8 @@ export class AuthPlugin implements Plugin {
 
         // Platform-admin gate (ADR-0068 D2) — see platform-admin-gate.ts.
         const authApi = await this.authManager!.getApi();
-        const session = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+        // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`).
+        const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
         const verdict = judgePlatformAdmin(session);
         if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
 
@@ -3226,8 +3236,9 @@ export class AuthPlugin implements Plugin {
       rawApp.post(`${basePath}/admin/has-permission`, async (c: any) => {
         try {
           const authApi = await this.authManager!.getApi();
-          const session = await (authApi as any).getSession(inProcessSessionReadInput(c.req.raw.headers));
-          const user = (session as { user?: { id?: unknown } } | null | undefined)?.user;
+          // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`), not through `any`.
+          const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+          const user = session?.user;
           if (user?.id && isPlatformAdminUser(user)) {
             const { readEvaluatedPermissionQuery, answerPermissionQueryAsAdmin } = await import(
               './admin-has-permission-endpoint.js'
