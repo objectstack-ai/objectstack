@@ -1,5 +1,5 @@
 ---
-'@objectstack/cloud-connection': patch
+'@objectstack/cloud-connection': minor
 ---
 
 fix(cloud-connection)!: `bind/start`, `bind/poll` and `unbind` require `setup.access`, and `GET /status` serves the connection's details only to a caller who holds it
@@ -8,7 +8,7 @@ Clause-②: no (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) a runtime authorization narrowing at four of CloudConnectionPlugin's same-origin routes, not a metadata change: no spec key, export, option, config field or stored shape is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite; a caller who holds Setup Access is served exactly as before, and one who does not is refused or served less -->
 
-**BREAKING** (an accept-set narrowing), shipped as `patch`: no public surface widens.
+**BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
 
 The Console's Cloud Connection page sits on the Setup app, which requires the Setup Access permission (`setup.access`). The routes behind that page did not ask for it: the three that change this runtime's cloud connection checked only that the caller was signed in, and `GET /api/v1/cloud-connection/status` served the connection record the control plane reports to every caller. Both now follow the page's rule.
 
