@@ -341,7 +341,10 @@ describe('#23317 — a stored page whose component binds the retired API source 
   const PRESCRIPTION = /`view\.data\.provider: 'api'` was removed in @objectstack\/spec 18/;
   /** The components whose `data` prop is a view data source, as the D3 entry names them. */
   const VIEW_DATA_COMPONENTS = ['object-grid', 'object-map', 'object-gantt', 'object-tree', 'list-view'] as const;
-  const component = (type: string, data: unknown, id = 'block') => ({ id, type, properties: { objectName: 'crm_case', data } });
+  // A `list-view` names its object in `data` alone: its `objectName` is a retired
+  // alias, which a stored node carries forward through its own conversion (#22444).
+  const component = (type: string, data: unknown, id = 'block') =>
+    ({ id, type, properties: type === 'list-view' ? { data } : { objectName: 'crm_case', data } });
   const pageRow = (components: unknown[], extra: Record<string, unknown> = {}) => ({
     name: 'partner_page',
     label: 'Partner',
