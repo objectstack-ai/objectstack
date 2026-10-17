@@ -99,9 +99,11 @@ import { fileURLToPath } from 'node:url';
 import { isEntrypoint } from '../invoked-as.mjs';
 import { workspacePackages } from '../workspace-enumerator.mjs';
 
+// dispatch-gates: no-path-population -- the --self-test (the one invocation a pull request runs, in Lint & Repo Gates) drives in-memory fixture snapshots and throwaway git trees under the OS temp directory and reads no tracked file; the snapshot and report modes read turbo.json, the workspace manifests and the untracked tree only inside ci.yml's test jobs, which ci.yml's own filter already starts for a change to packages or scripts, so a hint here would be a second spelling of one population
+
 const SELF = fileURLToPath(import.meta.url);
 
-export const SNAPSHOT_SCHEMA = 'test-leftovers-snapshot/1';
+export const SNAPSHOT_SCHEMA = 'test-leftovers-snapshot.v1';
 export const ROOT_GROUP = '(root)';
 export const EXAMPLES_PER_PACKAGE = 5;
 
