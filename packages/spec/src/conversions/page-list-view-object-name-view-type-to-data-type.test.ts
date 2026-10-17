@@ -60,7 +60,7 @@ describe('page-list-view-object-name-view-type-to-data-type (ADR-0087 D2)', () =
     ]);
 
     const converted = applyConversionsToStoredItem('page', page(stored));
-    const props = propsOf(converted);
+    const props = (converted as ReturnType<typeof page>).regions[0]!.components[0]!.properties;
     expect(props).toEqual({
       columns: ['full_name', 'status'],
       kanban: { groupByField: 'status', columns: ['full_name'] },

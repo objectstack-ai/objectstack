@@ -247,7 +247,9 @@ const on = (types: readonly string[], paths: readonly string[], reason: Reason):
 // whose values are a `records` line below
 // (`component-action-row-declarative-update.test.ts`).
 const ACTION_RUNNER_PATHS = ['params', 'bodyExtra', 'bodyShape', 'toast', 'resultDialog'];
-const VIEW_DATA_TYPES = ['object-grid', 'object-map', 'object-gantt', 'object-tree'];
+// [#22444] `list-view` is the list view itself, so its `data` member is the
+// same view data source by reference.
+const VIEW_DATA_TYPES = ['object-grid', 'object-map', 'object-gantt', 'object-tree', 'list-view'];
 
 // Composition slots.
 on(['page:tabs', 'page:accordion'], ['items[].children[]'], SLOT);
@@ -263,7 +265,7 @@ on(['action:group', 'action:menu'], ['actions[].visible.ast', 'actions[].disable
 on(['action:button', 'action:icon'], ['visible.ast', 'disabled.ast'], EXPRESSION_AST);
 on(['record:line_items'], ['columns[].readonlyWhen.ast', 'columns[].requiredWhen.ast'], EXPRESSION_AST);
 on(['object-master-detail-form'], ['details[].columns[].readonlyWhen.ast', 'details[].columns[].requiredWhen.ast'], EXPRESSION_AST);
-on(['object-grid'], ['conditionalFormatting[].condition.ast', 'bulkActionDefs[].visible.ast'], EXPRESSION_AST);
+on(['object-grid', 'list-view'], ['conditionalFormatting[].condition.ast', 'bulkActionDefs[].visible.ast'], EXPRESSION_AST);
 on(['object-kanban'], ['conditionalFormatting[].condition.ast'], EXPRESSION_AST);
 // The S-forms stage: an inline form field (`customFields[]`, and a section's
 // inline entry) and the form view's `{ field }` entry carry the three `*When`
@@ -293,7 +295,7 @@ on(['object-grid', 'object-map', 'object-gantt', 'object-tree'], ['staticData[]'
 on(['object-kanban', 'object-timeline'], ['data[]'], RECORDS);
 on(['object-calendar'], ['data[]', 'staticData[]'], RECORDS);
 on(['object-form', 'object-master-detail-form'], ['initialValues{}', 'initialData{}'], RECORDS);
-on(['object-grid'], ['bulkActionDefs[].patch{}', 'bulkActionDefs[].params[].default'], RECORDS);
+on(['object-grid', 'list-view'], ['bulkActionDefs[].patch{}', 'bulkActionDefs[].params[].default'], RECORDS);
 // A page action row's `patch` is `ActionSchema`'s record of static field
 // values, by reference: each value is one field's.
 on(['action:button', 'action:icon'], ['patch{}'], RECORDS);
@@ -301,7 +303,7 @@ on(['action:group', 'action:menu'], ['actions[].patch{}'], RECORDS);
 // A static board's card is a record row: `id` and `title` are typed, the rest
 // is the row's own values (the kanban's lane bucketing keeps them verbatim).
 on(['object-kanban'], ['columns[].cards[].*'], RECORDS);
-on(['object-grid'], ['bulkActionDefs[].params[].options[].*'], BULK_OPTION_ENTRY);
+on(['object-grid', 'list-view'], ['bulkActionDefs[].params[].options[].*'], BULK_OPTION_ENTRY);
 on(['object-form'], ['customFields[].summaryOperations.filter{}'], FILTER_CONDITION);
 on(['object-form', 'object-master-detail-form'], ['sections[].fields[].summaryOperations.filter{}'], FILTER_CONDITION);
 // The S-final stage: the drill-down's `report` is `ReportSchema`, by reference,

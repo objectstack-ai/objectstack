@@ -340,7 +340,7 @@ describe('#23269 — a stored flow whose CRUD filter operand is a {…} token is
 describe('#23317 — a stored page whose component binds the retired API source in its `data` prop is listed by page and component', () => {
   const PRESCRIPTION = /`view\.data\.provider: 'api'` was removed in @objectstack\/spec 18/;
   /** The components whose `data` prop is a view data source, as the D3 entry names them. */
-  const VIEW_DATA_COMPONENTS = ['object-grid', 'object-map', 'object-gantt', 'object-tree'] as const;
+  const VIEW_DATA_COMPONENTS = ['object-grid', 'object-map', 'object-gantt', 'object-tree', 'list-view'] as const;
   const component = (type: string, data: unknown, id = 'block') => ({ id, type, properties: { objectName: 'crm_case', data } });
   const pageRow = (components: unknown[], extra: Record<string, unknown> = {}) => ({
     name: 'partner_page',
