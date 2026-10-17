@@ -379,10 +379,41 @@ export interface IAuthService {
  * `cloud-connection-plugin.ts` and `marketplace-install-local-plugin.ts`
  * (twice). `packages/types/src/in-process-session-read.contract.test.ts`
  * holds the helper's return inside this declaration, key for key.
+ *
+ * [#24196] Each result field beyond `user.id`, `session.userId` and
+ * `session.activeOrganizationId` is declared for the reader named on it, typed
+ * as that reader takes it. Read undeclared, through `any` or a cast, a field
+ * better-auth drops or renames compiles and reads `undefined` — for
+ * `impersonatedBy`, an impersonation refusal switched off.
  */
 export interface AuthSessionApi {
     getSession?(input: { headers: unknown; query?: { disableRefresh?: boolean } }): Promise<{
-        user?: { id?: string };
-        session?: { userId?: string; activeOrganizationId?: string };
+        user?: {
+            id?: string;
+            /** Read by `resolveAuthzContext`'s session arm (`@objectstack/core`) onto `ctx.email`. */
+            email?: string;
+            /**
+             * The ADR-0069 posture plugin-auth's `customSession` attaches. Read by
+             * `normalizeAuthGate` (`@objectstack/core`) from `resolveAuthzContext`'s
+             * session arm, which validates it against the closed posture vocabulary,
+             * so it is declared as that reader takes it: unvalidated.
+             */
+            authGate?: unknown;
+        };
+        session?: {
+            userId?: string;
+            activeOrganizationId?: string;
+            /** The session ROW id. Read by `resolveAuthzContext`'s session arm for its dropped-claim log line. */
+            id?: string;
+            /** The session credential. Read by `resolveAuthzContext`'s session arm onto `ctx.accessToken`. */
+            token?: string;
+            /**
+             * The administrator who started an impersonation session (better-auth's
+             * admin plugin; stored as the nullable `sys_session.impersonated_by`).
+             * Read by the print door's `impersonatorOf` (`@objectstack/service-print`),
+             * which refuses a print from an impersonation session.
+             */
+            impersonatedBy?: string | null;
+        };
     } | undefined>;
 }

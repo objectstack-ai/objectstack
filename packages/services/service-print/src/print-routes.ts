@@ -14,7 +14,7 @@ import {
   userAuthGateSourceOf,
 } from '@objectstack/core';
 import type { ErrorCode } from '@objectstack/spec/api';
-import type { IAuthService, IHttpRequest, IHttpResponse, IHttpServer } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, IAuthService, IHttpRequest, IHttpResponse, IHttpServer } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import {
@@ -132,10 +132,13 @@ export function registerPrintRoutes(http: IHttpServer, deps: PrintRoutesDeps): v
 }
 
 /** The caller, as the door resolved it: the context, and the session read that admitted it. */
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
+
 interface ResolvedCaller {
   context: ExecutionContext | undefined;
   /** The session payload the auth service returned, when a session (not an API key) admitted the caller. */
-  session: unknown;
+  session: SessionRead;
   authGate: ReturnType<typeof evaluateAuthGate>;
 }
 
@@ -226,9 +229,9 @@ async function resolveCaller(req: IHttpRequest, deps: PrintRoutesDeps): Promise<
     headers.set(name, Array.isArray(value) ? value.join(',') : String(value));
   }
   const auth = deps.getAuth();
-  let sessionRead: unknown;
+  let sessionRead: SessionRead;
   const getSession = auth
-    ? async (h: Headers): Promise<unknown> => {
+    ? async (h: Headers): Promise<SessionRead> => {
         const api = auth.api ?? (await auth.getApi?.());
         sessionRead = await api?.getSession?.(inProcessSessionReadInput(h));
         return sessionRead;
@@ -267,9 +270,8 @@ async function resolveCaller(req: IHttpRequest, deps: PrintRoutesDeps): Promise<
  * plugin writes `impersonatedBy` on the session it mints for an impersonation,
  * and `@objectstack/plugin-auth` stores it as `sys_session.impersonated_by`.
  */
-function impersonatorOf(sessionRead: unknown): string | undefined {
-  const session = (sessionRead as { session?: { impersonatedBy?: unknown } } | null | undefined)?.session;
-  const by = session?.impersonatedBy;
+function impersonatorOf(sessionRead: SessionRead): string | undefined {
+  const by = sessionRead?.session?.impersonatedBy;
   return typeof by === 'string' && by.trim() !== '' ? by : undefined;
 }
 
