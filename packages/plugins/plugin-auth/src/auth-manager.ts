@@ -6898,7 +6898,8 @@ export class AuthManager {
    * provider options). It is absent when the token carries no such claim: a
    * consent made with no active organization, or a refresh family started
    * before consents bound one. It is a record, not an authorization — the
-   * caller vets it against a current membership on every request, as the
+   * caller vets it on every request by the rule that vets a session's active
+   * organization (`vetOrganizationClaim`, `@objectstack/core`), as the
    * `IAuthService` contract states.
    */
   async verifyMcpAccessToken(
