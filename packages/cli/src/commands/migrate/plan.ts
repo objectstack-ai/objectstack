@@ -19,6 +19,7 @@ import {
   describeWithApplyLimits,
   describeDatabaseSource,
   describeTelemetryDatabase,
+  distinctDatabaseDrivers,
   renderPlan,
   renderPendingSchemaWork,
   summarize,
@@ -185,6 +186,11 @@ export default class MigratePlan extends Command {
         // resolves — or an app declaring `requires: ['auth']` plans without
         // `sys_account`, and its retired `issuer` column is never a drop.
         composeServedPlatform: true,
+        // [#24120] …and the datasources the deployment declares, connected as
+        // `os serve` connects them: a `datasourceMapping` rule's objects are
+        // planned in the datasource it routes them to, the declared default's
+        // included. `os migrate apply` passes the same.
+        composeDeclaredDatasources: true,
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
@@ -221,8 +227,10 @@ export default class MigratePlan extends Command {
       // indistinguishable from "never looked at". See `../../utils/unmanaged-tables.ts`.
       const { normalizeRows } = await import('@objectstack/metadata-protocol');
       const unmanagedTables: UnmanagedTablesReport = await collectUnmanagedTables({
-        // [#22580] Every database the drift above covers, the sibling included.
-        drivers: stack.drivers,
+        // [#22580] Every database the drift above covers, the sibling included —
+        // [#24120] each read once, though a declared default and the primary
+        // resolved from it are two connections to one file.
+        drivers: distinctDatabaseDrivers(stack.drivers),
         declaredObjects: stack.allObjects(),
         composition: stack.composition,
         normalize: normalizeRows,

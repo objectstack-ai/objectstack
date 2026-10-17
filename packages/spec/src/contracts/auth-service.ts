@@ -294,7 +294,32 @@ export interface IAuthService {
      * [#4127 batch 4] Implemented by `AuthManager`; the execution-context
      * resolver has always called it through `any`.
      */
-    verifyMcpAccessToken?(token: string): Promise<{ userId: string; scopes: string[]; clientId?: string } | undefined>;
+    verifyMcpAccessToken?(token: string): Promise<{
+        userId: string;
+        scopes: string[];
+        clientId?: string;
+        /**
+         * The organization the user's OAuth consent bound (the consenting
+         * user's current organization at the moment of consent), read from
+         * the access token's `organization_id` claim.
+         *
+         * Absent when no consent bound one: a token minted before consents
+         * bound an organization. Absent means the principal resolves with no
+         * organization, so only its global grants apply.
+         *
+         * A claim, not an authorization. The caller vets it on every request
+         * by the rule that vets a session's active organization
+         * (`vetOrganizationClaim`, `@objectstack/core`): once no current
+         * membership backs it, the principal resolves with no organization
+         * (global grants only, so tenant reads come back empty and tenant
+         * writes are refused), never in another one. The token acts in this
+         * one organization: ⛔ never the union of the user's organizations,
+         * and ⛔ never the organization the user's browser session has
+         * selected now. Under ADR-0090 D10 it is the organization the
+         * delegator's grants are resolved in.
+         */
+        organizationId?: string;
+    } | undefined>;
 
     /**
      * [#23772] Mint a short-lived session for the requesting user's OWN
