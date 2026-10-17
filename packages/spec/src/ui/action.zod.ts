@@ -265,15 +265,18 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    *   `default` it would actively mislead, since a dialog param defaults
    *   through `defaultValue` one level up.
    *
-   * **What this does NOT fix**, deliberately, because it is objectui's and not
-   * the spec's: a FIELD-BACKED param that inherits its list instead of declaring
-   * one still loses the key. `resolveActionParam` reaches
-   * `param.options ?? normaliseOptions(field.options, …)`, and `normaliseOptions`
-   * rebuilds every inherited entry as `{ label, value }`. That drop predates
-   * this change, is invisible to it (an authored `options` array wins over the
-   * inherited one), and is tracked in objectui — so the guidance below still
-   * refuses to prescribe "make it field-backed and inherit" (ledger finding 18:
-   * a confidently wrong prescription is worse than none).
+   * **A FIELD-BACKED param that inherits its list** instead of declaring one
+   * takes objectui's path, not the spec's. At the console pin (`.objectui-sha`
+   * `f8267df93aba`), objectui's `packages/fields/src/resolveActionParams.ts`
+   * resolves it as `authoredOptions ?? normaliseOptions(field.options, …)`
+   * (`:650`–`:651`), and `normaliseOptions` returns
+   * `{ ...raw, label, value: raw.value }` per entry (`:515`), so every key of an
+   * inherited entry survives the resolver. An authored `options` array still
+   * wins over the inherited one. Surviving is not being read: no reader of
+   * `color` / `icon` / `disabled` on an inherited option is measured from this
+   * repo, so the guidance below still refuses to prescribe "make it
+   * field-backed and inherit" (ledger finding 18: a confidently wrong
+   * prescription is worse than none, and an unmeasured one is no cure for it).
    *
    * The aliases are anchored on `SelectOptionSchema`'s own curated table (the
    * same idea, one layer down) rather than on edit distance, and deliberately
@@ -307,9 +310,11 @@ export const ActionParamSchema = lazySchema(() => strictObject(
       // The per-option keys that are real one layer down but have no reader on
       // THIS path, plus the two that no spec shape declares at all. Each says
       // where the vocabulary lives and — critically — does NOT promise that a
-      // field-backed param inherits it: `resolveActionParams`' `normaliseOptions`
-      // rebuilds each inherited entry as `{ label, value }`, so that promise
-      // would be false in exactly the way ledger finding 18 warns about.
+      // field-backed param inherits it. objectui's `normaliseOptions` keeps an
+      // inherited entry's keys by spread (the `options` docblock above cites the
+      // pin and line), but no reader of them on the inherited path is measured
+      // from this repo, so that promise would be an unmeasured one in exactly
+      // the way ledger finding 18 warns about.
       //
       // `visibleWhen` is deliberately absent: it is a declared key now, and
       // `guidance` is consulted only from the `unrecognized_keys` path, so an

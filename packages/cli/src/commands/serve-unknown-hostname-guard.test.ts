@@ -45,9 +45,21 @@
  * exported constants the middleware itself branches on, so a subdomain or a
  * probe path added to the guard is covered the moment it is added rather than
  * the day someone remembers to copy it here.
+ *
+ * ## #24022 — a boot with no HTTP server takes the degrade line
+ *
+ * `OS_ROOT_DOMAIN=… os serve <config> --no-server` printed `[unknown-hostname-guard]
+ * install failed` with the kernel's "composition/ordering fault" text, though
+ * nothing was at fault: `init` read the server with a `getService?.(…) ??
+ * getService?.(…)` chain, and the kernel's `getService` THROWS on a name
+ * nothing registered, so the throw landed in the install `catch`. `init` now
+ * reads through `readComposedHttpServer`. The last describe block boots a REAL
+ * `ObjectKernel`, so the throw it must survive is the kernel's own, and pins
+ * the composed control beside it.
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { ObjectKernel } from '@objectstack/core';
 import { HonoHttpServer } from '@objectstack/plugin-hono-server';
 
 import {
@@ -85,8 +97,11 @@ function mountGuard(opts: {
   knownHosts?: string[];
   /** Replace the env-registry with something broken, to pin the fall-throughs. */
   registryOverride?: unknown;
-  /** Force the `http.server` resolution to fail the way production tolerates. */
-  httpServer?: 'missing' | 'no-raw-app' | 'throws';
+  /**
+   * Force the `http.server` resolution to fail the way production tolerates.
+   * `install-throws`: a usable server whose raw app refuses the middleware.
+   */
+  httpServer?: 'missing' | 'no-raw-app' | 'throws' | 'install-throws';
 } = {}): Promise<Harness> {
   const server = new HonoHttpServer(0);
   const rawApp = server.getRawApp();
@@ -110,7 +125,9 @@ function mountGuard(opts: {
       ? undefined
       : opts.httpServer === 'no-raw-app'
         ? { getRawApp: () => ({}) }
-        : { getRawApp: () => rawApp },
+        : opts.httpServer === 'install-throws'
+          ? { getRawApp: () => ({ use: () => { throw new Error('middleware table sealed'); } }) }
+          : { getRawApp: () => rawApp },
     'env-registry': registry ?? undefined,
   };
 
@@ -120,7 +137,7 @@ function mountGuard(opts: {
       return services[name];
     },
     logger: {
-      warn: (msg: string) => { warnings.push(msg); },
+      warn: (msg: string, meta?: unknown) => { warnings.push(meta === undefined ? msg : `${msg} ${JSON.stringify(meta)}`); },
       info: (msg: string) => { infos.push(msg); },
     },
   };
@@ -379,10 +396,22 @@ describe('createUnknownHostnameGuardPlugin — install is soft, never fatal', ()
     expect(h.warnings.join('\n')).toContain('http.server unavailable');
   });
 
-  it('never throws out of init when service resolution fails', async () => {
+  it('never throws out of init when service resolution throws, and reads the throw as no server (#24022)', async () => {
+    // The kernel's `getService` throws on a name nothing registered, so a
+    // throwing read IS the no-server boot: the degrade line, not "install failed".
     const h = await mountGuard({ httpServer: 'throws' });
 
-    expect(h.warnings.join('\n')).toContain('install failed');
+    expect(h.warnings.join('\n')).toContain('http.server unavailable');
+    expect(h.warnings.join('\n')).not.toContain('install failed');
+    expect((await h.call('/api/v1/objects', 'nobody.objectos.ai')).status).toBe(200);
+  });
+
+  it('CONTROL: a composed server whose raw app refuses the middleware still warns "install failed", naming the error', async () => {
+    const h = await mountGuard({ httpServer: 'install-throws' });
+
+    expect(h.warnings).toHaveLength(1);
+    expect(h.warnings[0]).toContain('install failed');
+    expect(h.warnings[0]).toContain('middleware table sealed');
   });
 
   it('logs the install once the middleware is mounted', async () => {
@@ -467,5 +496,86 @@ describe('createUnknownHostnameGuardPlugin — install order is the contract', (
     // The registry was asked exactly once, for the request the guard actually
     // saw — the direct evidence that the `/before` hit never reached it.
     expect(asked).toEqual(['nobody.objectos.ai']);
+  });
+});
+
+/**
+ * #24022, on a REAL `ObjectKernel`: the throw `init` has to survive is the
+ * kernel's own, with the kernel's own "composition/ordering fault" wording. The
+ * plugin's `ctx.logger` IS the kernel's logger, so a spy on it sees the plugin's
+ * lines as well as the kernel's.
+ */
+describe('createUnknownHostnameGuardPlugin — a real kernel boot (#24022)', () => {
+  /** The one service a kernel refuses to start without. Nothing here reads data. */
+  const DATA_STUB = {
+    name: 'com.example.fx24022.data-stub',
+    version: '1.0.0',
+    init: async (ctx: { registerService(name: string, service: unknown): void }) => { ctx.registerService('data', {}); },
+    start: async () => {},
+  };
+
+  /** Boot the guard (and `extra`, registered AFTER it); every line the kernel logger was asked to warn or info. */
+  async function bootGuard(extra: Array<typeof DATA_STUB> = []) {
+    const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
+    const logger = (kernel as unknown as { logger: { warn: (...args: unknown[]) => void; info: (...args: unknown[]) => void } }).logger;
+    const warn = vi.spyOn(logger, 'warn');
+    const info = vi.spyOn(logger, 'info');
+    const lines = (spy: typeof warn) => spy.mock.calls.map((args) => args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+    await kernel.use(DATA_STUB);
+    await kernel.use(createUnknownHostnameGuardPlugin({ rootDomain: ROOT_DOMAIN, readCloudUrl: () => '' }));
+    for (const plugin of extra) await kernel.use(plugin);
+    await kernel.bootstrap();
+    return {
+      warnings: () => lines(warn),
+      infos: () => lines(info),
+      stop: async () => { await kernel.shutdown(); warn.mockRestore(); info.mockRestore(); },
+    };
+  }
+
+  const ours = (lines: string[]) => lines.filter((l) => l.includes('[unknown-hostname-guard]'));
+
+  it('no server composed: the degrade line, once — no "install failed", no "ordering fault"', async () => {
+    const boot = await bootGuard();
+    try {
+      const warnings = boot.warnings();
+      const seen = `\n--- warnings ---\n${warnings.join('\n')}`;
+      expect(warnings.filter((w) => w.includes('install failed')), seen).toEqual([]);
+      expect(warnings.filter((w) => w.includes('ordering fault')), seen).toEqual([]);
+      const said = ours(warnings);
+      expect(said, `not exactly one [unknown-hostname-guard] line${seen}`).toHaveLength(1);
+      expect(said[0], seen).toContain('http.server unavailable; guard not installed');
+    } finally {
+      await boot.stop();
+    }
+  });
+
+  it('CONTROL: a composed server, ordered ahead by optionalDependencies, gets the guard installed and refusing', async () => {
+    const server = new HonoHttpServer(0);
+    const rawApp = server.getRawApp();
+    const serverPlugin = {
+      name: 'com.objectstack.server.hono',
+      version: '1.0.0',
+      init: async (ctx: { registerService(name: string, service: unknown): void }) => {
+        ctx.registerService('http.server', server);
+        ctx.registerService('env-registry', { resolveByHostname: async () => null });
+      },
+      start: async () => {},
+    };
+    const boot = await bootGuard([serverPlugin]);
+    try {
+      const seen = `\n--- warnings ---\n${boot.warnings().join('\n')}`;
+      expect(ours(boot.warnings()), `an [unknown-hostname-guard] warning on a composed boot${seen}`).toEqual([]);
+      expect(ours(boot.infos()).some((l) => l.includes('installed')), seen).toBe(true);
+
+      // Registered after the guard, as every route-registering plugin is.
+      rawApp.all('*', (c: { text: (body: string, status: number) => Response }) => c.text(PASSED_THROUGH, 200));
+      const res = await rawApp.fetch(new Request('http://placeholder/api/v1/objects', {
+        headers: { host: 'nobody.objectos.ai', accept: 'application/json' },
+      }));
+      expect(res.status).toBe(404);
+      expect((await res.json() as RefusalBody).error?.code).toBe('ENVIRONMENT_NOT_FOUND');
+    } finally {
+      await boot.stop();
+    }
   });
 });
