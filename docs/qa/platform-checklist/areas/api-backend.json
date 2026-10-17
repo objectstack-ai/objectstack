@@ -1415,7 +1415,7 @@
       "title": "A retired metadata DEFINITION (whole schema type withdrawn) refuses at every authoring door — distinct from a retired key, and the door that must not fall through to 'unknown type, ignored'",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "build",
       "personas": [
@@ -1428,16 +1428,16 @@
           "a scratch authoring source tree (os build target) plus a live boot for the metadata-write door"
         ],
         "knownGaps": [
-          "Some retired defs were removed by ADR-0087 Route 3 ('no tombstone, no D2 conversion — this table plus the D3 semantic entry are the declaration', e.g. data/ExternalDataSource per #8075). For those, the correct behavior may be the GENERIC unknown-type refusal rather than a def-specific prescription. The run must read each sampled entry's route BEFORE deciding what a pass looks like — scoring a Route-3 def against a prescription it was never given is a false fail, and scoring it against 'anything 4xx' is a false pass."
+          "Some retired defs were removed by ADR-0087 Route 3 ('no tombstone, no D2 conversion — this table plus the D3 semantic entry are the declaration', e.g. data/ExternalDataSource per #8075). For those, the correct behavior may be the GENERIC unknown-type refusal rather than a def-specific prescription. The run must read each sampled entry's route BEFORE deciding what a pass looks like — scoring a Route-3 def against a prescription it was never given is a false fail, and scoring it against 'anything 4xx' is a false pass. Measured on main c91af8ed6: a zero-consumer def's only author-reachable door is the import of its schema export, refused generically (no prescription), so it scores as Route-3-shaped whatever route its entry names; the def-specific prescription, where one exists, is surfaced by its CARRIER's retired-key tombstone"
         ]
       },
       "steps": [
         "enumerate packages/spec/src/migrations/entries/retired-defs/ and record the count and the version prefixes present (the registry currently carries entries at both the current major and the next)",
         "sample at least four entries spanning BOTH version prefixes and at least three different domains (e.g. data/, system/, identity/, ui/)",
-        "for each sampled def, read its entry file and record which ADR-0087 route retired it and whether a prescription was authored",
-        "author a stack that declares metadata of each sampled retired type and run os build",
-        "attempt the same through the runtime metadata-write door (POST/PUT /meta/<type>) against a live boot",
-        "as a control, author metadata of a type that was NEVER declared (a typo'd/invented type name) and compare its refusal to the retired-def refusals"
+        "for each sampled def, read its entry file and record which ADR-0087 route retired it, whether a prescription was authored, and its CARRIER: the authored key that embedded it, retired as a retiredKey() tombstone (e.g. manifest.loading for kernel/PluginLoadingConfig and its closure; agent.lifecycle for automation/StateMachine and its family), or none — most entries are schema-export definitions with zero consumers: no metadata-type binding, no stack collection, no embedding (e.g. data/ExternalDataSource, automation/ScheduleState). Sample at least one def of each kind",
+        "build door, per sampled def, each in its own scratch stack run through os build: for a def WITH a carrier, author the carrier key (e.g. manifest.loading: { strategy: 'lazy' }; an agent carrying lifecycle) — the refusal is the carrier's tombstone. For a def WITHOUT one there is no metadata of that type to author ('a stack that declares metadata of the retired type' could only be an invented key, which is the control below), so drive the door it actually had: import its Zod export from its @objectstack/spec subpath in the config (e.g. ExternalDataSourceSchema from '@objectstack/spec/data') and confirm json-schema/DOMAIN/NAME.json is absent from packages/spec/json-schema",
+        "runtime door against a live boot: PUT /api/v1/meta/TYPE/NAME carrying the carrier key where its type is runtime-writable, and record a code-only type's up-front refusal where it is not (agent is code-only); for a zero-consumer def, PUT a type name spelled after it (e.g. external_data_source) — no type was ever bound, so the expected answer is the same refusal as the control",
+        "as a control, author an invented top-level stack key (e.g. qaInventedFamily) at the build door and PUT an invented type name at the runtime door, and compare their refusals to the retired-def refusals"
       ],
       "acceptance": [
         {
@@ -1485,6 +1485,12 @@
           "date": "2026-08-17",
           "change": "new — api-backend.enforce-or-remove-authoring-gates samples the retired-KEY registries and explicitly requires three key-level surfaces, but nothing exercised the retired-DEF registry, which is a materially different door: a withdrawn KEY loses one property, a withdrawn DEFINITION loses an entire metadata family, and the fall-through failure mode ('unknown type, ignored') is different from the strip-mode failure the key item guards. The registry has grown substantially since the ledger was built and now carries entries for the next major as well as the current one",
           "ref": "#9299"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-17",
+          "change": "steps re-pointed (checklist-accuracy finding, #23878 close-out): RETIRED_DEFS entries are schema-export definitions, most with no metadata-type binding or stack collection, so 'a stack that declares metadata of each sampled retired type' could only be an invented key. Steps 3–6 now sample by carrier (an authored key retired as a tombstone, or none), drive the carrier key or the schema-export import at os build, name the runtime type each reaches, and make the control an invented stack key and an invented type; knownGaps[0] records the reading. No clause changed. Re-run with os build on a minimal scratch stack (baseline exit 0): 17 data/ExternalDataSource (zero consumers) import → exit 2 \"The requested module '@objectstack/spec/data' does not provide an export named 'ExternalDataSourceSchema'\"; 18 automation/ScheduleState (zero consumers) import → exit 2, the same generic shape; 17 kernel/PluginLoadingConfig via manifest.loading → exit 2 'manifest.loading was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block …'; 18 automation/StateMachine via agent.lifecycle → exit 2 'agent.lifecycle was removed in @objectstack/spec 17.7.0 … Delete the key …'; control qaInventedFamily → exit 2 'Unrecognized key(s) on this stack definition'. The carrier refusals name the retirement and differ from the control; the zero-consumer ones are generic, which knownGaps[0] scores as correct. json-schema/data/ExternalDataSource.json, automation/ScheduleState.json and automation/StateMachine.json are absent. Runtime door on stock showcase: PUT /meta/agent/NAME with lifecycle → 403 'Metadata type agent is code-only …'; PUT /meta/external_data_source/NAME and the invented control → the same 400 \"… is not a metadata type\"",
+          "ref": "#24036"
         }
       ]
     },
