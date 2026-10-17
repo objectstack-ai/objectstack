@@ -39,6 +39,17 @@ import { fileURLToPath } from 'node:url';
  * The banner's unit shapes live in `utils/format.server-ready-no-http-server.test.ts`;
  * this file pins the WIRING: that serve hands the banner the kernel's answer.
  *
+ * ## #24022 — the datasource admin routes, on the same boots
+ *
+ * Shapes 1 and 2 also pin that the boot diagnostics carry the datasource admin
+ * routes plugin's own degrade line and never "route registration failed" or
+ * "ordering fault": `--no-server` composed no server on purpose. Shapes 3 and
+ * 4 pin the CONTROL: `/api/v1/datasources` is mounted (not 404, while an
+ * unmounted sibling path is) and the plugin prints nothing, shape 4 on the
+ * config's own server under `--no-server`. The plugin's unit shapes,
+ * including a registration that genuinely throws, live in
+ * `serve-datasource-admin-routes.test.ts`.
+ *
  * ## Why `bin/run.js` with `NODE_ENV` unset
  *
  * Shapes 1, 3 and 4 are production posture, which `bin/run-dev.js` cannot
@@ -73,6 +84,8 @@ const ADDRESS_ROW = /\b(?:API|Console|MCP):/;
  * lines, which are not it.
  */
 const NO_SERVER_LINE = /➜\s+No HTTP server:/;
+/** The datasource admin routes plugin's log prefix (#24022). */
+const DATASOURCE_ADMIN = '[datasource-admin]';
 
 const AUTH_SECRET = 'os-23623-auth-secret-not-a-real-credential';
 const SECRET_KEY = '0e2e'.repeat(16);
@@ -247,6 +260,18 @@ function expectNoServerShape({ banner, stop }: Boot): void {
   expect(said[0], `the line does not name the flag that caused it${seen}`).toContain('--no-server');
 }
 
+/**
+ * #24022: a boot with no server takes the datasource admin routes plugin's own
+ * degrade line, once, and no `[datasource-admin]` line reports a failed
+ * registration or an ordering fault.
+ */
+function expectDatasourceAdminDegradeLine(output: string): void {
+  const seen = `\n--- output ---\n${output}`;
+  const said = output.split('\n').filter((l) => l.includes(DATASOURCE_ADMIN));
+  expect(said.filter((l) => /route registration failed|ordering fault/.test(l)), `an ordering fault reported${seen}`).toEqual([]);
+  expect(said, `not exactly one [datasource-admin] line${seen}`).toHaveLength(1);
+}
+
 beforeAll(() => {
   if (!existsSync(BUILT_SERVE)) {
     throw new Error(
@@ -277,7 +302,9 @@ describe('os serve — the ready banner names an address only when an HTTP serve
   it(
     'production --no-server (the card\'s command): no address row, one line naming --no-server',
     async () => {
-      expectNoServerShape(await boot(plainDir, {}, ['--no-server', '--preset', 'minimal']));
+      const booted = await boot(plainDir, {}, ['--no-server', '--preset', 'minimal']);
+      expectNoServerShape(booted);
+      expectDatasourceAdminDegradeLine(booted.output);
     },
     240_000,
   );
@@ -285,7 +312,9 @@ describe('os serve — the ready banner names an address only when an HTTP serve
   it(
     '--dev --no-server: the same shape',
     async () => {
-      expectNoServerShape(await boot(plainDir, {}, ['--dev', '--no-server']));
+      const booted = await boot(plainDir, {}, ['--dev', '--no-server']);
+      expectNoServerShape(booted);
+      expectDatasourceAdminDegradeLine(booted.output);
     },
     240_000,
   );
@@ -293,7 +322,7 @@ describe('os serve — the ready banner names an address only when an HTTP serve
   it(
     'control: a default production boot prints API: and MCP:, and the API: port answers',
     async () => {
-      const { banner, stop } = await boot(plainDir, { OS_DATABASE_URL: 'file:./ctl.db', OS_AUTH_SECRET: AUTH_SECRET }, []);
+      const { banner, output, stop } = await boot(plainDir, { OS_DATABASE_URL: 'file:./ctl.db', OS_AUTH_SECRET: AUTH_SECRET }, []);
       const seen = `\n--- banner ---\n${banner}`;
       try {
         expect(banner, `the no-server line printed on a boot with a server${seen}`).not.toMatch(NO_SERVER_LINE);
@@ -301,6 +330,11 @@ describe('os serve — the ready banner names an address only when an HTTP serve
         const port = apiPort(banner);
         expect(port, `no API row naming a localhost port${seen}`).not.toBeNull();
         expect(await statusOf(port as number, '/api/v1/health'), `the API: port did not answer health${seen}`).toBe(200);
+        // #24022 CONTROL: the datasource admin routes still mount on a composed
+        // boot. An unmounted sibling path answers 404, so "not 404" is a mount.
+        expect(await statusOf(port as number, '/api/v1/datasources-not-a-route'), `unmounted paths no longer 404${seen}`).toBe(404);
+        expect(await statusOf(port as number, '/api/v1/datasources'), `the datasource admin routes are not mounted${seen}`).not.toBe(404);
+        expect(output.split('\n').filter((l) => l.includes(DATASOURCE_ADMIN)), `a [datasource-admin] warning on a composed boot${seen}`).toEqual([]);
       } finally {
         stop();
       }
@@ -311,7 +345,7 @@ describe('os serve — the ready banner names an address only when an HTTP serve
   it(
     'control: --no-server with a config-mounted HonoServerPlugin prints API:, and that port answers',
     async () => {
-      const { banner, stop } = await boot(honoDir, { OS_DATABASE_URL: 'file:./ctl.db' }, ['--no-server', '--preset', 'minimal']);
+      const { banner, output, stop } = await boot(honoDir, { OS_DATABASE_URL: 'file:./ctl.db' }, ['--no-server', '--preset', 'minimal']);
       const seen = `\n--- banner ---\n${banner}`;
       try {
         // ⭐ The read is off the kernel, not off the flag: the flag skipped serve's
@@ -321,6 +355,11 @@ describe('os serve — the ready banner names an address only when an HTTP serve
         expect(port, `no API row naming a localhost port${seen}`).not.toBeNull();
         // Any HTTP status proves a server listens there; `/` is not mounted on this shape.
         expect(await statusOf(port as number, '/'), `nothing answered on the API: port${seen}`).toBeGreaterThanOrEqual(100);
+        // #24022 CONTROL: the same read decides the datasource admin routes, so
+        // they mount on the config's server under `--no-server` too.
+        expect(await statusOf(port as number, '/api/v1/datasources-not-a-route'), `unmounted paths no longer 404${seen}`).toBe(404);
+        expect(await statusOf(port as number, '/api/v1/datasources'), `the datasource admin routes are not mounted${seen}`).not.toBe(404);
+        expect(output.split('\n').filter((l) => l.includes(DATASOURCE_ADMIN)), `a [datasource-admin] warning on a composed boot${seen}`).toEqual([]);
       } finally {
         stop();
       }
