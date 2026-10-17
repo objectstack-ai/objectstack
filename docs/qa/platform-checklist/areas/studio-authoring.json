@@ -95,7 +95,7 @@
       "title": "Object designer round-trip: field add/edit/reorder persists to metadata, identifiers derive and survive typing",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin"],
@@ -109,20 +109,20 @@
         ]
       },
       "steps": [
-        "open the object designer on the writable package: /_console/apps/com.objectstack.studio/metadata/object/new?package=<writable pkg>",
-        "TYPE the object name repair_asset character by character (never .fill — the F2 per-keystroke-sanitisation bug only reproduces when typed) and confirm the underscore survives",
+        "open the object designer on the writable package: /_console/apps/setup/metadata/object/new?package=PKG (PKG = the writable package's id; note its namespace NS, from GET /api/v1/packages). ⛔ Not /_console/apps/com.objectstack.studio/…: the studio app is not loaded on a stock boot (RUNNER.md environment facts), so that route renders inside another app's chrome",
+        "TYPE the object name NS_repair_asset character by character (never .fill — the F2 per-keystroke-sanitisation bug only reproduces when typed) and confirm both underscores survive. The NS_ prefix is required: in a namespaced writable package the publish gate refuses an unprefixed object name (NAMESPACE_PREFIX). Type the name after the label, or re-check it before saving — objectui#12680: typing the Label after a hand-typed name overwrites it and drops the prefix",
         "add a Text field, set its label to 'Asset Code', blur — the API name input must derive asset_code (F3)",
         "add a Picklist field and author its 3 real options, THEN add one EMPTY option row; wait out the debounced live validation — no validation banner may appear for the empty row (F4). ⚠ Order matters: with NO real option yet the select-needs-options banner fires, legitimately — the empty rows ARE dropped, so the field has no options — which collides with a literal 'no banner' (and with objectui F4's toHaveCount(0) the same way). Assert the empty-row half with real options present",
-        "Save draft, Publish; GET /api/v1/meta/object/repair_asset and record the full field list and its order",
+        "Save draft, Publish; GET /api/v1/meta/object/NS_repair_asset and record the full field list and its order",
         "reopen the designer: rename one picklist value, drag-reorder the fields, Save draft + Publish again",
-        "GET /api/v1/meta/object/repair_asset again — the rename AND the new field order must be in the persisted metadata, not just the canvas",
-        "create a record via the Records tab and GET /api/v1/data/repair_asset/<id> — the stored column key must be the derived API name (asset_code)"
+        "GET /api/v1/meta/object/NS_repair_asset again — the rename AND the new field order must be in the persisted metadata, not just the canvas",
+        "create a record via the Records tab and GET /api/v1/data/NS_repair_asset/<id> — the stored column key must be the derived API name (asset_code)"
       ],
       "acceptance": [
         {
           "clause": "designer edits persist to the metadata store: added, edited, and reordered fields read back from the meta API exactly as authored — the designer repaint is never the oracle",
           "oracle": "api",
-          "verify": "before/after GET /api/v1/meta/object/repair_asset: field set, picklist values, and field ORDER all match the authored state after each publish",
+          "verify": "before/after GET /api/v1/meta/object/NS_repair_asset: field set, picklist values, and field ORDER all match the authored state after each publish",
           "evidence": "the two meta reads, diffed"
         },
         {
@@ -132,9 +132,9 @@
           "evidence": "designer screenshot + the record read"
         },
         {
-          "clause": "typed identifiers survive per-keystroke sanitisation — repair_asset keeps its underscore when typed char-by-char",
+          "clause": "typed identifiers survive per-keystroke sanitisation — NS_repair_asset keeps its underscores when typed char-by-char",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the designer rendered, the name input's value equals repair_asset (pinned by objectui F2; pre-fix this yielded 'repairasset')",
+          "verify": "after a screenshot confirms the designer rendered, the name input's value equals the typed NS_repair_asset, character for character (pinned by objectui F2; pre-fix repair_asset yielded 'repairasset')",
           "evidence": "screenshot + input value read"
         },
         {
@@ -167,6 +167,12 @@
           "date": "2026-10-13",
           "change": "steps[3] and acceptance[3] (clause and verify) add the empty option row after the real options (assertion defect, #23166 A3; parked on #23121, carried by #23169). The empty rows are dropped, so a picklist with no real option yet has none, and the select-needs-options banner fires correctly; the literal 'no banner for the empty row' collided with it, as objectui F4's toHaveCount(0) does. QA run #23166 asserted the empty-row half with real options present and passed",
           "ref": "#23169"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "steps[0], [1], [4], [6] and [7] and acceptance[0].verify and [2] (clause, verify) re-pointed (checklist-accuracy finding 3 of QA run #23942, wave #23878). The object name repair_asset cannot publish in a namespaced writable package — the publish gate answers NAMESPACE_PREFIX — so #23942 minted repairs_repair_asset; the steps and reads now use NS_repair_asset, which still carries the underscores the F2 sanitisation clause tests. The route /_console/apps/com.objectstack.studio/… renders inside the Showcase chrome because the studio app is not loaded on a stock boot, so step 0 opens the designer under the Setup app. Not loosened: the typed name must still read back character for character",
+          "ref": "#24036"
         }
       ]
     },
@@ -336,7 +342,7 @@
       "title": "Metadata draft→publish lifecycle: drafts staged not served, publish flips visibility atomically, conflicts and invalid drafts refused, and the history/audit/diff/rollback forensics tell the truth",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["admin (authors drafts)", "end user (must not see drafts)"],
@@ -350,7 +356,7 @@
       "steps": [
         "author a dashboard draft: PUT /api/v1/meta/dashboard/qa_lifecycle_probe?mode=draft with one dataset-bound widget (dataset: showcase_task_metrics, dimensions: ['status'], values: ['task_count']) — the same door areas/dashboards.json exercises",
         "record the receipt: { success, version, seq, state: 'draft' }",
-        "BOTH sides pre-publish: GET /api/v1/meta/dashboard/qa_lifecycle_probe as the runtime read → 404 (never published) — the draft body must not be served; in Studio the item shows the 'Unpublished draft' badge and the 'Changes · n' counter",
+        "BOTH sides pre-publish: GET /api/v1/meta/dashboard/qa_lifecycle_probe as the runtime read → 404 (never published) — the draft body must not be served; in Studio the item shows the 'Unpublished draft' chip and a numbered pill on the Changes button (objectui#12459). For the Studio half stage the draft in a WRITABLE package (?package=PKG on the draft PUT): the pill counts the pending drafts of the package in scope, and an env-wide, package-less draft is counted in no package scope, so it shows no pill. Open the item in Studio through that package: stage, in the same package, an app draft whose navigation names the dashboard (e.g. an entry of type dashboard, dashboardName qa_lifecycle_probe) and select that entry in the Interfaces pillar — a package with no app shows 'This package has no app yet' and no dashboard to select, so no chip can render; the pill then counts both drafts",
         "publish per-ref: POST /api/v1/meta/dashboard/qa_lifecycle_probe/publish → 200; GET now serves the authored body",
         "author a SECOND draft revision on the same name and confirm the live read keeps serving revision 1 until that draft is published",
         "concurrency guard: re-PUT with the STALE version as If-Match and capture the 409",
@@ -401,9 +407,9 @@
           "evidence": "the refused publish + follow-up GET"
         },
         {
-          "clause": "Studio chrome tells the truth: 'Unpublished draft' badge and 'Changes · n' counter while pending, cleared after publish",
+          "clause": "Studio chrome tells the truth: the 'Unpublished draft' chip and the numbered pill on the Changes button while pending, cleared after publish",
           "oracle": "screenshot",
-          "verify": "badge/counter visible pre-publish, gone post-publish (the audit found this model 'reads consistently everywhere')",
+          "verify": "for a draft staged in a writable package (an env-wide draft is counted in no package scope, so it shows no pill): chip and pill visible pre-publish, both gone post-publish and after a reload (the audit found this model 'reads consistently everywhere')",
           "evidence": "before/after Studio screenshots"
         },
         {
@@ -460,7 +466,8 @@
         { "revision": 2, "date": "2026-08-08", "change": "clause-extension (routes hunter #12): meta forensics — GET /meta/:type/:name/{history,audit,diff} + POST .../rollback (two publishes → history lists both, diff names the changed key, rollback restores rev-1 and the live app serves it, audit rows carry the actor); traps gain dispatcher-vs-hono-route (the dispatcher /meta branch 404s /history)", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 3, "date": "2026-08-11", "change": "recorded the run #7695 ledger note that publish-drafts' namespace-gate abort answers HTTP 200 with data.success:false, not a 4xx: the step and the clause now say capture status and body separately and score the abort off data.success (the atomicity itself was verified — the abort leaves both names 404). Logged in negatives as an OPEN ledger question awaiting one deliberate ruling (#7753 item 2) — deliberately RECORDED, not adjudicated: a runner asserts the current behaviour and does not file the status code as a defect", "ref": "#7753" },
         { "revision": 4, "date": "2026-08-17", "change": "re-spell after [#7941]: the rollback step and the audit clause named X-Actor as an alternate actor source alongside the session identity; #7941 removed the header limb from resolveMetaWriteActor entirely (landed as commit 4dc8a618e, PR #9119) so it is now the SOLE source and X-Actor is ignored outright, not consulted even as a fallback. Re-spelled the rollback step, the audit acceptance clause, and the rest-server.ts source pointer to name the single source; added a new step + acceptance clause pairing the inverted check the finding asked for — send X-Actor and confirm it does NOT change the recorded actor — since that is now a meaningful QA-layer assertion nothing else covers (the unit pins live in packages/rest/src/meta-write-actor-identity.test.ts, added as a source pointer). The capability itself (audit rows name the acting user, never anonymous) is unchanged and was never wrong.", "ref": "#9118" },
-        { "revision": 5, "date": "2026-10-13", "change": "steps[9] and acceptance[8] (clause and verify) diff the two publish versions read off /history, and steps[8] and acceptance[7].verify say how history counts (assertion defect, #23166 A8; parked on #23121, carried by #23169). sys_metadata_history records draft saves and publishes alike, so ?from=1&to=2 compared the first draft save with its own publish (changed []); on QA run #23166's clean two-round run the published revisions were v2 and v4, and their diff named the edited widget key. The rollback steps are unchanged", "ref": "#23169" }
+        { "revision": 5, "date": "2026-10-13", "change": "steps[9] and acceptance[8] (clause and verify) diff the two publish versions read off /history, and steps[8] and acceptance[7].verify say how history counts (assertion defect, #23166 A8; parked on #23121, carried by #23169). sys_metadata_history records draft saves and publishes alike, so ?from=1&to=2 compared the first draft save with its own publish (changed []); on QA run #23166's clean two-round run the published revisions were v2 and v4, and their diff named the edited widget key. The rollback steps are unchanged", "ref": "#23169" },
+        { "revision": 6, "date": "2026-10-16", "change": "steps[2] and acceptance[6] (clause, verify) re-pointed (checklist-accuracy finding 4 of QA run #23942, wave #23878). The Studio counter is no longer 'Changes · n' text but a numbered pill on the Changes button (objectui#12459), and the pill counts the drafts of the package in scope — an env-wide (package-less) dashboard draft is counted in none, so #23942 staged the browser leg's draft in a writable package. The step and clause name the pill and the writable-package staging, and the step says how to reach the draft in Studio — through an app of that package whose navigation names the dashboard, since a package with no app offers no dashboard to select (the re-run on #24036 found no chip until it staged one). Not loosened: a chip or pill that survives the publish, or is missing while the draft is pending, still FAILS", "ref": "#24036" }
       ]
     },
     {
@@ -542,7 +549,7 @@
       "title": "The metadata type registry gates runtime writes: allowEnvironmentOverlay=false kinds refuse overlay (403 not_overridable), allowRuntimeCreate=false kinds refuse creation — both sides",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -602,7 +609,7 @@
       ],
       "variants": [
         "object (override locked, create open)",
-        "field (override locked, create open)",
+        "field (override locked, create LOCKED — the standalone runtime-create door was retired by the 2026-08-12 ruling, #7893: field declares allowRuntimeCreate:false, so PUT /api/v1/meta/field/OBJECT.NAME for a new name answers 403 NOT_CREATABLE; fields are authored inside the object)",
         "job (create locked — 403 not_creatable)",
         "view (override open)",
         "dashboard (override open)"
@@ -619,7 +626,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "new item: both sides of the registry's runtime-write gates (not_overridable / not_creatable vs accepted overlay / accepted create), variants sampled straight from DEFAULT_METADATA_TYPE_REGISTRY and pinned to the overlay-precedence suite", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-11", "change": "recorded two notes from run #7695 — (a) the CORRECTION to run #7637: with OS_METADATA_WRITABLE=permission the Studio read-only badge clears and the editor is fully writable (GET /meta reports overrideSource:'env'), so the earlier 'badge asserts a lock the server is not applying' observation does not reproduce and must not be acted on as written; (b) the route note that a metadata-API-authored flow opens read-only in Studio (ResourceEditPage's artifact-backed heuristic + flow's allowOrgOverride:false) — correct for this kind, with the polarity-reversed defect filed at objectui#4308. Notes only; no clause, variant or oracle changed", "ref": "#7753" }
+        { "revision": 2, "date": "2026-08-11", "change": "recorded two notes from run #7695 — (a) the CORRECTION to run #7637: with OS_METADATA_WRITABLE=permission the Studio read-only badge clears and the editor is fully writable (GET /meta reports overrideSource:'env'), so the earlier 'badge asserts a lock the server is not applying' observation does not reproduce and must not be acted on as written; (b) the route note that a metadata-API-authored flow opens read-only in Studio (ResourceEditPage's artifact-backed heuristic + flow's allowOrgOverride:false) — correct for this kind, with the polarity-reversed defect filed at objectui#4308. Notes only; no clause, variant or oracle changed", "ref": "#7753" },
+        { "revision": 3, "date": "2026-10-16", "change": "variants[1] corrected (checklist-accuracy finding 1 of QA run #23942, wave #23878). The field variant still read 'create open', but DEFAULT_METADATA_TYPE_REGISTRY has declared field allowRuntimeCreate:false since #7893 (a standalone field row reached no object's fields), so its create side is locked like job's and answers 403 NOT_CREATABLE. The variant now states the expectation the registry declares; step[0] already tells the runner to read the flags first", "ref": "#24036" }
       ]
     },
     {
@@ -748,7 +756,7 @@
       "title": "Permission-matrix editor UX: field-filter + bulk apply to EXACTLY the visible fields, and the Bulk column never clips at narrow widths",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin"],
@@ -805,9 +813,9 @@
           "evidence": "the narrow-viewport screenshot(s)"
         },
         {
-          "clause": "the read-only gate holds: a read-only package/type hides Save and disables every bulk button + checkbox; the read-only badge names the reason (package vs type)",
+          "clause": "the read-only gate holds: a read-only set hides Save and disables every bulk button + checkbox; the read-only badge names WHICH gate holds",
           "oracle": "screenshot",
-          "verify": "on the read-only set Save is absent, bulk buttons are disabled, and the badge text distinguishes the package gate (engine.studio.pkg.readonly) from the type gate (perm.readOnly)",
+          "verify": "on the read-only set Save is absent, bulk buttons are disabled, and the badge names the gate that holds; the console distinguishes FOUR (objectui PermissionMatrixEditor.tsx at the pin): the package gate (engine.studio.pkg.readonly — Studio on a read-only package), the artifact gate (perm.readOnly.artifact, 'Read-only (this set is provided by a code package)' — a set a code package ships, in the metadata admin), the wall (perm.readOnly.walled — the security catalog under isolated/group tenancy) and the type gate (perm.readOnly — a type with no runtime write channel). On a stock boot only the package and artifact gates are reachable — the wall needs a walled tenancy posture and the type gate a permission type with no write channel, which stock does not have — so score those two on the packaged showcase_contributor set (Studio Access and the metadata admin) and record the other two as not reachable on stock. A badge that blames the wrong gate is the FAIL",
           "evidence": "the read-only screenshot"
         }
       ],
@@ -836,6 +844,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "acceptance[5] (clause, verify) re-pointed (checklist-accuracy finding 7 of QA run #23942, wave #23878). The clause distinguished only a package gate and a type gate, but the console names more read-only reasons — #23942 saw three (package, artifact, type) and the pin also carries the wall (objectui#12183) — and the type gate is unreachable on stock. The verify text now names each gate's key, the two reachable on stock (package in Studio Access, artifact in the metadata admin, both on showcase_contributor), and records the other two as not reachable on stock. Not loosened: Save must still be absent, every bulk control disabled, and the badge must name the right gate",
+          "ref": "#24036"
         }
       ]
     },
@@ -1035,7 +1049,7 @@
       "title": "Source-authored page tiers render by the RIGHT path: kind:'html' source is PARSED-never-executed (static, in-browser sdui-parser compile), kind:'react' source is EXECUTED behind its capability gate (live data + interactivity) — command-center-jsx / capability-map (html) vs crm-workbench (react)",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (seeded admin@objectos.ai) driving the published showcase app as an end user"],
@@ -1058,7 +1072,7 @@
         "prove the react tier is EXECUTED against LIVE data: the 'Total projects' KPI equals GET /api/v1/data/showcase_project's count (the page computes it via useAdapter().find('showcase_project'), reading the QueryResult .data envelope), and a showcase_project find query fires on the network — the number is computed at render, not authored",
         "prove react interactivity (executed handlers, not a parsed tree): click a ListView row → the ObjectForm binds THAT record (React useState); click '+ New project' → the form switches to create mode",
         "both-sides gate: on a boot with OS_PAGE_REACT=off, re-open crm-workbench — it must render the NAMED 'React pages are disabled on this deployment' notice (CapabilityDisabledNotice), never a blank and never an executed page; the html pages still render (html is not gated). If the env toggle cannot be flipped on the stock fixture, record this clause blocked(environment)",
-        "degradation: (a) html — save a faulting html source at the ACTIVE door (or publish one) and capture the 422 INVALID_METADATA with its compile diagnostics; then save the same source as a ?mode=draft draft and open the page designer's draft preview, where the 'HTML page failed to compile (N)' panel renders with the diagnostic messages — the save gate keeps a faulting html page off the rendered route, so the panel cannot be met there (knownGaps[0]); (b) react — a react runtime error shows the 'React page error' fallback on the rendered page. Neither may be a blank page"
+        "degradation: (a) html — save a faulting html source at the ACTIVE door (or publish one) and capture the 422 INVALID_METADATA with its compile diagnostics; then save the same source as a ?mode=draft draft IN A WRITABLE PACKAGE (?package=PKG) that also holds an app whose navigation references the page, and open it in Studio at /_console/studio/PKG/interfaces?surface=page:NAME, where the draft preview's 'HTML page failed to compile (N)' panel renders with the diagnostic messages. An env-wide (package-less) draft has no Studio surface, and the save gate keeps a faulting html page off the rendered route, so the panel cannot be met anywhere else (knownGaps[0]); (b) react — a react runtime error shows the 'React page error' fallback on the rendered page. Neither may be a blank page"
       ],
       "acceptance": [
         {
@@ -1119,7 +1133,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-08", "change": "new item: the html (parse-never-execute, in-browser sdui-parser compile, static) vs react (executed at render, capability-gated, live data + interactivity) source-page tiers — the objectui renderer-path split grounded in PageRenderer's kind dispatch + react-page.tsx's gate, distinguishing command-center-jsx/capability-map (html) from crm-workbench (react); records the honest build-step finding (none needed to view — in-browser compile/transpile) as a knownGap", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-10-13", "change": "acceptance[5] (clause and verify), steps[7] and knownGaps[0] name where an html compile error is observable (assertion defect, minor, #23166 A5; parked on #23121, carried by #23169). The save door compiles an html page's source against the deployment's manifest (runtime-authoring-gate.ts HTML_PAGE_SOURCE_COMPILE), so a faulting html page is refused 422 INVALID_METADATA at save / publish and never publishes, and the compile-error panel is reachable only in the designer's draft preview. QA run #23166 met the 422 and the draft-preview panel. The react half is unchanged", "ref": "#23169" }
+        { "revision": 2, "date": "2026-10-13", "change": "acceptance[5] (clause and verify), steps[7] and knownGaps[0] name where an html compile error is observable (assertion defect, minor, #23166 A5; parked on #23121, carried by #23169). The save door compiles an html page's source against the deployment's manifest (runtime-authoring-gate.ts HTML_PAGE_SOURCE_COMPILE), so a faulting html page is refused 422 INVALID_METADATA at save / publish and never publishes, and the compile-error panel is reachable only in the designer's draft preview. QA run #23166 met the 422 and the draft-preview panel. The react half is unchanged", "ref": "#23169" },
+        { "revision": 3, "date": "2026-10-16", "change": "steps[7](a) names how to reach the draft preview (checklist-accuracy finding 8 of QA run #23942, wave #23878). The compile panel is reachable only for a page staged in a writable package that an app's navigation references, opened at /_console/studio/PKG/interfaces?surface=page:NAME; an env-wide draft has no Studio surface, which is what #23942 met. The clause is unchanged", "ref": "#24036" }
       ]
     },
     {
@@ -1127,7 +1142,7 @@
       "title": "Studio Automations pillar on a read-only package: a packaged flow is NOT editable in place — New-flow and autosave honor the courtesy gate, the enable/disable switch produces no metadata write, and inspector edits are inert or announced, never silently discarded",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": ["admin (opens Studio on the read-only package)"],
@@ -1138,7 +1153,7 @@
           "a vendored console matching .objectui-sha — the pillar markup under test is objectui's, so a stale bundle tests yesterday's gate"
         ],
         "knownGaps": [
-          "FIXED at objectui 1fb1ced36243 (objectui#11124), recorded so runs don't re-derive it: on a read-only package the Automations pillar's enable/disable switch is disabled (disabled={!isEditable || !!saving || readOnly}, its title the read-only hint) and toggleEnabled is guarded as well, so a forced click saves nothing; the flow node inspector receives the pillar's REAL readOnly flag, threaded as the Data pillar threads it, so its inputs are disabled; New-flow and autosave still honour the gate (StudioDesignSurface.tsx). QA run #23163 measured exactly that: the switch disabled with a reason title, a forced click sending nothing, the inspector inputs disabled, the flow byte-identical. The pre-fix shape — a clickable switch only the server's 422 refused, and inspector edits that took locally and vanished on reload — is gone; meeting it again is a regression FAIL, not a standing finding",
+          "FIXED at objectui 1fb1ced36243 (objectui#11124), recorded so runs don't re-derive it: on a read-only package the Automations pillar's enable/disable switch is disabled (disabled={!isEditable || !!saving || readOnly}, its read-only reason carried by aria-describedby and a tooltip since objectui#12303, not a `title`) and toggleEnabled is guarded as well, so a forced click saves nothing; the flow node inspector receives the pillar's REAL readOnly flag, threaded as the Data pillar threads it, so its inputs are disabled; New-flow and autosave still honour the gate (StudioDesignSurface.tsx). QA run #23163 measured exactly that: the switch disabled with a reason title, a forced click sending nothing, the inspector inputs disabled, the flow byte-identical. The pre-fix shape — a clickable switch only the server's 422 refused, and inspector edits that took locally and vanished on reload — is gone; meeting it again is a regression FAIL, not a standing finding",
           "objectui now pins the read-only posture: packages/app-shell/src/views/studio-design/StudioDesignSurface.automationsReadOnly-11124.test.tsx ('disables the header \"Enabled\" switch, and a click on it saves nothing'; 'opens the flow inspector read-only: the node inputs are disabled'; no canvas edit handles). It lives in the objectui repo only, so from this checkout the item stays browser-driven end to end; run the pin from an objectui checkout at the .objectui-sha revision to cite it beside the live read"
         ]
       },
@@ -1147,10 +1162,10 @@
         "pin the precondition: GET /api/v1/packages must report com.example.showcase writable:false — the pillar's readOnly gate is pkgWritable===false (objectui StudioDesignSurface.tsx) and an UNKNOWN writability (fetch failed / still loading) deliberately leaves the pillar ungated, so a race here fakes a gate failure (hydration-race)",
         "baseline the server truth: GET /api/v1/meta/flow/showcase_urgent_task_alert (full body) — every later clause diffs against this read",
         "affordance sweep with the network panel recording: confirm the New-flow button is ABSENT from the rail heading; select the packaged flow and wait past the autosave debounce after touching the canvas — no flow save may leave the browser",
-        "click the enable/disable switch in the pillar header and capture everything: whether it is disabled/absent (at objectui 1fb1ced36243 it is disabled, titled with the read-only hint), whether a forced click fires any request (it must not — were it to, the request would be a flow DRAFT save flipping status active↔obsolete, StudioDesignSurface.tsx toggleEnabled), and what the UI surfaces",
+        "click the enable/disable switch in the pillar header and capture everything: whether it is disabled/absent (it is disabled, and its read-only reason rides aria-describedby and a tooltip — objectui#12303 — not a `title`), whether a forced click fires any request (it must not — were it to, the request would be a flow DRAFT save flipping status active↔obsolete, StudioDesignSurface.tsx toggleEnabled), and what the UI surfaces",
         "select a flow node and edit a property in the inspector; record whether the edit visibly takes on the canvas/draft, and whether any affordance announces a read-only or will-not-persist state",
         "reload the pillar (re-open the package) and re-inspect: record whether the inspector edit survived or vanished, and whether its discard was ever announced",
-        "close out: GET /api/v1/meta/flow/showcase_urgent_task_alert again and diff against the baseline — byte-identical"
+        "forge the write the client gate withholds, both spellings: PUT /api/v1/meta/flow/showcase_urgent_task_alert?mode=draft&package=com.example.showcase and the same PUT without ?package=, each with a modified body — capture each status and error.code. Then close out: GET /api/v1/meta/flow/showcase_urgent_task_alert again and diff against the baseline — byte-identical"
       ],
       "acceptance": [
         {
@@ -1160,16 +1175,16 @@
           "evidence": "the rail DOM read + the flow-write-free network trace over the debounce window"
         },
         {
-          "clause": "a packaged flow definition is not editable in place in Studio (ADR-0126 §2 Regime C, card F2): after driving every affordance the pillar offers, the flow's server-side metadata is byte-identical — and any write that slips past client courtesy is refused server-side with the ledgered 422 [writable_package_required] naming the writable-package remedy (ADR-0124 D1: the server is the authority, the client gate is courtesy)",
+          "clause": "a packaged flow definition is not editable in place in Studio (ADR-0126 §2 Regime C, card F2): after driving every affordance the pillar offers, the flow's server-side metadata is byte-identical — and any write that slips past client courtesy is refused server-side with a 403 — error.code ITEM_LOCKED when the write names the read-only package (?package=com.example.showcase: the named read-only base), NOT_OVERRIDABLE when it does not (flow declares allowEnvironmentOverlay:false) — each naming the clone or toggle remedy (ADR-0124 D1: the server is the authority, the client gate is courtesy)",
           "oracle": "api",
-          "verify": "GET /api/v1/meta/flow/showcase_urgent_task_alert before/after the whole probe: identical; every flow write captured in the trace answers 4xx with the writable_package_required class — a 2xx on any of them is the hard FAIL",
+          "verify": "GET /api/v1/meta/flow/showcase_urgent_task_alert before/after the whole probe: identical; every flow write captured in the trace, and the two forged in step 7, answer 403 with error.code ITEM_LOCKED (the write names com.example.showcase) or NOT_OVERRIDABLE (it names no package) — score the status and the code, never the message; a 2xx on any of them is the hard FAIL",
           "evidence": "the before/after meta reads, diffed + each refusal body"
         },
         {
           "clause": "the enable/disable switch honors the read-only package lock exactly as the New-flow button does: clicking it produces NO metadata write",
           "oracle": "network",
-          "verify": "click the switch: the PASS shape is disabled/absent-or-inert (no request fires). At objectui 1fb1ced36243 the switch is disabled with the read-only hint as its title and toggleEnabled is guarded (objectui#11124), so even a forced click fires nothing — the expected-fail this clause carried (a clickable switch the server refused 422 writable_package_required) is fixed. A switch that fires a request is now a FAIL of this clause; a 2xx on that write escalates to clause 2's hard FAIL",
-          "evidence": "the click's network capture (no request) + the disabled switch's DOM state and title"
+          "verify": "click the switch: the PASS shape is disabled/absent-or-inert (no request fires). The switch is disabled — its read-only reason on aria-describedby and a tooltip (objectui#12303), not a `title` — and toggleEnabled is guarded (objectui#11124), so even a forced click fires nothing; the expected-fail this clause once carried (a clickable switch only the server refused) is fixed. A switch that fires a request is now a FAIL of this clause; a 2xx on that write escalates to clause 2's hard FAIL",
+          "evidence": "the click's network capture (no request) + the disabled switch's DOM state and its accessible description"
         },
         {
           "clause": "inspector edits are inert OR their discard is announced: the flow node inspector on a read-only package either disables its inputs or tells the author the edit will not persist — an edit that visibly takes and silently vanishes on reload is the failure",
@@ -1186,14 +1201,16 @@
       "traps": ["stale-console-bundle", "hydration-race", "automation-input"],
       "source": [
         "objectui packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (readOnly = pkgWritable===false; unknown writability deliberately leaves the pillar ungated), (the prop's own contract: 'hide/disable flow-authoring affordances'), (autosave blocked on readOnly), (the enable/disable switch — disabled={!isEditable || !!saving || readOnly} and a guarded toggleEnabled since objectui#11124), (toggleEnabled = client.save flow draft flipping status active↔obsolete), (New-flow gated on !readOnly), (the inspector receives the real readOnly flag since objectui#11124, as the Data pillar's editors do), (the rail lists package-scoped flows) + StudioDesignSurface.automationsReadOnly-11124.test.tsx (the pin) — objectui owns this pillar's markup, so locator and gate fixes land there (ADR-0054)",
-        "packages/metadata-protocol/src/sys-metadata-repository.ts + packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts (the 422 [writable_package_required] refusal a read-only code package answers to metadata writes — the server half of the lock; com.example.showcase is source-loaded read-only)",
+        "packages/metadata-protocol/src/sys-metadata-repository.ts + packages/metadata-protocol/src/sys-metadata-repository.package-writability.test.ts (a read-only code package's write refusals — the server half of the lock; com.example.showcase is source-loaded read-only. The test pins 'a read-only base answers ITEM_LOCKED / 403 where a writable base answers NOT_OVERRIDABLE / 403')",
         "docs/adr/0126-packaged-metadata-customization-model.md §2/§3 (flow = Regime C: locked base, in-place edit refused loudly at the write door — card F2)",
+        "packages/metadata-protocol/src/sys-metadata-repository.ts#readOnlyBaseOverrideError (the 403 ITEM_LOCKED a write naming a read-only base answers) + packages/metadata-protocol/src/protocol.ts (the 403 NOT_OVERRIDABLE an overlay write on a non-overlayable type answers when no package is named)",
         "#12438 (the ADR-0126 packaged flow/action sweep this item lands from)",
         "access-security.readonly-package-locks-studio (object designer + permission matrix — cross-referenced, not widened), access-security.packaged-flow-write-door-parity (the API-side door parity for the same packaged flow), automation.setup-packaged-automation-board (the ledgered enable/disable surface — a different mechanism from this pillar's status flip)"
       ],
       "history": [
         { "revision": 1, "date": "2026-08-26", "change": "new item (#12438 card F2, UI half): the Studio Automations pillar's read-only package lock — the promise (no in-place edit, switch produces no metadata write, inspector edits inert or announced) asserted with the current source shape recorded as the expected finding: the switch is clickable with only the server-side 422 behind it (disabled expression omits readOnly, StudioDesignSurface.tsx) and the inspector hardcodes readOnly:false so edits take locally and silently vanish on reload; New-flow and autosave honor the gate. Grounded in objectui f7c52e2 + the framework's writable_package_required door; owns the Automations pillar only, cross-referencing readonly-package-locks-studio for the surfaces it already owns", "ref": "#12438" },
-        { "revision": 2, "date": "2026-10-13", "change": "acceptance[2] and [3] (verify; evidence for [2]) drop the expected-fail wording, with knownGaps[0] and [1], steps[4] and source[0] (stale spec, #23163 A2 / A3; parked on #23121, carried by #23169). objectui#11124 disabled the pillar's switch on a read-only package (with the read-only hint as its title, and a guarded toggleEnabled) and threaded the real readOnly flag into the flow node inspector, pinned by StudioDesignSurface.automationsReadOnly-11124.test.tsx. QA run #23163 measured the switch disabled, a forced click sending nothing, the inspector inputs disabled and the flow byte-identical. Re-read from objectui source at 1fb1ced36243, still this repo's .objectui-sha. The clauses' promises are unchanged; only the recorded finding flips to the fixed shape", "ref": "#23169" }
+        { "revision": 2, "date": "2026-10-13", "change": "acceptance[2] and [3] (verify; evidence for [2]) drop the expected-fail wording, with knownGaps[0] and [1], steps[4] and source[0] (stale spec, #23163 A2 / A3; parked on #23121, carried by #23169). objectui#11124 disabled the pillar's switch on a read-only package (with the read-only hint as its title, and a guarded toggleEnabled) and threaded the real readOnly flag into the flow node inspector, pinned by StudioDesignSurface.automationsReadOnly-11124.test.tsx. QA run #23163 measured the switch disabled, a forced click sending nothing, the inspector inputs disabled and the flow byte-identical. Re-read from objectui source at 1fb1ced36243, still this repo's .objectui-sha. The clauses' promises are unchanged; only the recorded finding flips to the fixed shape", "ref": "#23169" },
+        { "revision": 3, "date": "2026-10-16", "change": "acceptance[1] (clause, verify), acceptance[2] (verify, evidence), steps[4] and [7], knownGaps[0] and source re-pointed (checklist-accuracy finding 5 of QA run #23942, wave #23878). Clause 1 named the server refusal as 422 [writable_package_required]; the forged flow write is refused 403 — ITEM_LOCKED when it names com.example.showcase, NOT_OVERRIDABLE when it names no package (sys-metadata-repository.package-writability.test.ts pins the pair) — so step 7 now forges both spellings and the clause scores status and code. The switch's reason is an aria-describedby plus tooltip since objectui#12303, not a `title`. Not loosened: a 2xx on any flow write is still the hard FAIL, and a 403 with any other code fails the clause", "ref": "#24036" }
       ]
     },
     {
@@ -1201,15 +1218,15 @@
       "title": "Packaged views and dashboards are 'yours to edit directly' (ADR-0126 Regime O): the designer live-edits the PACKAGED artifact, publish reaches the end user, reset-overlay returns the shipped base — while a Regime-C flow in the same surface stays locked",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["admin (authors the overlay in the designer)", "end user (renders the published change)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "the stock packaged showcase views (com.example.showcase — e.g. the showcase_task view gallery, examples/app-showcase/src/ui/views/task.view.ts); discover the container name via GET /api/v1/meta/view?object=showcase_task rather than guessing it",
-          "the built-in System Overview dashboard (name system_overview), code-shipped by @objectstack/platform-objects — packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts",
+          "the stock packaged showcase views (com.example.showcase — e.g. the showcase_task view gallery, examples/app-showcase/src/ui/views/task.view.ts). The showcase ships INDIVIDUAL views, not a container: GET /api/v1/meta/view?object=showcase_task lists them by qualified name (e.g. showcase_task.default) — pick one from that list rather than guessing a name",
+          "the built-in System Overview dashboard (name system_overview), defined in @objectstack/platform-objects (packages/platform-objects/src/apps/dashboards/system_overview.dashboard.ts) and REGISTERED by plugin-auth (packages/plugins/plugin-auth/src/auth-plugin.ts, dashboards: [SystemOverviewDashboard]) — so its layered read reports packageId com.objectstack.plugin-auth",
           "a packaged showcase flow as the same-surface Regime-C negative (e.g. showcase_urgent_task_alert)",
           "a vendored console matching .objectui-sha"
         ],
@@ -1220,14 +1237,14 @@
         ]
       },
       "steps": [
-        "boot the showcase, sign in admin@objectos.ai/admin123; open the metadata-admin designer on a PACKAGED showcase view (/_console/…/metadata/view/<container>, container discovered via GET /api/v1/meta/view?object=showcase_task) — it must open EDITABLE, with no 'provided by an installed package' banner",
-        "record the shipped base: GET /api/v1/meta/view?object=showcase_task and the layered read of the container, before any edit — the reset clause diffs against this",
+        "boot the showcase, sign in admin@objectos.ai/admin123; open the metadata-admin designer on a PACKAGED showcase view (/_console/…/metadata/view/VIEW, VIEW picked from GET /api/v1/meta/view?object=showcase_task — e.g. showcase_task.default; the showcase ships individual views, not a container) — it must open EDITABLE, with no lock banner",
+        "record the shipped base: GET /api/v1/meta/view?object=showcase_task and the layered read of the picked view (GET /api/v1/meta/view/VIEW/layers), before any edit — the reset clause diffs against this",
         "edit DIRECTLY on the packaged artifact — change the default list's label and add/remove a column — save draft and publish through the designer chrome",
         "as an end user, open the showcase task list (client reload only, no server restart): the edited label/column set renders",
         "server truth: GET the view again — the overlay body is served over the shipped base (overlay wins at read; the code layer remains underneath in the layered read)",
         "dashboard leg: open the designer on the built-in system_overview dashboard — it opens EDITABLE the same way (dashboard allowEnvironmentOverlay:true); edit a widget title; publish; open the rendered System Overview board and confirm the edited title renders (its live-count semantics stay dashboards.system-overview-live-counts' business)",
         "reset BOTH overlays via the designer's destructive control: it must carry the 'Reset overlay' verb (resettable:true on the layered envelope — a package baseline exists), confirm; the follow-up GET serves the SHIPPED body again and the end-user surfaces render the base",
-        "negative, same surface: open the designer route on the PACKAGED flow — it opens read-only behind the installed-package banner (artifact-backed + flow allowEnvironmentOverlay:false) with no operating save/publish path"
+        "negative, same surface: open the designer route on the PACKAGED flow — it opens read-only behind the lock banner (at the pin it reads 'This item is locked and cannot be edited or deleted.' and names the owning package com.example.showcase; artifact-backed + flow allowEnvironmentOverlay:false) with no operating save/publish path"
       ],
       "acceptance": [
         {
@@ -1243,7 +1260,7 @@
           "evidence": "before/after end-user screenshots + server log excerpt"
         },
         {
-          "clause": "the dashboard leg holds on a BUILT-IN packaged dashboard: system_overview (code-shipped by platform-objects) is directly editable the same way, and the rendered board shows the published edit ('… and dashboards are yours to edit directly')",
+          "clause": "the dashboard leg holds on a BUILT-IN packaged dashboard: system_overview (defined in platform-objects, registered by plugin-auth's package com.objectstack.plugin-auth) is directly editable the same way, and the rendered board shows the published edit ('… and dashboards are yours to edit directly')",
           "oracle": "api",
           "verify": "the dashboard editor opens editable; after publish GET /api/v1/meta/dashboard/system_overview serves the edited widget title and the rendered board displays it — the tiles' live-count truthfulness is dashboards.system-overview-live-counts, cite it rather than re-proving",
           "evidence": "the dashboard meta read + the rendered-board screenshot"
@@ -1255,9 +1272,9 @@
           "evidence": "the reset receipts + post-reset reads diffed against the step-2 baseline + the reverted renders"
         },
         {
-          "clause": "a Regime-C artifact in the SAME surface stays locked: the packaged flow opens read-only behind the installed-package banner with no operating save/publish path — 'yours to edit directly' is the Regime-O display classes (view, dashboard), never flow (ADR-0126 §3)",
+          "clause": "a Regime-C artifact in the SAME surface stays locked: the packaged flow opens read-only behind the lock banner with no operating save/publish path — 'yours to edit directly' is the Regime-O display classes (view, dashboard), never flow (ADR-0126 §3)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms render, the flow editor shows the installed-package lock banner and its inputs are read-only (isArtifactItem + flow allowEnvironmentOverlay:false ⇒ canWrite false); no save/publish affordance operates",
+          "verify": "after a screenshot confirms render, the flow editor shows the lock banner naming the owning package (its wording is the console's and is not scored) and its inputs are read-only (isArtifactItem + flow allowEnvironmentOverlay:false ⇒ canWrite false); no save/publish affordance operates",
           "evidence": "the locked-editor screenshot + the disabled-state DOM read"
         }
       ],
@@ -1278,7 +1295,8 @@
         "studio-authoring.org-override-registry-gate (the raw-PUT registry-gate half — cross-referenced, not duplicated), studio-authoring.view-authoring-live (the non-packaged authoring loop this item complements), dashboards.system-overview-live-counts (the same board's live-count semantics — and the reason the overlay must be reset)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-26", "change": "new item (#12438, E1 tier-1 claim / ADR-0126 §3 Regime O): 'views and dashboards are yours to edit directly' proven on PACKAGED artifacts through the designer — live edit, publish, end-user render, reset-overlay back to the shipped base — with a built-in dashboard leg (system_overview; the dashboard kind's allowOrgOverride:true overlay door verified in the registry at metadata-plugin.zod.ts before asserting, per the register's instruction) and a same-surface Regime-C flow negative. Complements org-override-registry-gate (raw-PUT half) and view-authoring-live (which deliberately avoids packaged views)", "ref": "#12438" }
+        { "revision": 1, "date": "2026-08-26", "change": "new item (#12438, E1 tier-1 claim / ADR-0126 §3 Regime O): 'views and dashboards are yours to edit directly' proven on PACKAGED artifacts through the designer — live edit, publish, end-user render, reset-overlay back to the shipped base — with a built-in dashboard leg (system_overview; the dashboard kind's allowOrgOverride:true overlay door verified in the registry at metadata-plugin.zod.ts before asserting, per the register's instruction) and a same-surface Regime-C flow negative. Complements org-override-registry-gate (raw-PUT half) and view-authoring-live (which deliberately avoids packaged views)", "ref": "#12438" },
+        { "revision": 2, "date": "2026-10-16", "change": "fixtures.requires[0] and [1], steps[0], [1] and [7] and acceptance[2] (clause) and [4] (clause, verify) corrected (checklist-accuracy finding 6 of QA run #23942, wave #23878). The showcase ships individual views, not a container, so the 'discover the container name' instruction pointed at nothing — the item now picks a packaged view from the list and reads its /layers. The flow's banner is the lock banner ('This item is locked and cannot be edited or deleted.' plus the owning package), not an 'installed-package' banner; its wording is recognised, not scored. system_overview is defined in platform-objects but registered by plugin-auth, which is why its /layers reports com.objectstack.plugin-auth. Not loosened: the flow must still open locked with no operating save path", "ref": "#24036" }
       ]
     },
     {
@@ -1286,7 +1304,7 @@
       "title": "The metadata governance sweep: GET /meta/diagnostics reports every STORED item failing spec validation with located errors, refuses outages and bad spellings loudly instead of answering '0 problems', and the Studio diagnostics page + directory tile badges paint the same numbers",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["admin (the governance surface is Studio's)"],
@@ -1323,7 +1341,7 @@
         {
           "clause": "stats tell the directory's truth: per sampled type, stats[type].count equals the type's own list length and stats[type].packages equals the sorted distinct _packageId set — the one-round-trip aggregate the Studio directory tiles render from",
           "oracle": "api",
-          "verify": "side-by-side of stats[<type>] against the GET /meta/<type> list for each sampled type (count, packages). `locked` counts the items whose served READ ENVELOPE reports a lock other than 'none' — the derivation GET /api/v1/meta/<type>/<name> publishes (protocol.ts servedLockState, #21694) — NOT the rows whose declared `_lock` != 'none': a packaged base the write doors refuse reads locked on its envelope while declaring no `_lock`, so compare `locked` against each sampled item's envelope lock",
+          "verify": "side-by-side of stats[<type>] against the GET /meta/<type> list for each sampled type (count, packages). `locked` counts the items whose served READ ENVELOPE reports a lock other than 'none' — the derivation the LAYERED read publishes — read it from GET /api/v1/meta/<type>/<name>/layers, whose envelope carries `lock` (protocol.ts servedLockState, #21694); the default GET /api/v1/meta/<type>/<name> is the cached arm and carries no `lock` by design, so it cannot answer this — NOT the rows whose declared `_lock` != 'none': a packaged base the write doors refuse reads locked on its envelope while declaring no `_lock`, so compare `locked` against each sampled item's envelope lock",
           "evidence": "the stats excerpt + the list reads"
         },
         {
@@ -1387,7 +1405,8 @@
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "new item (2026-08-30 sweep, angle 4): the governance sweep GET /meta/diagnostics + its two Studio surfaces had no coverage — nothing asserted the stats/tile parity seam, the #8924 spelling refusal (whose regression the page paints as 'All clear'), the #8855 outage honesty, or the clean-store empty state. Grounded against source with two corrections to the register hypothesis: the scoping query param is ?package= (not ?packageId= — that is the protocol-layer argument name), and severity=warning cannot 'add warning-only entries' on stock because no producer emits warnings at head (reserved for a future lint layer) — authored as a mechanism clause with the lint-layer tripwire recorded. The invalid-stored-row positive is blocked(fixture) by construction (save doors validate; sys_metadata is not a data-plane object), with the stale-row snapshot named as the honest fixture candidate", "ref": "#sweep-2026-08-30" },
         { "revision": 2, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 17). A7 was blocked(fixture): an invalid stored row cannot be planted, because every authoring door validates at save. Disposition: recorded knownGap. The leg cannot be reached on a stock environment by design. The knownGap now names the environment it needs (a store already holding a stale row), says no CI job builds one, and points at the producer-level pin as mechanism-only. No clause changed", "ref": "#22017" },
-        { "revision": 3, "date": "2026-10-13", "change": "acceptance[1].verify compares stats.locked against the served envelope lock (stale spec, #23166 A1; parked on #23121, carried by #23169). getMetaDiagnostics counts an item as locked when its read envelope reports a lock other than 'none' — the same derivation getMetaItem publishes (#21694) — not when its declared _lock is set. QA run #23166 compared against the envelope lock and passed. Read from source at 6d7f4df3c (protocol.ts getMetaDiagnostics docblock and loop). The A6 row of the same run, the unplantable invalid stored row, is already recorded in full in knownGaps[0] and needs no edit", "ref": "#23169" }
+        { "revision": 3, "date": "2026-10-13", "change": "acceptance[1].verify compares stats.locked against the served envelope lock (stale spec, #23166 A1; parked on #23121, carried by #23169). getMetaDiagnostics counts an item as locked when its read envelope reports a lock other than 'none' — the same derivation getMetaItem publishes (#21694) — not when its declared _lock is set. QA run #23166 compared against the envelope lock and passed. Read from source at 6d7f4df3c (protocol.ts getMetaDiagnostics docblock and loop). The A6 row of the same run, the unplantable invalid stored row, is already recorded in full in knownGaps[0] and needs no edit", "ref": "#23169" },
+        { "revision": 4, "date": "2026-10-16", "change": "acceptance[1].verify names the read that carries the envelope lock (checklist-accuracy finding 2 of QA run #23942, wave #23878). It told the runner to compare stats.locked against the lock GET /api/v1/meta/TYPE/NAME publishes, but that default read is the cached arm and carries no `lock` by design; the envelope lock is on GET /api/v1/meta/TYPE/NAME/layers, which is where #23942 read it (object 107, view 0, flow 32 locked, matching stats). The comparison itself is unchanged", "ref": "#24036" }
       ]
     },
     {
@@ -1395,7 +1414,7 @@
       "title": "A doc on the app menu follows the reader's audience: an admin authors a doc and puts it (or its book) on an app menu; a member who may read it sees it and opens it in its book; a member outside its audience does not see the entry and gets a refusal — never \"not found\", never a blank page — on the direct route",
       "since": "v17.5",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1413,7 +1432,7 @@
         ],
         "knownGaps": [
           "THE STOCK SHOWCASE CORPUS CARRIES NO { permissionSet } BOOK AND NO doc NAV ENTRY — verify first (GET /api/v1/meta/book, read each audience; GET /api/v1/meta/app?id=showcase_app, look for type:'doc'). The run authors the books, docs, permission set and nav entries at runtime and tears them down, as platform-core.docs-audience-gate allows; the audience is read off the stored row, so a runtime-authored book exercises the same resolver",
-          "FORK WINDOW: while .objectui-sha predates objectui PR 11241 / PR 11258, the vendored console carries the PRE-feature UI — at db11afd496 the console source holds no 'You do not have access to this documentation' heading and no renderer doc-target check (source read) — so a run against it fails for a reason that is not this item's. Drive a console built from an objectui revision carrying both (RUNNER.md's two honest options) and NAME that revision in the run record, beside the pin",
+          "FORK WINDOW CLOSED: .objectui-sha (daeb77fc84dd and later, f8267df93aba today) carries objectui PR 11241 and PR 11258 — the 'You do not have access to this documentation' refusal page and the menu pruning — so the vendored console is the right one to drive (QA run #23942 ran outside the window). Only a console older than those PRs (db11afd496 held neither, source read) fails for a reason that is not this item's; record the console revision in the run record as usual",
           "FIXTURE RECIPE, measured on the first run: the showcase is invite_only, so members come from POST /api/v1/auth/admin/create-user (mustChangePassword false), not sign-up; the Studio doc editor no longer refuses the read-only code package with a 422 — at objectui 1fb1ced36243 it saves an ENV-WIDE draft and offers no package picker (QA run #23166), so a doc authored through the editor lands outside the package that holds the books. Install a writable base first (POST /api/v1/packages with id, name, version, type 'app') and drive every book, doc and the app into it over the metadata API with ?package=, so books and docs share one package; the seeded admin holds no app-declared set, so once the gated book claims the doc the admin's own editor and /meta/app answer the audience refusal too — author the doc before the gated book, or read it back as the reader",
           "REPO OWNERSHIP (ADR-0054): the server half — /meta/app pruning, /meta/doc and /meta/book refusals — is objectstack's; the menu markup, the direct-route refusal page and the claiming-book permalink are objectui's. A locator or copy fix goes to objectui"
         ]
@@ -1474,7 +1493,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-09-30", "change": "new — the 清单项待写 row of docs/NORTH-STAR.md beside platform-core.docs-audience-gate and platform-core.docs-portal-render; drafted with objectui#10188 and corrected by the at-tier review of objectui PR 11258 (the UI-mirror clause scoped to entries naming an installed doc or book; no signed-out persona — /docs sits behind ProtectedRoute)", "ref": "#20939" },
-        { "revision": 2, "date": "2026-10-13", "change": "knownGaps[2]'s fixture recipe re-pointed (knownGap stale, #23166 A0; parked on #23121, carried by #23169). The Studio doc editor no longer answers the read-only showcase package with a 422: it saves an env-wide draft and offers no package picker, so the recipe's reason for a writable base changed, not its need. The books and docs must share one package, so the recipe drives the writable base over the metadata API with ?package=. QA run #23166 did exactly that and passed", "ref": "#23169" }
+        { "revision": 2, "date": "2026-10-13", "change": "knownGaps[2]'s fixture recipe re-pointed (knownGap stale, #23166 A0; parked on #23121, carried by #23169). The Studio doc editor no longer answers the read-only showcase package with a 422: it saves an env-wide draft and offers no package picker, so the recipe's reason for a writable base changed, not its need. The books and docs must share one package, so the recipe drives the writable base over the metadata API with ?package=. QA run #23166 did exactly that and passed", "ref": "#23169" },
+        { "revision": 3, "date": "2026-10-16", "change": "knownGaps[1] closed (checklist-accuracy finding 9 of QA run #23942, wave #23878): the .objectui-sha pin has been past the fork window since daeb77fc84dd — the console carries the refusal page and the menu pruning — so the knownGap no longer asks for a console built elsewhere. Wording only: no step, request or oracle changed", "ref": "#24036" }
       ]
     },
     {

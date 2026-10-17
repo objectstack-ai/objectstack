@@ -57,7 +57,19 @@ export const InvoiceDocumentPage = definePage({
           properties: {
             childObject: 'showcase_invoice_line',
             relationshipField: 'invoice',
-            columns: [{ name: 'description' }, { name: 'quantity' }, { name: 'unit_price' }, { name: 'amount' }],
+            // Each column declares its heading. Unlike the master-detail grid
+            // (`showcase_invoice.lines.inlineColumns`), this block does not
+            // fill a column from the child field, so an identity-only
+            // `{ name }` column prints its raw field name. The labels are the
+            // invoice line fields' own. They read in English in every locale:
+            // a column `label` is a plain string, and no translation bundle
+            // key reaches a `record:line_items` column.
+            columns: [
+              { name: 'description', label: 'Description' },
+              { name: 'quantity', label: 'Qty' },
+              { name: 'unit_price', label: 'Unit Price' },
+              { name: 'amount', label: 'Amount' },
+            ],
             readonly: true,
           },
         },
