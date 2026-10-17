@@ -256,10 +256,6 @@ export const en: TranslationData = {
   // (@objectstack/cloud-connection, @objectstack/mcp) and exist so the other
   // locales have a complete key set to translate against.
   pages: {
-    marketplace_installed: {
-      label: 'Installed Apps',
-      subtitle: "Marketplace packages currently installed into this runtime's kernel.",
-    },
     cloud_connection_settings: {
       label: 'Cloud Connection',
       subtitle:

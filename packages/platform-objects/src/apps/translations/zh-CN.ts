@@ -178,10 +178,6 @@ export const zhCN: TranslationData = {
   },
 
   pages: {
-    marketplace_installed: {
-      label: '已安装应用',
-      subtitle: '当前已安装到此运行时内核的应用市场包。',
-    },
     cloud_connection_settings: {
       label: '云连接',
       subtitle: '将此运行时连接到 ObjectStack 控制平面，即可浏览并安装组织的私有包。',

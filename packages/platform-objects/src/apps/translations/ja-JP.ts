@@ -168,10 +168,6 @@ export const jaJP: TranslationData = {
   },
 
   pages: {
-    marketplace_installed: {
-      label: 'インストール済みアプリ',
-      subtitle: 'このランタイムのカーネルに現在インストールされているマーケットプレイスパッケージ。',
-    },
     cloud_connection_settings: {
       label: 'クラウド接続',
       subtitle:

@@ -174,8 +174,6 @@ export const zhCNSourceHashes: Readonly<Record<string, string>> = {
   'dashboards.system_overview.widgets.widget_events_by_user.description': 'ee9e0d412f66fb4d',
   'dashboards.system_overview.widgets.widget_recent_events.title': '5fb9db734193fe37',
   'dashboards.system_overview.widgets.widget_recent_events.description': '5b9ce7479f6c178c',
-  'pages.marketplace_installed.label': '93bd5d458e05db60',
-  'pages.marketplace_installed.subtitle': '0743c8f3da7d8a7b',
   'pages.cloud_connection_settings.label': '3a7caad0cb98e71d',
   'pages.cloud_connection_settings.subtitle': 'f5cdd253e8ffef9f',
   'pages.connect_agent.label': 'eeb174613510e87d',

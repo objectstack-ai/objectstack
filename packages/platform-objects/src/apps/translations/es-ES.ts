@@ -168,10 +168,6 @@ export const esES: TranslationData = {
   },
 
   pages: {
-    marketplace_installed: {
-      label: 'Aplicaciones instaladas',
-      subtitle: 'Paquetes del marketplace instalados actualmente en el kernel de este runtime.',
-    },
     cloud_connection_settings: {
       label: 'Conexión a la nube',
       subtitle:
