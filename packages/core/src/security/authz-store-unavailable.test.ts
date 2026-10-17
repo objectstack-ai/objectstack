@@ -186,8 +186,12 @@ const TRANSPORT_LEDGER: Record<string, 'guarded' | 'propagates'> = {
   'packages/services/service-settings/src/settings-service-plugin.ts': 'guarded',
   'packages/services/service-storage/src/storage-service-plugin.ts': 'guarded',
   'packages/plugins/plugin-sharing/src/sharing-plugin.ts': 'guarded',
+  'packages/plugins/plugin-hono-server/src/current-user-endpoints.ts': 'guarded',
   'packages/cloud-connection/src/marketplace-install-local-plugin.ts': 'guarded',
   'packages/cloud-connection/src/cloud-connection-plugin.ts': 'guarded',
+  // The print door: its caller-resolution `catch` relays the outage with its
+  // own status and code before any other arm can answer it.
+  'packages/services/service-print/src/print-routes.ts': 'guarded',
 };
 
 /** Test scaffolding is not a transport — it drives the resolver, it does not authorize for anyone. */

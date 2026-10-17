@@ -56,6 +56,14 @@ export default defineConfig({
         find: /^@objectstack\/service-settings$/,
         replacement: path.resolve(here, '../../services/service-settings/src/index.ts'),
       },
+      // [#24061] `auth-prelude-query-count.pin.test.ts` counts the reads the
+      // `/auth/me/*` faces' execution-context resolver issues — that resolver
+      // (`makeExecutionContextResolver`) is the subject, so it is read from
+      // SOURCE. Same reason and the same anchoring as the entries above.
+      {
+        find: /^@objectstack\/plugin-hono-server$/,
+        replacement: path.resolve(here, '../plugin-hono-server/src/index.ts'),
+      },
     ],
   },
 });
