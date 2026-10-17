@@ -76,18 +76,16 @@ import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
  * omits it: no `item` (the transports' `404 RESOURCE_NOT_FOUND`), or the
  * missing draft's `404 NO_DRAFT` on the strict draft read. `READERS` carries a
  * listing row and a by-name row for EVERY type `MetadataTypeSchema` declares
- * but `object` and `package` (`BY_NAME_TYPES`), so a type added there gets its
- * two rows here without anyone writing them. `package` is never hidden: the
- * Packages page re-enables from it.
+ * but `object` (`BY_NAME_TYPES`; the schema does not list `package`), so a
+ * type added there gets its two rows here without anyone writing them.
+ * `package` is never hidden: the Packages page re-enables from it.
  */
 
 const PKG = 'app.disabled_demo';
 const OTHER_PKG = 'app.healthy_demo';
 
 /** [#24210] Every declared metadata type the by-name read answers as absent. */
-const BY_NAME_TYPES: readonly string[] = MetadataTypeSchema.options.filter(
-  (type) => type !== 'object' && type !== 'package',
-);
+const BY_NAME_TYPES: readonly string[] = MetadataTypeSchema.options.filter((type) => type !== 'object');
 /** The item each package ships of `type`, registered as a code package registers it. */
 const shippedName = (type: string, pkg: string) => `${pkg === PKG ? 'demo' : 'healthy'}_${type}_item`;
 
