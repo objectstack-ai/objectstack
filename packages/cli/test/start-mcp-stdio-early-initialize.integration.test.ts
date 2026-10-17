@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: two boots of the built CLI (a `serve --dev` that mints the stdio key, then the `os start` under test, its compile and serve children included); 14.6 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
+// test-budget: 20 — spawns the real producer once per single-cause fixture: two boots of the built CLI (a `serve --dev` that mints the stdio key, then the `os start` under test, its compile and serve children included); 14.9 s, the slowest of three local runs on a shared container, x 1.25, no CI reading yet
 
 /**
  * #24002 — an `os start` with the stdio MCP transport enabled answers an
@@ -128,7 +128,10 @@ let dir: string;
 let db: string;
 let apiKey: string;
 
-/** The environment both boots share; `undefined` unsets. */
+/**
+ * The environment both boots share; `undefined` unsets. Each spawn states its
+ * child's `NODE_ENV` itself, at the call (`check:cli-test-child-env`, rule 3).
+ */
 function bootEnv(overrides: Record<string, string | undefined>): Record<string, string | undefined> {
   // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
   return childEnv({
@@ -143,8 +146,6 @@ function bootEnv(overrides: Record<string, string | undefined>): Record<string, 
     OS_DATABASE_URL: undefined,
     OS_MCP_STDIO_ENABLED: undefined,
     OS_MCP_STDIO_API_KEY: undefined,
-    // Truly unset: production posture, and oclif resolves the command from `dist/`.
-    NODE_ENV: undefined,
     ...overrides,
   });
 }
@@ -194,7 +195,16 @@ beforeAll(async () => {
   const mint = spawn(
     process.execPath,
     [CLI, 'serve', 'objectstack.config.ts', '-p', port, '--dev', '--no-ui'],
-    { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'], detached: true, env: bootEnv({ OS_DATABASE_URL: db }) },
+    {
+      cwd: dir,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: true,
+      env: bootEnv({
+        OS_DATABASE_URL: db,
+        // Truly unset: oclif resolves the command from `dist/`.
+        NODE_ENV: undefined,
+      }),
+    },
   );
   groups.push(mint);
   let output = '';
@@ -277,7 +287,12 @@ describe('os start with the stdio MCP transport and an initialize written at spa
         cwd: dir,
         stdio: ['pipe', 'pipe', 'pipe'],
         detached: true,
-        env: bootEnv({ OS_MCP_STDIO_ENABLED: 'true', OS_MCP_STDIO_API_KEY: apiKey }),
+        env: bootEnv({
+          OS_MCP_STDIO_ENABLED: 'true',
+          OS_MCP_STDIO_API_KEY: apiKey,
+          // Truly unset: production posture, and oclif resolves the command from `dist/`.
+          NODE_ENV: undefined,
+        }),
       },
     );
     groups.push(child);
