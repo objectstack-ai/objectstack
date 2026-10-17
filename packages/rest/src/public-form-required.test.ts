@@ -37,7 +37,7 @@ import { RestServer } from './rest-server';
 
 const OBJECT = 'pf_required_lead_24131';
 const SLUG = 'pf-required-24131';
-const SYS = { context: { isSystem: true } } as const;
+const SYS = { context: { isSystem: true } };
 
 /** `name` and `company` are object-required; `email` / `tags` / the conditional ones are not. */
 const LEAD = {
@@ -117,7 +117,7 @@ interface Answer { status: number; body: any }
 describe('[#24131] POST /forms/:slug/submit enforces the form\'s own `required`', () => {
   let engine: ObjectQL;
   let post: (body: Record<string, unknown>) => Promise<Answer>;
-  const rowCount = async (): Promise<number> => (await engine.find(OBJECT, {}, SYS as any)).length;
+  const rowCount = async (): Promise<number> => (await engine.find(OBJECT, {}, SYS)).length;
 
   beforeAll(async () => {
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true } as any);
@@ -194,7 +194,7 @@ describe('[#24131] POST /forms/:slug/submit enforces the form\'s own `required`'
     const answer = await post(COMPLETE);
     expect(answer.status, JSON.stringify(answer.body)).toBe(201);
     expect(typeof answer.body.id).toBe('string');
-    const stored = await engine.findOne(OBJECT, { where: { id: answer.body.id } } as any, SYS as any);
+    const stored = await engine.findOne(OBJECT, { where: { id: answer.body.id } }, SYS);
     expect(stored).toMatchObject({ name: 'Ada', company: 'Analytical Engines', email: 'ada@example.test', tags: ['lead'] });
     expect(await rowCount()).toBe(before + 1);
   }, 60_000);
@@ -229,7 +229,7 @@ describe('[#24131] POST /forms/:slug/submit enforces the form\'s own `required`'
   it('BOUNDARY — a hidden entry, a conditionally visible entry and an entry in a conditional section are not judged by the door', async () => {
     const answer = await post(COMPLETE);
     expect(answer.status, JSON.stringify(answer.body)).toBe(201);
-    const stored = await engine.findOne(OBJECT, { where: { id: answer.body.id } } as any, SYS as any);
+    const stored = await engine.findOne(OBJECT, { where: { id: answer.body.id } }, SYS);
     expect(stored?.reason ?? null).toBeNull();
     expect(stored?.referrer ?? null).toBeNull();
     expect(stored?.region ?? null).toBeNull();
