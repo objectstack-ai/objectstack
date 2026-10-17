@@ -9,6 +9,7 @@
     "single-project-mode",
     "publish-and-preview",
     "install-modes",
+    "cloud-connection",
     "validating-metadata",
     "cli",
     "environment-variables",
