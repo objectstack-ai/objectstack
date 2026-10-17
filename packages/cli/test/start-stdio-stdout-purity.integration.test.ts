@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: two boots of the built CLI (a `serve --dev` that mints the stdio key, then the first-run `os start` under test, its compile and serve children included); MEASURE_PENDING
+// test-budget: 20 — spawns the real producer once per single-cause fixture: two boots of the built CLI (a `serve --dev` that mints the stdio key, then the first-run `os start` under test, its compile and serve children included); 15.0 s, the slowest of three local runs on a shared container, x 1.25, no CI reading yet
 
 /**
  * #24192 — a FIRST-RUN `os start` with the stdio MCP transport enabled puts
