@@ -92,6 +92,7 @@
     "content/docs/data-modeling/validation.mdx",
     "content/docs/deployment/backup-restore.mdx",
     "content/docs/deployment/cli.mdx",
+    "content/docs/deployment/cloud-connection.mdx",
     "content/docs/deployment/environment-variables.mdx",
     "content/docs/deployment/index.mdx",
     "content/docs/deployment/install-modes.mdx",
