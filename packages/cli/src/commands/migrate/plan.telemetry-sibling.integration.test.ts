@@ -194,9 +194,10 @@ describe('os migrate plan / apply plan each object against the database it lives
     // Both databases' objects examined: their tables, less the raw-DDL one.
     expect(plan.payload.managedTables).toBe(primaryTables.length - NOT_AN_OBJECT.length + siblingTables.length);
     // [#22580] Both databases' catalogs swept: the sibling's stranded table is
-    // reported beside the primary's raw-DDL one.
+    // reported — and [#24059] the primary's raw-DDL one is not, its
+    // declaration accounts for it.
     expect(plan.payload.unmanagedTables?.status, JSON.stringify(plan.payload.unmanagedTables)).toBe('read');
-    expect(plan.payload.unmanagedTables.tables.map((t: any) => t.table)).toEqual([...NOT_AN_OBJECT, retired].sort());
+    expect(plan.payload.unmanagedTables.tables.map((t: any) => t.table)).toEqual([retired]);
     // A plan writes nothing, to either database.
     expect({ primary: state(f.primary), sibling: state(f.sibling) }).toEqual(before);
 

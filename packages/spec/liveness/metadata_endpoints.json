@@ -38,7 +38,7 @@
           "status": "live",
           "verifiedAt": "2026-09-02",
           "evidenceScope": "in-repo",
-          "evidence": "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (`if (metadata.endpoints.types !== false)` gates the GET /meta route mount)",
+          "evidence": "packages/rest/src/meta-collection-routes.ts#registerMetaCollectionRoutes (`if (metadata.endpoints.types !== false)` gates the GET /meta route mount)",
           "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
           "note": "Read as `!== false`, so an author who omits the key gets the route; setting it false removes the mount. REACHABILITY (#15543, measured 2026-09-08 on origin/main 8ccf7a1df): embedder-only. Written only by a host that constructs a RestServerConfig; no shipped boot path authors it, so a CLI-started deployment always gets the schema default. See this file's _note REACHABILITY paragraph. Liveness and verifiedAt are unaffected: `live` answers who READS this key, this row answers who can SET it."
         },
@@ -46,7 +46,7 @@
           "status": "live",
           "verifiedAt": "2026-09-02",
           "evidenceScope": "in-repo",
-          "evidence": "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (`if (metadata.endpoints.items !== false)` gates the GET /meta/:type per-type list mount)",
+          "evidence": "packages/rest/src/meta-collection-routes.ts#registerMetaCollectionRoutes (`if (metadata.endpoints.items !== false)` gates the GET /meta/:type per-type list mount)",
           "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
           "note": "Same `!== false` shape as `types`. RADIUS NARROWED 2026-09-06 (#15542): it used to gate four mounts \u2014 the per-type list plus the whole-store family (`/diagnostics`, `/_drafts` and the `POST /_migrate-stored` write door) \u2014 while its describe() named the list alone, so an operator who closed a listing read silently disarmed a migration door. The whole-store family now answers to its own key, `maintenance`, and this key gates exactly the one mount it names. Liveness is unchanged by that move (it was live before and is live now); what changed is the radius, which is the axis this ledger structurally cannot see \u2014 the mount table pin (packages/rest/src/rest-config-mount-table.pin.test.ts, the #15544 shape) is the instrument that does, and it asserts route ABSENCE per switch. REACHABILITY (#15543, measured 2026-09-08 on origin/main 8ccf7a1df): embedder-only. Written only by a host that constructs a RestServerConfig; no shipped boot path authors it, so a CLI-started deployment always gets the schema default. See this file's _note REACHABILITY paragraph. Liveness and verifiedAt are unaffected: `live` answers who READS this key, this row answers who can SET it."
         },
@@ -62,7 +62,7 @@
           "status": "live",
           "verifiedAt": "2026-09-06",
           "evidenceScope": "in-repo",
-          "evidence": "packages/rest/src/rest-server.ts#registerMetadataEndpointsInner (three `if (metadata.endpoints.maintenance !== false)` gates \u2014 `GET /meta/diagnostics`, `GET /meta/_drafts` and `POST /meta/_migrate-stored`)",
+          "evidence": "packages/rest/src/meta-collection-routes.ts#registerMetaCollectionRoutes (three `if (metadata.endpoints.maintenance !== false)` gates \u2014 `GET /meta/diagnostics`, `GET /meta/_drafts` and `POST /meta/_migrate-stored`)",
           "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
           "note": "ADDED 2026-09-06 (#15542) as the whole-store family's own switch \u2014 the three mounts used to ride `endpoints.items`, whose declared meaning is the per-type list. Live from its first commit: it is a re-partition of an existing gated surface, not a newly declared key waiting for a consumer, and the mount table pin asserts its three routes leave when it is false. Same `!== false` shape as its siblings, default true, so an embedder who never authors it keeps every route it gates. REACHABILITY (#15543, measured 2026-09-08 on origin/main 8ccf7a1df): embedder-only. Written only by a host that constructs a RestServerConfig; no shipped boot path authors it, so a CLI-started deployment always gets the schema default. See this file's _note REACHABILITY paragraph. Liveness and verifiedAt are unaffected: `live` answers who READS this key, this row answers who can SET it."
         },
