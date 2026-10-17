@@ -300,6 +300,24 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     );
   });
 
+  it('[ADR-0139 D4] a read naming its parents by $in is served exactly the rows the same read spelled as an $or is', async () => {
+    const NAMED = [ITEM, SEALED, PREFIX];
+    const named = { object_name: { $in: NAMED } };
+    // A spelling neither rule reads as naming its parents: both keep their full enumeration.
+    const spelledOut = { $or: NAMED.map((object_name) => ({ object_name })) };
+    const idsOf = async (where: Record<string, unknown>, context: any) =>
+      ((await engine.find(ACTIVITY, { where, orderBy: ORDER, context })) as Row[]).map((r) => String(r.id));
+    for (const context of [MEMBER, ADMIN]) {
+      const full = await idsOf(spelledOut, context);
+      expect(await idsOf(named, context)).toEqual(full);
+      expect(await engine.count(ACTIVITY, { where: named }, { context })).toBe(full.length);
+    }
+    const member = await idsOf(named, MEMBER);
+    expect(member).not.toContain(rowIds.withheld);
+    expect(member).toContain(rowIds.mixed);
+    expect(await idsOf(named, ADMIN)).toContain(rowIds.withheld);
+  });
+
   // ── every listing face agrees with the rows served ──────────────────────
 
   it('count: the member total agrees with the served rows', async () => {
@@ -496,6 +514,32 @@ describe('[ADR-0139 E6] keptRowsOfParent / computeWithheldUpdateFilter — a pre
       keptRowsOfParent('b', ['x'], []),
     );
     expect(servedFor).toHaveBeenCalledTimes(1);
+  });
+
+  it('[ADR-0139 D4] a read naming its parents by $in is judged against those parents alone, as the read gate narrows its own', async () => {
+    const engine = engineWith([{ name: 'a' }, { name: 'b' }, { name: 'c' }, { name: 'd' }]);
+    const servedFor = vi.fn(async () => ['x']);
+    const where = { $and: [{ object_name: { $in: ['b', 'c'] } }, { type: 'updated' }] };
+    expect(await computeWithheldUpdateFilter(engine, { where }, servedFor, { warn: vi.fn() })).toEqual({
+      $or: [keptRowsOfParent('b', ['x'], []), keptRowsOfParent('c', ['x'], [])],
+    });
+    expect(servedFor).toHaveBeenCalledTimes(2);
+  });
+
+  it('[ADR-0139 D4] named parents that get no answer: the full enumeration still decides whether the read is narrowed', async () => {
+    const engine = engineWith([{ name: 'a' }, { name: 'b' }, { name: 'c' }]);
+    const onlyA = async (o: string) => (o === 'a' ? ['x'] : undefined);
+    const named = (names: string[]) => ({ where: { object_name: { $in: names } } });
+    // Another parent is narrowed: the named ones are kept whole, as the full enumeration keeps them.
+    expect(await computeWithheldUpdateFilter(engine, named(['b', 'c']), onlyA, { warn: vi.fn() })).toEqual({
+      $or: [{ object_name: 'b' }, { object_name: 'c' }],
+    });
+    // ...and a read naming no enumerated parent is withheld every row, as every full-enumeration branch withholds it.
+    expect(await computeWithheldUpdateFilter(engine, named(['zz']), onlyA, { warn: vi.fn() })).toEqual({
+      id: '__activity_withheld_row_denied__',
+    });
+    // No parent narrowed anywhere: no filter at all, as before.
+    expect(await computeWithheldUpdateFilter(engine, named(['b', 'zz']), async () => undefined, { warn: vi.fn() })).toBeNull();
   });
 
   it('the audit and activity objects themselves are not enumerated (the read gate excludes their rows)', async () => {

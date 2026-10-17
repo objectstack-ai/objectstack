@@ -1,7 +1,7 @@
 ---
 title: Component schema — UI Protocol reference
 navTitle: Component
-description: "Component schemas of the ObjectStack UI Protocol: ActionButtonProps and 44 more — each property with its type, default and a TypeScript example."
+description: "Component schemas of the ObjectStack UI Protocol: ActionButtonProps and 43 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Component schemas of the ObjectStack UI Protocol: ActionButtonProp
 ## TypeScript Usage
 
 ```typescript
-import { ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema, ActionMenuPropsSchema, ElementButtonPropsSchema, ElementDefinitionListPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementRepeaterPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordJsonProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
-import type { ActionButtonProps, ActionGroupProps, ActionIconProps, ActionMenuProps, ElementDefinitionListProps, ElementNumberProps, ElementRecordPickerProps, ElementRepeaterProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordJsonProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
+import { ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema, ActionMenuPropsSchema, ElementButtonPropsSchema, ElementDefinitionListPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementRepeaterPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
+import type { ActionButtonProps, ActionGroupProps, ActionIconProps, ActionMenuProps, ElementDefinitionListProps, ElementNumberProps, ElementRecordPickerProps, ElementRepeaterProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
 
 // Validate data
 const result = ActionButtonPropsSchema.parse(data);
@@ -1788,19 +1788,6 @@ Type: `string`
 | **limit** | `integer` | optional | Maximum history entries displayed, and the `$top` of the self-fetch query (renderer default: 50). |
 | **emptyText** | `string` | optional | Copy shown when the record has no history. Literal string rendered as-is in EVERY locale (no inline locale map — the timeline renders it as a raw React child; renderer default: "No history yet"). |
 | **unknownUserText** | `string` | optional | Copy substituted when an entry has no resolvable actor. Literal string, every locale (renderer default: "Unknown user"). |
-
-
----
-
-## RecordJsonProps
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | The key of the bound record whose value this block draws as indented JSON, in a panel that starts collapsed, with a copy control. A declared field, or a key the record's read route serves beside the declared fields (`payload` on a `sys_approval_request` row). It is NOT checked against the object's fields: a key with no value on the served record draws nothing, so a misspelled `field` draws nothing and no publish check reports it. |
-| **label** | `string \| Record<string, string>` | optional | The collapsed panel's summary line — a string or an inline locale map (renderer default: "Raw data (JSON)"). |
-| **requiredPermissions** | `string[]` | ✅ | [ADR-0066] REQUIRED, at least one. Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions. It fails CLOSED, unlike the record blocks' gate of the same name: a client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) draws nothing, and so does a user missing any of them — no notice, no summary line, no empty panel. Presentation only: it authorises nothing, and the read route still serves the value to the same user. To keep a value from a user, gate the object, the field or the route. |
 
 
 ---

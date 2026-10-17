@@ -238,7 +238,6 @@
     "RecordHighlightsField": "ui/RecordHighlightsField",
     "RecordHighlightsProps": "ui/RecordHighlightsProps",
     "RecordHistoryProps": "ui/RecordHistoryProps",
-    "RecordJsonProps": "ui/RecordJsonProps",
     "RecordLineItemsProps": "ui/RecordLineItemsProps",
     "RecordPathProps": "ui/RecordPathProps",
     "RecordQuickActionsProps": "ui/RecordQuickActionsProps",
