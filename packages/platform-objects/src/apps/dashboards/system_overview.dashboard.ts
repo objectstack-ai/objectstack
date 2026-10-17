@@ -42,7 +42,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_user_metrics', values: ['user_count'],
       title: 'Total Users',
       type: 'metric',
-      layout: { x: 0, y: 0, w: 3, h: 2 },
+      layout: { x: 0, y: 0, w: 3, h: 1 },
       // #7531 — a TOTAL must not move when the date bar moves. The dashboard's
       // `created_at` global filter is broadcast into every widget's analytics
       // query (#2501), so before this opt-out the tile reported "users created
@@ -67,7 +67,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       // `requiresService: 'org-scoping'` — gate this KPI the same way so the
       // overview doesn't dangle a metric the admin can't act on.
       requiresService: 'org-scoping',
-      layout: { x: 3, y: 0, w: 3, h: 2 },
+      layout: { x: 3, y: 0, w: 3, h: 1 },
       // #7613 — the same #2501 fan-out as Total Users above, on the same row.
       // `sys_organization.created_at` exists, so the date bar landed on it and
       // the tile reported "organizations created in the last 7 days" under a
@@ -83,7 +83,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_session_metrics', values: ['session_count'],
       title: 'Active Sessions',
       type: 'metric',
-      layout: { x: 6, y: 0, w: 3, h: 2 },
+      layout: { x: 6, y: 0, w: 3, h: 1 },
       // #7531 — "Active Sessions" counted EVERY `sys_session` row: the dataset
       // is a bare count and the widget carried no predicate, so a signed-out or
       // long-expired session was still reported as active. `sys_session` can
@@ -113,7 +113,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       // Cloud-only object — only registered when service-tenant is loaded.
       // Hide this widget gracefully in single-environment runtimes.
       requiresObject: 'sys_package_installation',
-      layout: { x: 9, y: 0, w: 3, h: 2 },
+      layout: { x: 9, y: 0, w: 3, h: 1 },
       // Which installations count: the ones that are actually installed. This
       // predicate is the tile's own, and it is ORTHOGONAL to the opt-out below
       // — the two answer different questions and both stand.
@@ -162,7 +162,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Login Events',
       type: 'metric',
-      layout: { x: 0, y: 2, w: 6, h: 2 },
+      layout: { x: 0, y: 2, w: 6, h: 1 },
       filter: { action: 'login' },
       colorVariant: 'blue',
       description: 'Authentication events recorded by the audit log',
@@ -172,7 +172,7 @@ export const SystemOverviewDashboard = Dashboard.create({
       dataset: 'sys_audit_log_metrics', values: ['event_count'],
       title: 'Config Changes',
       type: 'metric',
-      layout: { x: 6, y: 2, w: 6, h: 2 },
+      layout: { x: 6, y: 2, w: 6, h: 1 },
       filter: { action: 'config_change' },
       colorVariant: 'blue',
       description: 'System configuration modifications',
