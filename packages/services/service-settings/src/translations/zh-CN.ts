@@ -20,7 +20,7 @@ export const zhCN: PlatformTranslationData = {
       title: '邮件投递',
       description: 'SMTP 与事务性邮件服务商配置。',
       groups: {
-        provider: { title: '服务商', description: '选择此工作区如何发送邮件。' },
+        provider: { title: '服务商', description: '选择此环境如何发送邮件。' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'API 密钥' },
         from_address: { title: '发件地址' },
@@ -60,7 +60,7 @@ export const zhCN: PlatformTranslationData = {
       title: '短信投递',
       description: '用于 OTP 登录、邀请与通知的短信服务商配置。',
       groups: {
-        provider: { title: '服务商', description: '选择此工作区如何发送外发短信。' },
+        provider: { title: '服务商', description: '选择此环境如何发送外发短信。' },
         aliyun: { title: '阿里云短信' },
         twilio: { title: 'Twilio' },
         limits: { title: '发送额度', description: '限制本部署的外发短信量。短信是付费通道,每一条都产生真实费用。' },
@@ -100,13 +100,13 @@ export const zhCN: PlatformTranslationData = {
 
     branding: {
       title: '品牌',
-      description: '工作区名称、Logo 与主题色。',
+      description: '组织名称、Logo 与主题色。',
       groups: {
         identity: { title: '身份' },
         appearance: { title: '外观' },
       },
       keys: {
-        workspace_name: { label: '工作区名称' },
+        workspace_name: { label: '组织名称' },
         support_email: { label: '客服邮箱', help: '示例:support@example.com' },
         theme_mode: {
           label: '默认主题',
@@ -126,7 +126,7 @@ export const zhCN: PlatformTranslationData = {
         contact: { title: '联系方式' },
       },
       keys: {
-        legal_name: { label: '法定名称', help: '注册的法定名称(可能与工作区名称不同)。' },
+        legal_name: { label: '法定名称', help: '注册的法定名称(可能与「品牌」中的组织名称不同)。' },
         registration_number: { label: '注册号', help: '公司注册/工商登记号(如 EIN、统一社会信用代码)。' },
         tax_id: { label: '税号 / VAT', help: '发票上显示的税务标识(如 VAT、GST、ABN)。' },
         address_line1: { label: '地址行 1' },
@@ -271,7 +271,7 @@ export const zhCN: PlatformTranslationData = {
         require_email_verification: { label: '要求邮箱验证' },
         membership_policy: {
           label: '新用户的成员归属',
-          help: '「自动加入」会把每个新用户绑定到本部署的默认组织；「仅限邀请」只在用户显式行动后才授予成员身份——自行创建工作区、接受邀请、被管理员添加，或由 SSO 即时开通。',
+          help: '「自动加入」会把每个新用户绑定到本部署的默认组织；「仅限邀请」只在用户显式行动后才授予成员身份——自行创建组织、接受邀请、被管理员添加，或由 SSO 即时开通。',
           options: {
             auto: '自动加入默认组织',
             'invite-only': '仅限邀请——绝不自动加入',
@@ -391,7 +391,7 @@ export const zhCN: PlatformTranslationData = {
 
     feature_flags: {
       title: '功能开关',
-      description: '为当前工作区开启实验性与测试功能。',
+      description: '为当前组织开启实验性与测试功能。',
       groups: {
         productivity: { title: '生产力' },
         collaboration: { title: '协作' },

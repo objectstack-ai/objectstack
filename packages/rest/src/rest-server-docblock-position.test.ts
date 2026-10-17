@@ -187,6 +187,11 @@ describe('rest-server.ts docblock position', () => {
  * the module header, the host interface's block and the function's. The public
  * form body held no TSDoc block of its own, so `rest-server.ts` keeps every
  * block it had (163).
+ *
+ * [#23050 slice 12] `crud-routes.ts` carries three, as the form module does:
+ * the module header, the host interface's block and the function's. The CRUD
+ * body held no TSDoc block of its own, so `rest-server.ts` keeps every block it
+ * had (163).
  */
 const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
     'data-action-routes.ts': 4,
@@ -200,6 +205,7 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     'search-routes.ts': 3,
     'ui-routes.ts': 4,
     'form-routes.ts': 3,
+    'crud-routes.ts': 3,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -235,9 +241,10 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // [#23050 slice 9] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 = 40 over nine, length 9 → 10.
         // [#23050 slice 10] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 = 44 over ten, length 10 → 11.
         // [#23050 slice 11] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 + 3 = 47 over eleven, length 11 → 12.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(12);
+        // [#23050 slice 12] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 + 3 + 3 = 50 over twelve, length 12 → 13.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(13);
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(47);
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(50);
     });
 });

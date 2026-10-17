@@ -537,12 +537,12 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'module on the registrar list (`packages/rest/src/rest-server-registrar-files.ts`) — ' +
       '`data-action-routes.ts`, `batch-routes.ts`, `approvals-routes.ts`, `sharing-routes.ts`, ' +
       '`analytics-routes.ts`, `security-routes.ts`, `discovery-routes.ts`, `email-routes.ts`, ' +
-      '`search-routes.ts`, `ui-routes.ts` and `form-routes.ts`, the modules the bodies of ' +
+      '`search-routes.ts`, `ui-routes.ts`, `form-routes.ts` and `crud-routes.ts`, the modules the bodies of ' +
       '`registerDataActionEndpoints`, `registerBatchEndpoints`, `registerApprovalsEndpoints`, ' +
       '`registerSharingEndpoints`, `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, ' +
       '`registerSecurityExplainEndpoints`, `registerSecurityEndpoints`, `registerDiscoveryEndpoints`, ' +
       '`registerOpenApiEndpoints`, `registerEmailEndpoints`, `registerSearchEndpoints`, ' +
-      '`registerUiEndpoints` and `registerFormEndpoints` moved to; ' +
+      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints` moved to; ' +
       'reachable = those inside registerMetadataEndpoints',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -801,10 +801,24 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // the move commit, before the list learned the module: population 68 and
     // `this.routeManager.register(` 61 over eleven files, the two sites out of
     // reach.
+    // [#23050 slice 12] 70 / 19 / 51 UNCHANGED, the same measurement again:
+    // `registerCrudEndpoints`' body (six registration sites, the list, read,
+    // create, QueryAST query, update and delete doors under
+    // `{base}{crud.dataPrefix}`, all outside `registerMetadataEndpoints`, so
+    // all six in the blind spot) moved to `crud-routes.ts`, which joins the list
+    // (length 12 -> 13) with its own control. `this.routeManager.register(`
+    // stays 63 over the thirteen files
+    // (12 here + 9 + 5 + 7 + 8 + 1 + 6 + 4 + 1 + 1 + 1 + 2 + 6),
+    // `private register*Endpoints(` stays 16 (the registrar is still declared
+    // here), and `enforceAuth` 108 -> 112 is RE-ANCHORED, not relaxed: the six
+    // call sites moved with their routes and are counted in both readings; the
+    // four new occurrences are this slice's seam, the same two spellings once
+    // (the host literal's forwarder, two; the host interface's member, two). No
+    // call site was added.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
-      'registrar list length': 12,
+      'registrar list length': 13,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
       'approvals-routes.ts: this.routeManager.register(': 7,
@@ -816,6 +830,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'search-routes.ts: this.routeManager.register(': 1,
       'ui-routes.ts: this.routeManager.register(': 1,
       'form-routes.ts: this.routeManager.register(': 2,
+      'crud-routes.ts: this.routeManager.register(': 6,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -823,7 +838,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 108,
+      enforceAuth: 112,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +

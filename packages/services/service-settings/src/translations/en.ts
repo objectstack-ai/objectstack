@@ -24,7 +24,7 @@ export const en: PlatformTranslationData = {
       title: 'Mail Delivery',
       description: 'SMTP and transactional email provider configuration.',
       groups: {
-        provider: { title: 'Provider', description: 'Choose how this workspace sends outbound email.' },
+        provider: { title: 'Provider', description: 'Choose how this environment sends outbound email.' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'API key' },
         from_address: { title: 'From address' },
@@ -64,13 +64,13 @@ export const en: PlatformTranslationData = {
 
     branding: {
       title: 'Branding',
-      description: 'Workspace name, logo, and accent colour.',
+      description: 'Organization name, logo, and accent colour.',
       groups: {
         identity: { title: 'Identity' },
         appearance: { title: 'Appearance' },
       },
       keys: {
-        workspace_name: { label: 'Workspace name' },
+        workspace_name: { label: 'Organization name' },
         support_email: { label: 'Support email', help: 'Example: support@example.com' },
         theme_mode: {
           label: 'Default theme',
@@ -90,7 +90,7 @@ export const en: PlatformTranslationData = {
         contact: { title: 'Contact' },
       },
       keys: {
-        legal_name: { label: 'Legal name', help: 'Registered legal name (may differ from the workspace name).' },
+        legal_name: { label: 'Legal name', help: 'Registered legal name (may differ from the organization name set under Branding).' },
         registration_number: { label: 'Registration number', help: 'Company registration / incorporation number (e.g. EIN).' },
         tax_id: { label: 'Tax / VAT ID', help: 'Shown on invoices (e.g. VAT, GST, ABN).' },
         address_line1: { label: 'Address line 1' },
@@ -158,7 +158,7 @@ export const en: PlatformTranslationData = {
         require_email_verification: { label: 'Require email verification' },
         membership_policy: {
           label: 'New user membership',
-          help: 'Automatic binds every new user to the default organization. Invitation only grants membership solely through an explicit act — creating a workspace, accepting an invitation, an admin adding them, or SSO just-in-time provisioning.',
+          help: 'Automatic binds every new user to the default organization. Invitation only grants membership solely through an explicit act — creating an organization, accepting an invitation, an admin adding them, or SSO just-in-time provisioning.',
           options: {
             auto: 'Join the default organization automatically',
             'invite-only': 'Invitation only — never join automatically',
@@ -202,7 +202,7 @@ export const en: PlatformTranslationData = {
 
     feature_flags: {
       title: 'Feature Flags',
-      description: 'Toggle experimental and beta features for this workspace.',
+      description: 'Toggle experimental and beta features for this organization.',
       groups: {
         productivity: { title: 'Productivity' },
         collaboration: { title: 'Collaboration' },
