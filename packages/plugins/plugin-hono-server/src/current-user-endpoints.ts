@@ -39,11 +39,13 @@
  */
 
 import {
+    apiKeyLifecyclePolicySourceOf,
     assembleExecutionContext,
     buildEffectiveObjectPermissions,
     IDataEngine,
     resolveAuthzContext,
     resolveLocalizationContext,
+    userAuthGateSourceOf,
     type ApiExposureSchemaLike,
     type ManagedSchemaLike,
 } from '@objectstack/core';
@@ -463,14 +465,15 @@ export function makeExecutionContextResolver(
             if (!api && typeof authService.getApi === 'function') {
                 api = await authService.getApi();
             }
-            if (!api?.getSession) return undefined;
+            const getSession = api?.getSession?.bind(api);
+            if (!getSession) return undefined;
             // [#22258] The in-process session-read rule: these routes answer
             // with their own response, so a renewal here would move the
             // session's expiry while its renewed cookie is discarded. A request
             // carrying a session cookie reads without renewal; a bearer-only
             // request renews as before.
             const readSession = async () => {
-                const session = await api.getSession(inProcessSessionReadInput(c.req.raw.headers));
+                const session = await getSession(inProcessSessionReadInput(c.req.raw.headers));
                 return session?.user?.id ? session : null;
             };
             // THE delegation (#6334), and ONE resolution per request (#24061).
@@ -504,6 +507,11 @@ export function makeExecutionContextResolver(
                 ql: getObjectQL(),
                 headers: undefined,
                 getSession: readSession,
+                // Bound from the auth service, as the resolver requires
+                // wherever one is reachable. Both are read by the API-key
+                // admission seam alone, which no request here reaches.
+                userAuthGates: userAuthGateSourceOf(authService),
+                apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
             });
             if (!authz.userId) return undefined;
             // [#2408 / #3361] Open the per-request `Server-Timing` disclosure
