@@ -1,5 +1,65 @@
 # @objectstack/cli
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/account@18.0.0-next.4
+  - @objectstack/setup@18.0.0-next.4
+  - @objectstack/client@18.0.0-next.4
+  - @objectstack/cloud-connection@18.0.0-next.4
+  - create-objectstack@18.0.0-next.4
+  - @objectstack/driver-memory@18.0.0-next.4
+  - @objectstack/driver-mongodb@18.0.0-next.4
+  - @objectstack/driver-sql@18.0.0-next.4
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.4
+  - @objectstack/driver-turso@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/lint@18.0.0-next.4
+  - @objectstack/mcp@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/metadata-protocol@18.0.0-next.4
+  - @objectstack/observability@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/plugin-approvals@18.0.0-next.4
+  - @objectstack/plugin-audit@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/plugin-email@18.0.0-next.4
+  - @objectstack/plugin-hono-server@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-sharing@18.0.0-next.4
+  - @objectstack/plugin-webhooks@18.0.0-next.4
+  - @objectstack/service-analytics@18.0.0-next.4
+  - @objectstack/service-automation@18.0.0-next.4
+  - @objectstack/service-cache@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-job@18.0.0-next.4
+  - @objectstack/service-mailbox@18.0.0-next.4
+  - @objectstack/service-messaging@18.0.0-next.4
+  - @objectstack/service-package@18.0.0-next.4
+  - @objectstack/service-queue@18.0.0-next.4
+  - @objectstack/service-realtime@18.0.0-next.4
+  - @objectstack/service-settings@18.0.0-next.4
+  - @objectstack/service-sms@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/trigger-api@18.0.0-next.4
+  - @objectstack/trigger-record-change@18.0.0-next.4
+  - @objectstack/trigger-schedule@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+  - @objectstack/verify@18.0.0-next.4
+  - @objectstack/plugin-pinyin-search@18.0.0-next.4
+  - @objectstack/console@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

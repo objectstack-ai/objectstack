@@ -1,5 +1,21 @@
 # @objectstack/example-showcase
 
+## 0.3.22-next.4
+
+### Patch Changes
+
+- Updated dependencies [eda6f14]
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/cloud-connection@18.0.0-next.4
+  - @objectstack/connector-mcp@18.0.0-next.4
+  - @objectstack/connector-openapi@18.0.0-next.4
+  - @objectstack/connector-rest@18.0.0-next.4
+  - @objectstack/connector-slack@18.0.0-next.4
+  - @objectstack/driver-sql@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-i18n@18.0.0-next.4
+
 ## 0.3.22-next.3
 
 ### Patch Changes
