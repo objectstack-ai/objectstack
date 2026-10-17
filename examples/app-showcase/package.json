@@ -33,6 +33,7 @@
     "@objectstack/runtime": "workspace:*",
     "@objectstack/service-datasource": "workspace:*",
     "@objectstack/service-i18n": "workspace:*",
+    "@objectstack/service-print": "workspace:*",
     "@objectstack/spec": "workspace:*"
   },
   "devDependencies": {

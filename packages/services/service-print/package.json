@@ -27,6 +27,7 @@
     "@objectstack/core": "workspace:*",
     "@objectstack/service-storage": "workspace:*",
     "@objectstack/spec": "workspace:*",
+    "@objectstack/types": "workspace:*",
     "playwright-core": "1.63.0"
   },
   "devDependencies": {

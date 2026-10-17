@@ -102,6 +102,47 @@ written under their own permissions, and both the file and the attachment name
 them. A user can never archive a record they could not read, or attach a file
 where they could not attach one by hand.
 
+## Print from the console
+
+`PrintServicePlugin` also mounts one HTTP route on the kernel's HTTP server,
+`POST /api/v1/print/records`, so a user can print the record they are looking
+at. Its JSON body is the same request, `{ app, object, recordId, page,
+filename? }`, and it answers `201` with the stored file,
+`{ fileId, attachmentId, size, filename }`. The print runs as the signed-in
+caller, exactly as an in-process print with their context does, and the file is
+attached once, by the service.
+
+Reach it from the console with an ordinary `type: 'api'` action on the object:
+
+```ts
+import { defineAction } from '@objectstack/spec/ui';
+
+export const GenerateInvoicePdf = defineAction({
+  name: 'generate_invoice_pdf',
+  label: 'Generate PDF',
+  objectName: 'invoice',
+  type: 'api',
+  target: '/api/v1/print/records',
+  method: 'POST',
+  recordIdParam: 'recordId',                  // the clicked record's id
+  bodyExtra: { app: 'sales', object: 'invoice', page: 'invoice_document' },
+  locations: ['list_item'],
+  refreshAfter: true,
+});
+```
+
+The route refuses, before it asks the service anything: an anonymous request
+(`UNAUTHENTICATED` / 401); a sign-in held by an authentication policy (`403` with
+the policy's own code); a request from an **impersonation session** — an
+administrator signed in as the user — (`PERMISSION_DENIED` / 403: a print is
+archived in the user's name, so it is never made for them by someone else); and
+a query parameter or a body field outside the request (`VALIDATION_ERROR` /
+400). Every refusal below then reaches the caller with its own `code` and
+`status`; a 5xx answers with the route's own sentence, and the service's text is
+written to the server log. The route writes no audit row of its own: the print's
+session sign-in and sign-out are recorded as any sign-in is, and the file and
+the attachment name the caller.
+
 ## Refusals
 
 Each refusal carries `code` and `status`, and every one of them is decided

@@ -343,6 +343,50 @@ export const SubmitForSignoffAction = defineAction({
 });
 
 /**
+ * api — print the invoice to a PDF and attach it to the invoice, as the user
+ * who clicks it.
+ *
+ * The target is `@objectstack/service-print`'s door, `POST
+ * /api/v1/print/records`, which `PrintServicePlugin` mounts (composed in
+ * `objectstack.config.ts`). The door prints the record on the invoice's
+ * default record page, `showcase_invoice_document`, the page that declares
+ * `print`, through the in-process print service, which attaches the PDF to the
+ * invoice once, as the caller. The body is the door's whole request: the
+ * clicked record's id (`recordIdParam`) and the three constant fields
+ * (`bodyExtra`); `app` is the console route segment the record opens in.
+ *
+ * Its availability is the user's access to the record: a row or a record the
+ * user cannot read is not shown to them, and a page is never gated apart from
+ * the data it shows. The door re-judges every print anyway, and each of its
+ * refusals reaches the user as the action's error: no print engine configured
+ * (the showcase composes none by default: set `OS_PRINT_CHROMIUM_PATH` or
+ * `OS_PRINT_BROWSER_ENDPOINT`, and `OS_PRINT_CONSOLE_URL`), a record they may
+ * not edit (attaching needs it), an impersonation session.
+ *
+ * `list_item` puts it in the invoice list's row menu, where the console draws
+ * it. `record_header` is its record-page placement, beside Submit for Sign-off.
+ * ⚠️ The console draws record-header actions in a page's `page:header`, and a
+ * print page may not hold one, so on the invoice's record page (a print page)
+ * neither action is drawn until the console gives a print page a header host.
+ */
+export const GenerateInvoicePdfAction = defineAction({
+  name: 'showcase_generate_invoice_pdf',
+  label: 'Generate PDF',
+  icon: 'file-text',
+  objectName: invoice,
+  type: 'api',
+  target: '/api/v1/print/records',
+  method: 'POST',
+  // One print per record: the door takes one record id.
+  execution: 'perRecord',
+  recordIdParam: 'recordId',
+  bodyExtra: { app: 'com.example.showcase', object: invoice, page: 'showcase_invoice_document' },
+  successMessage: 'The PDF is attached to the invoice.',
+  locations: ['list_item', 'record_header'],
+  refreshAfter: true,
+});
+
+/**
  * script — the **action-param widget gallery** (ADR-0059). One inline param of
  * every non-trivial widget type, so the `ActionParamDialog` renders each real
  * field widget (not a text box): richtext editor, color picker, date picker,
@@ -509,6 +553,7 @@ export const allActions = [
   LogTimeAction,
   NewTaskAction,
   SubmitForSignoffAction,
+  GenerateInvoicePdfAction,
   ActionParamGalleryAction,
   ArchiveTaskAction,
   PortfolioSnapshotAction,

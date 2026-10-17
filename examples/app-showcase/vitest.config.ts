@@ -44,6 +44,7 @@ export default defineConfig({
       { find: /^@objectstack\/formula$/, replacement: path.resolve(__dirname, '../../packages/formula/src/index.ts') },
       { find: /^@objectstack\/plugin-email$/, replacement: path.resolve(__dirname, '../../packages/plugins/plugin-email/src/index.ts') },
       { find: /^@objectstack\/lint$/, replacement: path.resolve(__dirname, '../../packages/lint/src/index.ts') },
+      { find: /^@objectstack\/service-print$/, replacement: path.resolve(__dirname, '../../packages/services/service-print/src/index.ts') },
     ],
   },
   test: {

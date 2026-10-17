@@ -684,6 +684,15 @@ export const ShowcaseTranslationBundle = {
             message: '该客户已流失 —— 请先将其恢复为活跃状态,然后再开具发票。',
           },
         },
+        // Translated at birth: this example is ratcheted at its untranslated
+        // count, so a declared action label that skips zh-CN fails
+        // check-i18n-coverage.
+        _actions: {
+          showcase_generate_invoice_pdf: {
+            label: '生成 PDF',
+            successMessage: 'PDF 已附加到发票。',
+          },
+        },
       },
       // See the `en` side for why this entry translates exactly ONE field and
       // no more (check-i18n-coverage is a two-sided ratchet).
