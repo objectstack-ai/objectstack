@@ -8198,14 +8198,16 @@ const LIST_VIEW_PAGE_ALIAS_GUIDANCE: Readonly<Record<'objectName' | 'viewType', 
     + `\`${LIST_VIEW_RETIRED_ALIASES.objectName.replacedBy}\` source — write \`data: { provider: 'object', object: '…' }\` `
     + 'in `properties`, or name the object on the node\'s `dataSource` binding (`dataSource.object`). The '
     + 'console reads no `objectName` off this node, so the list queries nothing. Run `os migrate meta --from 17` '
-    + 'to list the mechanical edits for existing sources; `--write` applies the ones it can prove. The react '
+    + 'to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you '
+    + 'apply the rest by hand. The react '
     + `tier retired the same alias on \`ListView\`: ${LIST_VIEW_RETIRED_ALIASES.objectName.note}`,
   viewType:
     '`viewType` was retired on a page `list-view` node in @objectstack/spec 18: the list kind is the list view\'s own '
     + `\`${LIST_VIEW_RETIRED_ALIASES.viewType.replacedBy}\`, written in \`properties\` (\`type: 'kanban'\`) — the `
     + 'node\'s own `type` stays `list-view`, the registry key. The console reads no `viewType` off this node, '
     + 'so the list draws as a grid. Run `os migrate meta --from 17` to list the mechanical edits for existing '
-    + 'sources; `--write` applies the ones it can prove. The react tier retired the same alias on `ListView`: '
+    + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand. The react tier retired '
+    + 'the same alias on `ListView`: '
     + LIST_VIEW_RETIRED_ALIASES.viewType.note,
 };
 

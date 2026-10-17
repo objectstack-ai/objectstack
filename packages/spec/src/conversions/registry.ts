@@ -11391,8 +11391,9 @@ const pageIsDefaultOffRecordPageRemoved: MetadataConversion = {
  * spelling, instead of having it quietly rewritten at `defineStack` /
  * `validate`. Data at rest has no author to teach: stored `sys_metadata` rows
  * (`applyConversionsToStoredItem`), the artifact-ingestion door and the
- * package registration door replay this, and `os migrate meta` rewrites a
- * source. The paired D3 entry is `page-list-view-object-name-view-type-retired`.
+ * package registration door replay this, and `os migrate meta --write`
+ * rewrites a source where it can prove the edit. The paired D3 entry is
+ * `page-list-view-object-name-view-type-retired`.
  */
 const pageListViewObjectNameViewTypeToDataType: MetadataConversion = {
   id: 'page-list-view-object-name-view-type-to-data-type',
