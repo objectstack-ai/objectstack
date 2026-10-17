@@ -72,6 +72,7 @@ import { isCodeArtifactBody, isTenantAuthored } from '@objectstack/metadata-core
 import * as actionExec from '../action-execution.js';
 import { actorUserFromExecutionContext, resolveActorDisplayName } from '../security/actor-user.js';
 import { validationFailureDetails } from '../validation-failure.js';
+import { buildApiError } from '../error-envelope.js';
 // [ADR-0126 §5] The shared activation write-authority gates — the same two
 // tiers `/automation`'s toggle door passes, one implementation.
 import {
@@ -107,6 +108,12 @@ import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.
  * refuses a wrong-shaped path with a 400 that names the shape.
  */
 const ACTION_ACTIVATION_SEGMENT = '_activation';
+
+/**
+ * The one method this domain serves, on every path it claims — invocation and
+ * the activation door alike: the `Allow` value of its 405.
+ */
+const ACTIONS_ALLOWED_METHODS = 'POST';
 
 function isActionActivationWrite(parts: string[], method: string): boolean {
     return method === 'POST' && parts[0] === ACTION_ACTIVATION_SEGMENT;
@@ -443,7 +450,25 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
         }
     }
     if (method.toUpperCase() !== 'POST') {
-        return { handled: true, response: deps.error('Method not allowed', 405) };
+        // RFC 9110 §15.5.6: a 405 MUST carry an `Allow` header naming the
+        // target resource's supported methods. Hand-rolled rather than
+        // `deps.error(...)` only for that header, which `deps.error` cannot
+        // carry — the shape `domains/mcp.ts`, `domains/meta.ts` and
+        // `domains/ai.ts` already answer with. The BODY still goes through the
+        // one builder, so its code stays DERIVED from the status
+        // (`METHOD_NOT_ALLOWED`) and is not spelled here. Below the anonymous
+        // baseline above, which stays this handler's first statement.
+        return {
+            handled: true,
+            response: {
+                status: 405,
+                headers: { Allow: ACTIONS_ALLOWED_METHODS },
+                body: {
+                    success: false,
+                    error: buildApiError({ message: 'Method not allowed', httpStatus: 405 }),
+                },
+            },
+        };
     }
     const parts = path.split('/').filter(Boolean);
     if (parts.length < 1) {
