@@ -471,6 +471,106 @@ describe('[ADR-0139 D4] the leaf path: one ReadableIds leaf per parent object, a
   });
 });
 
+describe('[ADR-0139 D4] a read that names its parent objects enumerates only those', () => {
+  /** Forty registered parents: the gate's full enumeration, for a read that names none. */
+  const OBJECTS = Array.from({ length: 40 }, (_, i) => `crm_o${String(i).padStart(2, '0')}`);
+  const NAMED = ['crm_o05', 'crm_o17', 'crm_o33'];
+  /** The gate's own conjunct: the second member of the `$and` it builds onto the caller's where. */
+  const gateBranches = (where: any): any[] => branchesOf(where?.$and ? where.$and[1] : where);
+  const readWhere = async (mw: Mw, where: unknown) => (await read(mw, { ast: { object: 'sys_activity', where } })).where;
+
+  it('a read for 3 objects carries 3 branches — one leaf per named parent, of 40 registered', async () => {
+    const { mw, calls } = installClassifying({ objects: OBJECTS });
+    expect(branchesOf((await read(mw)).where)).toHaveLength(OBJECTS.length);
+    const branches = gateBranches(await readWhere(mw, { object_name: { $in: NAMED } }));
+    expect(branches).toHaveLength(3);
+    expect(branches.map(leafObjectOf)).toEqual(NAMED);
+    expect(branches.map((b) => b.object_name)).toEqual(NAMED);
+    expect(calls.scans).toEqual([]);
+  });
+
+  it('reads a plain value, $eq and $in, at the root or inside a root $and at any depth; two confinements intersect', async () => {
+    const { mw } = installClassifying({ objects: OBJECTS });
+    for (const [where, expected] of [
+      [{ object_name: 'crm_o05' }, ['crm_o05']],
+      [{ object_name: { $eq: 'crm_o17' } }, ['crm_o17']],
+      [{ $and: [{ type: 'updated' }, { $and: [{ object_name: { $in: NAMED } }] }] }, NAMED],
+      [{ object_name: { $in: NAMED }, $and: [{ object_name: { $in: ['crm_o17', 'crm_o33', 'crm_o39'] } }] }, ['crm_o17', 'crm_o33']],
+      [{ object_name: { $in: NAMED }, $or: [{ type: 'created' }, { type: 'updated' }] }, NAMED],
+    ] as const) {
+      expect(gateBranches(await readWhere(mw, where)).map(leafObjectOf), JSON.stringify(where)).toEqual(expected);
+    }
+  });
+
+  it('a named object the gate does not enumerate gets no branch; naming none it does is the deny-all sentinel', async () => {
+    const excluded = AUDIT_EXCLUDED_OBJECTS.filter((o) => o !== 'sys_activity')[0];
+    const { mw } = installClassifying({ objects: [...OBJECTS, excluded, 'sys_activity'] });
+    const named = { object_name: { $in: ['crm_o05', 'crm_unregistered', excluded, 'sys_activity'] } };
+    expect(gateBranches(await readWhere(mw, named)).map(leafObjectOf)).toEqual(['crm_o05']);
+    for (const where of [
+      { object_name: { $in: ['crm_unregistered', excluded, 'sys_activity'] } },
+      { object_name: { $in: [] } },
+      { $and: [{ object_name: 'crm_o05' }, { object_name: 'crm_o17' }] },
+    ]) {
+      expect((await readWhere(mw, where) as any).$and[1], JSON.stringify(where)).toEqual(DENY);
+    }
+  });
+
+  it('a shape it does not read — another operator, an $or, a $not, a value that is not a machine name — keeps every branch', async () => {
+    const { mw } = installClassifying({ objects: OBJECTS });
+    for (const where of [
+      { $or: [{ object_name: 'crm_o05' }, { object_name: 'crm_o17' }] },
+      { $or: [{ object_name: { $in: NAMED } }, { type: 'note' }] },
+      { $not: { object_name: { $in: NAMED } } },
+      { object_name: { $nin: NAMED } },
+      { object_name: { $ne: 'crm_o05' } },
+      { object_name: { $in: NAMED, $ne: 'crm_o05' } },
+      { object_name: { $eq: 'crm_o05', $in: NAMED } },
+      { object_name: { $in: ['crm_o05', 'CRM_O17'] } },
+      { object_name: { $in: ['crm_o05', 7] } },
+      { object_name: 'Crm_O05' },
+      { object_name: { $startsWith: 'crm_o0' } },
+      { record_id: { $in: NAMED } },
+      { $and: { object_name: 'crm_o05' } },
+    ]) {
+      expect(gateBranches(await readWhere(mw, where)), JSON.stringify(where)).toHaveLength(OBJECTS.length);
+    }
+  });
+
+  it('the bounded probe reads only the named parents of its classes, and is not run when the read names none of them', async () => {
+    const opts = {
+      objects: ['crm_case', 'sys_attachment', 'ext_ticket'],
+      middleware: ['sys_attachment'],
+      datasource: { ext_ticket: 'warehouse' },
+      scan: () => [{ object_name: 'sys_attachment', record_id: 'f1' }],
+      readable: { sys_attachment: ['f1'] },
+    };
+    const both = installClassifying(opts);
+    const named = { object_name: { $in: ['crm_case', 'sys_attachment'] } };
+    const branches = gateBranches(await readWhere(both.mw, named));
+    expect(branches.map(leafObjectOf)).toEqual(['crm_case', null]);
+    expect(branches[1]).toEqual({ object_name: 'sys_attachment', record_id: { $in: ['f1'] } });
+    expect(both.calls.scans.map((s) => s.where)).toEqual([{ $and: [named, { object_name: { $in: ['sys_attachment'] } }] }]);
+
+    const leafOnly = installClassifying(opts);
+    expect(gateBranches(await readWhere(leafOnly.mw, { object_name: 'crm_case' })).map(leafObjectOf)).toEqual(['crm_case']);
+    expect(leafOnly.calls.scans).toEqual([]);
+    expect(leafOnly.calls.probes).toEqual([]);
+  });
+
+  it('a delegated caller’s whole-read probe is unchanged: it scans the caller’s own where', async () => {
+    const { mw, calls } = installClassifying({
+      objects: OBJECTS,
+      scan: () => [{ object_name: 'crm_o05', record_id: 'c1' }],
+      readable: { crm_o05: ['c1'] },
+    });
+    const where = { object_name: { $in: NAMED } };
+    const ctxWhere = (await read(mw, { ast: { object: 'sys_activity', where }, context: { userId: 'u_agent', onBehalfOf: { userId: 'u_d' } } as any })).where as any;
+    expect(ctxWhere.$and[1]).toEqual({ object_name: 'crm_o05', record_id: { $in: ['c1'] } });
+    expect(calls.scans.map((s) => s.where)).toEqual([where]);
+  });
+});
+
 describe('[ADR-0139 D5] three classes keep the bounded probe, by name, chosen before any leaf is written', () => {
   it('a parent an object-scoped read middleware narrows is probed — its rows only — beside the other parents’ leaves', async () => {
     const { mw, calls } = installClassifying({
