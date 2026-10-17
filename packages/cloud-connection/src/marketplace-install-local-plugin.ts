@@ -2793,20 +2793,23 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
     };
 
     /**
-     * ADR-0087 D2 for this plugin's two loads of a ledger body — the install
-     * and the rehydrate. The body is data at rest (a published artifact), so it
-     * replays the versioned forward conversion inside the window its own
-     * `engines.protocol` opens, through the engine's ONE registration-door entry
-     * point (`ObjectQL.convertPackageBodyForward`), reused here, never
-     * re-derived: a body with no declared range comes back by reference, and the
-     * named warning is the engine's own.
+     * ADR-0087 D2 for this plugin's three loads of a ledger body — the install,
+     * the rehydrate and the reseed ({@link handleReseed}, #24040). The body is
+     * data at rest (a published artifact), so it replays the versioned forward
+     * conversion inside the window its own `engines.protocol` opens, through the
+     * engine's ONE registration-door entry point
+     * (`ObjectQL.convertPackageBodyForward`), reused here, never re-derived: a
+     * body with no declared range comes back by reference, and the named warning
+     * is the engine's own.
      *
-     * Converted once per load and handed to EVERY reader of that load —
-     * `manifest.register`, {@link bindArtifactHandlers}, {@link applySideEffects}
-     * and the sample-data heal — so none of them reads the raw bytes while the
-     * registry holds the converted copy. `register` meets the same entry point
-     * again, which hands an already-converted body back by reference with no
-     * second warning.
+     * Converted once per load and handed to EVERY reader of that load — on the
+     * install and the rehydrate `manifest.register`, {@link bindArtifactHandlers},
+     * {@link applySideEffects} and the rehydrate's sample-data heal; on the
+     * reseed {@link applySideEffects} alone, since it neither registers nor
+     * binds — so none of them reads the raw bytes while the registry holds the
+     * converted copy. On the two loads that register, `register` meets the same
+     * entry point again, which hands an already-converted body back by reference
+     * with no second warning.
      *
      * An engine without that door (not ObjectQL) is handed the body as before.
      */
