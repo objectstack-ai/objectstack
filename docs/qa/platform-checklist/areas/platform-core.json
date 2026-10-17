@@ -668,13 +668,13 @@
       ],
       "acceptance": [
         {
-          "clause": "a settings value round-trips: PUT /api/settings/localization persists and GET re-reads it, with source FLIPPING default→tenant (the scope), not staying 'default'",
+          "clause": "a settings value round-trips: PUT /api/settings/localization persists and GET re-reads it, with source reading the scope ('tenant'), never 'default' — on a boot without the dev seed that is a flip from 'default'; on an `os dev --seed-admin` boot the seed already wrote the zone at tenant scope (steps[1]), so the value is what round-trips",
           "oracle": "api",
           "verify": "the PUT + GET responses; the timezone value is Asia/Tokyo and source is the scope, not 'default'",
           "evidence": "the PUT + GET bodies with the source field"
         },
         {
-          "clause": "EFFECT, not just a form: the saved value reaches its consumer — localization.timezone resolves onto ExecutionContext (resolve-authz-context.ts), so an ExecutionContext-dependent output (analytics date bucket / today() / rendered datetime) shifts from UTC to the saved zone",
+          "clause": "EFFECT, not just a form: the saved value reaches its consumer — localization.timezone resolves onto ExecutionContext (resolve-authz-context.ts), so an ExecutionContext-dependent output (the session's resolved localization, GET /api/v1/auth/me/localization, or a datetime the console renders — steps[3]) shifts from UTC to the saved zone",
           "oracle": "api",
           "verify": "the before/after output pair differs by exactly the zone change; NOTE (ai.json caveat) this clause requires an observable consumer — only localization/branding/auth qualify on stock fixtures, a persisted form is NOT proof",
           "evidence": "the before/after consumer output"
@@ -688,7 +688,7 @@
         {
           "clause": "the console source badge flips from default to the persisted-scope source after save",
           "oracle": "screenshot",
-          "verify": "before/after field screenshots of the localization timezone source indicator",
+          "verify": "before/after field screenshots of the source indicator of a localization key whose source was 'default' before the save (e.g. default_country — on a dev-seeded boot the timezone is already tenant-scoped, steps[5]); the indicator reads the persisted scope after it",
           "evidence": "the two screenshots"
         },
         {
@@ -784,7 +784,7 @@
         { "revision": 1, "date": "2026-08-08", "change": "initial — settings hub round-trip with persistence + observable-consumer effect (honoring the ai.json form-is-not-effect caveat), sys_setting_audit, env-lock server refusal, honest test action, sys_secret handle-not-plaintext, anonymous deny", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "secret clauses strengthened from negative-only ('never returns the plaintext', which omission and a vanished key also satisfy) to the POSITIVE contract #7522/PR #7554 pinned at the route level: set→mask / unset→null presence-preserving, masking across values.<key>.value AND every cascadeChain entry, source/locked/lockedReason unchanged, both specifier flavours, plus the distinct echoed-mask-PUT-is-a-no-op round-trip clause and the in-process-path-is-NOT-masked guard", "ref": "#7573" },
         { "revision": 3, "date": "2026-08-18", "change": "corrected the open-framework namespace count from 10 to 11 in the fixture list, step 0 and the per-namespace clause. builtinSettingsManifests holds 10, but lifecycle is registered separately by ObjectQLPlugin at kernel:ready (packages/objectql/src/lifecycle/lifecycle-settings.ts, 5 specifiers) and is served alongside them — so a runner enumerating only the manifests directory undercounts, and the clause could never be satisfied as written (#9453 CF-7)", "ref": "#9386" },
-        { "revision": 4, "date": "2026-10-16", "change": "steps[1], [2], [3], [5] and [12] and acceptance[7] (clause, verify) and [11] (clause, verify, evidence) re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). Four premises had moved: the `os dev --seed-admin` dev seed writes the host zone into localization.timezone at tenant scope (#23175), so the source is 'tenant' before any PUT and the badge flip needs a key the seed did not write (#23939 used default_country); the analytics date bucket has no stock observable, so the effect step names the two consumers #23939 used (auth/me/localization and a rendered datetime); global-scope secrets live in sys_platform_setting.value_enc, not sys_setting; and an anonymous caller meets the ADR-0056 D2 floor first, 401 UNAUTHENTICATED on both routes, not 403 SETTINGS_FORBIDDEN. Not loosened: anonymous must still be refused on both routes with no namespace enumerated, and a secret must still never be plaintext", "ref": "#24036" }
+        { "revision": 4, "date": "2026-10-16", "change": "steps[1], [2], [3], [5] and [12] and acceptance[7] (clause, verify) and [11] (clause, verify, evidence) re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). Four premises had moved: the `os dev --seed-admin` dev seed writes the host zone into localization.timezone at tenant scope (#23175), so the source is 'tenant' before any PUT and the badge flip needs a key the seed did not write (#23939 used default_country); the analytics date bucket has no stock observable, so the effect step names the two consumers #23939 used (auth/me/localization and a rendered datetime); global-scope secrets live in sys_platform_setting.value_enc, not sys_setting; and an anonymous caller meets the ADR-0056 D2 floor first, 401 UNAUTHENTICATED on both routes, not 403 SETTINGS_FORBIDDEN. acceptance[0].clause, [1].clause and [3].verify follow the same premises: the source reads the scope (on a dev-seeded boot it never read 'default', so there is no flip to see), the effect clause names the two stock consumers instead of the analytics bucket, and the badge is read on a key whose source was 'default' before the save. Not loosened: anonymous must still be refused on both routes with no namespace enumerated, and a secret must still never be plaintext", "ref": "#24036" }
       ]
     },
     {
