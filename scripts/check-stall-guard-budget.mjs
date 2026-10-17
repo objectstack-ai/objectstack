@@ -143,12 +143,11 @@
  *    No value of `T` closes either one. Raising a job timeout buys headroom for
  *    item 3; it does not extend the guard's reach.
  *
- * The affected population is 7 guard-wrapped STEPS across 5 jobs, not 4 jobs:
- * TWO of those jobs carry two guarded steps each on ONE job clock --
- * `temporal-conformance` in ci.yml, and `rerun-safety` in
- * rerun-safety-nightly.yml, whose two sites are consecutive full passes of the
- * suite -- so in each pair the second site's `p` includes the first one's
- * entire runtime.
+ * The affected population is counted in guard-wrapped STEPS, not jobs: some
+ * jobs carry more than one guarded step on ONE job clock -- in ci.yml today
+ * `test`, `temporal-conformance` and `dogfood` (`--list` prints the current
+ * census) -- so within each such job a later site's `p` includes the earlier
+ * sites' entire runtime.
  *
  * Each site's `slack` is still computed independently, which is correct for the
  * criterion; on its own it also READ as more independent than the clock
