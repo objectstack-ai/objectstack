@@ -503,7 +503,7 @@ export function makeExecutionContextResolver(
             // read `activeOrganizationId` before. Never throws for a missing
             // engine or an absent table — an empty-but-valid envelope
             // (cloud#927); a permission-store read that FAILS raises, and the
-            // `catch` below re-raises that outage (#13279).
+            // `catch` below re-raises that outage.
             const authz = await resolveAuthzContext({
                 ql: getObjectQL(),
                 headers: undefined,
@@ -590,15 +590,17 @@ export function makeExecutionContextResolver(
                 authGate: undefined,
             });
         } catch (err) {
-            // [#13279 — maintainer ruling 2026-08-30] Fail closed, with ONE
-            // exception: an authorization store that could not be read is an
-            // outage, not an anonymous caller. Since #24061 this face resolves
-            // through `resolveAuthzContext`, which puts it in that ruling's
-            // transport ledger (`authz-store-unavailable.test.ts` in core): the
-            // outage is re-raised to the host's error seam — `503
+            // [commit 6a180e42d — maintainer ruling 2026-08-30, quoted verbatim
+            // in the header of core's `authz-store-unavailable.test.ts`] Fail
+            // closed, with ONE exception: an authorization store that could
+            // not be read is an outage, not an anonymous caller, at every
+            // transport that authorizes through `resolveAuthzContext`. Since
+            // #24061 this face is one, so it is in that test's transport
+            // ledger: the outage is re-raised to the host's error seam — `503
             // SERVICE_UNAVAILABLE` on `HonoHttpServer` — instead of answering
-            // `{ authenticated: false }`, a body byte-identical to a signed-out
-            // caller's. Every other fault still answers no context.
+            // `{ authenticated: false }` or `{ apps: [] }`, bodies
+            // byte-identical to a signed-out caller's. Every other fault still
+            // answers no context.
             return rethrowAuthzStoreUnavailable(err);
         }
     };
