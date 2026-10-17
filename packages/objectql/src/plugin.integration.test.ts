@@ -1942,7 +1942,11 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
         const restored = await metadata.getObject('crm_contact');
         expect(restored._packageId).toBe('com.acme.crm');
         expect(restored.label).toBe('Contact');
-        expect(Object.keys(restored.fields)).toEqual(['name']);
+        // The registry's own body, field for field (its injected system fields
+        // included): the owner's `name` kept, the extension's `ext_score` gone.
+        expect(Object.keys(restored.fields)).toEqual(Object.keys(registry.getObject('crm_contact').fields));
+        expect(Object.keys(restored.fields)).toContain('name');
+        expect(Object.keys(restored.fields)).not.toContain('ext_score');
       });
 
       it('CONTROL: a package the registry still holds is not withdrawn — the copy keeps its field', async () => {
