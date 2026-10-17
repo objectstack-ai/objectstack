@@ -48,6 +48,7 @@ import { join } from 'node:path';
 import '@objectstack/runtime';
 import { ObjectKernel } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
+import type { IMetadataService } from '@objectstack/spec/contracts';
 import { MarketplaceInstallLocalPlugin } from './marketplace-install-local-plugin.js';
 import { LocalManifestSource } from './local-manifest-source.js';
 import { INSTALLER_USER_ID, installerAuthService, withInstallerGrants } from './install-local-principal.fixtures.js';
@@ -136,7 +137,7 @@ function makeC(url: string, opts: { body?: unknown; manifestId?: string } = {}) 
  * and `metadata` service, booted to `kernel:ready` (which runs the rehydrate).
  * `refuseUnregister` makes the metadata service refuse to withdraw a copy.
  */
-async function bootPlugin(opts: { refuseUnregister?: string; before?: (metadata: any) => Promise<void> } = {}) {
+async function bootPlugin(opts: { refuseUnregister?: string; before?: (metadata: IMetadataService) => Promise<void> } = {}) {
     const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false } as never);
     kernels.push(kernel);
     await kernel.use(new ObjectQLPlugin());
@@ -150,7 +151,7 @@ async function bootPlugin(opts: { refuseUnregister?: string; before?: (metadata:
     // in-memory layers.
     ql.registerDriver(EMPTY_STORE as never, true);
     const protocol = kernel.getService<any>('protocol');
-    const metadata = kernel.getService<any>('metadata');
+    const metadata = kernel.getService<IMetadataService>('metadata');
     if (opts.refuseUnregister !== undefined) {
         const reason = opts.refuseUnregister;
         metadata.unregister = async () => { throw new Error(reason); };
@@ -199,7 +200,9 @@ async function bootPlugin(opts: { refuseUnregister?: string; before?: (metadata:
     const warnings = () => logger.warn.mock.calls
         .map((call: unknown[]) => String(call[0]))
         .filter((line) => line.includes(`uninstalled ${APP_ID}`));
-    return { install, uninstall, protocol, metadata, ql, warnings };
+    /** The metadata service's copy of an object — what the object reads serve besides the registry. */
+    const copyOf = async (name: string) => (await metadata.getObject(name)) as Bag | undefined;
+    return { install, uninstall, protocol, copyOf, ql, warnings };
 }
 
 /** The names a `GET /meta/:type` listing serves for `type`, read through the protocol the route calls. */
@@ -253,7 +256,7 @@ describe('#24070: an install-local uninstall withdraws the package from every me
         // Identity: the install's register bridged the objects into the
         // metadata service as the package's own copies — the store the
         // object reads consult besides the registry.
-        for (const name of OBJECTS) expect((await h.metadata.getObject(name))?._packageId).toBe(APP_ID);
+        for (const name of OBJECTS) expect((await h.copyOf(name))?._packageId).toBe(APP_ID);
         expect(await readMeta(h.protocol)).toEqual(SERVED);
 
         const res = await h.uninstall();
@@ -262,14 +265,14 @@ describe('#24070: an install-local uninstall withdraws the package from every me
         // Nothing failed: no withdrawal outcome rides on the response.
         expect(res.payload.data.cleanups).toEqual([]);
         expect(await readMeta(h.protocol)).toEqual(WITHDRAWN);
-        for (const name of OBJECTS) expect(await h.metadata.getObject(name)).toBeUndefined();
+        for (const name of OBJECTS) expect(await h.copyOf(name)).toBeUndefined();
         expect(h.warnings()).toEqual([]);
     });
 
     it('install → restart (the ledger rehydrate) → DELETE: the same, for a package the boot registered', async () => {
         seedLedger();
         const h = await bootPlugin();
-        for (const name of OBJECTS) expect((await h.metadata.getObject(name))?._packageId).toBe(APP_ID);
+        for (const name of OBJECTS) expect((await h.copyOf(name))?._packageId).toBe(APP_ID);
         expect(await readMeta(h.protocol)).toEqual(SERVED);
 
         const res = await h.uninstall();
@@ -288,15 +291,15 @@ describe('#24070: an install-local uninstall withdraws the package from every me
         const installed = await h.install();
         expect(installed.status, JSON.stringify(installed.payload)).toBe(200);
         // The bridge left the copy it did not make alone; it bridged the other.
-        expect(await h.metadata.getObject(OBJECTS[0])).toEqual(authored);
-        expect((await h.metadata.getObject(OBJECTS[1]))?._packageId).toBe(APP_ID);
+        expect(await h.copyOf(OBJECTS[0])).toEqual(authored);
+        expect((await h.copyOf(OBJECTS[1]))?._packageId).toBe(APP_ID);
 
         const res = await h.uninstall();
 
         expect(res.status, JSON.stringify(res.payload)).toBe(200);
         expect(res.payload.data.cleanups).toEqual([]);
-        expect(await h.metadata.getObject(OBJECTS[0])).toEqual(authored);
-        expect(await h.metadata.getObject(OBJECTS[1])).toBeUndefined();
+        expect(await h.copyOf(OBJECTS[0])).toEqual(authored);
+        expect(await h.copyOf(OBJECTS[1])).toBeUndefined();
     });
 
     it('a copy the metadata service refuses to withdraw is a failed outcome on the response, and the cleanups still run', async () => {
