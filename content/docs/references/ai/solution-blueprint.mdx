@@ -271,6 +271,27 @@ const result = BlueprintAppSchema.parse(data);
 | **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>` | optional (default: `"list"`) | View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list". |
 | **columns** | `string[]` | optional | Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |
 | **groupBy** | `string` | optional | REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows). |
+| **filters** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Which records this view shows: the list-view filter rules [`{ field, operator, value }`] the built view carries, ANDed. REQUIRED whenever the view's name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [`{ field: "due_date", operator: "less_than", value: "{today}" }`, `{ field: "status", operator: "not_equals", value: "completed" }`]; my open → [`{ field: "owner", operator: "equals", value: "{current_user_id}" }`, `{ field: "status", operator: "equals", value: "open" }`]. WITHOUT it the view shows EVERY record under a name that promises a subset. For a select field compare its option VALUE, never its label. Omit for a view that genuinely spans every record. |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Default record order: [`{ field, order }`] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [`{ field: "due_date", order: "asc" }`]). Omit for the platform default order. |
+
+### Nested Shape: `BlueprintView.filters[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `BlueprintView.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
 
 
 ---
@@ -324,6 +345,8 @@ const result = BlueprintAppSchema.parse(data);
 | **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'>` | optional (default: `"list"`) | View kind. Pick the surface that fits the data: "gallery" for a visual card/cover browse when the user asks for a 画廊/相册/卡片墙/封面/海报/图集 (a gallery / card wall / cover / poster grid) or the object has an image/avatar/file field worth showing as a card cover; "gantt" for a 甘特图/时间线/排期 (timeline / schedule) when the object has BOTH a start and an end date field; "kanban" for a board grouped by a status/select field; "calendar" for a single-date schedule; "form" for a record editor; else "list". |
 | **columns** | `string[]` | optional | Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |
 | **groupBy** | `string` | optional | REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows). |
+| **filters** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Which records this view shows: the list-view filter rules [`{ field, operator, value }`] the built view carries, ANDed. REQUIRED whenever the view's name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [`{ field: "due_date", operator: "less_than", value: "{today}" }`, `{ field: "status", operator: "not_equals", value: "completed" }`]; my open → [`{ field: "owner", operator: "equals", value: "{current_user_id}" }`, `{ field: "status", operator: "equals", value: "open" }`]. WITHOUT it the view shows EVERY record under a name that promises a subset. For a select field compare its option VALUE, never its label. Omit for a view that genuinely spans every record. |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Default record order: [`{ field, order }`] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [`{ field: "due_date", order: "asc" }`]). Omit for the platform default order. |
 
 ### Nested Shape: `SolutionBlueprint.dashboards[number]`
 
@@ -387,6 +410,8 @@ const result = BlueprintAppSchema.parse(data);
 | **type** | `Enum<'list' \| 'form' \| 'kanban' \| 'calendar' \| 'gallery' \| 'gantt'> \| null` | ✅ | View kind, or null for list. "gallery" = visual card/cover browse (画廊/相册/卡片墙/封面/海报, or an object with an image/avatar/file field); "gantt" = timeline/schedule (甘特图/时间线/排期, object with BOTH a start and an end date field); "kanban" = board grouped by a status/select field; "calendar" = single-date schedule; "form" = record editor. |
 | **columns** | `string[] \| null` | ✅ | Field names shown as columns, or null. For a gallery, INCLUDE the image/avatar/file field (becomes the card cover); for a gantt, INCLUDE the start date column before the end date column. |
 | **groupBy** | `string \| null` | ✅ | REQUIRED for kanban: the select/status field whose options become the board columns (e.g. "stage"). Optional for gantt (groups leaf tasks). Null for list/form/calendar/gallery. |
+| **filters** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value: string \| number \| boolean \| (string \| number)[] \| null }[] \| null` | ✅ | Which records this view shows: list-view filter rules [`{field, operator, value}`], ANDed, or null for a view over EVERY record. REQUIRED whenever the view's name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [`{field:"due_date",operator:"less_than",value:"{today}"}`,`{field:"status",operator:"not_equals",value:"completed"}`]; my open → [`{field:"owner",operator:"equals",value:"{current_user_id}"}`,`{field:"status",operator:"equals",value:"open"}`]. Null under such a name ships a view that shows every record while its name promises a subset. |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[] \| null` | ✅ | Default record order: [`{field, order}`] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [`{field:"due_date",order:"asc"}`]), or null for the platform default order. |
 
 ### Nested Shape: `SolutionBlueprintStrict.dashboards[number]`
 
