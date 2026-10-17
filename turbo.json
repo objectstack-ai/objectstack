@@ -325,6 +325,7 @@
         "!dist/**",
         "!coverage/**",
         "!.turbo/**",
+        "$TURBO_ROOT$/packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json",
         "$TURBO_ROOT$/scripts/js-comment-mask.mjs",
         "$TURBO_ROOT$/scripts/js-comment-mask.d.mts"
       ]
@@ -575,6 +576,18 @@
         "!**/node_modules/**",
         "$TURBO_ROOT$/packages/spec/src/security/rls.zod.ts",
         "$TURBO_ROOT$/skills/objectstack-formula/**"
+      ]
+    },
+    "@objectstack/service-package#test": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "env": ["OS_TEST_TIERS", "OS_TEST_SHARD"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "!dist/**",
+        "!coverage/**",
+        "!.turbo/**",
+        "$TURBO_ROOT$/packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json"
       ]
     },
     "@objectstack/service-automation#test": {

@@ -113,6 +113,7 @@ import { prepareImportRequest, runImport } from '@objectstack/rest';
 import { generatePlaceholderEmail, isPlaceholderEmail } from './placeholder-email.js';
 import { generateTemporaryPassword, normalizePhoneNumber, isLikelyEmail, type AdminActor, type EndpointResult } from './admin-user-endpoints.js';
 import { SYS_USER_IMPORT_UPDATE_FIELDS } from './sys-user-writable-fields.js';
+import { readJsonRequestBody } from './request-json-body.js';
 import {
   runImportPasswordReset,
   type AccountInvitationMarker,
@@ -489,11 +490,15 @@ export async function runAdminImportUsers(
   request: Request,
   actor: AdminActor,
 ): Promise<EndpointResult> {
-  let body: any = {};
-  try { body = await request.json(); } catch { body = {}; }
   const fail = (status: number, code: string, message: string): EndpointResult => ({
     status, body: { success: false, error: { code, message } },
   });
+  // [#24032] A declared-JSON body that does not parse is refused, never read as
+  // `{}`, which answered "Provide format…" for a payload the admin did send;
+  // see request-json-body.ts.
+  const reading = await readJsonRequestBody(request);
+  if (!reading.ok) return fail(400, 'INVALID_REQUEST', reading.message);
+  const body: any = reading.body;
 
   // ── Request-level validation ─────────────────────────────────────────
   // Default policy: `auto` (#3236) — prefer the invite path (no shared secret
