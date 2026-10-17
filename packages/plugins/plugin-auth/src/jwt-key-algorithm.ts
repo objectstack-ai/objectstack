@@ -52,8 +52,11 @@
  * sitting broken. The EdDSA row is never deleted — move back to a host with
  * Ed25519 and it is simply visible again.
  *
- * The reader is installed **only when the host lacks Ed25519**, so every normal
- * deployment runs better-auth's stock code path with no ObjectStack code in it.
+ * The filter applies **only when the host lacks Ed25519**: every normal
+ * deployment reads the stock keyring, unfiltered. [#24061] On every host the
+ * keyring read is wrapped by the signing-key read cache
+ * (`signing-key-read-cache.ts`), whose miss performs this module's read on such
+ * a host and better-auth's stock read on any other.
  *
  * @see https://github.com/objectstack-ai/objectstack/issues/3585
  */

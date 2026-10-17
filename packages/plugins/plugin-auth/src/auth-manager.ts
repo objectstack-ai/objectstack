@@ -189,6 +189,7 @@ import {
   protectGetSessionJwtHook,
   resolveJwtSigningAlgorithm,
 } from './jwt-key-algorithm.js';
+import { createSigningKeyReader } from './signing-key-read-cache.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -2996,10 +2997,14 @@ export class AuthManager {
    * 2. **Existing EdDSA keys.** `resolveSigningKey` falls back to *any* stored
    *    key when none matches the configured algorithm, so a deployment that
    *    already minted an EdDSA key would still die in `importJWK` after the
-   *    fallback. On a host without Ed25519 we install better-auth's
-   *    `adapter.getJwks` keyring seam so unusable keys are not offered at all
-   *    and a fresh ES256 key is minted instead. Rows are hidden, never
-   *    deleted — moving back to a host with Ed25519 restores them.
+   *    fallback. On a host without Ed25519 the `adapter.getJwks` keyring seam
+   *    hides unusable keys, so they are not offered at all and a fresh ES256
+   *    key is minted instead. Rows are hidden, never deleted — moving back to
+   *    a host with Ed25519 restores them.
+   *
+   * The same seam carries the signing-key read cache on every host (#24061,
+   * `signing-key-read-cache.ts`): the keyring is held across requests only
+   * until a `sys_jwks` write passes the engine or its TTL lapses.
    *
    * Belt-and-braces, on every host: a signing failure degrades the
    * `set-auth-jwt` header instead of 500ing `/get-session`, and the header is
@@ -3029,12 +3034,20 @@ export class AuthManager {
     const jwtPlugin = jwt({
       schema: buildJwtPluginSchema(),
       jwks: { keyPairConfig },
-      // The keyring override is installed ONLY on a host that needs it, so a
-      // normal deployment runs better-auth's stock read path with no
-      // ObjectStack code in it and nothing to regress.
-      ...(ed25519Supported
-        ? {}
-        : { adapter: { getJwks: createHostUsableJwksReader() } }),
+      // [#24061] The keyring read goes through `createSigningKeyReader` on
+      // every host: it holds the rows across requests only while no
+      // `sys_jwks` write has passed this engine's middleware since they were
+      // read, and never past `SIGNING_KEY_CACHE_TTL_MS` — both halves of the
+      // cross-request caching rule (see `signing-key-read-cache.ts`). A miss
+      // reads exactly what it read before: better-auth's stock read, or, on a
+      // host without Ed25519, the host-usable keyring that hides keys this
+      // host cannot import (#3585).
+      adapter: {
+        getJwks: createSigningKeyReader({
+          engine: this.config.dataEngine,
+          read: ed25519Supported ? undefined : createHostUsableJwksReader(),
+        }),
+      },
     });
 
     const protectedHook = protectGetSessionJwtHook(jwtPlugin, (error) =>
