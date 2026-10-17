@@ -1397,7 +1397,13 @@ export default class Serve extends Command {
   static override description = 'Start ObjectStack server. Reads `objectstack.config.ts` if present; otherwise falls back to `dist/objectstack.json` (or OS_ARTIFACT_PATH, including http(s):// URLs) as a portable artifact.';
 
   static override args = {
-    config: Args.string({ description: 'Configuration file path', required: false, default: 'objectstack.config.ts' }),
+    // [#24191] `ignoreStdin`: oclif otherwise fills an omitted positional from
+    // a line already waiting on stdin (`tryStdin`), and with the stdio MCP
+    // transport that line is the client's `initialize`, written at spawn. It
+    // became the config path, the boot fell back to the artifact without the
+    // config, and the request was never answered. Stdin belongs to the
+    // transport; the config path comes from argv or the default.
+    config: Args.string({ description: 'Configuration file path', required: false, default: 'objectstack.config.ts', ignoreStdin: true }),
   };
 
   static override flags = {
