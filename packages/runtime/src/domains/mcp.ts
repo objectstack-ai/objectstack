@@ -173,10 +173,10 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
         // Hand-rolled rather than `deps.error(...)` only because it carries an
         // `Allow` header; the BODY still goes through the one builder (#3842),
         // so this branch cannot drift back to a numeric `code`. The code is
-        // DERIVED (`method_not_allowed`), not spelled here — the other two 405
-        // sites (`domains/actions.ts`, `domains/keys.ts`) go through
-        // `deps.error` and derive theirs, and one dispatcher answering the same
-        // status two ways is the drift this issue is closing.
+        // DERIVED (`METHOD_NOT_ALLOWED`), not spelled here. Every 405 this
+        // dispatcher's domains answer (`actions.ts`, `ai.ts`, `keys.ts`,
+        // `meta.ts`, this one) is built this way: an `Allow` header, and the
+        // body through the one builder.
         return {
             handled: true,
             response: {
