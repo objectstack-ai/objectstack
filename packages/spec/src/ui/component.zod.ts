@@ -8197,18 +8197,16 @@ const LIST_VIEW_PAGE_ALIAS_GUIDANCE: Readonly<Record<'objectName' | 'viewType', 
     '`objectName` was retired on a page `list-view` node in @objectstack/spec 18: the list view names its object in its own '
     + `\`${LIST_VIEW_RETIRED_ALIASES.objectName.replacedBy}\` source — write \`data: { provider: 'object', object: '…' }\` `
     + 'in `properties`, or name the object on the node\'s `dataSource` binding (`dataSource.object`). The '
-    + 'console reads no `objectName` off this node, so the list queries nothing. Run `os migrate meta --from 17` '
-    + 'to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you '
-    + 'apply the rest by hand. The react '
-    + `tier retired the same alias on \`ListView\`: ${LIST_VIEW_RETIRED_ALIASES.objectName.note}`,
+    + 'console reads no `objectName` off this node, so the list queries nothing. '
+    + `The react tier retired the same alias on \`ListView\`: ${LIST_VIEW_RETIRED_ALIASES.objectName.note} `
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   viewType:
     '`viewType` was retired on a page `list-view` node in @objectstack/spec 18: the list kind is the list view\'s own '
     + `\`${LIST_VIEW_RETIRED_ALIASES.viewType.replacedBy}\`, written in \`properties\` (\`type: 'kanban'\`) — the `
     + 'node\'s own `type` stays `list-view`, the registry key. The console reads no `viewType` off this node, '
-    + 'so the list draws as a grid. Run `os migrate meta --from 17` to list the mechanical edits for existing '
-    + 'sources; `--write` applies the ones it can prove, and you apply the rest by hand. The react tier retired '
-    + 'the same alias on `ListView`: '
-    + LIST_VIEW_RETIRED_ALIASES.viewType.note,
+    + 'so the list draws as a grid. The react tier retired the same alias on `ListView`: '
+    + `${LIST_VIEW_RETIRED_ALIASES.viewType.note} `
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
 };
 
 /**
