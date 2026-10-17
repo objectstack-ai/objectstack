@@ -6,6 +6,8 @@ import { ObjectQLPlugin } from '../src/plugin';
 import { ObjectSchema } from '@objectstack/spec/data';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
+import type { IMetadataService } from '@objectstack/spec/contracts';
+import type { ObjectQL } from './engine';
 
 describe('ObjectQLPlugin - Metadata Service Integration', () => {
   let kernel: ObjectKernel;
@@ -1898,6 +1900,64 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
       const bridged = await metadata.getObject('crm_contact');
       expect(bridged).toBeDefined();
       expect(bridged.label).toBe('Contact');
+    });
+
+    // [#24182] An extender's bridge rewrites the OWNER's copy with the merged
+    // body; withdrawing the extender must put the owner's definition back, or
+    // `GET /meta/object/NAME` (which reads the copy first) keeps serving the
+    // withdrawn field until a restart.
+    describe('withdrawing an extender restores the owner\'s copy', () => {
+      type WithdrawingManifestService = ManifestService & { restoreExtendedObjectCopies(id: string): Promise<void> };
+      const extenderManifest = () => ({
+        id: 'com.acme.crmext',
+        name: 'acme_crmext',
+        version: '1.0.0',
+        type: 'app',
+        objectExtensions: [
+          { extend: 'crm_contact', fields: { ext_score: { name: 'ext_score', label: 'Score', type: 'number' } } },
+        ],
+      });
+
+      async function installBoth() {
+        await kernel.use(new ObjectQLPlugin());
+        await kernel.bootstrap();
+        const manifest = kernel.getService('manifest') as WithdrawingManifestService;
+        await manifest.register(crmManifest());
+        await manifest.register(extenderManifest());
+        const metadata = kernel.getService<IMetadataService>('metadata');
+        const registry = kernel.getService<ObjectQL>('objectql').registry;
+        // Identity: the extender's bridge rewrote the owner's copy.
+        const extended = await metadata.getObject('crm_contact') as any;
+        expect(extended._packageId).toBe('com.acme.crm');
+        expect(Object.keys(extended.fields)).toEqual(expect.arrayContaining(['name', 'ext_score']));
+        return { manifest, metadata, registry };
+      }
+
+      it('serves the owner\'s body without the withdrawn field, its own fields kept', async () => {
+        const { manifest, metadata, registry } = await installBoth();
+
+        registry.uninstallPackage('com.acme.crmext');
+        // The registry already serves the owner's body; only the copy lags.
+        expect(Object.keys(registry.getObject('crm_contact')!.fields ?? {})).not.toContain('ext_score');
+        await manifest.restoreExtendedObjectCopies('com.acme.crmext');
+
+        const restored = await metadata.getObject('crm_contact') as any;
+        expect(restored._packageId).toBe('com.acme.crm');
+        expect(restored.label).toBe('Contact');
+        // The registry's own body, field for field (its injected system fields
+        // included): the owner's `name` kept, the extension's `ext_score` gone.
+        expect(Object.keys(restored.fields)).toEqual(Object.keys(registry.getObject('crm_contact')!.fields ?? {}));
+        expect(Object.keys(restored.fields)).toContain('name');
+        expect(Object.keys(restored.fields)).not.toContain('ext_score');
+      });
+
+      it('CONTROL: a package the registry still holds is not withdrawn — the copy keeps its field', async () => {
+        const { manifest, metadata } = await installBoth();
+
+        await manifest.restoreExtendedObjectCopies('com.acme.crmext');
+
+        expect(Object.keys(((await metadata.getObject('crm_contact')) as any).fields)).toContain('ext_score');
+      });
     });
 
     it('boot-time registrations still flow through the one-shot startup bridge', async () => {

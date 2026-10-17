@@ -249,10 +249,22 @@ export default class Start extends Command {
       // on "Config file not found: …/{"jsonrpc":"2.0",…}" and `initialize` was
       // consumed before any transport existed. The compile reads no input, so
       // it gets none: `'ignore'` keeps every byte in the pipe for `serve`.
+      //
+      // ── stdout belongs to the protocol, the compile step included (#24192) ──
+      // `redirectStdoutToStderr()` above patches `process.stdout.write` in
+      // THIS process only; a child handed `'inherit'` writes to the raw fd 1,
+      // the fd the `serve` child's stdio transport writes JSON-RPC frames to.
+      // Measured on a first run with the transport enabled: the compile's 24
+      // progress lines (`◆ Compile`, `✓ Build complete`, `Artifact: …`) reached
+      // the client ahead of the `initialize` answer. So the child's stdout is
+      // this process's stderr (fd 2), where the header above already goes —
+      // unconditionally, for the reason the top of `run()` gives: everything
+      // this supervisor prints is a diagnostic, stdio transport or not.
+      // Pinned by `test/start-stdio-stdout-purity.integration.test.ts`.
       const compileResult = spawnSync(
         process.execPath,
         [binPath, 'compile', '--output', outputPath],
-        { stdio: ['ignore', 'inherit', 'inherit'], env: process.env },
+        { stdio: ['ignore', 2, 'inherit'], env: process.env },
       );
       if (compileResult.status !== 0) {
         printError('Compile failed — fix errors above before starting the server');

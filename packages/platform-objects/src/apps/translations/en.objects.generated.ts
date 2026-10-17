@@ -569,6 +569,21 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "Invite User",
+        description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
+        successMessage: "Invitation sent to ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Owner",
+              admin: "Admin",
+              delegated_admin: "Delegated Admin",
+              member: "Member"
+            }
+          }
+        }
+      },
       create_organization: {
         label: "Create Organization",
         successMessage: "Organization created"
@@ -586,15 +601,15 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Set Active",
         successMessage: "Active organization switched"
       },
-      leave_organization: {
-        label: "Leave Organization",
-        confirmText: "Leave this organization? You will lose access to all of its resources.",
-        successMessage: "You have left the organization"
-      },
       change_slug: {
         label: "Change Slug",
         description: "Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?",
         successMessage: "Organization slug changed"
+      },
+      leave_organization: {
+        label: "Leave Organization",
+        confirmText: "Leave this organization? You will lose access to its environments and members.",
+        successMessage: "You have left the organization"
       }
     }
   },
@@ -1587,7 +1602,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "Reference ID",
-        help: "Caller-supplied correlation identifier"
+        help: "Organization bound by the consent this token was issued under; empty when none was bound"
       },
       authorization_code_id: {
         label: "Authorization Code ID",
@@ -1647,7 +1662,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "Reference ID",
-        help: "Caller-supplied correlation identifier"
+        help: "Organization bound by the consent that started this refresh family; empty when none was bound"
       },
       authorization_code_id: {
         label: "Authorization Code ID",
@@ -1715,7 +1730,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "Reference ID",
-        help: "Caller-supplied correlation identifier"
+        help: "Organization this consent binds: the consenting user's active organization at consent; empty when none was active"
       },
       resources: {
         label: "Resources",

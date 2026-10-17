@@ -569,6 +569,21 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "ユーザーを招待",
+        description: "メールアドレスを指定して招待します。招待が承諾されると、選択したロールでこの組織に参加します。",
+        successMessage: "${result.email} に招待を送信しました",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理者",
+              delegated_admin: "委任管理者",
+              member: "メンバー"
+            }
+          }
+        }
+      },
       create_organization: {
         label: "組織を作成",
         successMessage: "組織を作成しました"
@@ -586,15 +601,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "アクティブに設定",
         successMessage: "アクティブ組織を切り替えました"
       },
-      leave_organization: {
-        label: "組織から退出",
-        confirmText: "この組織から退出しますか？すべてのリソースへのアクセスを失います。",
-        successMessage: "組織から退出しました"
-      },
       change_slug: {
         label: "スラッグを変更",
         description: "スラッグを変更すると、この組織のすべてのプラットフォームサブドメインが書き換えられ、旧スラッグは 90 日間確保されます。続行しますか？",
         successMessage: "組織のスラッグを変更しました"
+      },
+      leave_organization: {
+        label: "組織から退出",
+        confirmText: "この組織から退出しますか？この組織の環境とメンバーへのアクセスを失います。",
+        successMessage: "組織から退出しました"
       }
     }
   },
@@ -1587,7 +1602,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "参照 ID",
-        help: "呼び出し元が指定した相関識別子"
+        help: "このトークンの発行根拠となった同意が紐づけた組織。紐づけがない場合は空"
       },
       authorization_code_id: {
         label: "認可コード ID",
@@ -1647,7 +1662,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "参照 ID",
-        help: "呼び出し元が指定した相関識別子"
+        help: "このリフレッシュトークン系列を開始した同意が紐づけた組織。紐づけがない場合は空"
       },
       authorization_code_id: {
         label: "認可コード ID",
@@ -1715,7 +1730,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "参照 ID",
-        help: "呼び出し元が指定した相関識別子"
+        help: "この同意が紐づける組織。同意時のユーザーのアクティブな組織で、アクティブな組織がなかった場合は空"
       },
       resources: {
         label: "リソース",

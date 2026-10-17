@@ -1,8 +1,8 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // `invite_user`'s user-facing copy — the parameter dialog's subtitle and the
-// success toast — on all three declaration sites (sys_user, sys_invitation,
-// sys_member).
+// success toast — on all four declaration sites (sys_user, sys_invitation,
+// sys_member, sys_organization).
 //
 // What the console does with each key, measured on the pinned objectui:
 //
@@ -29,6 +29,7 @@ import { jaJPObjects } from '../apps/translations/ja-JP.objects.generated.js';
 import { esESObjects } from '../apps/translations/es-ES.objects.generated.js';
 import { SysInvitation } from './sys-invitation.object.js';
 import { SysMember } from './sys-member.object.js';
+import { SysOrganization } from './sys-organization.object.js';
 import { SysUser } from './sys-user.object.js';
 
 interface CopyAction {
@@ -44,6 +45,7 @@ const MIRRORS: Array<[string, unknown]> = [
   ['sys_user', SysUser],
   ['sys_invitation', SysInvitation],
   ['sys_member', SysMember],
+  ['sys_organization', SysOrganization],
 ];
 
 const TRANSLATED = [
@@ -75,8 +77,8 @@ describe('invite_user — declared copy', () => {
     expect(invite(object).successMessage).toContain(INVITEE);
   });
 
-  it('the three mirrors say the same thing', () => {
-    // One action, three declaration sites: compared to EACH OTHER, so a mirror
+  it('the mirrors say the same thing', () => {
+    // One action, four declaration sites: compared to EACH OTHER, so a mirror
     // edited alone goes red without any literal copied into this file.
     const [first, ...rest] = MIRRORS.map(([, object]) => invite(object));
     for (const other of rest) {

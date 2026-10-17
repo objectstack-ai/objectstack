@@ -569,6 +569,21 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "Invitar usuario",
+        description: "Invita a alguien por su dirección de correo electrónico. Se une a esta organización con el rol elegido cuando acepta la invitación.",
+        successMessage: "Invitación enviada a ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Propietario",
+              admin: "Administrador",
+              delegated_admin: "Administrador delegado",
+              member: "Miembro"
+            }
+          }
+        }
+      },
       create_organization: {
         label: "Crear organización",
         successMessage: "Organización creada"
@@ -586,15 +601,15 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Establecer como activa",
         successMessage: "Organización activa cambiada"
       },
-      leave_organization: {
-        label: "Abandonar organización",
-        confirmText: "¿Abandonar esta organización? Perderá el acceso a todos sus recursos.",
-        successMessage: "Ha abandonado la organización"
-      },
       change_slug: {
         label: "Cambiar slug",
         description: "Renombrar el slug reescribe todos los subdominios de la plataforma para esta organización y reserva el slug anterior durante 90 días. ¿Continuar?",
         successMessage: "Slug de la organización cambiado"
+      },
+      leave_organization: {
+        label: "Abandonar organización",
+        confirmText: "¿Abandonar esta organización? Perderá el acceso a sus entornos y miembros.",
+        successMessage: "Ha abandonado la organización"
       }
     }
   },
@@ -1587,7 +1602,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "ID de referencia",
-        help: "Identificador de correlación proporcionado por quien llama."
+        help: "Organización vinculada por el consentimiento con el que se emitió este token; vacío si no se vinculó ninguna."
       },
       authorization_code_id: {
         label: "ID del código de autorización",
@@ -1647,7 +1662,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "ID de referencia",
-        help: "Identificador de correlación proporcionado por quien llama."
+        help: "Organización vinculada por el consentimiento que inició esta familia de tokens de actualización; vacío si no se vinculó ninguna."
       },
       authorization_code_id: {
         label: "ID del código de autorización",
@@ -1715,7 +1730,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "ID de referencia",
-        help: "Identificador de correlación proporcionado por quien llama."
+        help: "Organización que vincula este consentimiento: la organización activa del usuario al consentir; vacío si no había ninguna."
       },
       resources: {
         label: "Recursos",

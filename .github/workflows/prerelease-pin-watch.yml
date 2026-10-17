@@ -57,8 +57,8 @@ name: Prerelease Pin Watch
 
 on:
   schedule:
-    # 06:00 UTC nightly — after Rerun Safety (04:00) and Spec Coverage (05:00),
-    # before Showcase Smoke (07:00). Nightly, not weekly: see the note above.
+    # 06:00 UTC nightly — after Spec Coverage (05:00), before Showcase Smoke
+    # (07:00). Nightly, not weekly: see the note above.
     - cron: '0 6 * * *'
   workflow_dispatch:
   pull_request:

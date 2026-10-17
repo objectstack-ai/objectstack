@@ -63,6 +63,7 @@ import { SystemObjectName } from '@objectstack/spec/system';
 import type { AuthzPosture, TenancyPosture } from '@objectstack/spec/security';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 import { isValueDomainMember } from '@objectstack/spec/shared';
+import type { AuthSessionApi } from '@objectstack/spec/contracts';
 
 import { ApiKeyLifecycleRefusalError, resolveApiKeyAdmission } from './api-key.js';
 import type { ApiKeyLifecyclePolicySource, ApiKeyRefusalReason } from './api-key.js';
@@ -145,6 +146,9 @@ export interface ResolvedAuthzContext {
    */
   authGate?: AuthGate;
 }
+
+/** What an in-process better-auth session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 export interface ResolveAuthzInput {
   /** Data engine (ObjectQL) exposing `find(object, { where, limit, context })`. */
@@ -539,7 +543,9 @@ async function resolveAuthzContextInScope(input: ResolveAuthzInput): Promise<Res
   // 2. Session / Bearer path — fall back when no API key resolved a user.
   if (!userId && typeof input.getSession === 'function') {
     try {
-      const sessionData = await input.getSession(headers);
+      // [#24196] Read as `AuthSessionApi.getSession` declares its answer, so
+      // every field this arm reads is one the contract names for it.
+      const sessionData: SessionRead | null = await input.getSession(headers);
       userId = sessionData?.user?.id ?? sessionData?.session?.userId;
       tenantId = tenantId ?? sessionData?.session?.activeOrganizationId;
       if (userId) {

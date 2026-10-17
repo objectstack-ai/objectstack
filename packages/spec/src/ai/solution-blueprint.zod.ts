@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
-import { FieldType } from '../data/field.zod';
+import { FieldType, SelectOptionSchema } from '../data/field.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
 import { SortDirectionEnum, SortItemSchema } from '../shared/enums.zod';
 import { VIEW_FILTER_OPERATORS, ViewFilterRuleSchema } from '../ui/view.zod';
@@ -25,6 +25,32 @@ import { VIEW_FILTER_OPERATORS, ViewFilterRuleSchema } from '../ui/view.zod';
 
 /** Machine-name pattern every object, field and option name in a blueprint must match. */
 const SNAKE_CASE = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * The lifecycle category a blueprint option declares: `SelectOption.kind`'s own
+ * enum (`open` / `won` / `lost`), taken from that schema's shape and never
+ * re-spelled here, so a blueprint can offer no kind the object field's option
+ * refuses and miss none it accepts. Both option shapes below wrap it in their
+ * own spelling of "optional" (`.optional()` lenient, `.nullable()` strict).
+ *
+ * A function rather than a constant: the lenient shapes build lazily
+ * ({@link lazySchema}), and a module-level read would force
+ * `SelectOptionSchema` at import for every consumer of this module.
+ */
+const optionKindEnum = () => SelectOptionSchema.shape.kind.unwrap();
+
+/**
+ * What the object schema refuses about the field a blueprint object's
+ * `stageField` names (`refuseStageFieldWithoutKinds`, `data/object.zod.ts`):
+ * one sentence both object shapes and both option shapes state, so the two
+ * halves of the rule (the pointer and the kinds) read the same on every side.
+ */
+const STAGE_FIELD_RULE =
+  'The object schema refuses the object unless the field `stageField` names is a single-value `select` or `radio` '
+  + 'whose inline options EACH declare `kind`: "open" for a step on the way, "won" for the successful end (a deal\'s '
+  + 'Closed Won, a task\'s Done, a case\'s Resolved), "lost" for the unsuccessful end (Closed Lost, Cancelled, '
+  + 'Unqualified). Naming a multiselect / checkboxes / tags field that carries options is refused too: a record '
+  + 'stands at one stage.';
 
 /**
  * One `field op value` comparison in a blueprint predicate.
@@ -90,6 +116,8 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
   options: z.array(z.object({
     label: z.string(),
     value: z.string().regex(SNAKE_CASE),
+    kind: optionKindEnum().optional()
+      .describe(`The option's lifecycle category, REQUIRED on EVERY option of the field the object's \`stageField\` names. ${STAGE_FIELD_RULE} Only a single-value \`select\` / \`radio\` field's options take it: omit it on a multiselect / checkboxes / tags field's options, where the field schema refuses it. Absent on any other select option reads as "open".`),
   })).optional().describe('Choices for select / multiselect / radio fields'),
   summaryOperations: BlueprintSummaryOperationsSchema.optional()
     .describe('REQUIRED when `type` is "summary" (a roll-up of child records: 任务总数 / 报名人数 / 合计金额 / 已完成任务数). Names the child object, the aggregation, and — for a qualified count/sum — the condition. A "summary" field without it materializes runtime-dead.'),
@@ -108,6 +136,12 @@ export const BlueprintObjectSchema = lazySchema(() => z.object({
     .describe('Org-Wide Default record visibility (OWD) for INTERNAL users — the deliberate sharing choice for this object (ADR-0090). Canonical four only: private (owner-only) | public_read (everyone reads, owner writes) | public_read_write (everyone reads+writes) | controlled_by_parent (derived from the master record — ONLY for an object whose fields include a master_detail reference). SET it when the user\'s description implies a visibility intent — personal/private data (HR, 绩效, salary, 个人隐私) → "private"; shared reference data everyone edits → "public_read_write". Omit to accept the platform\'s deterministic default (business object → public_read_write; master-detail child → controlled_by_parent) — omitting on privacy-sensitive data silently over-shares it.'),
   nameField: z.string().regex(SNAKE_CASE).optional()
     .describe('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object\'s text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "{order_no} · {customer}"). Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred.'),
+  // `ObjectSchema.stageField` (ADR-0085), and the ONLY trigger of the object
+  // schema's mandatory-kind rule: without this key the option `kind` above is
+  // never required of an AI-built object. The string arm only — the object
+  // schema's `false` ("no linear lifecycle") has no blueprint spelling.
+  stageField: z.string().regex(SNAKE_CASE).optional()
+    .describe(`The lifecycle stage field (ADR-0085) — which \`select\` (or \`radio\`) field of THIS object holds the ordered steps a record moves through (a deal's stage, a ticket's status), drawn as the record path. snake_case, naming one of this object's own fields. ${STAGE_FIELD_RULE} SET it whenever the object has such a status/stage field, and give every one of that field's options its \`kind\`. Omitting it leaves stage detection to a guess from field names (status / stage / state / phase).`),
 }));
 export type BlueprintObject = z.input<typeof BlueprintObjectSchema>;
 
@@ -340,6 +374,12 @@ const StrictField = z.object({
   options: z.array(z.object({
     label: z.string().describe('What the user reads on the dropdown — free text in the user\'s own language (「1-49人」, 「已完成」).'),
     value: strictIdent('The STORED machine value: snake_case, and it may NEVER start with a digit — give it a word prefix instead (「1-49人」 → "size_1_49", 「2024年」 → "year_2024"). The label carries the human wording; this key only has to be a legal identifier.'),
+    // ⛔ Must stay in lockstep with the lenient `BlueprintFieldSchema.options[].kind`.
+    // THIS describe is the one the design model reads, and strict mode makes
+    // the key required, so the model decides on every option. The option
+    // key-parity pin fails if either side drops it.
+    kind: optionKindEnum().nullable()
+      .describe(`The option's lifecycle category, or null. REQUIRED (never null) on EVERY option of the field the object's \`stageField\` names. ${STAGE_FIELD_RULE} Only a single-value \`select\` / \`radio\` field's options take it: null on a multiselect / checkboxes / tags field's options, where the field schema refuses it. Null on any other select option reads as "open".`),
   })).nullable()
     .describe('Choices for select-family fields, or null'),
   summaryOperations: StrictSummaryOperations.nullable()
@@ -356,6 +396,11 @@ const StrictObject = z.object({
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).nullable()
     .describe('Org-Wide Default record visibility (OWD) for INTERNAL users (ADR-0090), or null to accept the platform default (business object → public_read_write; master-detail child → controlled_by_parent). SET it when the user\'s description implies a visibility intent: personal/private data (HR, 绩效, salary, 个人隐私) → "private" (owner-only); "public_read" = everyone reads, owner writes; "public_read_write" = everyone reads+writes; "controlled_by_parent" ONLY for an object with a master_detail reference field. Null on privacy-sensitive data silently over-shares it.'),
   nameField: strictIdentOrNull('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079), or null to let the platform auto-pick a text field. Set it to the object\'s text label field (e.g. "product_name") — snake_case. For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "{order_no} · {customer}"). Declaring it is strongly preferred over null.'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintObjectSchema.stageField`:
+  // a key present only there is one no proposal can ever contain, and the
+  // option `kind` above would then never be required of an AI-built object.
+  // The object key-parity pin fails if either side drops it.
+  stageField: strictIdentOrNull(`The lifecycle stage field (ADR-0085) — which \`select\` (or \`radio\`) field of THIS object holds the ordered steps a record moves through (a deal's stage, a ticket's status), drawn as the record path — or null. snake_case, naming one of this object's own fields. ${STAGE_FIELD_RULE} SET it whenever the object has such a status/stage field, and give every one of that field's options a non-null \`kind\`. Null leaves stage detection to a guess from field names (status / stage / state / phase).`),
 });
 
 // One list-view filter rule, strict-shaped. The lenient side reuses

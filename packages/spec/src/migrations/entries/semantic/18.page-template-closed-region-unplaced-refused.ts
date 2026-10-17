@@ -56,8 +56,13 @@ export const entry: SemanticMigration = {
     + 'page-template-full-width-to-default on read (full-width and default were one layout component in the '
     + 'console, so nothing changes on screen); an unregistered template and an unplaced region have no lossless '
     + 'rewrite and are not converted. '
-    + '⚠️ A page row already stored with an unregistered template or an unplaced region is served unchanged '
-    + 'and renders as before, while saving it again is refused until it is renamed. ADR-0087.',
+    + '⚠️ A page row already stored with an unregistered template or an unplaced region is served unchanged, '
+    + 'and saving it again is refused until it is renamed. Until then the console draws a refusal in its place: '
+    + 'an unregistered template draws no layout, only a refusal naming the template and the registered '
+    + 'templates; on a default, header-sidebar-main or three-column page an unplaced region is not drawn and '
+    + 'moves into no other slot, and where it used to stack, under main, a refusal names it and the slots that '
+    + 'template places. The exception is a page that names no template: it takes its page type\'s layout, which '
+    + 'still stacks such a region under main. ADR-0087.',
   acceptanceCriteria:
     'Grep every page in defineStack pages sources, exported stacks and every page row in sys_metadata for a '
     + 'template outside default, header-sidebar-main, three-column and dashboard, and, on kind full pages, '
