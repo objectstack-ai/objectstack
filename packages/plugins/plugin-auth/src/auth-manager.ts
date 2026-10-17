@@ -3002,7 +3002,10 @@ export class AuthManager {
    *    deleted — moving back to a host with Ed25519 restores them.
    *
    * Belt-and-braces, on every host: a signing failure degrades the
-   * `set-auth-jwt` header instead of 500ing `/get-session`.
+   * `set-auth-jwt` header instead of 500ing `/get-session`, and the header is
+   * signed only for an HTTP `/get-session` — an in-process `auth.api.getSession`
+   * read discards it, so it no longer pays the key read and the signature
+   * (#24061; see `protectGetSessionJwtHook`).
    */
   private async buildJwtPlugin(jwt: (options: any) => any): Promise<any> {
     if (!this.ed25519ProbeResult) this.ed25519ProbeResult = probeEd25519Support();
@@ -3043,7 +3046,8 @@ export class AuthManager {
       console.error(
         '[AuthManager] Could not attach the JWT signing guard to better-auth\'s /get-session hook ' +
           '(its `hooks.after` shape changed). A JWT signing failure will now 500 every /get-session ' +
-          'instead of degrading to a missing set-auth-jwt header. Re-check ' +
+          'instead of degrading to a missing set-auth-jwt header, and every in-process session read ' +
+          'signs a JWT it discards (two sys_jwks reads per authenticated request). Re-check ' +
           'the better-auth version in better-auth-schema-parity.test.ts.',
       );
     }
