@@ -305,7 +305,7 @@ describe('[#21388] an update whose every recorded change is withheld from the re
     const named = { object_name: { $in: NAMED } };
     // A spelling neither rule reads as naming its parents: both keep their full enumeration.
     const spelledOut = { $or: NAMED.map((object_name) => ({ object_name })) };
-    const idsOf = async (where: unknown, context: any) =>
+    const idsOf = async (where: Record<string, unknown>, context: any) =>
       ((await engine.find(ACTIVITY, { where, orderBy: ORDER, context })) as Row[]).map((r) => String(r.id));
     for (const context of [MEMBER, ADMIN]) {
       const full = await idsOf(spelledOut, context);
