@@ -27,10 +27,9 @@
 //  3. FAULTS — a THROWING by-name read fails OPEN and logs, as #3545 requires;
 //     "no object" logs nothing.
 //  4. FALLBACK — a protocol with no by-name read is asked the list, as before.
-//  5. A DISABLED PACKAGE'S OBJECT — the one class whose answer moves: the list
-//     omits it, the by-name read serves it, so a DENIED operation now answers
-//     the exposure verdict instead of the data plane's 404
-//     `OBJECT_PACKAGE_DISABLED`; an ALLOWED one still gets that 404.
+//  5. A DISABLED PACKAGE'S OBJECT — [#24097] the by-name read refuses it as the
+//     list omits it, so the gate sees no object and every operation, denied or
+//     allowed, gets the data plane's 404 `OBJECT_PACKAGE_DISABLED`.
 //
 // ⛔ The count rows are the regression this file exists for: put the list read
 // back in `enforceApiAccess` and they go red while every answer row stays
@@ -298,19 +297,20 @@ describe('[#24031] a protocol with no by-name read is asked the list, as before'
     });
 });
 
-// [#24031] An object whose package is DISABLED: the list read omits it (#7557)
-// while the by-name read still serves it, so the gate now judges it by its own
-// `enable`. A DENIED operation answers the exposure verdict — it answered the
-// data plane's 404 OBJECT_PACKAGE_DISABLED while the gate read the list — and an
-// ALLOWED one still reaches the data plane, which refuses it as before.
+// [#24031, #24097] An object whose package is DISABLED: the list read omits it
+// (#7557) and the by-name read refuses it `OBJECT_PACKAGE_DISABLED` (#24097), so
+// the gate sees no object and judges nothing. Every operation reaches the data
+// plane, which refuses it with that code. Between #24031 and #24097 the by-name
+// read still served the object, and a DENIED operation answered the exposure
+// verdict (405) instead.
 describe('[#24031] an object of a disabled package', () => {
-    it('a DENIED operation answers the exposure verdict (405), and the data call is never reached', async () => {
+    it('[#24097] a DENIED operation answers the data plane\'s 404 OBJECT_PACKAGE_DISABLED, not the exposure verdict', async () => {
         const h = host();
         h.registry.disablePackage(OFF_PACKAGE);
         const out = await call(h, 'create', OFF.name);
-        expect(out.status, JSON.stringify(out.body)).toBe(405);
-        expect(errorCode(out.body)).toBe('OBJECT_API_METHOD_NOT_ALLOWED');
-        expect(h.protocol.createData).not.toHaveBeenCalled();
+        expect(out.status, JSON.stringify(out.body)).toBe(404);
+        expect(errorCode(out.body)).toBe('OBJECT_PACKAGE_DISABLED');
+        expect(h.protocol.createData).toHaveBeenCalledTimes(1);
     });
 
     it('an ALLOWED operation still answers the data plane\'s 404 OBJECT_PACKAGE_DISABLED', async () => {
