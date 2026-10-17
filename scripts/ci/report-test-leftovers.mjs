@@ -105,6 +105,11 @@ export const SNAPSHOT_SCHEMA = 'test-leftovers-snapshot/1';
 export const ROOT_GROUP = '(root)';
 export const EXAMPLES_PER_PACKAGE = 5;
 
+// The job log lists each package's paths in full up to this many, then says how
+// many more: one package that leaves thousands of files must not bury the rest.
+// `--json` always carries every path.
+export const LOG_PATHS_PER_PACKAGE = 50;
+
 // GitHub shows at most 10 warning annotations per step and drops the rest
 // without saying so. Past that many packages the last slot becomes one roll-up
 // annotation naming the rest, so no package is dropped silently; the job
@@ -369,7 +374,12 @@ export function renderSummary(report, { label, notes = [] }) {
     '',
   );
   if (report.packages.length === 0) {
-    lines.push(`No path was added by the test run (${report.added} new path(s) in all, none outside the rules below).`, '');
+    lines.push(
+      report.added === 0
+        ? 'No path was added by the test run.'
+        : `No path was added by the test run outside the rules below (${report.added} new path(s), every one under a rule).`,
+      '',
+    );
   } else {
     lines.push(`| package | paths added | examples (up to ${EXAMPLES_PER_PACKAGE}) |`, '| :-- | --: | :-- |');
     for (const pkg of report.packages) {
@@ -404,7 +414,8 @@ export function renderLog(report, { label }) {
     );
     for (const pkg of report.packages) {
       lines.push(`  ${pkg.dir}  ${pkg.count}`);
-      for (const path of pkg.paths) lines.push(`      ${path}`);
+      for (const path of pkg.paths.slice(0, LOG_PATHS_PER_PACKAGE)) lines.push(`      ${path}`);
+      if (pkg.count > LOG_PATHS_PER_PACKAGE) lines.push(`      ... and ${pkg.count - LOG_PATHS_PER_PACKAGE} more under ${pkg.dir}`);
     }
   }
   const excl = exclusionLines(report);
@@ -527,7 +538,7 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '1. The diff: what counts as ADDED, and under which package': 7,
   '2. The fixed exclusions: each one, and only its own paths': 8,
   '3. turbo.json: the builds a test step runs after the snapshot': 8,
-  '4. Rendering: the table, the annotations, the escaping': 9,
+  '4. Rendering: the table, the annotations, the escaping': 10,
   '5. The real listing: ignored paths are seen (a real git tree)': 5,
   '6. Never fails a job: the in-job modes exit 0 on every path': 9,
 });
@@ -677,6 +688,18 @@ function selfTest() {
       `past ${ANNOTATIONS_PER_STEP} packages: ${ANNOTATIONS_PER_STEP - 1} annotations plus one roll-up naming the rest`,
       capped.length === ANNOTATIONS_PER_STEP && capped.at(-1).includes('3 more package(s)') && capped.at(-1).includes('packages/p11 (1)'),
       capped.join('\n'),
+    );
+    const flood = computeReport({
+      before: [],
+      after: Array.from({ length: LOG_PATHS_PER_PACKAGE + 3 }, (_, i) => `packages/runtime/.objectstack/f${String(i).padStart(3, '0')}`),
+      packageDirs: dirs,
+    });
+    const logLines = renderLog(flood, { label: 'L' });
+    assert(
+      `the log lists at most ${LOG_PATHS_PER_PACKAGE} paths of a package and counts the rest`,
+      logLines.filter((l) => l.startsWith('      packages/runtime/')).length === LOG_PATHS_PER_PACKAGE &&
+        logLines.some((l) => l.includes('... and 3 more under packages/runtime')),
+      logLines.slice(-3).join('\n'),
     );
     assert('an empty report raises no annotation', renderAnnotations(computeReport({ before: [], after: [], packageDirs: dirs }), { label: 'L' }).length === 0);
     const md = renderSummary(computeReport({ before: [], after: ['packages/runtime/a|b.json'], packageDirs: dirs }), { label: 'L' });
