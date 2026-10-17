@@ -252,8 +252,49 @@ const FAIL_CLOSED_CONSEQUENCE: Readonly<Record<string, string>> = {
 };
 
 /**
+ * One condition of the read that produced the rows: better-auth's
+ * `CleanedWhere`, spelled with the adapter's storage field names.
+ */
+export interface ReadLookupCondition {
+  readonly field: string;
+  readonly value: unknown;
+  readonly operator?: string;
+  readonly connector?: string;
+  readonly mode?: string;
+}
+
+/**
+ * The value a read's `where` fixes for `field`, when the read was keyed on
+ * that column alone: exactly one condition, an equality on `field`, not
+ * case-insensitive, on a non-empty string. `undefined` for every other shape.
+ */
+function lookupKeyValue(
+  lookup: readonly ReadLookupCondition[] | undefined,
+  field: string,
+): string | undefined {
+  if (!lookup || lookup.length !== 1) return undefined;
+  const [condition] = lookup;
+  if (condition?.field !== field) return undefined;
+  if ((condition.operator ?? 'eq') !== 'eq') return undefined;
+  if (condition.mode === 'insensitive') return undefined;
+  return typeof condition.value === 'string' && condition.value.length > 0 ? condition.value : undefined;
+}
+
+/**
  * Re-attach an object's `internal: true` columns to adapter read results, in
  * place.
+ *
+ * [#24061] A column the read was KEYED ON needs no privileged read: every row
+ * the engine returned matched `field = value`, so the lookup value is the
+ * column's value. better-auth's session lookup is that read — `findSession`
+ * finds `sys_session` by `token` — so the `token` readback, a second serial
+ * round trip on every session read, is answered from the lookup. Measured on a
+ * real engine before the change: `select id, token from sys_session where id in
+ * (…)` ran after every `select … from sys_session where token = …`, between the
+ * session row and the user row. A cookie's token is the signed value the
+ * server issued, byte for byte; whatever token a read matched is the value the
+ * same storage matches on every later write keyed by it (`updateSession`,
+ * `deleteSession`), which is all better-auth does with it.
  *
  * @param engine          The RAW data engine (privileged verb holder).
  * @param objectName      Protocol object name of the model just read.
@@ -264,16 +305,43 @@ const FAIL_CLOSED_CONSEQUENCE: Readonly<Record<string, string>> = {
  *                        one keeps its projection (that column is not
  *                        attached). Applied per column, so a projection may
  *                        name one flagged column and not another.
+ * @param lookup          The read's own `where`, when the caller has it. Only
+ *                        a single equality on a flagged column answers that
+ *                        column; any other shape is recovered as before.
  */
 export async function reattachInternalFieldsOnRead(
   engine: InternalFieldResolvingEngine,
   objectName: string,
   rows: unknown,
   requestedFields?: readonly string[],
+  lookup?: readonly ReadLookupCondition[],
 ): Promise<void> {
   const fields = READBACK_FIELDS[objectName];
   if (!fields) return;
+  attachLookupKeyColumns(rows, fields, lookup, requestedFields);
   await recoverColumns(engine, objectName, rows, fields, requestedFields);
+}
+
+/** Answer each flagged column the read was keyed on from the lookup itself. */
+function attachLookupKeyColumns(
+  rows: unknown,
+  fields: readonly ReadbackColumn[],
+  lookup: readonly ReadLookupCondition[] | undefined,
+  requestedFields: readonly string[] | undefined,
+): void {
+  if (!lookup) return;
+  const projected = Array.isArray(requestedFields) && requestedFields.length > 0 ? requestedFields : null;
+  const list = (Array.isArray(rows) ? rows : [rows]).filter(
+    (r): r is Record<string, unknown> => Boolean(r) && typeof r === 'object',
+  );
+  for (const { field } of fields) {
+    const value = lookupKeyValue(lookup, field);
+    if (value === undefined) continue;
+    if (projected && !projected.includes(field)) continue;
+    for (const row of list) {
+      if (!(field in row)) row[field] = value;
+    }
+  }
 }
 
 /**

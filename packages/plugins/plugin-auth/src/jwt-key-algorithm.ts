@@ -52,8 +52,11 @@
  * sitting broken. The EdDSA row is never deleted — move back to a host with
  * Ed25519 and it is simply visible again.
  *
- * The reader is installed **only when the host lacks Ed25519**, so every normal
- * deployment runs better-auth's stock code path with no ObjectStack code in it.
+ * The filter applies **only when the host lacks Ed25519**: every normal
+ * deployment reads the stock keyring, unfiltered. [#24061] On every host the
+ * keyring read is wrapped by the signing-key read cache
+ * (`signing-key-read-cache.ts`), whose miss performs this module's read on such
+ * a host and better-auth's stock read on any other.
  *
  * @see https://github.com/objectstack-ai/objectstack/issues/3585
  */
@@ -238,12 +241,36 @@ export function createHostUsableJwksReader(
  * "the hook moved in a better-auth upgrade" from "the hook is fine".
  */
 interface AfterHookEntry {
-  matcher?: (context: { path?: string }) => boolean;
+  matcher?: (context: { path?: string; request?: unknown }) => boolean;
   handler?: ((ctx: unknown) => unknown) & Record<string, unknown>;
 }
 
 /**
- * Make a JWT signing failure degrade the **header**, not the **session**.
+ * Is this better-auth dispatch answering an HTTP request?
+ *
+ * The router hands every endpoint the incoming `Request` as `request`
+ * (better-call `router.mjs`), and `dispatchAuthEndpoint` keeps it on the
+ * context its after-hooks receive. A server-side `auth.api.getSession(...)`
+ * call passes `headers` (`inProcessSessionReadInput` in `@objectstack/types`)
+ * and no `request`. The test is better-auth's own `isRequestLike`
+ * (`utils/url.mjs`), the one its dispatch uses to decide whether a call
+ * answers with a `Response`.
+ */
+function answersHttpRequest(context: { request?: unknown } | undefined): boolean {
+  const request = context?.request;
+  if (typeof Request !== 'undefined' && request instanceof Request) return true;
+  if (typeof request !== 'object' || request === null) return false;
+  if (Object.prototype.toString.call(request) !== '[object Request]') return false;
+  const shaped = request as { url?: unknown; headers?: { get?: unknown } | null };
+  return typeof shaped.url === 'string' && typeof shaped.headers?.get === 'function';
+}
+
+/**
+ * Make the jwt plugin's `/get-session` header hook do two things it does not
+ * do on its own: degrade a signing failure to "no header", and sign only for
+ * an HTTP `/get-session`.
+ *
+ * ## A signing failure degrades the **header**, not the **session**
  *
  * better-auth's hook is `await getJwtToken(ctx, options)` with no `catch`, so
  * any signing error — an algorithm this host cannot use, a key encrypted under
@@ -253,6 +280,24 @@ interface AfterHookEntry {
  * describes is already valid. So the failure is downgraded to "no header", in
  * the same spirit as `AuthManager.addOptionalPlugin`: one optional federation
  * feature must never take down core session auth.
+ *
+ * ## Only an HTTP `/get-session` signs (#24061)
+ *
+ * better-auth runs a path's after-hooks for a server-side `auth.api.*` call
+ * exactly as for a routed request, so every in-process session read — the
+ * REST and dispatcher execution-context resolvers, `/auth/me/*`, every plugin
+ * door that asks "who is calling" — signed a JWT and discarded it: the header
+ * lands on that call's own response object, which the caller never sends.
+ * Measured on a real engine, that was two `sys_jwks` reads (the key rows, then
+ * the `private_key` readback) and a signature on every authenticated request
+ * before its handler ran. The matcher is therefore narrowed to a dispatch that
+ * answers an HTTP request ({@link answersHttpRequest}): the browser-facing
+ * `GET /api/v1/auth/get-session` still carries `set-auth-jwt`, byte for byte as
+ * before, and an in-process read skips the hook. Only the header is affected —
+ * the session payload, its renewal and every other hook are unchanged. A
+ * server-side caller that wants the header dispatches the request
+ * (`AuthManager.handleRequest`), as the in-process `/get-session` re-dispatches
+ * already do.
  *
  * Returns `false` when the hook could not be found, so the caller can say so
  * out loud instead of silently shipping an unprotected build — a guard that
@@ -275,6 +320,10 @@ export function protectGetSessionJwtHook(
     const original = entry?.handler;
     if (typeof original !== 'function') continue;
     if (entry.matcher && !entry.matcher({ path: '/get-session' })) continue;
+
+    const matchesPath = entry.matcher;
+    entry.matcher = (context) =>
+      (matchesPath ? matchesPath(context) : true) && answersHttpRequest(context);
 
     const guarded = async (ctx: any): Promise<unknown> => {
       try {

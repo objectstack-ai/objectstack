@@ -279,6 +279,21 @@ describe('protectGetSessionJwtHook', () => {
     ).toBe(false);
   });
 
+  it('[#24061] the guarded hook runs for an HTTP /get-session and not for an in-process read', () => {
+    const plugin = makePlugin(async () => 'signed');
+    expect(protectGetSessionJwtHook(plugin, vi.fn())).toBe(true);
+    const matcher = plugin.hooks.after[0]!.matcher as (c: unknown) => boolean;
+
+    // The router hands the endpoint the incoming Request (better-call router.mjs).
+    const routed = { path: '/get-session', request: new Request('http://localhost/api/v1/auth/get-session') };
+    expect(matcher(routed)).toBe(true);
+    // `auth.api.getSession(inProcessSessionReadInput(headers))`: headers, no request.
+    expect(matcher({ path: '/get-session', headers: new Headers({ cookie: 'x' }) })).toBe(false);
+    expect(matcher({ path: '/get-session', request: { url: 'http://localhost/x', headers: {} } })).toBe(false);
+    // The path half is the original matcher's, unchanged.
+    expect(matcher({ path: '/sign-in/email', request: routed.request })).toBe(false);
+  });
+
   it('skips hooks whose matcher does not claim /get-session', () => {
     const plugin = {
       hooks: { after: [{ matcher: () => false, handler: async () => 'untouched' }] },

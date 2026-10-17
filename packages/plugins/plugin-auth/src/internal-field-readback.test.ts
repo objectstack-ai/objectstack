@@ -132,6 +132,58 @@ describe('#7823 reattachInternalFieldsOnRead — sys_session.token', () => {
   });
 });
 
+describe('[#24061] a column the read was keyed on is answered from the lookup', () => {
+  // better-auth's `findSession(token)` is `findOne(session, where token = …)`.
+  // Every row that read returns matched the token, so the readback of `token`
+  // — a second serial round trip on every session read — has nothing to add.
+  const byToken = (value: unknown, extra: Record<string, unknown> = {}) => [
+    { field: 'token', value, operator: 'eq', connector: 'AND', mode: 'sensitive', ...extra },
+  ];
+
+  it('the session lookup by token attaches the token and issues no privileged read', async () => {
+    const resolveInternalField = resolver({ s1: { token: 'tok-1' } });
+    const row: any = { id: 's1', user_id: 'u1' };
+    await reattachInternalFieldsOnRead({ resolveInternalField }, 'sys_session', row, undefined, byToken('tok-1'));
+    expect(row.token).toBe('tok-1');
+    expect(resolveInternalField).not.toHaveBeenCalled();
+  });
+
+  it('every other lookup shape still recovers the column through the accessor', async () => {
+    const shapes: Array<[string, unknown[]]> = [
+      ['keyed on another column', [{ field: 'id', value: 's1', operator: 'eq', connector: 'AND' }]],
+      ['a second condition beside the token', [...byToken('tok-1'), { field: 'user_id', value: 'u1', operator: 'eq', connector: 'AND' }]],
+      ['not an equality', byToken(['tok-1'], { operator: 'in' })],
+      ['case-insensitive', byToken('tok-1', { mode: 'insensitive' })],
+      ['an empty value', byToken('')],
+      ['a non-string value', byToken(42)],
+      ['no lookup at all', []],
+    ];
+    for (const [label, lookup] of shapes) {
+      const resolveInternalField = resolver({ s1: { token: 'stored' } });
+      const row: any = { id: 's1', user_id: 'u1' };
+      await reattachInternalFieldsOnRead({ resolveInternalField }, 'sys_session', row, undefined, lookup as any);
+      expect(row.token, label).toBe('stored');
+      expect(resolveInternalField, label).toHaveBeenCalledTimes(1);
+    }
+  });
+
+  it('a projection that excluded the column keeps its projection, lookup or not', async () => {
+    const resolveInternalField = resolver({ s1: { token: 'tok-1' } });
+    const row: any = { id: 's1' };
+    await reattachInternalFieldsOnRead({ resolveInternalField }, 'sys_session', row, ['id', 'expires_at'], byToken('tok-1'));
+    expect('token' in row).toBe(false);
+    expect(resolveInternalField).not.toHaveBeenCalled();
+  });
+
+  it('a row that still carries the column keeps its own value', async () => {
+    const resolveInternalField = resolver({});
+    const row: any = { id: 's1', token: 'original' };
+    await reattachInternalFieldsOnRead({ resolveInternalField }, 'sys_session', row, undefined, byToken('tok-1'));
+    expect(row.token).toBe('original');
+    expect(resolveInternalField).not.toHaveBeenCalled();
+  });
+});
+
 describe('#7987 reattachInternalFieldsOnRead — sys_account OAuth columns', () => {
   const ACCOUNT_ROW = () => ({ id: 'a1', user_id: 'u1', provider_id: 'google' });
 
