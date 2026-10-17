@@ -232,6 +232,9 @@ describe('[#24087] searchAll titles nameField before the deprecated titleFormat'
             name: 'order',
             titleFormat: 'Order {order_no}',
             fields: { order_no: { name: 'order_no', type: 'number' } },
+            // A number is not in the auto-default search set; declaring it
+            // keeps the object scannable so the sweep reaches its title.
+            searchableFields: ['order_no'],
         });
         expect(order.nameField).toBeUndefined();
         const p = makeProtocol([order], { order: [{ id: 'ord_1', order_no: 42 }] });
