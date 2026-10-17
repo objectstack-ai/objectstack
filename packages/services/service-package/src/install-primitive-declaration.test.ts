@@ -152,4 +152,32 @@ describe('[#24086] rows stored before the change keep hydrating (stated toleranc
     expect(err.statusCode).toBe(400);
     expect(await second.packages.get('com.example.ai-base-two')).toBeNull();
   });
+
+  // `duplicatePackage` is a RE-ENTRY path for a stored manifest: it spreads the
+  // source's stored manifest into `installPackage`. A pre-change AI app
+  // (`type: 'application'`, `scope: 'environment'`, an undeclared `icon`) is
+  // hydrated by the read, but the copy is a new WRITE, so it is refused, and
+  // the refusal reaches the caller rather than being swallowed: ⛔ no
+  // tolerance at that write. (`scope` is stripped by the duplicate itself.)
+  it('duplicating a pre-change stored app is refused and REPORTED, and the copy is written nowhere', async () => {
+    const AI_APP = { ...AI_BASE, id: 'com.example.ai-app', name: 'AI app', icon: 'sparkles' };
+    const dir = freshDir();
+    const first = await boot(dir);
+    expect(await first.packages.publish({ manifest: AI_APP as never, metadata: {} as never })).toEqual({ success: true });
+    await first.kernel.shutdown();
+
+    const second = await boot(dir);
+    expect(second.ql.registry.getPackage(AI_APP.id), 'the pre-change app was not hydrated').toBeDefined();
+
+    const err = await refusalOf(() => second.protocol.duplicatePackage({
+      sourcePackageId: AI_APP.id,
+      targetPackageId: 'com.example.ai-app-copy',
+    }));
+    expect(err.statusCode).toBe(400);
+    expect(standardErrorCodeForHttpStatus(err.statusCode!)).toBe('VALIDATION_ERROR');
+    expect(err.message).toContain('manifest.type');
+    expect(err.message).toContain('icon');
+    expect(second.ql.registry.getPackage('com.example.ai-app-copy')).toBeUndefined();
+    expect(await second.packages.get('com.example.ai-app-copy')).toBeNull();
+  });
 });
