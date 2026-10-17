@@ -224,9 +224,9 @@ let warn: ReturnType<typeof vi.spyOn>;
 beforeEach(() => { warn = vi.spyOn(console, 'warn').mockImplementation(() => {}); });
 afterEach(() => { warn.mockRestore(); });
 
-const droppedClaimLines = () => warn.mock.calls
-  .map((c) => String(c[0]))
-  .filter((line) => line.includes('organization claim dropped (organization_membership_ended)'));
+const droppedClaimLines = (): string[] => warn.mock.calls
+  .map((c: unknown[]) => String(c[0]))
+  .filter((line: string) => line.includes('organization claim dropped (organization_membership_ended)'));
 
 describe('an OAuth token acts in the organization its consent bound — isolated posture, the real D10 middleware', () => {
   const r = rig('isolated');
