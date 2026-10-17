@@ -3,13 +3,13 @@
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { defineStackSource, linkSpec } from '../../../test/helpers/define-stack-fixture.js';
-import { childEnv, reservePort } from '../../../test/helpers/serve-process.js';
 
 /**
  * [#24120] On a project whose primary store is a DECLARED datasource that
@@ -64,19 +64,40 @@ const DATABASE = join('data', 'main.db');
 const DRIFT_LINE = /\[schema-drift\] ([a-z0-9_]+\.[a-z0-9_]+):/g;
 
 let dir: string;
+let port: number;
 
+/**
+ * The config, in the one shape `os build` accepts (`defineStack`). The project
+ * resolves `@objectstack/spec` through a link to the workspace package
+ * (`test/helpers/define-stack-fixture.ts` does the same, out of reach of this
+ * `src` program's `rootDir`).
+ */
 function writeConfig(fields: Record<string, unknown>): void {
-  writeFileSync(join(dir, 'objectstack.config.ts'), defineStackSource({
+  const stack = {
     manifest: { id: 'com.example.fx24120', name: 'fx24120', version: '0.0.0', type: 'app', engines: { protocol: '^18' } },
     datasources: [{ name: 'qa_main', driver: 'sqlite', config: { filename: `./${DATABASE}` } }],
     datasourceMapping: [{ default: true, datasource: 'qa_main' }],
     objects: [{ name: APP_OBJECT, sharingModel: 'private', fields }],
-  }));
+  };
+  writeFileSync(
+    join(dir, 'objectstack.config.ts'),
+    `import { defineStack } from '@objectstack/spec';\n\nexport default defineStack(${JSON.stringify(stack, null, 2)});\n`,
+  );
 }
 
-/** The child's environment: nothing inherited that names a database, a home or a telemetry sibling. */
+/**
+ * The child's environment: this process's, minus the families
+ * `test/helpers/serve-process.ts` `childEnv()` strips (its header says why),
+ * and nothing that names a database, a home, an artifact or a telemetry sibling.
+ */
 function env(extra: Record<string, string> = {}): Record<string, string | undefined> {
-  return childEnv({
+  const inherited: Record<string, string | undefined> = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (key === 'TEST' || key === 'VITEST' || key.startsWith('VITEST_') || key === 'NODE_PATH') continue;
+    inherited[key] = value;
+  }
+  return {
+    ...inherited,
     OS_DATABASE_URL: undefined,
     DATABASE_URL: undefined,
     TURSO_DATABASE_URL: undefined,
@@ -89,6 +110,18 @@ function env(extra: Record<string, string> = {}): Record<string, string | undefi
     OS_AUTH_SECRET: 'os24120-declared-default-secret-at-least-32-characters',
     NO_COLOR: '1',
     ...extra,
+  };
+}
+
+/** A port nothing listens on: the boot exits before it would listen, but `os dev` takes one. */
+async function freePort(): Promise<number> {
+  return new Promise((done, fail) => {
+    const server = createServer();
+    server.once('error', fail);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      server.close(() => (address && typeof address === 'object' ? done(address.port) : fail(new Error('no port'))));
+    });
   });
 }
 
@@ -100,7 +133,7 @@ function env(extra: Record<string, string> = {}): Record<string, string | undefi
 function devBootOnce(): string {
   const r = spawnSync(
     TSX,
-    [RUN_DEV, 'dev', '--port', String(reservePort()), '--compile', '--no-watch', '--no-restart', '--no-seed-admin'],
+    [RUN_DEV, 'dev', '--port', String(port), '--compile', '--no-watch', '--no-restart', '--no-seed-admin'],
     { cwd: dir, env: env({ OS_MIGRATE_AND_EXIT: '1' }), encoding: 'utf8', timeout: SPAWN_TIMEOUT_MS },
   );
   const output = `${r.stdout}\n${r.stderr}`;
@@ -125,9 +158,12 @@ function tableCount(file: string): number {
   }
 }
 
-beforeAll(() => {
+beforeAll(async () => {
   dir = mkdtempSync(join(tmpdir(), 'os-24120-declared-default-'));
-  linkSpec(dir);
+  const specRoot = dirname(createRequire(import.meta.url).resolve('@objectstack/spec/package.json'));
+  mkdirSync(join(dir, 'node_modules', '@objectstack'), { recursive: true });
+  symlinkSync(specRoot, join(dir, 'node_modules', '@objectstack', 'spec'), 'dir');
+  port = await freePort();
 });
 
 afterAll(() => {
