@@ -997,9 +997,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             /**
              * Wrap the IHttpServer so every route registration is
-             * automatically instrumented. We only override the three
-             * verb methods the dispatcher uses; everything else passes
-             * through unchanged.
+             * automatically instrumented. We override all five route
+             * verbs `IHttpServer` declares; everything else (`use`,
+             * `getRawApp`, `setFallbackHandler`, …) passes through
+             * unchanged.
              */
             const rawServer = server;
             // ── `http_requests_total` on the transport seam (#9835) ────
@@ -1042,9 +1043,23 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     config.observability.metrics,
                 );
             }
+            // [#24025] Every route verb, not the three the first mounts used.
+            // A verb missing here is not a smaller instrumentation surface: a
+            // route registered through it answers with no request-id header,
+            // leaves `req.requestId` unset, never reaches `errorReporter` on a
+            // 5xx, and its 5xx log line loses the `res.__obsRequest`
+            // coordinates. PUT and PATCH ran that way while this arm named
+            // only get/post/delete — `/keys`, `/notifications`, `/packages/:id`,
+            // `/automation/:name`, the `/ai/*` wildcards and service-emitted
+            // PATCH routes among them. The counter and the histogram are
+            // unaffected either way on a transport implementing `afterResponse`
+            // (the flags below hand both to the transport for every verb alike).
+            const instrumentedRouteVerbs: ReadonlySet<PropertyKey> = new Set(
+                ['get', 'post', 'put', 'delete', 'patch'] satisfies ReadonlyArray<keyof IHttpServer>,
+            );
             server = new Proxy(rawServer, {
                 get(target, prop, receiver) {
-                    if (prop === 'get' || prop === 'post' || prop === 'delete') {
+                    if (instrumentedRouteVerbs.has(prop)) {
                         const method = String(prop).toUpperCase();
                         const original = (target as any)[prop];
                         if (typeof original !== 'function') return original;
@@ -1299,10 +1314,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // domain branch dead code on this adapter. Registering the verbs
             // hands the mismatch to the branch that already exists.
             //
-            // The method set tracks `/mcp`'s deliberately: `server.get/post/
-            // delete` are also the three verbs the observability Proxy above
-            // instruments, so a PUT/PATCH mount here would be both wider than
-            // the sibling route and silently un-instrumented.
+            // The method set tracks `/mcp`'s deliberately, so the two sibling
+            // routes answer the same verbs. Instrumentation is no reason either
+            // way any more: the observability Proxy above wraps every verb
+            // (#24025), where it once wrapped only get/post/delete.
             const mountMcpSkill = (method: 'GET' | 'POST' | 'DELETE') => {
                 const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
                 register.call(server, `${prefix}/mcp/skill`, async (req: any, res: any) => {
@@ -1332,9 +1347,8 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // signed-in one its own 405 in the dispatcher's envelope.
             //
             // Unlike `/mcp/skill`, PUT and PATCH are mounted too, because the
-            // contract says every verb. Those two mounts are not wrapped by the
-            // per-route instrumentation (the observability Proxy wraps only
-            // get/post/delete), as the other PUT/PATCH mounts in this file are not.
+            // contract says every verb. All five go through the observability
+            // Proxy above like every other mount here (#24025).
             server.post(`${prefix}/keys`, async (req: any, res: any) => {
                 try {
                     const result = await dispatcher.dispatch('POST', '/keys', req.body, req.query, { request: req });
@@ -1421,9 +1435,6 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // No body is handed on: none of these verbs is a face, so the domain
             // never reads one, and reading `req.body` here would answer a body
             // the transport cannot parse with its `400` ahead of the floor's 401.
-            // The PUT and PATCH mounts are not wrapped by the per-route
-            // instrumentation (the observability Proxy wraps only
-            // get/post/delete), as the other PUT/PATCH mounts in this file are not.
             const mountNotificationsVerb = (
                 subPath: '/notifications' | '/notifications/read' | '/notifications/read/all',
                 method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
