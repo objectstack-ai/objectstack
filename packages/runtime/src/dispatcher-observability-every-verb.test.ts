@@ -221,7 +221,7 @@ describe('[#24025] a 5xx on every route verb reaches the error reporter', () => 
 });
 
 describe('[#24025] on a transport without afterResponse, every verb is counted and timed under its own method label', () => {
-    it.each(VERBS)('%s /api/v1/keys emits one counter sample and one duration sample labelled %s', async (verb) => {
+    it.each(VERBS)('%s /api/v1/keys emits one counter sample and one duration sample under its own method label', async (verb) => {
         const metrics = new InMemoryMetricsRegistry();
         const { handlers } = await boot({ observability: { metrics } });
 
