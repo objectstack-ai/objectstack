@@ -23,11 +23,13 @@
  *   - a named key the read did not return (the stripped `__search` companion)
  *     is absent from the row, never invented as `null` — the same answer the
  *     list door's `$select` gives;
- *   - the projection does not depend on a security service being composed.
- *
- * Out of scope here: `format=json` with no `?fields=` — its column set is a
- * separate decision (the export's schema-derived default does not carry `id`
- * on an object that does not declare it).
+ *   - the projection does not depend on a security service being composed;
+ *   - with NO `?fields=`, json writes each row as the read returns it: no
+ *     projection, `id` included. `QuerySchema.fields` ("Fields to retrieve",
+ *     optional) absent means no projection. The csv / xlsx default (schema
+ *     fields minus `hidden`) is a tabular default and is not json's: on an
+ *     object that declares no `id` it carries none, and json rows cut to it
+ *     re-import as duplicates when upserted on `id`.
  */
 
 import { describe, it, expect, afterEach } from 'vitest';
@@ -188,5 +190,21 @@ describe('format=json honours an explicit ?fields= (#24183)', () => {
     const { route } = await boot({ withSecurity: false });
     const rows = await jsonOf(route, { fields: 'title,id' });
     expect(rows).toEqual([{ title: 'Note 1', id: '1' }, { title: 'Note 2', id: '2' }]);
+  });
+
+  it('JSON with NO `?fields=`: each row carries the read\'s own keys, `id` included — not the csv default', async () => {
+    const { route, readRows } = await boot({ withSecurity: true });
+    const rows = await jsonOf(route, {});
+    expect(readRows).toHaveLength(2);
+    expect(rows).toHaveLength(2);
+    rows.forEach((row, i) => {
+      expect(row.id).toBe(String(i + 1));
+      expect(Object.keys(row)).toEqual(Object.keys(readRows[i]));
+    });
+    // Not vacuous: the read returned a key the csv default drops (the hidden
+    // `internal_code`), so a no-fields json cut to that default reddens here.
+    expect(Object.keys(readRows[0])).toContain('internal_code');
+    const csvHeader = (await exportOf(route, { format: 'csv' })).split('\r\n')[0];
+    expect(csvHeader.split(',')).not.toContain('Internal Code');
   });
 });
