@@ -447,6 +447,11 @@
         "options[1].navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
+    "api/PackageInstallManifest": {
+      "sites": [
+        "navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
     "api/PackageInstallRequest": {
       "sites": [
         "manifest.navigationContributions.element.items.element.lazy.options[0]"

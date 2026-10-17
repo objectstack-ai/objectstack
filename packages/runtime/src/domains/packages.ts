@@ -125,12 +125,16 @@ import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatch
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
 // [#19328] The install door's DECLARED body contract, asked whole at
 // `POST /api/v1/packages` — the union of the wrapped request and a bare
-// manifest — plus the wrapped branch by name, which the refusal re-reads to
-// locate a failure on the form the caller wrote. Both are the declarations
+// manifest — plus each branch by name, which the refusal re-reads to locate a
+// failure on the form the caller wrote. All three are the declarations
 // `@objectstack/spec` publishes for this door; nothing here restates them.
 // Its own line on purpose: the `@objectstack/spec/kernel` import above carries
 // the id/version legs' names and is not this import's to share.
-import { PackageInstallBodySchema, PackageInstallRequestSchema } from '@objectstack/spec/api';
+import {
+    PackageInstallBodySchema,
+    PackageInstallManifestSchema,
+    PackageInstallRequestSchema,
+} from '@objectstack/spec/api';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -860,7 +864,10 @@ interface InstallBodyIssue {
  */
 function installBodyRefusal(body: unknown, unionIssues: ReadonlyArray<InstallBodyIssue>): string {
     const wrapped = body !== null && typeof body === 'object' && 'manifest' in body;
-    const branch = (wrapped ? PackageInstallRequestSchema : ManifestSchema).safeParse(body);
+    // The bare branch is the union's own, `PackageInstallManifestSchema` — ⛔ not
+    // `ManifestSchema`, which admits the platform scopes this door refuses, so a
+    // re-parse through it passed and the bare-form refusal lost its sentence.
+    const branch = (wrapped ? PackageInstallRequestSchema : PackageInstallManifestSchema).safeParse(body);
     // By the disjointness above the branch cannot pass where the union failed;
     // if a future union ever made it, the union's own issues still say what
     // was refused rather than an empty sentence.

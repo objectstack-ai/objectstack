@@ -300,6 +300,7 @@
     "api/PackageApiErrorCode",
     "api/PackageExportManifest",
     "api/PackageInstallBody",
+    "api/PackageInstallManifest",
     "api/PackageInstallRequest",
     "api/PackageInstallResponse",
     "api/PackagePathParams",
