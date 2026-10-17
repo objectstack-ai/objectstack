@@ -126,7 +126,7 @@ export interface PrintRoutesDeps {
   resolveTenancyPosture(): Promise<TenancyPosture | undefined>;
 }
 
-/** Mount the print door on `http`. Touches neither argument until a request arrives. */
+/** Mount the print door on `http`. Nothing on `deps` is called until a request arrives. */
 export function registerPrintRoutes(http: IHttpServer, deps: PrintRoutesDeps): void {
   http.post(PRINT_RECORDS_ROUTE, (req, res) => handlePrintRecord(req, res, deps));
 }
