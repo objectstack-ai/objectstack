@@ -376,8 +376,6 @@
     "RecordHighlightsProps (const)",
     "RecordHistoryProps (const)",
     "RecordHistoryProps (type)",
-    "RecordJsonProps (const)",
-    "RecordJsonProps (type)",
     "RecordLineItemsProps (const)",
     "RecordLineItemsProps (type)",
     "RecordLineItemsPropsParsed (type)",
