@@ -2972,7 +2972,7 @@
       "title": "Opt-in record-view auditing writes `read` rows for exactly the opted-in objects' detail reads, batched off the request path — stock boot audits nothing, excluded names refuse loudly, values never copied",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2982,26 +2982,26 @@
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "stock showcase boot for the honest-default half (grepped: nothing under examples/app-showcase constructs an AuditPlugin or names readAudit — the CLI's auto-registered instance passes NO options and audits no views)",
+          "stock showcase boot for the honest-default half (grepped: nothing under examples/app-showcase constructs an AuditPlugin or names readAudit — the CLI's auto-registered instance passes NO options and audits no views); boot it at OS_LOG_LEVEL=info so the install-line grep can discriminate",
           "read the rows through GET /api/v1/data/sys_audit_log — NEVER by opening a SQLite file directly: sys_audit_log's ADR-0057 lifecycle class routes it to the dedicated telemetry datasource whenever one is registered (os dev provisions one by default as a sibling file), and the data API resolves the right one; the write-failure text at read-audit.ts documents exactly this trap"
         ],
         "knownGaps": [
-          "the CONFIGURED half has no stock fixture and the provisioning is a BOOT-CONFIG change, not an API sequence — so no area recipe fits. Compose the docs' own snippet (content/docs/permissions/record-view-auditing.mdx, 'Under os serve'): a scratch app whose objectstack.config.ts plugins array carries new AuditPlugin({ readAudit: { objects: ['<object>', 'sys_job'] } }) — sys_job included deliberately as the excluded-name probe. The 'Plugin superseded: com.objectstack.audit' boot line is the opt-in WORKING (last-one-wins over the CLI's option-less instance), not a misconfiguration. Without such a boot, clauses 2-5 score blocked(fixture); clause 1 (the stock negative) runs regardless",
+          "the CONFIGURED half has no stock fixture and the provisioning is a BOOT-CONFIG change, not an API sequence — so no area recipe fits. Compose the docs' own snippet (content/docs/permissions/record-view-auditing.mdx, 'Under os serve'): a scratch app whose objectstack.config.ts plugins array carries new AuditPlugin({ readAudit: { objects: ['<object>', 'sys_job'] } }) — sys_job included deliberately as the excluded-name probe. The 'Plugin superseded: com.objectstack.audit' boot line is the opt-in WORKING (last-one-wins over the CLI's option-less instance), not a misconfiguration. Scripted scratch-copy recipe (measured on main c91af8ed6, #24036): copy examples/app-showcase without node_modules, dist, e2e and test into a scratch directory; give the copy a REAL node_modules directory holding one symlink per entry of examples/app-showcase/node_modules (each @objectstack/* entry pointed at its workspace package), plus @objectstack/plugin-audit → packages/plugins/plugin-audit and @objectstack/platform-objects → packages/platform-objects, which the showcase does not depend on; add `import { AuditPlugin } from '@objectstack/plugin-audit'` and put `new AuditPlugin({ readAudit: { objects: ['showcase_account', 'sys_job'] } })` first in the plugins array; boot with the copy's node_modules/.bin/objectstack dev --seed-admin -p PORT -d file:SCRATCH_DB, OS_PORT exported and OS_LOG_LEVEL=info. It is a boot-config copy, not an API sequence, so it lives here and not as an area recipe. Without such a boot, clauses 2-5 score blocked(fixture); clause 1 (the stock negative) runs regardless",
           "there is deliberately NO enable.auditReads object-metadata key, no stack-config key and no env flag (the docs state why: a declaration that can outlive the plugin reads as coverage while recording nothing) — a runner hunting for a config knob on the object will conclude the capability is missing (absence-inference); the opt-in lives ONLY where the plugin is constructed"
         ]
       },
       "steps": [
-        "stock leg: boot showcase stock; as M open a record detail (GET /api/v1/data/showcase_contact/<id>); wait past the 2s default flush window; as admin GET /api/v1/data/sys_audit_log with a $filter on action 'read' — expect zero rows; the boot log must carry NO 'record-view auditing installed' line",
-        "configured leg (see knownGaps): boot the scratch app with readAudit.objects naming object X plus the excluded sys_job; read the boot log for the install line and the exclusion warning",
+        "stock leg: boot showcase stock with OS_LOG_LEVEL=info (or --log-level info) — os dev defaults to warn, and the install line logs at INFO, so on a default boot its absence proves nothing; confirm INFO lines are present in the boot log as the positive control. As M open a record detail M can READ — GET /api/v1/data/showcase_account/<id> answering 200 (a baseline member is refused showcase_contact at the object gate with 403, and a refused read audits nothing under any configuration, so a contact specimen makes the zero vacuous); wait past the 2s default flush window; as admin GET /api/v1/data/sys_audit_log with a $filter on action 'read' — expect zero rows; the boot log must carry NO 'record-view auditing installed' line",
+        "configured leg (the scratch-copy recipe in knownGaps[0]): boot the scratch copy with readAudit.objects naming X = showcase_account plus the excluded sys_job, at OS_LOG_LEVEL=info; read the boot log for the install line and the exclusion warning",
         "as M (user context): GET /api/v1/data/X/<id>; wait past the flush window (or drive maxBatchSize reads); as admin read the ledger rows for action 'read'",
-        "as M: LIST /api/v1/data/X (a collection read) and GET a detail of an object NOT in the opt-in — then re-read the ledger",
+        "as M: LIST /api/v1/data/X (a collection read) and GET a detail of an object NOT in the opt-in that M can read (showcase_project) — then re-read the ledger",
         "inspect the landed row's fields: action, user_id, object_name, record_id, old_value, new_value, created_at (compare created_at against the wall clock of the read, not of the flush)"
       ],
       "acceptance": [
         {
           "clause": "stock boot audits nothing — the honest default: os serve/dev auto-registers AuditPlugin with NO options, so a stock boot writes zero action:'read' rows however many records are opened, and logs no install line (a deployment that opts nothing in pays nothing)",
           "oracle": "api",
-          "verify": "post-read ledger query for action 'read' returns 0 rows on the stock boot; boot log lacks 'record-view auditing installed'",
+          "verify": "post-read ledger query for action 'read' returns 0 rows on the stock boot after a detail read that answered 200; boot log, at info level with INFO lines present, lacks 'record-view auditing installed'",
           "evidence": "the filtered query + the log grep"
         },
         {
@@ -3069,6 +3069,12 @@
           "date": "2026-08-30",
           "change": "new — the #8992 record-view audit writer had no checklist coverage: the honest default (stock boot audits nothing), the closed per-object opt-in, the detail-read discriminator, the no-values row shape and the loud exclusion refusal were all unasserted. The configured half is fixture-gapped (a boot-config change per the docs' own snippet — recorded as knownGaps, not an area recipe, since it is not an API sequence); the stock negative runs on stock",
           "ref": "#8992"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-17",
+          "change": "re-measured on main c91af8ed6 (checklist-accuracy finding from #23878): the stock leg's install-line grep was vacuous on a default boot, because the line logs at INFO and os dev defaults to warn, so steps[0], the fixture and clause 0's verify now boot at OS_LOG_LEVEL=info with an INFO-line positive control. The stock specimen GET /data/showcase_contact/ID is refused to a baseline member at the object gate (403), so the zero proved nothing either; the step now reads a showcase_account detail (200). knownGaps[0] gains the scripted scratch-copy recipe for the configured half, and steps 1 and 3 name X = showcase_account and the un-opted showcase_project. Re-run: stock boot at info (649 INFO lines), plain member detail reads of showcase_project, showcase_task and showcase_account all 200, action 'read' rows 0, no install line. Configured scratch copy: 'Plugin superseded: com.objectstack.audit' WARN, the sys_job exclusion WARN and 'AuditPlugin: record-view auditing installed on 1 object(s) — showcase_account'; member M's account detail read → 1 row (action read, user_id M, object_name showcase_account, record_id correct, old_value and new_value null, created_at 00:15:23.489Z inside the 23.385–23.497 read window, about 4 s before the flush read); the list read and the showcase_project detail read left the count at 1; the admin's detail read made it 2",
+          "ref": "#24036"
         }
       ]
     },

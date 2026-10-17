@@ -242,10 +242,11 @@
       "title": "Gated downloads: 401 anonymous, 403 parent-invisible, signed URL for the entitled — per gating class (attachments-scope / field-owned / public_read opt-out / ungated)",
       "since": "v15.1",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
-      "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record", "anonymous"],
+      "personas": ["admin (uploader/owner)", "signed-up member who cannot read the parent record (qa-scratch-authz persona B: the API deny clauses)",
+    "qa-scratch-authz persona A, entitled on qa_shared and then de-granted (the browser clause)", "anonymous"],
       "fixtures": {
         "app": "showcase",
         "requires": [
@@ -268,7 +269,7 @@
         "GET the same routes as the uploader/admin and follow the signed URL",
         "compare TTLs: the gated grant uses the short downloadTtl (default 300s), not the 3600s presignedTtl — read expiry material from the minted URL/descriptor where the adapter exposes it",
         "flip one file to acl='public_read' (system write) and GET /files/<fileId> anonymously — the opt-out must restore the stable anonymous capability URL",
-        "in the browser, open the parent record's RecordAttachmentsPanel as the denied member — persona B, holding READ on sys_attachment (qa-scratch-authz step 6) — attempt the download, and capture the surfaced copy. Without that read the panel refuses up front ('You don't have access to these attachments.') before any download is attempted: that is the listing gate, not the download denial acceptance[4] scores"
+        "in the browser, as persona A (reads qa_shared through its qa_att_reader binding, qa-scratch-authz step 6), open a qa_shared record that carries an attachments-scope file (/_console/apps/showcase_app/qa_shared/record/ID), open its Attachments tab and confirm the file is listed; then, server-side and WITHOUT reloading the page, remove A's read (as admin DELETE /api/v1/data/sys_user_permission_set/BINDING_ID, A's qa_att_reader row), click the listed file's Download, and capture the 403 on GET /api/v1/storage/files/FILE_ID/url plus the panel's surfaced copy; re-bind A afterwards (POST the same row back). Persona B cannot stand in for A here: with no read on the parent the record page itself refuses first ('You don't have access to qa_vault records'), so RecordAttachmentsPanel never mounts and there is no download to attempt. A reload after the revoke re-runs the record and listing gates and refuses before any download, which is not the download denial acceptance[4] scores"
       ],
       "acceptance": [
         {
@@ -298,7 +299,7 @@
         {
           "clause": "the browser surface renders the denial as friendly copy, not a raw error dump (objectui#2532) — the RecordAttachmentsPanel maps the fail-closed 40x codes to readable text",
           "oracle": "screenshot",
-          "verify": "the denied member's panel shows the mapped copy (RecordAttachmentsPanel.tsx friendlyError reads both the enveloped error.code and the legacy top-level code)",
+          "verify": "persona A's already-open panel, after A's read is removed, shows the mapped copy on Download (the 403 is on the /url grant request) (RecordAttachmentsPanel.tsx friendlyError reads both the enveloped error.code and the legacy top-level code)",
           "evidence": "panel screenshot"
         }
       ],
@@ -328,6 +329,12 @@
           "date": "2026-10-13",
           "change": "steps[6] names persona B's sys_attachment read, and the area recipe qa-scratch-authz step 6 now provisions it (persona recipe gap, #23166 A4; parked on #23121, carried by #23169). Without read on sys_attachment the attachments panel refuses before any download, so acceptance[4]'s friendly-denial screenshot would capture the listing refusal instead of the download one. QA run #23166 granted B that read and passed the clause. No clause changed",
           "ref": "#23169"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-17",
+          "change": "steps[6] re-pointed to the reachable shape (checklist-accuracy finding from QA run #23929, carried on #23878): persona B never reaches RecordAttachmentsPanel, because without read on the parent the record page refuses first. The step now opens the panel as persona A while entitled, removes A's qa_att_reader binding server-side without a reload, and clicks Download; acceptance[4]'s verify names that persona and the personas list carries A. The clause still scores the mapped copy against a raw 403. Re-run on main c91af8ed6 with the console at objectui f8267df93aba: A opened /_console/apps/showcase_app/qa_shared/record/ID, the Attachments tab listed sfsp-24036.txt; the admin deleted A's sys_user_permission_set row (200); Download sent GET /api/v1/storage/files/ID/url → 403 and the panel showed 'You don't have access to download this attachment.' above the row, with no status text; A was re-bound (201). As B, /_console/apps/showcase_app/qa_vault/record/ID rendered 'You don't have access to qa_vault records' with no Attachments tab",
+          "ref": "#24036"
         }
       ]
     },

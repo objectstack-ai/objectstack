@@ -1690,7 +1690,7 @@
       "title": "POST /automation/:name/clone: whole-definition copy mutating exactly name/label/status, protection envelope dropped, no ancestry, draft-but-armed (double-fire notice verbatim), 409/404/400 refusal arms — and the honest clause: the clone must survive a restart and reach Studio",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1711,7 +1711,7 @@
         "double-fire: POST /api/v1/data/showcase_task with priority='urgent'; GET both flows' runs lists",
         "references: POST /api/v1/automation/showcase_task_done_notify_owner/clone {\"name\":\"qa_task_done_clone\",\"label\":\"QA task-done clone\"}; read the clone's subflow node config",
         "ordinariness: PUT /api/v1/automation/qa_urgent_alert_clone with the clone's own definition (label tweaked) — it is a tenant flow, the edit lands",
-        "restart probe: stop the server; cold-boot over the SAME database file; GET /api/v1/automation/qa_urgent_alert_clone and GET /api/v1/meta/flow (does any package/tenant metadata hold the clone?)",
+        "restart probe: stop the server; cold-boot over the SAME database file; GET /api/v1/automation/qa_urgent_alert_clone and GET /api/v1/meta/flow (does any package/tenant metadata hold the clone?); then, in the browser as the admin, open /_console/studio/~org/automations (the 'Organization flows' scope) and confirm the clone is listed on the Automations rail and opens in the designer; create one more urgent task (with its required project) and confirm the clone's runs list grows on the new process",
         "teardown: DELETE /api/v1/automation/qa_urgent_alert_clone and …/qa_task_done_clone (or discard the isolated DB)"
       ],
       "acceptance": [
@@ -1754,7 +1754,7 @@
         {
           "clause": "the honest clause — the clone OUTLIVES the process and REACHES Studio: after a cold restart over the same database file the clone still exists and dispatches, and it is listed on a Studio Automations rail (it is 'an ordinary org/install-owned flow', ADR-0126 §7.1, under the shipped 'customize in Studio' promise §1.3 — the Setup page's own copy says 'Editing happens in Studio')",
           "oracle": "api",
-          "verify": "step 8: GET /api/v1/automation/qa_urgent_alert_clone on the new process, and the flow present in metadata a Studio rail can list. DURABILITY holds since cb4c31d (#20907, with the clone save path #20761): the clone survives a cold restart and still dispatches. ⚠️ REACHABILITY is an EXPECTED FAIL, kept as the assertion on purpose: the Studio Automations rail lists PACKAGE-scoped metadata (objectui StudioDesignSurface.tsx loadPackageSurfaces(client,'flow',packageId)) while the clone is stored with package_id null (_packageId deliberately stripped, flow-clone.ts), so it is reachable in no rail — tracked at #21332. Record which half failed (durability, reachability, or both) — do NOT soften the clause to a same-process read",
+          "verify": "step 8: GET /api/v1/automation/qa_urgent_alert_clone on the new process, and the flow present in metadata a Studio rail can list. DURABILITY holds since cb4c31d (#20907, with the clone save path #20761): the clone survives a cold restart and still dispatches. REACHABILITY holds since objectui#11553 (the vendored console at f8267df93aba carries it; #21332 closed as a duplicate on 2026-10-03): Studio's org scope, /_console/studio/~org/automations ('Organization flows'), lists package-less flows on its Automations rail, so the clone stored with package_id null (_packageId deliberately stripped, flow-clone.ts) is listed there and opens in the designer. A clone absent from that rail, or a rail that opens another flow for the clone's deep link, fails the clause. Record which half failed (durability, reachability, or both) — do NOT soften the clause to a same-process read",
           "evidence": "the post-restart GET (present or 404) + the meta/flow listing showing where, if anywhere, the clone is held"
         }
       ],
@@ -1774,7 +1774,7 @@
         "packages/runtime/src/domains/automation.ts#clone (the clone arm: body-first validation, mandatory name+label, 404/409 probes, registerFlow-only registration, no ancestry on the response), (clone in the manage_metadata write set)",
         "packages/runtime/src/domains/automation-flow-clone.test.ts#dispatcher (route-level pins for the validation and refusal arms — a mocked-service pin; it cannot see the live dispatcher, the double-fire, or the restart — which is exactly the remainder this item drives)",
         "packages/spec/src/automation/flow.zod.ts (machine-name regex)",
-        "objectui packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx (the Automations rail is package-scoped — the reachability half of the honest clause)",
+        "objectui packages/app-shell/src/views/studio-design/StudioDesignSurface.tsx + studioScope.ts (the org scope ~org that lists package-less flows; objectui#11553, pinned by StudioDesignSurface.packageLessFlows-11553.test.tsx) — the reachability half of the honest clause",
         "examples/app-showcase/src/automation/flows/index.ts#UrgentTaskAlertFlow (UrgentTaskAlertFlow; TaskDoneNotifyOwnerFlow → showcase_notify_owner)",
         "#12438 (sweep) · Epic #12150",
         "cross-ref: access-security.packaged-flow-write-door-parity (owns the packaged-base write-door question this item's ordinariness clause must not be read as answering); automation.setup-packaged-automation-board (the clone dialog UI half)"
@@ -1786,7 +1786,8 @@
           "change": "new — the ADR-0126 §7.1 clone door landed with route-level mocked pins only; nothing asserted the live contract (double-fire with the notice verbatim, references not re-pointed, the refusal arms on the real dispatcher) and nothing anywhere asked the two questions the honest clause pins: the clone registers engine-only (no sys_metadata write) and its _packageId is stripped, so restart survival and Studio reachability — both halves of the ADR's own 'ordinary flow' promise — are authored as an expected-fail probe rather than left unasked",
           "ref": "#12438"
         },
-        { "revision": 2, "date": "2026-10-02", "change": "clause 7's expected-fail note now names only the reachability half. The durability half was fixed by cb4c31d (#20907, with #20761): on 17.6.0 the clone survives a cold restart, reads back with its edited label and still fires (release-verification run). The reachability half still fails — no Studio surface lists a package-less flow — and is now filed as #21332 instead of resting on the #12438 sweep", "ref": "#21330" }
+        { "revision": 2, "date": "2026-10-02", "change": "clause 7's expected-fail note now names only the reachability half. The durability half was fixed by cb4c31d (#20907, with #20761): on 17.6.0 the clone survives a cold restart, reads back with its edited label and still fires (release-verification run). The reachability half still fails — no Studio surface lists a package-less flow — and is now filed as #21332 instead of resting on the #12438 sweep", "ref": "#21330" },
+        { "revision": 3, "date": "2026-10-17", "change": "clause 6's reachability EXPECTED FAIL is stale (checklist-accuracy finding, automation slice report on #23878): objectui#11553 gave Studio an org scope whose Automations rail lists package-less flows, and #21332 closed as a duplicate. The verify now asserts the clone is listed and opens at /_console/studio/~org/automations, steps[7] drives it after the restart, and the objectui source line names the org scope and its pin. Re-run on main c91af8ed6 with the console at objectui f8267df93aba, file DB: POST …/showcase_urgent_task_alert/clone {name qa_urgent_alert_clone, label} → 200 status draft; the Organization flows rail listed 'QA urgent alert clone' and opened it (Trigger: Record created or updated · showcase_task, Enabled, no lock banner); after a cold restart over the same DB the GET answered 200, the rail listed and opened it again, and one urgent task create added one run to the clone (0 → 1) and one to the base (1 → 2); teardown DELETE → deleted true", "ref": "#24036" }
       ]
     },
     {
