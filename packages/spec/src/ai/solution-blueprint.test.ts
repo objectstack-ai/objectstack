@@ -10,6 +10,8 @@ import {
 } from './solution-blueprint.zod';
 import { ViewFilterRuleSchema } from '../ui/view.zod';
 import { SortItemSchema } from '../shared/enums.zod';
+import { SelectOptionSchema } from '../data/field.zod';
+import { ObjectSchema } from '../data/object.zod';
 
 const validBlueprint: SolutionBlueprint = {
   summary: 'A simple project tracker',
@@ -373,6 +375,92 @@ describe('SolutionBlueprintSchema', () => {
       })).toEqual({ path: ['views', 0, 'sort'], code: 'invalid_type' });
     });
   });
+
+  describe('option `kind` + object `stageField` (an AI-built status field ships its lifecycle kinds)', () => {
+    const LOAN_STAGES = [
+      { label: '申请中', value: 'applied', kind: 'open' as const },
+      { label: '已放款', value: 'disbursed', kind: 'open' as const },
+      { label: '已还清', value: 'repaid', kind: 'won' as const },
+      { label: '已核销', value: 'written_off', kind: 'lost' as const },
+    ];
+    const loanObject = (stages: Array<Record<string, unknown>> = LOAN_STAGES, extra: Record<string, unknown> = {}) => ({
+      name: 'loan',
+      fields: [
+        { name: 'title', type: 'text' as const },
+        { name: 'status', type: 'select' as const, options: stages },
+      ],
+      stageField: 'status',
+      ...extra,
+    });
+    /** The first issue of a failed lenient parse, as `{ path, code }`. */
+    const firstIssue = (input: unknown) => {
+      const result = SolutionBlueprintSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      const issue = result.success ? undefined : result.error.issues[0];
+      return { path: issue?.path, code: issue?.code };
+    };
+
+    it('carries every option\'s kind and the object\'s stageField through the parse — z.object would strip an undeclared key', () => {
+      const parsed = SolutionBlueprintSchema.parse({ summary: 's', objects: [loanObject()] });
+      expect(parsed.objects[0].stageField).toBe('status');
+      expect(parsed.objects[0].fields[1].options?.map((o) => o.kind)).toEqual(['open', 'open', 'won', 'lost']);
+    });
+
+    it('keeps both keys optional — a plain select on an object that names no stage field omits them', () => {
+      const parsed = SolutionBlueprintSchema.parse(validBlueprint);
+      const task = parsed.objects.find((o) => o.name === 'task');
+      expect(task?.stageField).toBeUndefined();
+      const status = task?.fields.find((f) => f.name === 'status');
+      expect(status?.options?.every((o) => !Object.prototype.hasOwnProperty.call(o, 'kind'))).toBe(true);
+    });
+
+    it('reuses SelectOption.kind\'s enum by identity — the blueprint spells no lifecycle vocabulary of its own', () => {
+      // Identity, not shape: a copy would agree today and drift the day the
+      // object field's option gains or loses a kind.
+      const ownEnum = (SelectOptionSchema as any).shape.kind.unwrap();
+      const lenientKind = (SolutionBlueprintSchema as any).shape.objects.element.shape.fields.element.shape
+        .options.unwrap().element.shape.kind;
+      const strictKind = (SolutionBlueprintStrictSchema as any).shape.objects.element.shape.fields.element.shape
+        .options.unwrap().element.shape.kind;
+      expect(lenientKind.unwrap()).toBe(ownEnum);
+      expect(strictKind.unwrap()).toBe(ownEnum);
+      expect(ownEnum.options).toEqual(['open', 'won', 'lost']);
+    });
+
+    it('refuses a kind outside open / won / lost, at the option\'s own path', () => {
+      const stages = LOAN_STAGES.map((o) => (o.value === 'repaid' ? { ...o, kind: 'done' } : o));
+      expect(firstIssue({ summary: 's', objects: [loanObject(stages)] }))
+        .toEqual({ path: ['objects', 0, 'fields', 1, 'options', 2, 'kind'], code: 'invalid_value' });
+    });
+
+    it('refuses a stageField that is not a snake_case field name', () => {
+      expect(firstIssue({ summary: 's', objects: [loanObject(LOAN_STAGES, { stageField: 'Status' })] }))
+        .toEqual({ path: ['objects', 0, 'stageField'], code: 'invalid_format' });
+    });
+
+    it('carries exactly what the object schema reads: a 1:1 copy parses, and an option missing its kind is refused there', () => {
+      // The blueprint does not judge the kinds itself (strict structured
+      // output cannot express a cross-key rule); the object schema the applier
+      // writes through does. This pins that the two keys land on the object
+      // schema's own spellings — `stageField` on the object, `kind` on the
+      // option — so a plain copy is all an applier has to do.
+      const toObject = (bp: ReturnType<typeof loanObject>) => {
+        const parsed = SolutionBlueprintSchema.parse({ summary: 's', objects: [bp] }).objects[0];
+        return {
+          name: parsed.name,
+          fields: Object.fromEntries(parsed.fields.map(({ name, ...field }) => [name, { label: name, ...field }])),
+          stageField: parsed.stageField,
+        };
+      };
+      expect(ObjectSchema.safeParse(toObject(loanObject())).success).toBe(true);
+
+      const forgot = LOAN_STAGES.map((o) => (o.value === 'written_off' ? { label: o.label, value: o.value } : o));
+      const refused = ObjectSchema.safeParse(toObject(loanObject(forgot)));
+      expect(refused.success).toBe(false);
+      expect(refused.error?.issues.map((i) => ({ path: i.path, code: i.code })))
+        .toEqual([{ path: ['fields', 'status', 'options', 3, 'kind'], code: 'custom' }]);
+    });
+  });
 });
 
 // The strict mirror is what `generateObject` sends to OpenAI: every property
@@ -391,6 +479,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
         description: null,
         sharingModel: null,
         nameField: null,
+        stageField: null,
         fields: [
           { name: 'name', label: null, type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null },
         ],
@@ -431,7 +520,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const badField = {
       ...strictBp,
       objects: [
-        { name: 'x', label: null, description: null, sharingModel: null, nameField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
+        { name: 'x', label: null, description: null, sharingModel: null, nameField: null, stageField: null, fields: [{ name: 'f', type: 'text', required: null, reference: null, options: null, summaryOperations: null, expression: null }] },
       ],
     };
     // `f` is missing the (nullable, required) `label` key.
@@ -454,6 +543,7 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
           description: null,
           sharingModel: null,
           nameField: null,
+          stageField: null,
           fields: [
             {
               name: 'task_total', label: '任务总数', type: 'summary', required: null, reference: null, options: null, expression: null,
@@ -528,6 +618,59 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const missingKey = { ...strictBp, objects: [{ ...strictBp.objects[0] }] };
     delete (missingKey.objects[0] as { nameField?: unknown }).nameField;
     expect(() => SolutionBlueprintStrictSchema.parse(missingKey)).toThrow();
+  });
+
+  describe('stageField + option kind (the model names the stage field and states each option\'s kind, or says null)', () => {
+    const statusField = (options: Array<Record<string, unknown>>) => ({
+      name: 'status', label: null, type: 'select', required: null, reference: null, options, summaryOperations: null, expression: null,
+    });
+    const STAGES = [
+      { label: 'New', value: 'new', kind: 'open' },
+      { label: 'Closed Won', value: 'closed_won', kind: 'won' },
+      { label: 'Closed Lost', value: 'closed_lost', kind: 'lost' },
+    ];
+    const withStatus = (options: Array<Record<string, unknown>>, stageField: string | null = 'status') => ({
+      ...strictBp,
+      objects: [{ ...strictBp.objects[0], stageField, fields: [...strictBp.objects[0].fields, statusField(options)] }],
+    });
+    /** The issue paths of a failed strict parse. */
+    const issuePaths = (input: unknown) => {
+      const result = SolutionBlueprintStrictSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      return result.success ? [] : result.error.issues.map((i) => i.path.join('.'));
+    };
+
+    it('carries the stage field and every option\'s kind — the lifecycle is expressible in the structured output', () => {
+      const parsed = SolutionBlueprintStrictSchema.parse(withStatus(STAGES));
+      expect(parsed.objects[0].stageField).toBe('status');
+      expect(parsed.objects[0].fields[1].options?.map((o) => o.kind)).toEqual(['open', 'won', 'lost']);
+    });
+
+    it('accepts null for both — an object with no stage field, options with no stated kind', () => {
+      const parsed = SolutionBlueprintStrictSchema.parse(
+        withStatus(STAGES.map((o) => ({ ...o, kind: null })), null),
+      );
+      expect(parsed.objects[0].stageField).toBeNull();
+      expect(parsed.objects[0].fields[1].options?.every((o) => o.kind === null)).toBe(true);
+    });
+
+    it('requires both keys to be present (OpenAI strict: every key in `required`)', () => {
+      const noStageField = withStatus(STAGES);
+      delete (noStageField.objects[0] as { stageField?: unknown }).stageField;
+      expect(issuePaths(noStageField)).toEqual(['objects.0.stageField']);
+
+      const noKind = withStatus(STAGES.map((o, i) => (i === 1 ? { label: o.label, value: o.value } : o)));
+      expect(issuePaths(noKind)).toEqual(['objects.0.fields.1.options.1.kind']);
+    });
+
+    it('refuses a kind outside open / won / lost', () => {
+      expect(issuePaths(withStatus(STAGES.map((o, i) => (i === 1 ? { ...o, kind: 'done' } : o)))))
+        .toEqual(['objects.0.fields.1.options.1.kind']);
+    });
+
+    it('refuses a stageField that is not a snake_case field name', () => {
+      expect(issuePaths(withStatus(STAGES, 'Status'))).toEqual(['objects.0.stageField']);
+    });
   });
 
   it('carries viewName on a strict nav item — nullable, and REQUIRED to be present (OpenAI strict)', () => {
@@ -701,14 +844,27 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
     expect(strictFieldKeys()).toEqual(lenientFieldKeys());
   });
 
+  it('the select OPTION schemas carry exactly the same keys', () => {
+    // One level below the field pin, for the reason the filter-rule pin sits
+    // below the view pin: both sides declare the option inline, so a key added
+    // to one is a key the other drops. `kind` is the reason this pin exists —
+    // with it on the lenient side only, the design model could never state an
+    // option's lifecycle kind, and the object schema refuses a stage field
+    // whose options do not each declare one. No deliberate exclusions.
+    const optionKeys = (root: any) =>
+      Object.keys(root.shape.objects.element.shape.fields.element.shape.options.unwrap().element.shape).sort();
+    expect(optionKeys(SolutionBlueprintStrictSchema)).toEqual(optionKeys(SolutionBlueprintSchema));
+    expect(optionKeys(SolutionBlueprintSchema)).toEqual(['kind', 'label', 'value']);
+  });
+
   it('the OBJECT schemas carry exactly the same keys', () => {
     // The `nameField` gap proved the field-level pin alone is not enough: the
     // lenient object schema carried the ADR-0079 record-title key while the
     // strict mirror did not, so the design-stage model could never author it —
     // detected by cloud lint, unfixable on the surface that produced it. There
     // are NO deliberate object-level exclusions (measured: both sides carry
-    // name/label/description/fields/sharingModel/nameField); if one ever
-    // becomes deliberate, list it explicitly here with its reason.
+    // name/label/description/fields/sharingModel/nameField/stageField); if one
+    // ever becomes deliberate, list it explicitly here with its reason.
     const lenientObjectKeys = Object.keys(
       (SolutionBlueprintSchema as any).shape.objects.element.shape,
     ).sort();
@@ -716,6 +872,10 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
       (SolutionBlueprintStrictSchema as any).shape.objects.element.shape,
     ).sort();
     expect(strictObjectKeys).toEqual(lenientObjectKeys);
+    // `stageField` named outright: it is the only trigger of the object
+    // schema's mandatory-kind rule, so the option key pin above is half a fix
+    // without it.
+    expect(lenientObjectKeys).toContain('stageField');
   });
 
   it('the NAV ITEM schemas carry exactly the same keys', () => {
@@ -962,13 +1122,16 @@ describe('strict mirror ↔ lenient schema — VALUE parity', () => {
         description: null,
         sharingModel: null,
         nameField: null,
+        stageField: null,
         fields: [{
           name: 'company_size',
           label: null,
           type: 'select',
           required: null,
           reference: null,
-          options: optionsWithLeadingDigit,
+          // Every strict option key present (`kind: null`), so the ONLY defect
+          // left in this proposal is the leading digit the pin is about.
+          options: optionsWithLeadingDigit.map((o) => ({ ...o, kind: null })),
           summaryOperations: null,
           expression: null,
         }],
