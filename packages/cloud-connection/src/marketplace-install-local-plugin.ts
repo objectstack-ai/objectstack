@@ -88,10 +88,12 @@
  *          → removes the cached manifest, withdraws the package from the
  *            running kernel through the registry's `uninstallPackage` — the
  *            verb the protocol's own uninstall uses — so its objects answer
- *            404 at once (#21576), then runs the uninstall cleanups domain
- *            plugins registered with the protocol (#21490) — the package's
- *            permission sets and their grants go with it — and reports each
- *            outcome as `cleanups`, a refused withdrawal included.
+ *            404 at once (#21576), and the copies of its objects the install
+ *            bridged into the `metadata` service, so the object reads stop
+ *            serving them at once too (#24070), then runs the uninstall
+ *            cleanups domain plugins registered with the protocol (#21490) —
+ *            the package's permission sets and their grants go with it — and
+ *            reports each outcome as `cleanups`, a refused withdrawal included.
  *
  * Persistence layout:
  *   <cwd>/.objectstack/installed-packages/<safe-manifest-id>.json
@@ -234,6 +236,13 @@ const UNINSTALL_CLEANUP_RUNNER = 'protocol.runUninstallCleanups';
  * above is named for the protocol's.
  */
 const REGISTRY_WITHDRAWAL = 'registry.uninstallPackage';
+
+/**
+ * [#24070] The outcome name this door reports when the `metadata` service kept
+ * a copy of one of the uninstalled package's objects — named for the service
+ * verb that withdraws it, as the one above is named for the registry's.
+ */
+const OBJECT_COPY_WITHDRAWAL = 'metadata.unregister';
 
 /**
  * [#8976] The capability every MUTATING install-local route demands.
@@ -1980,20 +1989,32 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // withdrawal releases them — synchronously, so still no `await` before
         // it, at the same point and through the same helper as
         // `deletePackage` — and the cleanup revokes the grants naming them.
+        //
+        // [#24070] The registry is one of the two places the install put the
+        // package's objects: its `manifest.register` also bridged a copy of
+        // each into the `metadata` service, which the object reads serve. The
+        // copies go right after the registry half and before the cleanups —
+        // only once the registry withdrew, so a refused withdrawal leaves the
+        // package whole, as loaded as it was.
         let registry: unknown;
         try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing registered */ }
         const declared = captureUninstallDeclared(registry, manifestId);
         const withdrawal = this.withdrawFromRunningKernel(ctx, manifestId);
+        const copies = withdrawal ? undefined : await this.withdrawObjectCopies(ctx, manifestId);
         const cleanups = [
             ...(withdrawal ? [withdrawal] : []),
+            ...(copies ? [copies] : []),
             ...await this.runUninstallCleanups(ctx, manifestId, admission.userId, declared),
         ];
+        const withdrawals = (withdrawal ? 1 : 0) + (copies ? 1 : 0);
         ctx.logger?.info?.(
             `[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; `
             + (withdrawal
                 ? 'the running kernel did NOT withdraw it, so it stays loaded until the next restart; '
-                : 'withdrawn from the running kernel; ')
-            + `${cleanups.length - (withdrawal ? 1 : 0)} uninstall cleanup(s) ran)`,
+                : copies
+                    ? 'withdrawn from the running kernel\'s registry, but the metadata service kept copies of its objects until the next restart; '
+                    : 'withdrawn from the running kernel; ')
+            + `${cleanups.length - withdrawals} uninstall cleanup(s) ran)`,
         );
         return c.json({
             success: true,
@@ -2002,7 +2023,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 cleanups,
                 note: withdrawal
                     ? 'Cached manifest removed, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The running kernel did not withdraw the package, so it stays loaded until the next restart; that is the `registry.uninstallPackage` entry in `cleanups`.'
-                    : 'Cached manifest removed, the package withdrawn from the running kernel, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`.',
+                    : copies
+                        ? 'Cached manifest removed, the package withdrawn from the running kernel\'s registry, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The metadata service kept copies of the package\'s objects, so the object listing and reads keep serving them until the next restart; that is the `metadata.unregister` entry in `cleanups`.'
+                        : 'Cached manifest removed, the package withdrawn from the running kernel, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`.',
             },
         }, 200);
     };
@@ -2029,7 +2052,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * same id (`registerApp`): the package's object contributions (so its
      * objects answer 404 at once instead of after a restart), its namespace,
      * every metadata item it shipped, its boot disable seed, and its package
-     * record. Its tables and rows are untouched.
+     * record. Its tables and rows are untouched. [#24070] The verb reaches the
+     * registry only: the copies of the package's objects that the install's
+     * register bridged into the `metadata` service are
+     * {@link withdrawObjectCopies}'s, which the door runs right after this.
      *
      * Never throws: the uninstall has already happened. Two answers:
      *   - `undefined` — withdrawn, or nothing to withdraw: no `objectql`
@@ -2069,6 +2095,94 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 error: 'the running kernel did not withdraw the package — it stays loaded until the next restart',
             };
         }
+    };
+
+    /**
+     * [#24070] Withdraw the copies of an uninstalled package's objects from the
+     * `metadata` service — the half of what the install put in the running
+     * kernel that {@link withdrawFromRunningKernel}'s registry verb cannot
+     * reach. The door runs it right after that verb has withdrawn.
+     *
+     * The install's `manifest.register` does two things: `registerApp` puts the
+     * package in the registry and, on a started kernel, the ObjectQL plugin
+     * bridges each of the package's objects into the `metadata` service, as a
+     * copy stamped with the package's id (`_packageId`), so every reader of
+     * that service sees them. Nothing took those copies out again. The metadata
+     * protocol's `GET /meta/object` merges the service's listing into its
+     * answer, and `GET /meta/object/NAME` reads the service before the
+     * registry, so both kept serving every object of the uninstalled package
+     * until a restart — while its data route already answered 404, and its
+     * `app` and `permission` items, which nothing copies into the service,
+     * were already gone.
+     *
+     * What is withdrawn is what the bridge itself counts as the package's own
+     * copy, the predicate it re-registers by on a hot upgrade: an `object` whose
+     * `_packageId` is this package's id. And only under the two conditions the
+     * ObjectQL plugin's own copy-follow takes before it removes a copy, because
+     * `unregister` also deletes through the service's writable `datasource:`
+     * loaders: the registry no longer serves the name, and the removal is
+     * silent to the service's watchers (`notify: false`), as the bridge's
+     * register was. A same-name copy the package never bridged — an authored
+     * one, or another package's — is not this uninstall's, and stays.
+     *
+     * Never throws: the uninstall has already happened. Two answers:
+     *   - `undefined` — every such copy withdrawn, or nothing to withdraw: no
+     *     `metadata` service, no `objectql` registry (so nothing was bridged),
+     *     or no copy stamped with the package's id;
+     *   - one failed outcome named {@link OBJECT_COPY_WITHDRAWAL}, when the
+     *     service could not be listed or refused to remove a copy; `removed`
+     *     counts the copies that did go. It rides on `cleanups`, the way a
+     *     refused registry withdrawal does, and the operator log names the
+     *     objects kept, what it costs and the remedy; the cause is logged,
+     *     never put on the wire.
+     */
+    private withdrawObjectCopies = async (
+        ctx: PluginContext,
+        manifestId: string,
+    ): Promise<UninstallCleanupOutcome | undefined> => {
+        let metadata: IMetadataService | undefined;
+        let registry: IObjectQLEngine['registry'] | undefined;
+        try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service — nothing bridged */ }
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing bridged */ }
+        if (!metadata || !registry) return undefined;
+
+        let removed = 0;
+        const kept: string[] = [];
+        let cause: unknown;
+        try {
+            for (const copy of await metadata.list('object')) {
+                const name = (copy as { name?: unknown } | null)?.name;
+                if (typeof name !== 'string' || (copy as { _packageId?: unknown })._packageId !== manifestId) continue;
+                if (registry.getObject(name) !== undefined) continue;
+                try {
+                    await metadata.unregister('object', name, { notify: false });
+                    removed++;
+                } catch (err) {
+                    kept.push(name);
+                    cause ??= err;
+                }
+            }
+        } catch (err) {
+            cause = err;
+        }
+        if (cause === undefined) return undefined;
+
+        const what = kept.length > 0
+            ? `kept its copies of object(s) ${kept.map((n) => `'${n}'`).join(', ')}`
+            : 'could not be listed, so its copies of the package\'s objects were not withdrawn';
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] uninstalled ${manifestId} and withdrew it from the registry, but the metadata `
+            + `service ${what} (${(cause as { message?: unknown })?.message ?? cause}) — GET /api/v1/meta/object and `
+            + 'GET /api/v1/meta/object/NAME keep serving them until the next restart, while their data route already '
+            + 'answers 404. The outcome is on the response (`cleanups`). Remedy: restart the runtime — the ledger entry '
+            + 'is already gone, so the restart does not bring the package back.',
+        );
+        return {
+            name: OBJECT_COPY_WITHDRAWAL,
+            success: false,
+            removed,
+            error: 'the metadata service kept copies of the package\'s objects — the object reads serve them until the next restart',
+        };
     };
 
     /**

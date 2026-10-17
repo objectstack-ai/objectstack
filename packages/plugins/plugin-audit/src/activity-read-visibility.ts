@@ -23,7 +23,8 @@
  * middleware (not a find-hook) on `find`, `findOne`, `count` and `aggregate`,
  * so a list's `total` and a grouped count are narrowed exactly like its rows.
  * For each read it ANDs into `ctx.ast.where` one branch per parent object the
- * registry holds (ADR-0139 D4):
+ * registry holds — only those the read names, when its own `where` names them
+ * (`namedParentObjects`) — (ADR-0139 D4):
  *
  *     { $or: [ { object_name: P, record_id: { $in: ReadableIds.of(P) } }, ... ] }
  *
