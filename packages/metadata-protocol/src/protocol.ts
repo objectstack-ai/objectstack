@@ -27002,7 +27002,9 @@ export class ObjectStackProtocolImplementation implements
      * `sys_metadata` keys on (type,name,org), so a same-name copy would collide
      * with the source — and rewriting every intra-package reference (lookup
      * `reference`, view `object`, expressions, etc.) to the new names. Per-item
-     * best-effort; one failure never aborts the whole clone.
+     * best-effort; one failure never aborts the whole clone. The copy's package
+     * record is not an item: when its install is refused, that refusal refuses
+     * the whole duplicate, before any item is written.
      *
      * Every copied object is named in the target namespace: `iojn_customer`
      * becomes `iojn2_customer`, and an object whose name lacks the source
@@ -27056,11 +27058,10 @@ export class ObjectStackProtocolImplementation implements
         // covers the WRITE. It does not cover this method, for two reasons that
         // are both about where the refusal lands:
         //
-        //   ① a refusal of the `installPackage` call below does not abort the
-        //     copy (a manifest row is not worth aborting a copy for): it is
-        //     reported as a `failed[]` entry on a duplicate that goes on, so
-        //     a refusal of the TARGET ID raised there would arrive as a
-        //     partial copy under an id the declaration refuses outright;
+        //   ① a refusal of the `installPackage` call below is rethrown before
+        //     any item is copied, so it would not be lost — but it names
+        //     `manifest.id`, the key of a manifest this door builds, never the
+        //     `targetPackageId` the caller wrote (the closing paragraph below);
         //   ② the refusal has to precede the MUTATIONS, and the manifest write
         //     is not the first of them. #14451 already established the position
         //     for this door's other precondition: `duplicatePackage` mints the
@@ -27433,9 +27434,6 @@ export class ObjectStackProtocolImplementation implements
             return { fields: Object.fromEntries(out) };
         };
 
-        const copied: Array<{ type: string; name: string }> = [];
-        const failed: Array<{ type: string; name: string; error: string }> = [];
-
         if (srcPkg?.manifest && typeof registry?.installPackage === 'function') {
             try {
                 // Route through installPackage (not a bare registry write) so the
@@ -27454,45 +27452,45 @@ export class ObjectStackProtocolImplementation implements
                 delete dupManifest.scope;
                 await this.installPackage({ manifest: dupManifest } as InstallPackageRequest);
             } catch (e: any) {
-                // [#24041] A REFUSED PACKAGE RECORD IS REPORTED, NEVER SWALLOWED.
-                // The copy still goes on: the per-item package binding works
-                // without a package record, and aborting here would leave the
-                // caller nothing it has today (refusing the duplicate outright
-                // is a separate decision). What it no longer does is go on in
-                // SILENCE. A refused install leaves no registry record and no
-                // `sys_packages` row, so `targetPackageId` is not an installed
-                // package — absent from `GET /packages` at once, not only after
-                // a restart — while every item copied below is bound to it.
+                // [#24041] ⭐ A REFUSED PACKAGE RECORD REFUSES THE DUPLICATE —
+                // the refusal itself, rethrown unchanged, before any item is
+                // copied (ruling B, claim amendment 6227008947).
                 //
-                // Reachable from the HTTP door: `SchemaRegistry.installPackage`'s
-                // namespace gate (`NAMESPACE_CONFLICT`, 422) refuses a target
-                // namespace another installed package owns — an explicit
-                // `targetNamespace`, or one derived from a target id whose last
-                // segment another package's namespace already uses — and a
-                // failed `sys_packages` write fails the install (#21243).
+                // This catch used to drop it and copy anyway. A refused install
+                // leaves no registry record and no `sys_packages` row, so the
+                // copy's items were live, bound to an id no package record
+                // holds, absent from `GET /packages`. After a namespace conflict
+                // they also sat inside a namespace another package owns — the
+                // very state ADR-0048 Phase 1's install-time gate in
+                // `SchemaRegistry.installPackage` exists to refuse. The sibling
+                // verb {@link importUnmanagedPackage} states the rule this door
+                // now keeps: "There is no half-copied app."
                 //
-                // ⭐ It rides `failed[]`, this verb's one per-item outcome
-                // carrier, under the source's own `package` item: the clone
-                // could not copy it. So `success` reads false and `failedCount`
-                // counts it, as for any item. The sentence is quoted only when
-                // the refusal declares a client status; a store fault is not
-                // quoted, and the warn below carries its full text, exactly as
-                // the per-item save failure does further down.
-                failed.push({
-                    type: 'package',
-                    name: request.sourcePackageId,
-                    error: `Package '${request.sourcePackageId}' is copied without its package record: installing `
-                        + `'${request.targetPackageId}' was refused, so '${request.targetPackageId}' is not an `
-                        + 'installed package while the items copied into it are bound to it. '
-                        + clientFacingFailureText(e, 'The install failed; the reason is in the server log.'),
-                });
+                // Nothing needs undoing: this call is the duplicate's FIRST
+                // mutation (everything above it reads), and a refused install
+                // leaves nothing behind — the registry judges before it writes,
+                // and a failed persist undoes the registry write before it
+                // throws (#21243). So the door answers the refusal's own status:
+                // `422 NAMESPACE_CONFLICT` with the registry's remedy (choose
+                // another namespace), or the primitive's `500` for a store fault.
+                //
+                // Logged once, because neither the primitive nor the HTTP door
+                // logs it. A store fault's driver text rides only on the error's
+                // `cause`, which no answer quotes, so the error itself is handed
+                // to the log for that one; a client refusal's sentence is
+                // already the whole story.
                 console.warn(
-                    `[protocol.duplicatePackage] package record for '${request.targetPackageId}' `
-                    + `(copy of '${request.sourcePackageId}') was not installed: `
+                    `[protocol.duplicatePackage] refused: the package record for '${request.targetPackageId}' `
+                    + `(copy of '${request.sourcePackageId}') was not installed, so nothing was copied: `
                     + `${typeof e?.code === 'string' ? `${e.code}: ` : ''}${e?.message ?? e}`,
+                    ...(declaresClientRefusal(e) ? [] : [e]),
                 );
+                throw e;
             }
         }
+
+        const copied: Array<{ type: string; name: string }> = [];
+        const failed: Array<{ type: string; name: string; error: string }> = [];
         // Resolved once for the whole copy: every flow row in this package needs
         // the same engine, and a package with fifty flows should not walk the
         // service table fifty times.

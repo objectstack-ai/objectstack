@@ -128,9 +128,9 @@ describe('[#19577] duplicatePackage refuses an explicit targetNamespace the decl
             expect(err.message).toContain(declarationSentence(ns));
 
             // ⭐ Nothing was minted and nothing was scanned: the refusal
-            // precedes the manifest write AND the copy loop. A refusal of the
-            // manifest write does not abort the copy, so a refusal raised only
-            // there would be a `failed[]` entry on a copy that went on anyway.
+            // precedes the manifest write AND the copy loop. The manifest write
+            // does not judge a namespace's charset at all, so this is the only
+            // place the refusal can be raised.
             expect(installed).toHaveLength(0);
             expect(engine.registry.installPackage).not.toHaveBeenCalled();
             expect(engine.find).not.toHaveBeenCalled();

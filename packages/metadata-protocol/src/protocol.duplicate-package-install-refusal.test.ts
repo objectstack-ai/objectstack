@@ -1,42 +1,46 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#24041] `duplicatePackage` reports a refused install of the copy's package
- * record — on its answer and in the log — and still copies the items.
+ * [#24041] `duplicatePackage` is refused, with nothing copied, when the install
+ * of the copy's package record is refused — and the refusal it answers is the
+ * install's own, unchanged.
  *
  * ---------------------------------------------------------------------------
  * The gap these pins close
  * ---------------------------------------------------------------------------
  * The duplicate writes the copy's package record through `installPackage`
  * before its copy loop, inside a `catch {}` that kept nothing. A refused
- * install leaves no registry record and no `sys_packages` row, so the target
- * id is not an installed package while every copied item is bound to it — and
- * the caller read `success: true` with an empty `failed[]`, and no line was
- * logged at any level.
+ * install leaves no registry record and no `sys_packages` row, so the copy's
+ * items were live, bound to an id no package record holds — after a namespace
+ * conflict, inside a namespace another package owns — and the caller read
+ * `success: true`, with no line logged at any level. The door now keeps the
+ * rule its sibling `importUnmanagedPackage` states: "There is no half-copied
+ * app." (ruling B, claim amendment 6227008947).
  *
  * ---------------------------------------------------------------------------
  * The two refusals, and why each is built the way it is
  * ---------------------------------------------------------------------------
- * - The REGISTRY'S NAMESPACE GATE. `SchemaRegistry.installPackage` refuses a
- *   namespace another installed package owns with `NamespaceConflictError`
- *   (`NAMESPACE_CONFLICT`, 422) — reachable from the HTTP door through an
- *   explicit `targetNamespace` or a derived one. That judge lives in
- *   `@objectstack/objectql`, which depends on this package, so it cannot be
- *   imported here: the registry below answers with that error's envelope
- *   (`code`, `status`, its sentence) at the registry's own boundary, and the
- *   protocol's real `installPackage` is the code that meets it.
- * - A FAILED `sys_packages` WRITE. Built with no stub on the install path at
- *   all: the `package` service reports a driver fault the way the real one
- *   does (`{ success: false, … }`), and the real primitive undoes its registry
- *   write and throws its own 500. That one is NOT a client refusal, so the
- *   answer must not quote the store; the log carries it.
+ * - The REGISTRY'S NAMESPACE GATE (ADR-0048 Phase 1).
+ *   `SchemaRegistry.installPackage` refuses a namespace another installed
+ *   package owns with `NamespaceConflictError` (`NAMESPACE_CONFLICT`, 422). That
+ *   judge lives in `@objectstack/objectql`, which depends on this package, so it
+ *   cannot be imported here: the registry below refuses exactly when another
+ *   package owns the namespace and throws that error's envelope (`code`,
+ *   `status`, its sentence) at the registry's own boundary, and the protocol's
+ *   real `installPackage` is the code that meets it.
+ * - A FAILED `sys_packages` WRITE. No stub on the install path at all: the
+ *   `package` service reports a driver fault the way the real one does
+ *   (`{ success: false, … }`), and the real primitive undoes its registry write
+ *   and throws its own 500.
  *
- * Every refusal is answered by a CONTROL on the same harness: an accepted
- * install adds no `package` entry, logs no line, and leaves the record in
- * place — a pin on the refusal alone cannot tell "the refusal is reported"
- * from "this door now reports every install".
+ * Each asserts the refusal as the ENVELOPE an HTTP boundary resolves it to
+ * (`resolveThrownHttpError`, the resolver the door's `errorFromThrown` uses),
+ * that it is the install's own error object, rethrown unchanged, and that
+ * nothing was copied. A CONTROL on the same harness holds the other side: an
+ * accepted install still copies, and logs nothing.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 const SOURCE = 'com.example.leave';
@@ -50,7 +54,8 @@ function namespaceConflict(namespace: string, existing: string, incoming: string
     return Object.assign(
         new Error(
             `Namespace conflict: namespace "${namespace}" is already owned by package "${existing}", `
-            + `so package "${incoming}" cannot be installed alongside it.`,
+            + `so package "${incoming}" cannot be installed alongside it. Choose a different namespace for `
+            + `"${incoming}", or uninstall "${existing}" first.`,
         ),
         { name: 'NamespaceConflictError', code: 'NAMESPACE_CONFLICT', status: 422, httpStatus: 422 },
     );
@@ -60,7 +65,8 @@ function namespaceConflict(namespace: string, existing: string, incoming: string
  * A duplicate-door harness: one source package holding one object row, a
  * registry that keeps its package records and namespace owners, and
  * optionally a `package` service. The namespace gate refuses exactly as the
- * real one does: a namespace another installed package owns.
+ * real one does: a namespace another installed package owns. Whatever it
+ * throws is kept in `thrown`, so a pin can ask for that very object back.
  */
 function makeHarness(opts: { publish?: (data: unknown) => Promise<unknown> } = {}) {
     const rows = [{
@@ -77,12 +83,17 @@ function makeHarness(opts: { publish?: (data: unknown) => Promise<unknown> } = {
         [OWNER, { manifest: { id: OWNER, name: 'Taken', namespace: 'taken', version: '1.0.0' } }],
     ]);
     const namespaceOwners = new Map<string, string[]>([['leave', [SOURCE]], ['taken', [OWNER]]]);
+    const thrown: unknown[] = [];
     const registry: any = {
         getPackage: vi.fn((id: string) => packages.get(id)),
         getNamespaceOwners: vi.fn((ns: string) => [...(namespaceOwners.get(ns) ?? [])]),
         installPackage: vi.fn((manifest: any) => {
             const owner = (namespaceOwners.get(manifest.namespace) ?? []).find((id) => id !== manifest.id);
-            if (owner) throw namespaceConflict(manifest.namespace, owner, manifest.id);
+            if (owner) {
+                const refusal = namespaceConflict(manifest.namespace, owner, manifest.id);
+                thrown.push(refusal);
+                throw refusal;
+            }
             const row = { manifest, status: 'installed', enabled: true };
             packages.set(manifest.id, row);
             namespaceOwners.set(manifest.namespace, [...(namespaceOwners.get(manifest.namespace) ?? []), manifest.id]);
@@ -101,96 +112,102 @@ function makeHarness(opts: { publish?: (data: unknown) => Promise<unknown> } = {
     const impl = new ObjectStackProtocolImplementation(engine as never, () => services as never);
     const saveMetaItem = vi.spyOn(impl, 'saveMetaItem' as never);
     (saveMetaItem as any).mockResolvedValue({ success: true } as never);
-    return { impl, registry, packages, saveMetaItem };
+    return { impl, packages, namespaceOwners, saveMetaItem, thrown };
 }
 
-/** The `[protocol.duplicatePackage]` lines about the copy's package record. */
-function packageRecordLines(warn: { mock: { calls: unknown[][] } }): string[] {
-    return warn.mock.calls
-        .map((args: unknown[]) => String(args[0]))
-        .filter((line: string) => line.startsWith('[protocol.duplicatePackage] package record'));
+/** The thrown refusal, or a failure naming what happened instead. */
+async function refusalOf(run: () => Promise<unknown>): Promise<any> {
+    try {
+        await run();
+    } catch (e) {
+        return e;
+    }
+    throw new Error('expected the duplicate to be refused, but it resolved');
 }
 
-describe('[#24041] duplicatePackage reports a refused install of the copy\'s package record', () => {
-    let warn: ReturnType<typeof vi.spyOn>;
+/** The `[protocol.duplicatePackage] refused:` log calls, each with its arguments. */
+function refusalLogs(warn: { mock: { calls: unknown[][] } }): unknown[][] {
+    return warn.mock.calls.filter((args: unknown[]) => String(args[0]).startsWith('[protocol.duplicatePackage] refused:'));
+}
+
+describe('[#24041] duplicatePackage is refused when the copy\'s package record is refused', () => {
+    let warn: { mock: { calls: unknown[][] }; mockRestore: () => void };
     beforeEach(() => {
-        warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        warn = vi.spyOn(console, 'warn').mockImplementation(() => {}) as never;
     });
     afterEach(() => {
         warn.mockRestore();
     });
 
-    it('carries the registry\'s namespace refusal on failed[], logs it once, and still copies', async () => {
-        const { impl, packages, saveMetaItem } = makeHarness();
-        const refusal = namespaceConflict('taken', OWNER, TARGET);
+    it('answers the registry\'s namespace refusal (422 NAMESPACE_CONFLICT) unchanged, and copies nothing', async () => {
+        const { impl, packages, namespaceOwners, saveMetaItem, thrown } = makeHarness();
 
-        const res = await (impl as any).duplicatePackage({
+        const err = await refusalOf(() => (impl as any).duplicatePackage({
             sourcePackageId: SOURCE,
             targetPackageId: TARGET,
             targetNamespace: 'taken',
-        });
+        }));
 
-        // The answer names the refusal: one `package` entry, under the
-        // source's own package item, quoting the registry's sentence (a 422
-        // is a client refusal) and naming the target id.
-        const entries = res.failed.filter((f: any) => f.type === 'package');
-        expect(entries).toHaveLength(1);
-        expect(entries[0].name).toBe(SOURCE);
-        expect(entries[0].error).toContain(`'${TARGET}'`);
-        expect(entries[0].error).toContain(refusal.message);
-        expect(res.success).toBe(false);
-        expect(res.failedCount).toBe(res.failed.length);
+        // The registry's own refusal, rethrown unchanged — so the door answers
+        // its status, its code and its remedy.
+        expect(thrown).toHaveLength(1);
+        expect(err).toBe(thrown[0]);
+        const envelope = resolveThrownHttpError(err);
+        expect(envelope.status).toBe(422);
+        expect(envelope.code).toBe('NAMESPACE_CONFLICT');
 
-        // The copy still goes on: the item was written, bound to the target.
-        expect(res.copied).toEqual([{ type: 'object', name: 'taken_ticket' }]);
-        expect(saveMetaItem).toHaveBeenCalledTimes(1);
-        expect((saveMetaItem as any).mock.calls[0][0].packageId).toBe(TARGET);
-        // …and the target is not an installed package: the refusal preceded
-        // every registry write.
+        // Nothing was copied, and nothing was minted.
+        expect(saveMetaItem).not.toHaveBeenCalled();
         expect(packages.has(TARGET)).toBe(false);
+        expect(namespaceOwners.get('taken')).toEqual([OWNER]);
 
-        // The log names the target id, the refusal's code and its sentence, once.
-        const lines = packageRecordLines(warn);
-        expect(lines).toHaveLength(1);
-        expect(lines[0]).toContain(`'${TARGET}'`);
-        expect(lines[0]).toContain('NAMESPACE_CONFLICT');
-        expect(lines[0]).toContain(refusal.message);
+        // Logged once, naming the target, the code and the sentence; a client
+        // refusal is not handed to the log as an error object.
+        const logs = refusalLogs(warn);
+        expect(logs).toHaveLength(1);
+        expect(logs[0]).toHaveLength(1);
+        expect(String(logs[0]![0])).toContain(`'${TARGET}'`);
+        expect(String(logs[0]![0])).toContain('NAMESPACE_CONFLICT');
+        expect(String(logs[0]![0])).toContain(err.message);
     });
 
-    it('carries a failed sys_packages write without quoting the store, and logs the primitive\'s sentence', async () => {
-        const { impl, packages } = makeHarness({
+    it('answers a failed sys_packages write with the primitive\'s 500, undone, and copies nothing', async () => {
+        const { impl, packages, saveMetaItem } = makeHarness({
             publish: async () => ({ success: false, driverFault: { message: DRIVER_TEXT } }),
         });
 
-        const res = await (impl as any).duplicatePackage({ sourcePackageId: SOURCE, targetPackageId: TARGET });
+        const err = await refusalOf(() => (impl as any).duplicatePackage({ sourcePackageId: SOURCE, targetPackageId: TARGET }));
 
-        const entries = res.failed.filter((f: any) => f.type === 'package');
-        expect(entries).toHaveLength(1);
-        expect(entries[0].name).toBe(SOURCE);
-        expect(entries[0].error).toContain(`'${TARGET}'`);
-        // A 500 is not a client refusal: nothing the store said reaches the answer.
-        expect(entries[0].error).not.toContain('SQLITE');
-        expect(res.success).toBe(false);
-        // The real primitive undid its registry write before it threw.
+        // The primitive's own failure: a 500 whose sentence names the target and
+        // quotes nothing of the store.
+        const envelope = resolveThrownHttpError(err);
+        expect(envelope.status).toBe(500);
+        expect(err.message).toContain(`'${TARGET}'`);
+        expect(err.message).not.toContain('SQLITE');
+
+        // Nothing was copied, and the primitive undid its registry write.
+        expect(saveMetaItem).not.toHaveBeenCalled();
         expect(packages.has(TARGET)).toBe(false);
-        // The copy still goes on.
-        expect(res.copied).toEqual([{ type: 'object', name: 'leave_copy_ticket' }]);
 
-        const lines = packageRecordLines(warn);
-        expect(lines).toHaveLength(1);
-        expect(lines[0]).toContain(`'${TARGET}'`);
-        expect(lines[0]).toContain(`Package '${TARGET}' was not installed`);
+        // Logged once, with the error itself attached: its `cause` is the only
+        // place the driver's text survives.
+        const logs = refusalLogs(warn);
+        expect(logs).toHaveLength(1);
+        expect(String(logs[0]![0])).toContain(`'${TARGET}'`);
+        expect(logs[0]![1]).toBe(err);
+        expect((err as { cause?: any }).cause?.driverFault?.message).toBe(DRIVER_TEXT);
     });
 
-    it('CONTROL: an accepted install adds no package entry and logs no line', async () => {
-        const { impl, packages } = makeHarness({ publish: async () => ({ success: true }) });
+    it('CONTROL: an accepted install still copies, and logs no refusal', async () => {
+        const { impl, packages, saveMetaItem } = makeHarness({ publish: async () => ({ success: true }) });
 
         const res = await (impl as any).duplicatePackage({ sourcePackageId: SOURCE, targetPackageId: TARGET });
 
         expect(res.failed).toEqual([]);
         expect(res.success).toBe(true);
         expect(res.copied).toEqual([{ type: 'object', name: 'leave_copy_ticket' }]);
+        expect(saveMetaItem).toHaveBeenCalledTimes(1);
         expect(packages.get(TARGET)?.manifest?.namespace).toBe('leave_copy');
-        expect(packageRecordLines(warn)).toEqual([]);
+        expect(refusalLogs(warn)).toEqual([]);
     });
 });
