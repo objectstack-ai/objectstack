@@ -502,6 +502,35 @@ function stripServedSystemColumns<T>(type: string, item: T): T {
 let warnedNoRegistryForDataGate = false;
 
 /**
+ * [#7557, #24097] The ONE refusal for an object whose owning package is
+ * disabled, raised by every API reader of that object: the data plane
+ * ({@link ObjectStackProtocolImplementation.assertObjectRegistered}) and the
+ * by-name `/meta` reads (`getMetaItem`, `getMetaItemLayered`). One constructor,
+ * so the two halves of the answer cannot drift apart in code, status or text.
+ */
+function objectPackageDisabledError(object: string): Error {
+    const disabled: any = new Error(
+        `Object '${object}' belongs to a disabled package and is not being served. `
+        + 'Re-enable the package to restore access.',
+    );
+    disabled.code = 'OBJECT_PACKAGE_DISABLED';
+    disabled.status = 404;
+    disabled.object = object;
+    return disabled;
+}
+
+/**
+ * [#7557, #24097] Whether `registry` says `name` is an object of a disabled
+ * package. Optional-called: registry doubles across the test suites implement
+ * `isPackageDisabled` but not this, and a host whose registry cannot answer
+ * must not have every read refused.
+ */
+function isObjectOfDisabledPackage(registry: any, name: string): boolean {
+    return typeof registry?.isObjectPackageDisabled === 'function'
+        && registry.isObjectPackageDisabled(name) === true;
+}
+
+/**
  * [#17501] Does a converted JSON Schema carry any authorable surface at all?
  *
  * `z.toJSONSchema()` answers a `ZodPipe` in its default `'output'` mode with a
@@ -11003,9 +11032,39 @@ export class ObjectStackProtocolImplementation implements
         return request;
     }
 
+    /**
+     * The by-name `/meta` read (`GET /meta/:type/:name`): an API reader.
+     *
+     * [#7557, #24097] An object whose owning package is disabled is refused
+     * here, `404 OBJECT_PACKAGE_DISABLED`, in every state this read serves
+     * (active, `state: 'draft'`, `previewDrafts`), checked once before any
+     * layer is read: the listing omits that object and the data plane refuses
+     * it, and this read answers with them. Authoring callers inside this class
+     * that must still see the object (the save's destructive-change check)
+     * read {@link readMetaItem}, the shared body, instead: the reader-class
+     * split `package-disable-enforcement.test.ts` pins.
+     */
     async getMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string,
+    }) {
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
+        request = canonicalizeMetaRequestType(request);
+        if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
+            throw objectPackageDisabledError(request.name);
+        }
+        return this.readMetaItem(request);
+    }
+
+    /**
+     * The body of {@link getMetaItem} without its disabled-package refusal:
+     * the object as the layers resolve it, whether or not its package is
+     * disabled. Private on purpose; only this class's authoring callers read
+     * it.
+     */
+    private async readMetaItem(request: {
+        type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
     }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
@@ -11640,6 +11699,12 @@ export class ObjectStackProtocolImplementation implements
         // three-layer diagnostic must answer for ONE namespace, or `code` and
         // `overlay` can be read from two.
         request = canonicalizeMetaRequestType(request);
+        // [#7557, #24097] A by-name API face of its own (`?layers=true`), which
+        // reads its layers without going through {@link getMetaItem}, so it
+        // refuses a disabled package's object itself: one answer per door.
+        if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
+            throw objectPackageDisabledError(request.name);
+        }
 
         // [ADR-0131 D6] Environment → code: the overlay layer is the
         // environment's stored row; no organization's row is read.
@@ -12418,20 +12483,9 @@ export class ObjectStackProtocolImplementation implements
             // object that is merely switched off, while this one names the cause
             // and therefore the fix (re-enable the package).
             //
-            // Optional-called: registry doubles across the test suites implement
-            // `isPackageDisabled` but not this, and a host whose registry cannot
-            // answer must not have every read refused.
-            if (typeof registry.isObjectPackageDisabled === 'function'
-                && registry.isObjectPackageDisabled(object)) {
-                const disabled: any = new Error(
-                    `Object '${object}' belongs to a disabled package and is not being served. `
-                    + 'Re-enable the package to restore access.',
-                );
-                disabled.code = 'OBJECT_PACKAGE_DISABLED';
-                disabled.status = 404;
-                disabled.object = object;
-                throw disabled;
-            }
+            // [#24097] The by-name `/meta` reads raise the same refusal, from
+            // the same constructor ({@link objectPackageDisabledError}).
+            if (isObjectOfDisabledPackage(registry, object)) throw objectPackageDisabledError(object);
             return;
         }
         // The one envelope, shared with the engine's in-process verbs, which
@@ -22888,7 +22942,12 @@ export class ObjectStackProtocolImplementation implements
                 // package's it judged a row no package-less save writes, and a
                 // save naming a third package was judged against another
                 // package's row.
-                const existing = await this.getMetaItem({
+                // [#24097] Read through {@link readMetaItem}, not the API face:
+                // this check must still see an object of a disabled package.
+                // The API face refuses one, and the `catch` below would read
+                // that refusal as "skip the check", so a field drop would land
+                // without its 409.
+                const existing = await this.readMetaItem({
                     type: request.type,
                     name: request.name,
                     ...(request.packageId ? { packageId: request.packageId } : {}),
