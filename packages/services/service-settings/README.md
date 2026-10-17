@@ -107,7 +107,7 @@ the following built-in manifests are pre-registered out of the box:
 |----------------|-----------------------------|---------------------------------------------|
 | `mail`         | `EmailServicePlugin`        | SMTP / Resend / Postmark + `mail/test`      |
 | `storage`      | `StorageServicePlugin`      | Local FS / S3 + encrypted secret + `storage/test` |
-| `branding`     | (built-in fallback)         | Workspace name, logo, accent colour         |
+| `branding`     | (built-in fallback)         | Organization name, logo, accent colour      |
 | `feature_flags`| (built-in fallback)         | Opt-in experimental features                |
 
 ## License
