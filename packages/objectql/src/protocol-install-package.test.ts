@@ -52,7 +52,7 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
   it('writes the in-memory registry AND persists via the package service', async () => {
     const publish = vi.fn(async () => ({ success: true }));
     const { protocol, registry } = makeProtocol({ pkgSvc: { publish } });
-    const manifest = { id: 'app.demo', name: 'Demo', version: '1.0.0', type: 'application' };
+    const manifest = { id: 'app.demo', name: 'Demo', version: '1.0.0', type: 'app' };
 
     const res = (await protocol.installPackage({ manifest } as never)) as {
       package: { manifest: { id: string } };
@@ -76,7 +76,7 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
 
   it('derives + persists a namespace from the id when the manifest declares none', async () => {
     const { protocol, registry } = makeProtocol();
-    const manifest = { id: 'com.example.leave', name: 'Leave', version: '1.0.0', type: 'application' };
+    const manifest = { id: 'com.example.leave', name: 'Leave', version: '1.0.0', type: 'app' };
     await protocol.installPackage({ manifest } as never);
     // `com.example.leave` → namespace `leave` (last dot-segment).
     expect((registry.installPackage.mock.calls[0][0] as any).namespace).toBe('leave');
@@ -85,21 +85,21 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
   it('does NOT override an explicitly declared namespace', async () => {
     const { protocol, registry } = makeProtocol();
     // HotCRM ships namespace `crm`, which differs from the id last segment.
-    const manifest = { id: 'app.objectstack.hotcrm', name: 'HotCRM', version: '1.0.0', type: 'application', namespace: 'crm' };
+    const manifest = { id: 'app.objectstack.hotcrm', name: 'HotCRM', version: '1.0.0', type: 'app', namespace: 'crm' };
     await protocol.installPackage({ manifest } as never);
     expect((registry.installPackage.mock.calls[0][0] as any).namespace).toBe('crm');
   });
 
   it('forwards install-time settings to the registry', async () => {
     const { protocol, registry } = makeProtocol();
-    const manifest = { id: 'app.s', name: 'S', version: '1.0.0', type: 'application' };
+    const manifest = { id: 'app.s', name: 'S', version: '1.0.0', type: 'app' };
     await protocol.installPackage({ manifest, settings: { theme: 'dark' } } as never);
     expect(registry.installPackage).toHaveBeenCalledWith(manifest, 'authored', { theme: 'dark' });
   });
 
   it('still registers in-memory when no package service is present (non-fatal)', async () => {
     const { protocol, registry } = makeProtocol();
-    const manifest = { id: 'app.nopkg', name: 'NoPkg', version: '1.0.0', type: 'application' };
+    const manifest = { id: 'app.nopkg', name: 'NoPkg', version: '1.0.0', type: 'app' };
 
     const res = (await protocol.installPackage({ manifest } as never)) as {
       package: { manifest: { id: string } };
@@ -120,7 +120,7 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
       throw dbDown;
     });
     const { protocol, registry } = makeProtocol({ pkgSvc: { publish } });
-    const manifest = { id: 'app.err', name: 'Err', version: '1.0.0', type: 'application' };
+    const manifest = { id: 'app.err', name: 'Err', version: '1.0.0', type: 'app' };
 
     let thrown: unknown;
     try {
@@ -150,7 +150,7 @@ describe('protocol.installPackage (ADR-0033 consolidation)', () => {
     // Now installPackage defaults version to '0.1.0' so they key into sys_packages.
     const publish = vi.fn(async () => ({ success: true }));
     const { protocol, registry } = makeProtocol({ pkgSvc: { publish } });
-    const manifest = { id: 'app.nov', name: 'NoVer', type: 'application' };
+    const manifest = { id: 'app.nov', name: 'NoVer', type: 'app' };
 
     await protocol.installPackage({ manifest } as never);
 

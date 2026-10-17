@@ -159,7 +159,7 @@ describe('#21243 installPackage — a refused sys_packages write fails the insta
   ] as const)('fresh id, %s → 500 %s, no row, no namespace', async (_label, code, publish) => {
     const { impl, registry } = makeImpl(publish);
 
-    const err = await rejectionOf(impl.installPackage({ manifest: { id: 'com.example.leave', name: 'Leave' } }));
+    const err = await rejectionOf(impl.installPackage({ manifest: { id: 'com.example.leave', name: 'Leave', type: 'app' } }));
 
     expect(door(err)).toMatchObject({ status: 500, code });
     // The driver's words stay on `cause` for the operator, never in the caller's sentence.
@@ -178,7 +178,7 @@ describe('#21243 installPackage — a refused sys_packages write fails the insta
     const priorContent = JSON.parse(JSON.stringify(registry.getPackage('com.example.leave')));
 
     const err = await rejectionOf(impl.installPackage({
-      manifest: { id: 'com.example.leave', name: 'Leave v2', version: '2.0.0', namespace: 'leave' },
+      manifest: { id: 'com.example.leave', name: 'Leave v2', type: 'app', version: '2.0.0', namespace: 'leave' },
       enableOnInstall: true,
     }));
 
@@ -198,7 +198,7 @@ describe('#21243 installPackage — a refused sys_packages write fails the insta
       throw refusal;
     });
 
-    const err = await rejectionOf(impl.installPackage({ manifest: { id: 'com.example.leave' } }));
+    const err = await rejectionOf(impl.installPackage({ manifest: { id: 'com.example.leave', name: 'Leave', type: 'app' } }));
 
     expect(err).toBe(refusal);
     expect(door(err)).toMatchObject({ status: 409, code: 'DESTRUCTIVE_CHANGE' });
@@ -208,7 +208,7 @@ describe('#21243 installPackage — a refused sys_packages write fails the insta
   it('CONTROL — a landed write answers the installed row, exactly as before', async () => {
     const { impl, registry, publish } = makeImpl(async () => ({ success: true }));
 
-    const res = await impl.installPackage({ manifest: { id: 'com.example.leave', name: 'Leave' } });
+    const res = await impl.installPackage({ manifest: { id: 'com.example.leave', name: 'Leave', type: 'app' } });
 
     expect(res.package.manifest.id).toBe('com.example.leave');
     expect(registry.getPackage('com.example.leave')).toBe(res.package);

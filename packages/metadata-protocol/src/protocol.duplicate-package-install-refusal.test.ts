@@ -79,8 +79,8 @@ function makeHarness(opts: { publish?: (data: unknown) => Promise<unknown> } = {
         metadata: JSON.stringify({ name: 'leave_ticket', label: 'Ticket' }),
     }];
     const packages = new Map<string, any>([
-        [SOURCE, { manifest: { id: SOURCE, name: 'Leave', namespace: 'leave', version: '1.0.0' } }],
-        [OWNER, { manifest: { id: OWNER, name: 'Taken', namespace: 'taken', version: '1.0.0' } }],
+        [SOURCE, { manifest: { id: SOURCE, name: 'Leave', type: 'app', namespace: 'leave', version: '1.0.0' } }],
+        [OWNER, { manifest: { id: OWNER, name: 'Taken', type: 'app', namespace: 'taken', version: '1.0.0' } }],
     ]);
     const namespaceOwners = new Map<string, string[]>([['leave', [SOURCE]], ['taken', [OWNER]]]);
     const thrown: unknown[] = [];

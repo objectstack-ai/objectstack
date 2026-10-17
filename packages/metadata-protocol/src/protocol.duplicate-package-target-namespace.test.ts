@@ -73,7 +73,7 @@ function makeDuplicateImpl(sourceId = 'com.example.leave') {
         find: vi.fn(async () => rows),
         registry: {
             getPackage: vi.fn(() => ({
-                manifest: { id: sourceId, name: 'Leave', namespace: 'leave', version: '1.0.0' },
+                manifest: { id: sourceId, name: 'Leave', type: 'app', namespace: 'leave', version: '1.0.0' },
             })),
             installPackage: vi.fn((manifest: any) => {
                 installed.push(manifest);
