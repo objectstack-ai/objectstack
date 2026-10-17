@@ -2429,14 +2429,25 @@ const RECORD_LINE_ITEMS_HISTORY =
  * `object-master-detail-form` detail entry's `columns` take, not a copy: the
  * panel hands its columns to the same objectui grid (`GridField`, whose
  * `GridColumn` declares exactly that schema's twenty keys and IS the spec's
- * type by reference). One difference is the
- * carrier's, not the column's, and the `describe()` says it: this panel does
- * NOT hydrate a column from the child object's field — it passes `columns`
- * straight through the field-security pass to the grid — so a column draws exactly what it declares, and an identity-only `{ name }`
- * column is a text cell headed by its name. For the same reason
- * `defineStack`'s identity-only check (`collectHydratedInlineColumnErrors` in
- * `stack.zod.ts`) does not reach this block: there is no hydrated type to
- * judge.
+ * type by reference). The column also means here what it means on those
+ * carriers (#24140, route B), because the column schema's own `label` describe
+ * — "defaults to the child field's label via hydration" — governs every
+ * carrier: a column that declares no `type` hydrates from the child object's
+ * field through objectui's `hydrateColumns`, so an identity-only `{ name }`
+ * column takes the child field's label (and with it that label's
+ * translation), its cell type and its options; declaring a `type` opts the
+ * column out. The renderer half is objectstack-ai/objectui#12854:
+ * `LineItemsPanel` reuses `hydrateColumns`, not a second resolver. Until the
+ * `.objectui-sha` pin carries it, the panel hands `columns` to the grid
+ * through the field-security pass alone, and an identity-only column draws as
+ * a text cell headed by its name.
+ *
+ * `defineStack`'s resolved-type check (`collectHydratedInlineColumnErrors` in
+ * `stack.zod.ts`) walks the three master-detail carriers and not this block,
+ * so an identity-only column here that hydrates to a type carrying a
+ * type-conditional column rule (today `currency`, which refuses `scale`) is
+ * not judged at publish. Closing that gap changes what publishes, so it is a
+ * change of its own, not part of this block's describe.
  *
  * The keys this block shares with an `object-master-detail-form` detail entry
  * take that entry's types and alias table, so one concept is spelled one way
@@ -2444,7 +2455,7 @@ const RECORD_LINE_ITEMS_HISTORY =
  * measured reason: `relationshipField` and `columns` are required here because
  * nothing derives them (the entry auto-detects the FK and derives the
  * columns; this panel queries `{ [relationshipField]: parentId }` and draws
- * `columns` as given), and `childObject` is optional because the
+ * only the authored `columns`), and `childObject` is optional because the
  * component-level `dataSource` binding can supply it instead. `title` is a
  * plain string because the panel draws it as a React child.
  */
@@ -2491,7 +2502,7 @@ export const RecordLineItemsProps = lazySchema(() => strictObject({
   relationshipField: z.string()
     .describe("FK on the child object pointing back to the parent record — the rows are queried as `{ [relationshipField]: parentId }`. Required: this panel does not auto-detect it"),
   columns: z.array(InlineGridColumnSchema).min(1)
-    .describe("Editable grid columns, drawn exactly as declared. Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, options?, … } — objectui GridColumn); unknown keys and the retired `field` spelling are refused. Unlike the master-detail carriers, this block does NOT hydrate a column from the child object's field: declare `label`, `type` and `options` yourself — an identity-only `{ name }` column is a text cell headed by its name. Required, with at least one column: nothing derives them, and an empty list draws a grid with no cells"),
+    .describe("Editable grid columns. Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, options?, … } — objectui GridColumn); unknown keys and the retired `field` spelling are refused. As on the master-detail carriers, identity-only entries ({ name }) hydrate everything else from the child object's fields, `label`, `type` and `options` included, so an identity-only column is headed by the child field's label and translates with it. Declaring `type` opts a column out of hydration — supply its `label`, `options` and other extras yourself. Required, with at least one column: nothing derives them, and an empty list draws a grid with no cells"),
   parentObject: z.string().optional()
     .describe("Parent object the `totalField` rollup is written to (default: the object of the record on the page)"),
   parentId: z.string().optional()
