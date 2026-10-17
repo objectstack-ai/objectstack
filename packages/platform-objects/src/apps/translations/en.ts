@@ -134,9 +134,11 @@ export const en: TranslationData = {
 
         // Diagnostics
         nav_sessions: { label: 'Sessions' },
-        nav_audit_logs: { label: 'Audit Logs' },
-        // The console's Audit Log page, beside the object view (#20142).
-        nav_audit_log_browser: { label: 'Audit Log Browser' },
+        // The one audit entry: the console's audit browser (`audit:log`),
+        // contributed by @objectstack/plugin-audit. The `sys_audit_log` list is
+        // reached from that page's "Open as list" link, not from this menu, and
+        // the page's former id `nav_audit_log_browser` is tombstoned (#23890).
+        nav_audit_logs: { label: 'Audit Log' },
         nav_notifications: { label: 'Notifications' },
 
         // Integrations — every entry here is contributed at RUNTIME by the

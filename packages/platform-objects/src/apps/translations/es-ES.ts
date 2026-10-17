@@ -93,8 +93,7 @@ export const esES: TranslationData = {
         nav_notification_templates: { label: 'Plantillas de Notificación' },
 
         nav_sessions: { label: 'Sesiones' },
-        nav_audit_logs: { label: 'Registros de Auditoría' },
-        nav_audit_log_browser: { label: 'Explorador de registros de auditoría' },
+        nav_audit_logs: { label: 'Registro de auditoría' },
         nav_notifications: { label: 'Notificaciones' },
 
         // Integrations — contributed at RUNTIME by the owning capability

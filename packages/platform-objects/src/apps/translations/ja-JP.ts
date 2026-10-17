@@ -94,7 +94,6 @@ export const jaJP: TranslationData = {
 
         nav_sessions: { label: 'セッション' },
         nav_audit_logs: { label: '監査ログ' },
-        nav_audit_log_browser: { label: '監査ログブラウザー' },
         nav_notifications: { label: '通知' },
 
         // Integrations — contributed at RUNTIME by the owning capability
