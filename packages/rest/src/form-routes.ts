@@ -71,8 +71,11 @@ import {
     anonymousFormIntakeWithdrawnIn,
     anonymousFormObjectName,
 } from '@objectstack/metadata-core';
+import { isEmptyForRequired, isMissing } from '@objectstack/core';
 import type { CreateDataRequest, GetMetaItemsRequest } from '@objectstack/spec/api';
 import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
+import { renderValidationMessage } from '@objectstack/spec/system';
+import { validationFailure } from '@objectstack/types';
 import type { ServerScopedDataRequest } from './data-action-routes.js';
 import { isExpectedRouteError, mapDataError } from './error-response.js';
 import { logError } from './log.js';
@@ -432,10 +435,26 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 // for stamping server-side defaults — see the CRM
                 // `lead.hook.ts` / `case.hook.ts` for the canonical pattern.
                 const allowedFields = new Set<string>();
+                // [#24131] …and, off the SAME entries, the fields the form
+                // requires the visitor to fill: an entry declaring
+                // `required: true` that the form shows unconditionally. See
+                // the refusal below for why a hidden or conditionally visible
+                // entry is not judged here.
+                const requiredFields: string[] = [];
                 for (const section of match.form?.sections ?? []) {
+                    const sectionConditional = section?.visibleWhen != null;
                     for (const f of section?.fields ?? []) {
                         if (typeof f === 'string') allowedFields.add(f);
-                        else if (f?.field) allowedFields.add(f.field);
+                        else if (f?.field) {
+                            allowedFields.add(f.field);
+                            if (
+                                f.required === true
+                                && f.hidden !== true
+                                && f.visibleWhen == null
+                                && !sectionConditional
+                                && !requiredFields.includes(f.field)
+                            ) requiredFields.push(f.field);
+                        }
                     }
                 }
                 // [#6920] A form that declares NO fields collects nothing, so
@@ -513,6 +532,62 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 };
 
                 const p = await this.resolveProtocol(environmentId, req);
+
+                // [#24131] The form's own `required`, enforced BEFORE the write.
+                // The engine judges only the fields the OBJECT requires, so a
+                // field the form requires and the object does not used to be
+                // stored empty with a `201` — while the rendered form refused
+                // the same submission. This door is exactly the one a script or
+                // bot uses without the rendered form.
+                //
+                // - ONE emptiness rule: `isEmptyForRequired` from
+                //   `@objectstack/core`, the rule the engine's object-level check
+                //   runs (absent, `null`, a blank string, and `[]` where the
+                //   declared value is a set). Judged on what this door WRITES
+                //   (`filteredData`), so an object default or a hook stamp does
+                //   not satisfy a field the visitor omitted.
+                // - ONE envelope: thrown as `validationFailure`, so the catch's
+                //   `mapDataError` arm answers the flat `400 VALIDATION_FAILED`
+                //   with `fields[]` the object-level refusal answers on this
+                //   route, worded by the same catalog (`renderValidationMessage`,
+                //   `required`) and naming the field by the object's label.
+                // - Judged only where the form ASKS: an entry that is
+                //   `hidden: true`, or carries a `visibleWhen` on itself or its
+                //   section, is not judged — nothing server-side evaluates a
+                //   form-view `visibleWhen`, and judging it unconditionally would
+                //   refuse a submission whose visitor was never shown the field.
+                //   A server-managed anchor is never written by this door, so it
+                //   is never judged either.
+                const judged = requiredFields.filter((name) =>
+                    !PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)
+                    && name !== '__proto__' && name !== 'constructor' && name !== 'prototype');
+                if (judged.length > 0) {
+                    const objectDef = (await this.readFormObjectDefinitions(p, environmentId))
+                        .find((o: any) => o?.name === match.object);
+                    const missing: Array<{ field: string; code: 'required'; message: string; label: string }> = [];
+                    for (const name of judged) {
+                        const def = objectDef?.fields?.[name];
+                        const value = Object.prototype.hasOwnProperty.call(filteredData, name)
+                            ? filteredData[name]
+                            : undefined;
+                        const empty = def && typeof def.type === 'string'
+                            ? isEmptyForRequired(def, value)
+                            : isMissing(value);
+                        if (!empty) continue;
+                        const declared = typeof def?.label === 'string' ? def.label.trim() : '';
+                        const label = declared.length > 0 ? declared : name;
+                        missing.push({
+                            field: name,
+                            code: 'required',
+                            message: renderValidationMessage({ messageKey: 'required', label, field: name, params: {} }),
+                            label,
+                        });
+                    }
+                    if (missing.length > 0) {
+                        throw validationFailure(missing.map((f) => f.message).join('; '), missing);
+                    }
+                }
+
                 const formCreateRequest: ServerScopedDataRequest<CreateDataRequest> = {
                     object: match.object,
                     data: filteredData,
