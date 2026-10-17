@@ -20,4 +20,6 @@ Clause-②: no
 ✗ Cannot create home directory at /proc/os-x: ENOENT: no such file or directory, mkdir '/proc/os-x'
 ```
 
+Not covered yet: the runtime state file `os serve` writes into `OS_HOME` once it is listening.
+
 Nothing else changes. Every directory these paths made before is still made, every missing level of it; every path that was refused before is still refused, with the operating system's code. The one difference is the path that was never answered at all.
