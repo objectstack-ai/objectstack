@@ -36,7 +36,9 @@
  *     resolved the grants a second time, outside any request scope.
  *  3. **The HTTP `/get-session`** still carries `set-auth-jwt`, signed by the
  *     stored key; the keyring is read once and then held.
- *  4. **A keyring write is seen on the very next signing** — the key the
+ *  4. **An in-process read signs nothing**, even one that asks for the
+ *     response headers — the half of 1 a held keyring hides from the count.
+ *  5. **A keyring write is seen on the very next signing** — the key the
  *     header was signed with is retired through the engine, and the next
  *     `/get-session` signs with a new one.
  *
@@ -251,6 +253,18 @@ describe('[#24061] one authenticated request\'s prelude, counted on a real engin
       expect(kidOf(jwt)).toBe(stored!.id);
       expect(JSON.parse(Buffer.from(jwt!.split('.')[1]!, 'base64url').toString('utf8')).sub).toBe(userId);
     }
+  }, 60_000);
+
+  it('an in-process session read signs nothing, even when it asks for the response headers', async () => {
+    // The count above cannot see this half: once the keyring is held, a
+    // signature reads no key. The header can.
+    const { manager, headers, userId } = await signedInRig();
+    const api: any = await manager.getApi();
+
+    const read = await api.getSession({ ...inProcessSessionReadInput(headers), returnHeaders: true });
+
+    expect(read.response?.user?.id).toBe(userId);
+    expect(read.headers?.get('set-auth-jwt') ?? null).toBeNull();
   }, 60_000);
 
   it('a keyring write through the engine is seen on the very next signing', async () => {
