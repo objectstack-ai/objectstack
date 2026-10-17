@@ -823,7 +823,13 @@ const SHARED_BUILDER = {
 const DISPATCHER_DOMAIN_DIR = 'packages/runtime/src/domains';
 
 const DISPATCHER_DOMAINS = {
-  'actions.ts': { handBuilt: 0 },
+  // Was 0. Kind 1: the handler's one 405 (every verb but POST) must carry
+  // `Allow:` — RFC 9110 requires it — and `deps.error` takes no headers, the
+  // same reason `mcp.ts`, `meta.ts` and `ai.ts` hand-roll theirs.
+  'actions.ts': {
+    handBuilt: 1,
+    note: 'one 405 for every verb but POST, which must carry an `Allow:` header (`deps.error` takes none); the body is the declared envelope, the code derived from the status',
+  },
   // [#12160] Not a domain either — the ADR-0126 §5 activation write-authority
   // gates, shared by the `/automation` toggle door, the `/actions` activation
   // door and the `/security` catalog activation door so one security policy
@@ -875,9 +881,12 @@ const DISPATCHER_DOMAINS = {
   'webhooks.ts': { handBuilt: 0 },
 
   // Kind 1 — enveloped, hand-built only because the helper cannot say it.
+  // Was 1. The 405 for every verb but POST must carry `Allow:` (RFC 9110), and
+  // `deps.error` takes no headers — the same reason `actions.ts` above and
+  // `mcp.ts`, `meta.ts` and `ai.ts` below hand-roll theirs.
   'keys.ts': {
-    handBuilt: 1,
-    note: 'POST /keys is a 201 and `deps.success` hardcodes 200; the body is the declared envelope',
+    handBuilt: 2,
+    note: 'POST /keys is a 201 and `deps.success` hardcodes 200; one 405 for every other verb, which must carry an `Allow:` header (`deps.error` takes none); both bodies are the declared envelope, the 405 code derived from the status',
   },
   'share-links.ts': {
     handBuilt: 1,
