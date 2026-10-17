@@ -27,7 +27,7 @@ A **public form** is the Salesforce *Web-to-Lead* style embeddable form — decl
 ```
 Visitor                        Framework                       Driver
 ───────                        ─────────                       ──────
-GET  /api/v1/forms/:slug   →   rest-server scans views     →
+GET  /api/v1/forms/:slug   →   form-routes.ts scans views  →
                                match sharing.publicLink    →   (no DB read)
                            ←   { form, objectSchema }
 
@@ -35,7 +35,7 @@ POST /api/v1/forms/:slug/  →   field whitelist (form)
      submit                →   derive publicFormGrant:
                                { object: <form target> }   →
                                protocol.createData()       →   INSERT
-                           ←   { object, id, record }
+                           ←   { id }
 ```
 
 Only the spec'd whitelist of form fields is accepted; everything else (status, owner, internal_notes, …) is stripped server-side. Lifecycle hooks then stamp server-controlled defaults.

@@ -1565,7 +1565,7 @@
       "title": "A public form's withdrawal holds across the layers of the environment's definition: an administrator's save is environment-wide whatever organization is active and its withdrawal closes the form, a withdrawal in any package's body of the view name closes it in every package, only an explicit false withdraws, a package's shipped false withdraws, and the package-less environment-wide copy may open a form a package ships closed",
       "since": "v17.7",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1596,7 +1596,7 @@
         {
           "clause": "an administrator's save is environment-wide whatever organization the session has active, and its withdrawal closes the form: with ORG active, the save that sets allowAnonymous false with the link kept answers 200 and names the environment-wide scope (never org=ORG), the item read with no organization active serves that withdrawal, and both doors answer 404 with code FORM_NOT_FOUND and the probe leaves no row",
           "oracle": "api",
-          "verify": "step 2's baseline probe is recorded first (a form already closed is closed for an unrelated reason); then step 4's save status and message, the no-organization read, and the GET and POST status and body code with the admin's count for the marker, which is 0. Mechanism: the /meta doors hand the protocol no organization, and an organization-scoped write is refused by packages/metadata-protocol/src/protocol.ts#organizationScopedWriteRefusal (403 NOT_OVERRIDABLE, ADR-0131 D6); packages/rest/src/rest-server.ts#registerFormEndpoints reads the environment's view list alone and drops a candidate that packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn finds withdrawn in that same list",
+          "verify": "step 2's baseline probe is recorded first (a form already closed is closed for an unrelated reason); then step 4's save status and message, the no-organization read, and the GET and POST status and body code with the admin's count for the marker, which is 0. Mechanism: the /meta doors hand the protocol no organization, and an organization-scoped write is refused by packages/metadata-protocol/src/protocol.ts#organizationScopedWriteRefusal (403 NOT_OVERRIDABLE, ADR-0131 D6); packages/rest/src/form-routes.ts#registerFormEndpoints reads the environment's view list alone and drops a candidate that packages/metadata-core/src/anonymous-form-intake.ts#anonymousFormIntakeWithdrawnIn finds withdrawn in that same list",
           "evidence": "the baseline and step 4 probes (status, code, row count), the save response with the scope it names, and the no-organization read"
         },
         {
@@ -1667,6 +1667,12 @@
           "date": "2026-10-15",
           "change": "re-authored to the behaviour on main: ADR-0131 retired the organization layer every clause of revision 1 composed against. The /meta doors hand the protocol no organization (PR #22447); the protocol refuses every organization-scoped write, and PR #22515 (b389e4355) deleted the three protocol.ts symbols this item anchored, the intake-specific organization refusals and the env-wide row anchor (check:platform-checklist ABSENT SYMBOL on all five citations); the sys_metadata family declares no organization column (PR #23469); and the anonymous doors read the environment alone. Revision 1's clauses 0, 1 and 3 (an organization overlay beneath an env-wide withdrawal, the organization save door's 403, an organization narrowing for itself) describe a layer that can no longer be written, and its steps 4 to 10 PUT saves that now land environment-wide. Revision 2 keeps the capability the id names, a withdrawal no other layer re-opens, on the layers main has. The stock end-to-end half follows the dogfood pin's re-authored shape: an organization-active administrator's save is environment-wide and its withdrawal closes both doors, and the open control lands in the organization. The package layers are scored from the rest, metadata-protocol and metadata-core pins that replaced the deleted cases: one item per package of a view name in the environment's list (new as a clause; revision 1 left two packages of one name unscored while #21934 was open), a package's shipped false, and the package-less copy as the switch. The explicit-only clause moves from an end-to-end organization stage to those pins. The ruled known limit of revision 1 has no stage left to occur on and is recorded in knownGaps. Anchors re-pointed at what the files declare now: organizationScopedWriteRefusal, getMetaItems, servedViewExpansion, anonymousFormIntakeUnavailability and the v18 boot guard",
           "ref": "#23593"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-17",
+          "change": "acceptance[0]'s verify re-pointed (the domain:cli pointer on #24036, comment 6227883776): it cited registerFormEndpoints in packages/rest/src/rest-server.ts for the code that reads the environment's view list and drops a withdrawn candidate. PR #24054 (#23050 slice 11, c40a0dd9c8) moved that body to the exported registerFormEndpoints in packages/rest/src/form-routes.ts and re-pointed source[2] only; the old anchor kept resolving through the private RestServer method left behind as a stub that hands the moved body its host, so the gate stayed green. Confirmed on main c40506aac. Anchor only: no clause, step, fixture or oracle changed, so no re-run is owed",
+          "ref": "#24128"
         }
       ]
     },
