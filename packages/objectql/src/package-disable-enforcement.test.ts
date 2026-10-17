@@ -2,6 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { MetadataTypeSchema } from '@objectstack/spec/kernel';
 import { SchemaRegistry } from './registry.js';
 // [#4550 / #5480] The producer's OWN write-verb dispatch decisions, so the
 // engine double cannot accept a call `ObjectQL.delete` / `ObjectQL.update`
@@ -66,10 +67,29 @@ import { assertEngineFindOnePredicate } from './engine-findone-predicate.js';
  * halves of the enforcement are independently pinned, and the resolution rows
  * are the control that keeps a future "fix" from over-reaching into the
  * registry primitives.
+ *
+ * ---------------------------------------------------------------------------
+ * [#24210] Every other type: absence, by name as in the listing
+ * ---------------------------------------------------------------------------
+ * A type with no data plane has no refusal to share, so the by-name read
+ * (`getMetaItem`) answers a disabled package's item as ABSENT, as the listing
+ * omits it: no `item` (the transports' `404 RESOURCE_NOT_FOUND`), or the
+ * missing draft's `404 NO_DRAFT` on the strict draft read. `READERS` carries a
+ * listing row and a by-name row for EVERY type `MetadataTypeSchema` declares
+ * but `object` and `package` (`BY_NAME_TYPES`), so a type added there gets its
+ * two rows here without anyone writing them. `package` is never hidden: the
+ * Packages page re-enables from it.
  */
 
 const PKG = 'app.disabled_demo';
 const OTHER_PKG = 'app.healthy_demo';
+
+/** [#24210] Every declared metadata type the by-name read answers as absent. */
+const BY_NAME_TYPES: readonly string[] = MetadataTypeSchema.options.filter(
+  (type) => type !== 'object' && type !== 'package',
+);
+/** The item each package ships of `type`, registered as a code package registers it. */
+const shippedName = (type: string, pkg: string) => `${pkg === PKG ? 'demo' : 'healthy'}_${type}_item`;
 
 const objectBody = (name: string) => ({
   name,
@@ -199,6 +219,20 @@ async function seed(protocol: any, registry: SchemaRegistry) {
       packageId: pkg,
       item: { name: app, label: 'Demo App' },
     });
+    // [#24210] A pending draft of the stored app, so the by-name read's
+    // `state: 'draft'` and `previewDrafts` rows have a draft to serve.
+    await protocol.saveMetaItem({
+      type: 'app',
+      name: app,
+      packageId: pkg,
+      mode: 'draft',
+      item: { name: app, label: 'Demo App (draft)' },
+    });
+    // [#24210] One item of every declared type, as a code package ships it:
+    // the registry layer, stamped with the package that registered it.
+    for (const type of BY_NAME_TYPES) {
+      registry.registerItem(type, { name: shippedName(type, pkg), label: 'Shipped' } as any, 'name', pkg);
+    }
   }
 }
 
@@ -238,7 +272,8 @@ const servedFor = async (protocol: any, type: string, pkg: string): Promise<numb
 /**
  * Every reader of the disable predicate, and the class it belongs to.
  * `enforces: true` = an API reader that must stop serving a disabled package's
- * object. `enforces: false` = a resolution reader that must keep serving it.
+ * object or item. `enforces: false` = a resolution reader that must keep
+ * serving it.
  */
 const READERS: Array<{
   reader: string;
@@ -308,6 +343,61 @@ const READERS: Array<{
         (r) => r?.effective,
       ),
   },
+  {
+    reader: 'getMetaItem({ type: "app", name }) — GET /meta/app/:name, a stored row',
+    enforces: true,
+    why: '[#24210] the by-name half of the app listing: absent, as the listing omits it',
+    serves: async ({ protocol }) =>
+      servesByName(() => protocol.getMetaItem({ type: 'app', name: 'demo_app' }), (r) => r?.item),
+  },
+  {
+    reader: 'getMetaItem({ type: "apps", name }) — the plural spelling of the same route',
+    enforces: true,
+    why: '[#24210] folded to the singular before the predicate is asked',
+    serves: async ({ protocol }) =>
+      servesByName(() => protocol.getMetaItem({ type: 'apps', name: 'demo_app' }), (r) => r?.item),
+  },
+  {
+    reader: 'getMetaItem({ type: "app", state: "draft" }) — GET /meta/app/:name?state=draft',
+    enforces: true,
+    why: '[#24210] the strict draft read answers the missing draft\'s 404 NO_DRAFT',
+    serves: async ({ protocol }) => {
+      try {
+        return (await protocol.getMetaItem({ type: 'app', name: 'demo_app', state: 'draft' }))?.item != null;
+      } catch (e: any) {
+        if (e?.code === 'NO_DRAFT') return false;
+        throw e;
+      }
+    },
+  },
+  {
+    reader: 'getMetaItem({ type: "app", previewDrafts: true }) — GET /meta/app/:name?preview=draft',
+    enforces: true,
+    why: '[#24210] the draft-overlay preview returns before the active read, and is asked the same predicate',
+    serves: async ({ protocol }) =>
+      servesByName(
+        () => protocol.getMetaItem({ type: 'app', name: 'demo_app', previewDrafts: true }),
+        (r) => r?.item,
+      ),
+  },
+  // [#24210] Two rows per declared type, generated: a type `MetadataTypeSchema`
+  // adds is enumerated here with no row to write.
+  ...BY_NAME_TYPES.flatMap((type) => [
+    {
+      reader: `getMetaItems({ type: "${type}" }) — GET /meta/${type}`,
+      enforces: true,
+      why: 'the listing omits a disabled package\'s item of every type but package',
+      serves: async ({ protocol }: { protocol: any }) =>
+        (await listNames(protocol, type)).includes(shippedName(type, PKG)),
+    },
+    {
+      reader: `getMetaItem({ type: "${type}", name }) — GET /meta/${type}/:name`,
+      enforces: true,
+      why: 'the by-name half of that listing: absent, the answer a name with nothing behind it gets',
+      serves: async ({ protocol }: { protocol: any }) =>
+        servesByName(() => protocol.getMetaItem({ type, name: shippedName(type, PKG) }), (r) => r?.item),
+    },
+  ]),
   {
     reader: 'assertObjectRegistered — the data plane (findData / getData funnel here)',
     enforces: true,
@@ -456,6 +546,66 @@ describe('#7557 (A) — a disabled package stops serving, on every API reader at
     expect(served?.item?._packageId).toBe(OTHER_PKG);
     const layered: any = await h.protocol.getMetaItemLayered({ type: 'object', name: 'healthy_widget' });
     expect((layered?.effective as any)?.name).toBe('healthy_widget');
+  });
+
+  it('[#24210] a disabled package\'s item is answered as a missing name is, on every type', async () => {
+    const h = makeHarness();
+    await seed(h.protocol, h.registry);
+    h.registry.disablePackage(PKG);
+
+    for (const type of BY_NAME_TYPES) {
+      const missing: any = await h.protocol.getMetaItem({ type, name: `no_such_${type}_item` });
+      const hidden: any = await h.protocol.getMetaItem({ type, name: shippedName(type, PKG) });
+      // No item, which is what the transports judge absence on (`item == null`).
+      expect({ type, item: missing?.item }).toEqual({ type, item: undefined });
+      expect({ type, item: hidden?.item, hasItemKey: 'item' in hidden }).toEqual({ type, item: undefined, hasItemKey: true });
+      expect(hidden?.registration).toBeUndefined();
+    }
+
+    // The strict draft read: the missing draft's own error, code, status and text.
+    let draftErr: any;
+    try {
+      await h.protocol.getMetaItem({ type: 'app', name: 'demo_app', state: 'draft' });
+    } catch (e) {
+      draftErr = e;
+    }
+    expect(draftErr?.code).toBe('NO_DRAFT');
+    expect(draftErr?.status).toBe(404);
+    expect(draftErr?.message).toBe('No pending draft exists for app/demo_app.');
+  });
+
+  it('[#24210] the control: another package\'s item of every type is still listed and served by name', async () => {
+    const h = makeHarness();
+    await seed(h.protocol, h.registry);
+    h.registry.disablePackage(PKG);
+
+    const served: Record<string, boolean> = {};
+    for (const type of BY_NAME_TYPES) {
+      const name = shippedName(type, OTHER_PKG);
+      const read: any = await h.protocol.getMetaItem({ type, name });
+      served[`${type}: by name`] = read?.item?.name === name;
+      served[`${type}: listed`] = (await listNames(h.protocol, type)).includes(name);
+    }
+    expect(served).toEqual(allTrue(served));
+    const app: any = await h.protocol.getMetaItem({ type: 'app', name: 'healthy_app' });
+    expect(app?.item?._packageId).toBe(OTHER_PKG);
+  });
+
+  it('[#24210] the protection envelope stays: the write doors\' verdict on the address is not the item', async () => {
+    // The ownership ceremony gates its own writes on `editable` / `lock` from
+    // this read (`packages/cli`, `lock.verdict`), and the save door judges a
+    // save to this address the same way whether or not the package is enabled.
+    const h = makeHarness();
+    await seed(h.protocol, h.registry);
+    const before: any = await h.protocol.getMetaItem({ type: 'app', name: 'demo_app' });
+    h.registry.disablePackage(PKG);
+    const after: any = await h.protocol.getMetaItem({ type: 'app', name: 'demo_app' });
+
+    expect(before?.item?.name).toBe('demo_app');
+    expect(after?.item).toBeUndefined();
+    const { item: _beforeItem, ...beforeEnvelope } = before;
+    const { item: _afterItem, ...afterEnvelope } = after;
+    expect(afterEnvelope).toEqual(beforeEnvelope);
   });
 
   it('[#24097] a field drop on a disabled package\'s object still answers 409 DESTRUCTIVE_CHANGE', async () => {
