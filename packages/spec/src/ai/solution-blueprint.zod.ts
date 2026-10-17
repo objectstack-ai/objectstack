@@ -4,6 +4,8 @@ import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
 import { FieldType } from '../data/field.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
+import { SortDirectionEnum, SortItemSchema } from '../shared/enums.zod';
+import { VIEW_FILTER_OPERATORS, ViewFilterRuleSchema } from '../ui/view.zod';
 
 /**
  * Solution Blueprint Schema (ADR-0033 §4 — plan-first authoring)
@@ -109,7 +111,21 @@ export const BlueprintObjectSchema = lazySchema(() => z.object({
 }));
 export type BlueprintObject = z.input<typeof BlueprintObjectSchema>;
 
-/** A proposed list/form/kanban/calendar/gallery/gantt view over an object. */
+/**
+ * A proposed list/form/kanban/calendar/gallery/gantt view over an object.
+ *
+ * `filters` and `sort` are what let a view keep the promise its name makes
+ * (ruling A on cloud#2932). Without them a plan could say 「overdue only」 in a
+ * view's name and nowhere else: the applier shipped an unfiltered grid under
+ * that name, and build verification passed it, because nothing on this shape
+ * could carry the condition (cloud#2922 — 12 rows shown where the plan
+ * promised 3). Neither key invents a format: `filters` IS
+ * {@link ViewFilterRuleSchema}, the rule `ListView.filter` declares, and `sort`
+ * is the shared {@link SortItemSchema} whose `{ field, order }` keys and
+ * `asc` / `desc` vocabulary the `ListView.sort` entry declares (that entry is an
+ * inline shape, not an export). The strict mirror below carries both keys in
+ * the model-facing shape; the key-parity tests fail if either side drops one.
+ */
 export const BlueprintViewSchema = lazySchema(() => z.object({
   object: z.string().regex(SNAKE_CASE).describe('Object this view displays (snake_case)'),
   name: z.string().regex(SNAKE_CASE).describe('View machine name (snake_case)'),
@@ -120,6 +136,10 @@ export const BlueprintViewSchema = lazySchema(() => z.object({
     .describe('Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column.'),
   groupBy: z.string().regex(SNAKE_CASE).optional()
     .describe('REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows).'),
+  filters: z.array(ViewFilterRuleSchema).optional()
+    .describe('Which records this view shows: the list-view filter rules [{ field, operator, value }] the built view carries, ANDed. REQUIRED whenever the view\'s name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [{ field: "due_date", operator: "less_than", value: "{today}" }, { field: "status", operator: "not_equals", value: "completed" }]; my open → [{ field: "owner", operator: "equals", value: "{current_user_id}" }, { field: "status", operator: "equals", value: "open" }]. WITHOUT it the view shows EVERY record under a name that promises a subset. For a select field compare its option VALUE, never its label. Omit for a view that genuinely spans every record.'),
+  sort: z.array(SortItemSchema).optional()
+    .describe('Default record order: [{ field, order }] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [{ field: "due_date", order: "asc" }]). Omit for the platform default order.'),
 }));
 export type BlueprintView = z.input<typeof BlueprintViewSchema>;
 /** Post-parse shape of {@link BlueprintView} — defaults applied, transforms run (ADR-0122). */
@@ -338,6 +358,35 @@ const StrictObject = z.object({
   nameField: strictIdentOrNull('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079), or null to let the platform auto-pick a text field. Set it to the object\'s text label field (e.g. "product_name") — snake_case. For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "{order_no} · {customer}"). Declaring it is strongly preferred over null.'),
 });
 
+// One list-view filter rule, strict-shaped. The lenient side reuses
+// `ViewFilterRuleSchema` itself; this mirror carries its SAME three keys and
+// differs only where strict structured output cannot express the original:
+//  - `value` is nullable and present, not optional — strict mode needs every
+//    key in `required`, and null is the unary operators' spelling. The blueprint
+//    tools strip it to an absent `value`, which is what the lenient rule reads.
+//  - `operator` is the plain canonical enum. The lenient `z.preprocess` that
+//    folds legacy spellings (`eq`, `gt`, …) is a parse-time transform with no
+//    JSON-Schema form, and a new producer emits the canonical vocabulary anyway.
+//  - the operator ↔ value-shape refinement (`in` takes an array, `between` a
+//    pair, `icontains` a non-empty string) has no JSON-Schema form either; the
+//    lenient rule `apply_blueprint` parses against refuses those, by name.
+// The key-parity test pins this key set to `ViewFilterRuleSchema`'s.
+const StrictViewFilterRule = z.object({
+  field: z.string().describe('Field on the view\'s object to filter by (snake_case, e.g. "due_date", "status", "owner")'),
+  operator: z.enum(VIEW_FILTER_OPERATORS).describe('Filter operator — the canonical vocabulary only'),
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number()]))]).nullable()
+    .describe('Comparison value, or null for the unary operators (is_empty / is_not_empty / is_null / is_not_null), which take their direction from the operator name. "in" / "not_in" take an ARRAY (any length); "between" takes exactly [min, max]; every other operator takes a scalar. For a select field use its option VALUE, never its label. Today\'s date is the platform token "{today}" and the signed-in user is "{current_user_id}".'),
+});
+
+// One sort entry, strict-shaped: the lenient side reuses the shared
+// `SortItemSchema`; both of its keys are already required, so the mirror needs
+// no nullable — it is inlined only because this mirror declares every shape it
+// sends, as the other nested shapes here do.
+const StrictSortItem = z.object({
+  field: z.string().describe('Field on the view\'s object to sort by (snake_case)'),
+  order: SortDirectionEnum.describe('Sort direction: "asc" or "desc"'),
+});
+
 const StrictView = z.object({
   object: strictIdent('Object this view displays (snake_case)'),
   name: strictIdent('View machine name (snake_case)'),
@@ -345,6 +394,14 @@ const StrictView = z.object({
   type: z.enum(['list', 'form', 'kanban', 'calendar', 'gallery', 'gantt']).nullable().describe('View kind, or null for list. "gallery" = visual card/cover browse (画廊/相册/卡片墙/封面/海报, or an object with an image/avatar/file field); "gantt" = timeline/schedule (甘特图/时间线/排期, object with BOTH a start and an end date field); "kanban" = board grouped by a status/select field; "calendar" = single-date schedule; "form" = record editor.'),
   columns: z.array(z.string().regex(SNAKE_CASE)).nullable().describe('Field names shown as columns, or null. For a gallery, INCLUDE the image/avatar/file field (becomes the card cover); for a gantt, INCLUDE the start date column before the end date column.'),
   groupBy: strictIdentOrNull('REQUIRED for kanban: the select/status field whose options become the board columns (e.g. "stage"). Optional for gantt (groups leaf tasks). Null for list/form/calendar/gallery.'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintViewSchema.filters`.
+  // THIS describe is the one the design model reads, and strict mode makes the
+  // key required, so the model decides on every view: state the filter its
+  // name promises, or say null. The view key-parity pin fails if it goes.
+  filters: z.array(StrictViewFilterRule).nullable()
+    .describe('Which records this view shows: list-view filter rules [{field, operator, value}], ANDed, or null for a view over EVERY record. REQUIRED whenever the view\'s name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [{field:"due_date",operator:"less_than",value:"{today}"},{field:"status",operator:"not_equals",value:"completed"}]; my open → [{field:"owner",operator:"equals",value:"{current_user_id}"},{field:"status",operator:"equals",value:"open"}]. Null under such a name ships a view that shows every record while its name promises a subset.'),
+  sort: z.array(StrictSortItem).nullable()
+    .describe('Default record order: [{field, order}] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [{field:"due_date",order:"asc"}]), or null for the platform default order.'),
 });
 
 const StrictDashboard = z.object({

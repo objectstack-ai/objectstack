@@ -2,11 +2,14 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  BlueprintViewSchema,
   SolutionBlueprintSchema,
   SolutionBlueprintStrictSchema,
   defineSolutionBlueprint,
   type SolutionBlueprint,
 } from './solution-blueprint.zod';
+import { ViewFilterRuleSchema } from '../ui/view.zod';
+import { SortItemSchema } from '../shared/enums.zod';
 
 const validBlueprint: SolutionBlueprint = {
   summary: 'A simple project tracker',
@@ -282,6 +285,94 @@ describe('SolutionBlueprintSchema', () => {
     });
     expect(result.success).toBe(false);
   });
+
+  describe('view filters + sort (a view named by a condition carries the condition)', () => {
+    const taskObject = {
+      name: 'task',
+      fields: [
+        { name: 'title', type: 'text' as const },
+        { name: 'status', type: 'select' as const },
+        { name: 'due_date', type: 'date' as const },
+      ],
+    };
+    const overdueRules = [
+      { field: 'due_date', operator: 'less_than' as const, value: '{today}' },
+      { field: 'status', operator: 'not_equals' as const, value: 'completed' },
+    ];
+    /** The first issue of a failed lenient parse, as `{ path, code }`. */
+    const firstIssue = (input: unknown) => {
+      const result = SolutionBlueprintSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      const issue = result.success ? undefined : result.error.issues[0];
+      return { path: issue?.path, code: issue?.code };
+    };
+
+    it('carries a view\'s filters and sort through the parse — z.object would strip an undeclared key', () => {
+      const parsed = SolutionBlueprintSchema.parse({
+        summary: 's',
+        objects: [taskObject],
+        views: [{
+          object: 'task', name: 'overdue_tasks', label: '逾期任务', columns: ['title', 'due_date'],
+          filters: overdueRules,
+          sort: [{ field: 'due_date', order: 'asc' }],
+        }],
+      });
+      expect(parsed.views?.[0].filters).toEqual(overdueRules);
+      expect(parsed.views?.[0].sort).toEqual([{ field: 'due_date', order: 'asc' }]);
+    });
+
+    it('keeps both keys optional — a view over every record omits them', () => {
+      const parsed = SolutionBlueprintSchema.parse({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'all_tasks' }],
+      });
+      expect(parsed.views?.[0].filters).toBeUndefined();
+      expect(parsed.views?.[0].sort).toBeUndefined();
+    });
+
+    it('declares no new format: `filters` IS ViewFilterRuleSchema and `sort` IS the shared SortItemSchema', () => {
+      // Identity, not shape: a copy would agree today and drift on the next
+      // edit of the ListView rule, which is the dialect this key must not fork.
+      const shape = (BlueprintViewSchema as any).shape;
+      expect(shape.filters.unwrap().element).toBe(ViewFilterRuleSchema);
+      expect(shape.sort.unwrap().element).toBe(SortItemSchema);
+    });
+
+    it('refuses an operator outside the view-filter vocabulary, at the rule\'s own path', () => {
+      expect(firstIssue({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'overdue_tasks', filters: [{ field: 'due_date', operator: 'older_than', value: '{today}' }] }],
+      })).toEqual({ path: ['views', 0, 'filters', 0, 'operator'], code: 'invalid_value' });
+    });
+
+    it('refuses the list-view rule\'s value-shape violations too (the rule is reused, refinement included)', () => {
+      // The strict mirror cannot express this coupling in JSON Schema; the
+      // lenient parse `apply_blueprint` runs is where it is refused.
+      expect(firstIssue({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'open_or_new', filters: [{ field: 'status', operator: 'in', value: 'open' }] }],
+      })).toEqual({ path: ['views', 0, 'filters', 0, 'value'], code: 'custom' });
+    });
+
+    it('refuses a sort order outside asc / desc, at the entry\'s own path', () => {
+      expect(firstIssue({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'by_due', sort: [{ field: 'due_date', order: 'descending' }] }],
+      })).toEqual({ path: ['views', 0, 'sort', 0, 'order'], code: 'invalid_value' });
+    });
+
+    it('refuses a bare-string sort clause — the array is the only spelling, as on ListView', () => {
+      expect(firstIssue({
+        summary: 's',
+        objects: [taskObject],
+        views: [{ object: 'task', name: 'by_due', sort: 'due_date desc' }],
+      })).toEqual({ path: ['views', 0, 'sort'], code: 'invalid_type' });
+    });
+  });
 });
 
 // The strict mirror is what `generateObject` sends to OpenAI: every property
@@ -324,8 +415,8 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     const parsed = SolutionBlueprintStrictSchema.parse({
       ...strictBp,
       views: [
-        { object: 'event', name: 'wall', label: null, type: 'gallery', columns: null, groupBy: null },
-        { object: 'event', name: 'plan', label: null, type: 'gantt', columns: null, groupBy: null },
+        { object: 'event', name: 'wall', label: null, type: 'gallery', columns: null, groupBy: null, filters: null, sort: null },
+        { object: 'event', name: 'plan', label: null, type: 'gantt', columns: null, groupBy: null, filters: null, sort: null },
       ],
     });
     expect(parsed.views?.map((v) => v.type)).toEqual(['gallery', 'gantt']);
@@ -516,6 +607,71 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
     };
     expect(() => SolutionBlueprintStrictSchema.parse(missingKeys)).toThrow();
   });
+
+  describe('view filters + sort (the model states a view\'s filter or says null)', () => {
+    const strictView = {
+      object: 'task', name: 'overdue_tasks', label: '逾期任务', type: 'list', columns: ['title', 'due_date'], groupBy: null,
+    };
+    /** The first issue of a failed strict parse, as `{ path, code }`. */
+    const firstIssue = (input: unknown) => {
+      const result = SolutionBlueprintStrictSchema.safeParse(input);
+      expect(result.success).toBe(false);
+      const issue = result.success ? undefined : result.error.issues[0];
+      return { path: issue?.path, code: issue?.code };
+    };
+
+    it('carries a view\'s filters and sort — the filter its name promises is expressible in the structured output', () => {
+      const filters = [
+        { field: 'due_date', operator: 'less_than', value: '{today}' },
+        { field: 'status', operator: 'not_equals', value: 'completed' },
+        { field: 'status', operator: 'in', value: ['open', 'blocked'] },
+        { field: 'archived_at', operator: 'is_null', value: null },
+      ];
+      const parsed = SolutionBlueprintStrictSchema.parse({
+        ...strictBp,
+        views: [{ ...strictView, filters, sort: [{ field: 'due_date', order: 'asc' }] }],
+      });
+      expect(parsed.views?.[0].filters).toEqual(filters);
+      expect(parsed.views?.[0].sort).toEqual([{ field: 'due_date', order: 'asc' }]);
+    });
+
+    it('accepts null for both keys — a view over every record, in the platform default order', () => {
+      const parsed = SolutionBlueprintStrictSchema.parse({
+        ...strictBp,
+        views: [{ ...strictView, name: 'all_tasks', filters: null, sort: null }],
+      });
+      expect(parsed.views?.[0].filters).toBeNull();
+      expect(parsed.views?.[0].sort).toBeNull();
+    });
+
+    it('requires both keys to be present (OpenAI strict: every key in `required`)', () => {
+      expect(firstIssue({ ...strictBp, views: [{ ...strictView, sort: null }] }))
+        .toEqual({ path: ['views', 0, 'filters'], code: 'invalid_type' });
+      expect(firstIssue({ ...strictBp, views: [{ ...strictView, filters: null }] }))
+        .toEqual({ path: ['views', 0, 'sort'], code: 'invalid_type' });
+    });
+
+    it('requires a rule\'s `value` key to be present — null is the unary operators\' spelling', () => {
+      expect(firstIssue({
+        ...strictBp,
+        views: [{ ...strictView, filters: [{ field: 'archived_at', operator: 'is_null' }], sort: null }],
+      })).toEqual({ path: ['views', 0, 'filters', 0, 'value'], code: 'invalid_type' });
+    });
+
+    it('takes the canonical operator vocabulary only — a legacy shorthand is not a word the model may emit', () => {
+      expect(firstIssue({
+        ...strictBp,
+        views: [{ ...strictView, filters: [{ field: 'status', operator: 'eq', value: 'open' }], sort: null }],
+      })).toEqual({ path: ['views', 0, 'filters', 0, 'operator'], code: 'invalid_value' });
+    });
+
+    it('refuses a sort order outside asc / desc', () => {
+      expect(firstIssue({
+        ...strictBp,
+        views: [{ ...strictView, filters: null, sort: [{ field: 'due_date', order: 'descending' }] }],
+      })).toEqual({ path: ['views', 0, 'sort', 0, 'order'], code: 'invalid_value' });
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -576,6 +732,47 @@ describe('strict mirror ↔ lenient schema — key parity', () => {
       (SolutionBlueprintStrictSchema as any).shape.app.unwrap().shape.nav.unwrap().element.shape,
     ).sort();
     expect(strictNavKeys).toEqual(lenientNavKeys);
+  });
+
+  const lenientViewShape = () => (SolutionBlueprintSchema as any).shape.views.unwrap().element.shape;
+  const strictViewShape = () => (SolutionBlueprintStrictSchema as any).shape.views.unwrap().element.shape;
+
+  it('the VIEW schemas carry exactly the same keys', () => {
+    // Widened with `filters` / `sort`, the fourth level of the same gap
+    // (fields → objects → nav items → views). The view is where "WHICH records
+    // does this view show" lives; with the key on the lenient side only, the
+    // design step could never state the filter its view's name promises, and the
+    // applier would accept a filter no proposal can contain. There are NO
+    // deliberate view-level exclusions (measured: both sides carry
+    // object/name/label/type/columns/groupBy/filters/sort); if one ever becomes
+    // deliberate, list it explicitly here with its reason.
+    expect(Object.keys(strictViewShape()).sort()).toEqual(Object.keys(lenientViewShape()).sort());
+    expect(Object.keys(lenientViewShape())).toEqual(expect.arrayContaining(['filters', 'sort']));
+  });
+
+  it('the view FILTER RULE and SORT ENTRY shapes carry exactly the same keys', () => {
+    // One level down, for the same reason the field pin sits under the object
+    // pin: the strict mirror re-declares these two shapes inline (strict mode
+    // cannot take the lenient rule's preprocess / refinement), so a key added to
+    // `ViewFilterRuleSchema` or `SortItemSchema` would otherwise be one the
+    // model can never emit. No deliberate exclusions at either level.
+    const keysOf = (arraySchema: any) => Object.keys(arraySchema.unwrap().element.shape).sort();
+    expect(keysOf(strictViewShape().filters)).toEqual(keysOf(lenientViewShape().filters));
+    expect(keysOf(strictViewShape().sort)).toEqual(keysOf(lenientViewShape().sort));
+  });
+
+  it('the strict filter rule offers exactly the view-filter operator vocabulary the lenient rule accepts', () => {
+    // Value parity for the one enum the VALUE-parity walker below cannot see
+    // (it indexes string patterns): the lenient operator is an enum behind a
+    // preprocess, the strict one the same enum without it. A canonical operator
+    // missing here is one the model cannot choose; an extra one, a rule the
+    // applier refuses.
+    const strictOperators = strictViewShape().filters.unwrap().element.shape.operator.options;
+    const lenientOperators = lenientViewShape().filters.unwrap().element.shape.operator.def.out.options;
+    expect([...strictOperators].sort()).toEqual([...lenientOperators].sort());
+    const strictOrders = strictViewShape().sort.unwrap().element.shape.order.options;
+    const lenientOrders = lenientViewShape().sort.unwrap().element.shape.order.options;
+    expect([...strictOrders].sort()).toEqual([...lenientOrders].sort());
   });
 
   it('carries `viewName`, so a menu entry can say WHICH view it opens', () => {
