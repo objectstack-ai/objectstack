@@ -196,7 +196,7 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
     }
 
     async function seedSource(extra: Array<[string, { name: string }]> = []): Promise<void> {
-        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'application' } });
+        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
         expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
         await save('object', customerBody);
         await save('object', ticketBody);

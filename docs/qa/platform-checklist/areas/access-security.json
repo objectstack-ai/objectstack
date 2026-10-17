@@ -1263,7 +1263,7 @@
       "title": "The audit-log browser surfaces attributable events over sys_audit_log with correct actor/object, filters, and a before/after payload drawer",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1283,7 +1283,7 @@
         "generate 3 attributable events with distinct action/actor/object: (a) a fresh member SIGNS IN (action 'login', actor = the member); (b) as admin DELETE a showcase_task via /api/v1/data/showcase_task/<id> (action 'delete', object_name showcase_task, record_id set); (c) write a setting (action 'config_change')",
         "open /system/audit-log; wait for the table to settle; screenshot",
         "locate all three events in the page and read their action / object / actor cells",
-        "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. /system/audit-log (AuditLogPage) has an Action select in its filter bar that writes action into the request's $filter. The sys_audit_log object list (the nav entry) offers the prebuilt filtered views (Recent / Writes / Auth / Config) and the generic Filter Records → Where → Add filter builder instead. Either is a valid server-side narrowing",
+        "narrow to writes and confirm the narrowing is server-side; capture the re-issued /api/v1/data/sys_audit_log request with its $filter. /system/audit-log (AuditLogPage) has an Action select in its filter bar that writes action into the request's $filter. The page's Presets row offers sys_audit_log's list views (Writes / Auth / Config / …), and its 'Open as list' link opens the sys_audit_log object list (no longer a Setup menu entry), which offers the same views and the generic Filter Records → Where → Add filter builder. Any of these is a valid server-side narrowing",
         "click an UPDATE row (e.g. PATCH a showcase_contact first) → the side drawer opens; screenshot the Before (old_value) / After (new_value) JSON panels — the update event is the shape that carries both",
         "cross-check the API twin directly: GET /api/v1/data/sys_audit_log?$filter=... for each of the three actions and compare actor/object/action to the page",
         "attempt to forge the trail: POST and PATCH /api/v1/data/sys_audit_log — both must be refused (get+list only)"
@@ -1336,7 +1336,7 @@
       ],
       "source": [
         "packages/plugins/plugin-audit/src/objects/sys-audit-log.object.ts#user_id (action enum, actor/user_id/object_name/record_id/old_value/new_value fields, enable.apiMethods get+list)",
-        "packages/plugins/plugin-audit/src/audit-plugin.ts#nav_audit_logs (nav_audit_logs → sys_audit_log)",
+        "packages/plugins/plugin-audit/src/audit-plugin.ts#nav_audit_logs (nav_audit_logs → audit:log, Setup's one audit entry, which opens this page)",
         "objectui apps/console/src/pages/system/AuditLogPage.tsx (/api/v1/data/sys_audit_log, $filter/$orderby/$top/$skip, Before/After drawer)",
         "objectui apps/console/src/AppContent.tsx (route system/audit-log)"
       ],
@@ -1350,7 +1350,8 @@
         { "revision": 2, "date": "2026-08-18", "change": "re-pointed clause 2 and step 5 at controls that exist. The item named an 'Action filter' dropdown; this console offers prebuilt filtered views (Recent / Writes / Auth / Config) plus a generic Filter Records / Where / Add filter builder. Server-side narrowing — the property the clause is actually for — is provable through the Writes view; naming a control that does not exist invites the absence-inference trap (#9453 CF-9)", "ref": "#9386" },
         { "revision": 3, "date": "2026-10-02", "change": "re-pointed clause 1 (and the clauses that counted its three rows) at 17.6.0's ledger read rule. 30c530e5 (#21194) serves a non-system reader, administrators included, only audit rows about records it can read, so the delete row is written but never served on the data API; the 17.6.0 release-verification run measured the admin's delete-filtered read at 0 rows while the stored row carried correct attribution. The clause now asserts the login and config_change rows served, the delete row stored and NOT served; step 6's drawer check moves to an update row, since no delete row reaches the page", "ref": "#21330" },
         { "revision": 4, "date": "2026-10-05", "change": "clauses 1, 3 and 5 and steps 5-6 re-pointed (stale after 17.6.0, #21784 VF4 + FE7). 7ebb543164 (#21296, fixes #21260, 2026-10-02) gives platform admins view_all_audit_log by default (ADMIN_FULL_ACCESS_CAPABILITIES). That exempts them from the ledger's parent-record read gate, so the admin's read serves the delete row. Revision 3 was measured on 17.6.0 and encodes only #21194. Clauses 1 and 5 use the verifier's wording: the delete row is served to a view_all_audit_log holder and withheld from a non-holder who cannot read the deleted record. FE7: revision 2's 'there is no Action dropdown' is false at the console pin, because AuditLogPage has an Action select that narrows through $filter. Clause 3 and step 5 now name it beside the object list's prebuilt views. Re-read at objectui 9dfaca6543: unchanged", "ref": "#21797" },
-        { "revision": 5, "date": "2026-10-16", "change": "clause 1's non-holder arm re-pointed to the measured answer (#23878 checklist-accuracy finding, re-measured on main c91af8ed6): a fresh member is refused sys_audit_log at the object level (GET /api/v1/data/sys_audit_log and the action='delete' filter both answer 403 PERMISSION_DENIED), so the 'empty filtered list' the clause expected never appears. No stock non-admin permission set grants read on sys_audit_log, so the parent-record gate (#21194) has no live non-admin reader; the clause now names the plugin-audit visibility pins as its oracle for that gate. The clause still fails if the fresh member is served any row", "ref": "#24036" }
+        { "revision": 5, "date": "2026-10-16", "change": "clause 1's non-holder arm re-pointed to the measured answer (#23878 checklist-accuracy finding, re-measured on main c91af8ed6): a fresh member is refused sys_audit_log at the object level (GET /api/v1/data/sys_audit_log and the action='delete' filter both answer 403 PERMISSION_DENIED), so the 'empty filtered list' the clause expected never appears. No stock non-admin permission set grants read on sys_audit_log, so the parent-record gate (#21194) has no live non-admin reader; the clause now names the plugin-audit visibility pins as its oracle for that gate. The clause still fails if the fresh member is served any row", "ref": "#24036" },
+        { "revision": 6, "date": "2026-10-17", "change": "step 5 and the nav source re-pointed at Setup's one audit entry (#23890): nav_audit_logs now opens this page (audit:log) and is labelled Audit Log, the sys_audit_log object list has no Setup menu entry and is reached from the page's Open as list link, and the page offers the list views as presets (objectui#12667, at the console pin 5e15928b4631). No acceptance clause changes", "ref": "#23890" }
       ]
     },
     {

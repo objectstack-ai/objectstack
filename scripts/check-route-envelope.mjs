@@ -268,6 +268,12 @@ const MODULES = {
   // created the module so the gap never exists.
   'packages/services/service-storage/src/mount-storage-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // The print door (`POST /api/v1/print/records`), mounted by `PrintServicePlugin`
+  // straight on `IHttpServer`. Every body it answers is written by the shared pair
+  // (`sendOk` / `sendError` / `sendServerFault`), so it builds none itself.
+  // Declared in the same PR that created the module.
+  'packages/services/service-print/src/print-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // ── Exempt ──────────────────────────────────────────────────────────────
 
   // A dev-only SSE endpoint (`GET|POST /api/v1/dev/metadata-events`) that closes
@@ -391,7 +397,15 @@ const MODULES = {
     // `FORM_NOT_FOUND`) left this file with `registerFormEndpoints`' body for
     // `form-routes.ts`, declared below at the count they had here; the sum is
     // unchanged (11 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 = 39).
-    stringError: 11,
+    //
+    // 11 → 8 (#23050 slice 12): NOT progress — the same MOVE as slices 1–3, 8,
+    // 10 and 11. The CRUD doors' three literal string `error` bodies (the 400
+    // `VALIDATION_FAILED` answers of the create, QueryAST query and update
+    // request gates: `'Invalid create request'`, `'Invalid query request'`,
+    // `'Invalid update request'`) left this file with `registerCrudEndpoints`'
+    // body for `crud-routes.ts`, declared below at the count they had here; the
+    // sum is unchanged (8 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 = 39).
+    stringError: 8,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -488,7 +502,12 @@ const MODULES = {
     // `FORM_RESOLVE_FAILED` and the submit door's 400 `VALIDATION_ERROR`) left
     // with that body for `form-routes.ts`, declared below; the sum is unchanged
     // (7 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 = 54).
-    siblingCode: 7,
+    //
+    // 7 → 4 (#23050 slice 12): NOT progress — the same MOVE as `stringError`
+    // above. Those same three `{ error, code }` bodies (each request gate's 400
+    // `VALIDATION_FAILED`) left with that body for `crud-routes.ts`, declared
+    // below; the sum is unchanged (4 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 = 54).
+    siblingCode: 4,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -720,6 +739,24 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 4,
     siblingCode: 6,
+  },
+
+  // [#23050 slice 12] `RestServer#registerCrudEndpoints`' body — the six record
+  // doors under `{basePath}{crud.dataPrefix}` (list, read, create, the QueryAST
+  // query, update, delete) — moved out of `rest-server.ts` whole, on exactly
+  // slice 1's terms above: a MOVE, no wire answer changed, so it inherits
+  // `dialectOnly` and the two dialect facts, and no write-site count. Both
+  // counts were measured on the moved file and equal what left
+  // `rest-server.ts` in the same PR (stringError 11 → 8, siblingCode 7 → 4), so
+  // each sum is unchanged. Both only ever tick down. Discovered by the
+  // `*-routes.ts` convention and declared in the same PR that created the
+  // module, so the gap never exists.
+  'packages/rest/src/crud-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 12 and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 3,
+    siblingCode: 3,
   },
 };
 

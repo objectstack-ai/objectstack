@@ -95,7 +95,7 @@ describe('installPackage — durable persistence (#2532)', () => {
   it('persists a VERSIONLESS manifest by defaulting version (the vanish-on-restart bug)', async () => {
     const { impl, registryCalls, publish } = makeImpl();
     const res: any = await (impl as any).installPackage({
-      manifest: { id: 'com.example.orders', name: '订单中心' },
+      manifest: { id: 'com.example.orders', name: '订单中心', type: 'app' },
     });
 
     // In-memory half.
@@ -111,7 +111,7 @@ describe('installPackage — durable persistence (#2532)', () => {
 
   it('keeps an explicit version untouched', async () => {
     const { impl, publish } = makeImpl();
-    await (impl as any).installPackage({ manifest: { id: 'com.example.v', version: '2.3.4' } });
+    await (impl as any).installPackage({ manifest: { id: 'com.example.v', name: 'V', type: 'app', version: '2.3.4' } });
     expect((publish.mock.calls[0][0] as any).manifest.version).toBe('2.3.4');
   });
 
@@ -208,7 +208,7 @@ describe("service-ABSENT host — the degraded path (#17676 ruling A' items 2/3)
       const { impl, registryCalls, publish, registry } = makeImpl({ packageService: false });
 
       const res: any = await (impl as any).installPackage({
-        manifest: { id: 'com.example.leave', name: '请假' },
+        manifest: { id: 'com.example.leave', name: '请假', type: 'app' },
       });
 
       // The door still answers 201 — which is exactly why the card calls the
@@ -282,7 +282,7 @@ describe("the restart split this card reported (#17676 ruling A' items 3/5)", ()
       // ── process 1 ─────────────────────────────────────────────────────────
       const before = makeImpl({ packageService: false, publish: sysPackages.publish });
       await (before.impl as any).installPackage({
-        manifest: { id: 'com.example.leave', name: '请假' },
+        manifest: { id: 'com.example.leave', name: '请假', type: 'app' },
       });
       expect(before.registry.getPackage('com.example.leave')).toBeTruthy();
       expect([...sysPackages.rows.keys()]).toEqual([]);
@@ -310,7 +310,7 @@ describe("the restart split this card reported (#17676 ruling A' items 3/5)", ()
 
     const before = makeImpl({ publish: sysPackages.publish });
     await (before.impl as any).installPackage({
-      manifest: { id: 'com.example.leave', name: '请假' },
+      manifest: { id: 'com.example.leave', name: '请假', type: 'app' },
     });
     // The durable half ran, so the restart has something to replay.
     expect([...sysPackages.rows.keys()]).toEqual(['com.example.leave']);

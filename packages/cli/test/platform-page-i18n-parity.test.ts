@@ -3,7 +3,7 @@
 /**
  * Drift guard for the plugin-carried Setup pages' i18n (#3589).
  *
- * Three Setup pages ship as metadata inside capability plugins
+ * Two Setup pages ship as metadata inside capability plugins
  * (`@objectstack/cloud-connection`, `@objectstack/mcp`) while their
  * translations live in `@objectstack/platform-objects` — the two are edited
  * in different packages by different people. `translatePage` applies the
@@ -22,19 +22,20 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import {
-  MARKETPLACE_INSTALLED_UI_BUNDLE,
-  CLOUD_CONNECTION_UI_BUNDLE,
-} from '@objectstack/cloud-connection';
+import { CLOUD_CONNECTION_UI_BUNDLE } from '@objectstack/cloud-connection';
 import { CONNECT_AGENT_UI_BUNDLE } from '@objectstack/mcp';
 import { SetupAppTranslations } from '@objectstack/platform-objects';
 import * as PlatformPages from '@objectstack/platform-objects/pages';
 import { PAGE_COMPONENT_COPY_KEYS, translatePage, walkAddressedPageComponents } from '@objectstack/spec/system';
 import { collectExpectedEntries } from '../src/utils/i18n-extract.js';
 
-/** The pages exactly as the plugins register them with the kernel. */
+/**
+ * The pages exactly as the plugins register them with the kernel. The
+ * install-local plugin's `marketplace_installed` page retired with #23933 —
+ * its "Installed Apps" entry opens Setup → Packages filtered to marketplace
+ * installs — so its bundle carries no page to read here.
+ */
 const PAGES = [
-  MARKETPLACE_INSTALLED_UI_BUNDLE.pages?.[0],
   CLOUD_CONNECTION_UI_BUNDLE.pages?.[0],
   CONNECT_AGENT_UI_BUNDLE.pages?.[0],
 ].filter(Boolean) as Array<Record<string, any>>;
@@ -50,11 +51,10 @@ const read = (node: unknown, path: string): unknown =>
   );
 
 describe('plugin-carried Setup pages — i18n drift guard (#3589)', () => {
-  it('finds all three pages through the plugins’ UI bundles', () => {
+  it('finds both pages through the plugins’ UI bundles', () => {
     expect(PAGES.map((p) => p.name).sort()).toEqual([
       'cloud_connection_settings',
       'connect_agent',
-      'marketplace_installed',
     ]);
   });
 
@@ -1022,7 +1022,6 @@ const defaultLocalePageDrift = (
  */
 const ALL_PAGE_SOURCES: Array<{ page: Record<string, any>; authoredBy: string }> = [
   ...([
-    [MARKETPLACE_INSTALLED_UI_BUNDLE, '@objectstack/cloud-connection'],
     [CLOUD_CONNECTION_UI_BUNDLE, '@objectstack/cloud-connection'],
     [CONNECT_AGENT_UI_BUNDLE, '@objectstack/mcp'],
   ] as Array<[{ pages?: Array<Record<string, any>> }, string]>).flatMap(([bundle, authoredBy]) =>
@@ -1043,13 +1042,13 @@ describe('`pages.*` default-locale parity (#8764, moved off the nav roster by #1
     // The anti-vacuity floor, stated before the verdict runs. A verdict over an
     // empty or shrunken population is the ambiguous `0` this whole card is
     // about: every loop below would be satisfied and report success.
-    // (`sys_position_detail` retired with the `sys_position` object, C3 stage 8.)
-    expect(SOURCE_BY_NAME.size).toBeGreaterThanOrEqual(5);
+    // (`sys_position_detail` retired with the `sys_position` object, C3 stage 8,
+    // and `marketplace_installed` with the install-local plugin's page, #23933.)
+    expect(SOURCE_BY_NAME.size).toBeGreaterThanOrEqual(4);
     expect([...SOURCE_BY_NAME.keys()].sort()).toEqual(
       expect.arrayContaining([
         'cloud_connection_settings',
         'connect_agent',
-        'marketplace_installed',
         'sys_organization_detail',
         'sys_user_detail',
       ]),
@@ -1065,7 +1064,7 @@ describe('`pages.*` default-locale parity (#8764, moved off the nav roster by #1
     const enPages = pagesOf(EN);
     // Absence is loud: an `en` section that lost its entries would make the
     // verdict below compare nothing at all.
-    expect(Object.keys(enPages).length).toBeGreaterThanOrEqual(5);
+    expect(Object.keys(enPages).length).toBeGreaterThanOrEqual(4);
 
     const findings = defaultLocalePageDrift(enPages, SOURCE_BY_NAME).map((f) => ({
       ...f,
@@ -1084,7 +1083,9 @@ describe('`pages.*` default-locale parity (#8764, moved off the nav roster by #1
   });
 
   // ── The RED-SHAPE controls. These were `--self-test` cases on the gate; a
-  //    verdict moved without them is a verdict nobody has seen fail.
+  //    verdict moved without them is a verdict nobody has seen fail. The
+  //    sample is a synthetic page shaped like the retired `marketplace_installed`
+  //    page (#23933); it is a fixture, and no shipped population carries it.
   const SAMPLE_PAGE = {
     name: 'marketplace_installed',
     label: 'Installed Apps',

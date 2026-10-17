@@ -2570,10 +2570,10 @@ export const SearchAllHitSchema = lazySchema(() => z.object({
   object: z.string().describe('Name of the object the hit belongs to.'),
   id: z.string().describe('ID of the matched record.'),
   title: z.string().describe(
-    'Display title for the hit, resolved in order: the object\'s `titleFormat` template → '
-    + 'the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias '
-    + '`displayNameField` still honored) → conventional name fields → first/last name → '
-    + 'the record ID as a string.'
+    'Display title for the hit, resolved in order: the declared primary-title pointer '
+    + '(`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → the '
+    + 'object\'s deprecated `titleFormat` template → conventional name fields → first/last '
+    + 'name → the record ID as a string.'
   ),
   snippet: z.string().optional().describe(
     'Excerpt cut around the first matched term in a searchable text column, ellipsized at '

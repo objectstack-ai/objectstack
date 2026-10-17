@@ -28,6 +28,9 @@ export default defineConfig({
       { find: /^@objectstack\/objectql$/, replacement: path.resolve(__dirname, '../../objectql/src/index.ts') },
       { find: /^@objectstack\/metadata-protocol$/, replacement: path.resolve(__dirname, '../../metadata-protocol/src/index.ts') },
       { find: /^@objectstack\/driver-sql$/, replacement: path.resolve(__dirname, '../../drivers/driver-sql/src/index.ts') },
+      // The install-refusal pins read the boundary's status-to-code mapping
+      // (`standardErrorCodeForHttpStatus`) from the source, like the rest.
+      { find: /^@objectstack\/spec\/api$/, replacement: path.resolve(__dirname, '../../spec/src/api/index.ts') },
     ],
   },
 });

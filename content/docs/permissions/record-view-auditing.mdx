@@ -204,8 +204,9 @@ concerns.
 ## Reading the trail
 
 `sys_audit_log` ships a **Record Views** list view — filtered to `action: read`,
-newest first — reachable in the Setup app under Diagnostics, via the
-[Audit Logs entry](/docs/ui/setup-app) the plugin contributes.
+newest first. In the Setup app, Diagnostics › [Audit Log](/docs/ui/setup-app),
+the entry the plugin contributes, opens the audit browser, which offers that
+view as a preset; its "Open as list" link opens the object list on it.
 
 The object is append-only and exposes only `get` and `list` on the data API;
 every field is `readonly`, so the ledger is never written through a form.

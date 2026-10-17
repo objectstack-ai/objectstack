@@ -51,6 +51,8 @@ export const REST_SERVER_REGISTRAR_FILES = [
     'ui-routes.ts',
     // [#23050 slice 11] `registerFormEndpoints`' body.
     'form-routes.ts',
+    // [#23050 slice 12] `registerCrudEndpoints`' body.
+    'crud-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
