@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 20 — spawns the real producer once per single-cause fixture: three runs of the built CLI (a `serve --dev` that mints the stdio key, an `os compile` for the artifact, then the `os serve` under test); provisional, measured before landing
+// test-budget: 15 — spawns the real producer once per single-cause fixture: three runs of the built CLI (a `serve --dev` that mints the stdio key, an `os compile` for the artifact, then the `os serve` under test); 11.6 s, the slowest of four local runs on a shared container, x 1.25, no CI reading yet
 
 /**
  * #24191 — `os serve` with the stdio MCP transport enabled and NO config
