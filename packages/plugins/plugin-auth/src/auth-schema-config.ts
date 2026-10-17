@@ -613,8 +613,10 @@ export const AUTH_OAUTH_REFRESH_TOKEN_SCHEMA = {
  * `@better-auth/oauth-provider` plugin `oauthConsent` model mapping.
  *
  * The new package dropped the boolean `consentGiven` flag — the presence of
- * a row implies consent was given for the listed scopes. A new
- * `referenceId` column was added for client-supplied correlation.
+ * a row implies consent was given for the listed scopes. Its `referenceId`
+ * column holds the organization the consent binds (the consenting session's
+ * active organization, written through `postLogin.consentReferenceId` in
+ * `auth-manager.ts`), never a client-supplied value.
  *
  * | camelCase (better-auth) | snake_case (ObjectStack)   |
  * |:------------------------|:---------------------------|

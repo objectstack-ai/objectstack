@@ -1359,6 +1359,30 @@ async function slugGuardReadFaultApiError(object: string, cause: unknown): Promi
   return err;
 }
 
+/**
+ * [#24166, ruling 6232069920 A] The access-token claim that carries the
+ * organization an OAuth consent bound. Minted by `customAccessTokenClaims` on
+ * the embedded authorization server and read back by
+ * {@link AuthManager.verifyMcpAccessToken} — one spelling for both ends.
+ */
+const OAUTH_ORGANIZATION_CLAIM = 'organization_id';
+
+/**
+ * [#24166] The organization an OAuth consent binds: the consenting session's
+ * active organization, or `undefined` when it has none.
+ *
+ * Reads the session the installed provider hands `postLogin.consentReferenceId`
+ * — the session of record, by better-auth's field name — and nothing else, so
+ * neither the authorize request nor the client can choose the value. An empty
+ * or non-string value is no organization: the consent then binds none and the
+ * token carries no claim, which is the ruled outcome for a user with no
+ * organization, never a guessed or default one.
+ */
+function consentOrganizationOf(session: Record<string, unknown> | null | undefined): string | undefined {
+  const organizationId = session?.activeOrganizationId;
+  return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
+}
+
 export class AuthManager {
   private auth: Auth<any> | null = null;
   /**
@@ -4056,6 +4080,46 @@ export class AuthManager {
         // an anonymous registration mints no authority by itself.
         allowDynamicClientRegistration: dcr,
         allowUnauthenticatedClientRegistration: dcr,
+        // ── The organization an OAuth consent binds (ruling 6232069920, A) ──
+        // At consent the consenting session's active organization becomes the
+        // consent's `reference_id`, and the installed provider carries that
+        // value onto the authorization code, the refresh family it starts, and
+        // every access token minted from either, where `customAccessTokenClaims`
+        // emits it as `organization_id` (`verifyMcpAccessToken` reads it back).
+        //
+        // ⛔ The value is the SESSION's, never the client's: the hook reads the
+        // session the provider hands it and nothing else. The authorize query,
+        // the consent body and the client's metadata never reach it, so no
+        // request parameter can choose the organization a token acts in.
+        //
+        // ⛔ No session organization ⇒ no reference and no claim. Never a
+        // guessed or default one: the principal then resolves with global
+        // grants only.
+        //
+        // Existing consents re-confirm once, by the provider's own lookup: it
+        // finds a consent by (client, user, reference) whenever this hook
+        // answers a reference, so a consent stored before this binding (its
+        // `reference_id` is null) no longer satisfies an authorize made in an
+        // organization, and the user sees the consent page again. Until then an
+        // old refresh family keeps minting tokens with no claim, because a
+        // refresh carries the family's own reference, never the session's.
+        //
+        // `postLogin` is declared as one object, so its two other members are
+        // required beside the hook. `shouldRedirect` answers false: the
+        // organization is the one the session already has, not a choice made
+        // on an extra page. `page` is read only when `shouldRedirect` answers
+        // true, which it never does here; it names the consent page so that it
+        // could only ever point at a page that exists.
+        postLogin: {
+          page: this.getConsolePageUrl('/oauth/consent'),
+          shouldRedirect: () => false,
+          consentReferenceId: ({ session }) => consentOrganizationOf(session),
+        },
+        // `organization_id` is not in the provider's reserved access-token
+        // claim set, which it strips at issuance. This is the claim the
+        // `IAuthService.verifyMcpAccessToken` contract names.
+        customAccessTokenClaims: ({ referenceId }) =>
+          referenceId ? { [OAUTH_ORGANIZATION_CLAIM]: referenceId } : {},
       })];
       });
     }
@@ -6826,10 +6890,20 @@ export class AuthManager {
    * `resolveAuthzContext` — the single shared authorization resolver — so
    * OAuth is a second *provenance* for the principal, never a second authz
    * model.
+   *
+   * [#24166] `organizationId` is the organization the user's consent bound,
+   * read from the token's `organization_id` claim, which this deployment's
+   * authorization server mints from the consent's reference and from nothing
+   * else (`postLogin.consentReferenceId` / `customAccessTokenClaims` in the
+   * provider options). It is absent when the token carries no such claim: a
+   * consent made with no active organization, or a refresh family started
+   * before consents bound one. It is a record, not an authorization — the
+   * caller vets it against a current membership on every request, as the
+   * `IAuthService` contract states.
    */
   async verifyMcpAccessToken(
     token: string,
-  ): Promise<{ userId: string; scopes: string[]; clientId?: string } | null> {
+  ): Promise<{ userId: string; scopes: string[]; clientId?: string; organizationId?: string } | null> {
     try {
       if (!token || token.split('.').length !== 3) return null; // not a JWS compact token
       if (!this.isMcpOAuthEnabled()) return null;
@@ -6876,7 +6950,22 @@ export class AuthManager {
         typeof payload.scope === 'string'
           ? payload.scope.split(' ').filter(Boolean)
           : [];
-      return { userId: subject, scopes, ...(azp ? { clientId: azp } : {}) };
+      // The bound organization, when the token carries one. A claim that is
+      // PRESENT but is not a non-empty string is no organization this
+      // authorization server mints, so the token is refused rather than read
+      // as "no organization": the check that cannot run must not pass.
+      const organizationClaim = (payload as Record<string, unknown>)[OAUTH_ORGANIZATION_CLAIM];
+      if (
+        organizationClaim !== undefined
+        && (typeof organizationClaim !== 'string' || !organizationClaim)
+      ) return null;
+      const organizationId = organizationClaim as string | undefined;
+      return {
+        userId: subject,
+        scopes,
+        ...(azp ? { clientId: azp } : {}),
+        ...(organizationId ? { organizationId } : {}),
+      };
     } catch {
       return null; // unknown/expired/wrong-audience/garbage → no principal
     }
