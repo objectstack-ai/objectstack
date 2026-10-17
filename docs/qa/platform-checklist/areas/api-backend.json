@@ -468,7 +468,7 @@
         "packages/spec/src/data/filter.zod.ts#checkFilterConditionComparands (the request-schema refusal of a scalar list comparand on the POST door, #20116 — the $-object spelling, located at query.where.<field>.$nin)",
         "packages/spec/src/data/data-engine.zod.ts#lowerFoldedTransportValues (the AST/FilterArray spelling on the POST door, refused at query.where when it cannot be lowered)",
         "packages/spec/src/data/data-engine.zod.ts#QueryTransportParamsSchema (`filter` is a declared transport spelling of `where` — why negative[0] no longer probes with it)",
-        "packages/rest/src/rest-server.ts (POST /data/:object/query answers a FindDataRequestSchema failure 400 VALIDATION_FAILED with fields[] via zodIssuesToFields)",
+        "packages/rest/src/crud-routes.ts (POST /data/:object/query answers a FindDataRequestSchema failure 400 VALIDATION_FAILED with fields[] via zodIssuesToFields)",
         "packages/metadata-protocol/src/protocol.ts#assertProjectionFieldsExist (a dotted fields entry → 400 INVALID_FIELD prescribing expand, #7532)",
         "packages/metadata-protocol/src/protocol.ts#assertQueryParamsAreFields (an undeclared leftover key → implicit field filter → 400 INVALID_FIELD, #4134)",
         "packages/rest/src/rest-server-repeated-filter-param.test.ts + packages/rest/src/analytics-filter-refusal-envelope.test.ts (the schema-door 400 VALIDATION_FAILED posture since #20116)",
@@ -1858,7 +1858,7 @@
         "packages/objectql/src/in-memory-aggregation.ts#bucketDateValue (the six function arms incl. #11152 boolean-as-number and the #10576 per-aggregation filter; bucketDateValue ISO shapes; the #3839 real-null bucket rule at the module head)",
         "packages/spec/src/data/aggregation-policy.ts#emptyGroupValueFor (emptyGroupValueFor — the ruled empty-set identities; objectui#3136)",
         "packages/runtime/src/action-execution.ts#engine (the aggregate door: engine-only, at-least-one-aggregation, the raw-rows degradation hazard)",
-        "packages/rest/src/rest-server.ts#data (POST /data/:object/query — the wire door that accepts groupBy/aggregations)",
+        "packages/rest/src/crud-routes.ts#data (POST /data/:object/query — the wire door that accepts groupBy/aggregations)",
         "packages/metadata-protocol/src/protocol.ts#assertAggregationFieldsExist (assertAggregationFieldsExist — the located unknown-field refusal)",
         "#10576, #11152, #3839, #3773"
       ],
@@ -2199,7 +2199,7 @@
       "source": [
         "packages/spec/liveness/crud_endpoints.json (the ADR-0049 ledger this item answers: five live `operations.*` switches + `dataPrefix`, two dead keys)",
         "packages/spec/src/api/rest-server.zod.ts#CrudEndpointsConfigSchema (the declared contract, its defaults and the two retiredKey tombstones)",
-        "packages/rest/src/rest-server.ts#registerCrudEndpoints (the six mounts and their five gates), (normalizeConfig — the parsed sub-config every consumer reads), (parseDeclaredSubConfig — the construction-time refusal), (getRoutes — the route table the mount clauses read) + packages/rest/src/discovery-routes.ts#registerDiscoveryEndpoints (discovery.routes.data built from dataPrefix)",
+        "packages/rest/src/crud-routes.ts#registerCrudEndpoints (the six mounts and their five gates) + packages/rest/src/rest-server.ts (normalizeConfig — the parsed sub-config every consumer reads), (parseDeclaredSubConfig — the construction-time refusal), (getRoutes — the route table the mount clauses read) + packages/rest/src/discovery-routes.ts#registerDiscoveryEndpoints (discovery.routes.data built from dataPrefix)",
         "#14691 (the ADR-0049 retirement of patterns/objectParamStyle) · #11984 (parse-and-consume instead of cast) · ADR-0122 (author state) · ADR-0076 D12 (advertise only what is mounted)",
         "sibling clause: api-backend.api-methods-verb-gate (the per-OBJECT exposure gate this config-level switch must stay distinguishable from) · api-backend.route-ledger-live-parity (the routing-404 control technique)"
       ],

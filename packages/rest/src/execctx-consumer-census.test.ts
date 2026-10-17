@@ -116,6 +116,9 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
  * [#23050 slice 11] …and `registerFormEndpoints`' body to `form-routes.ts`,
  * with none: the public form doors resolve no caller (their authorization is
  * the form's own declaration).
+ *
+ * [#23050 slice 12] …and `registerCrudEndpoints`' body to `crud-routes.ts`,
+ * with its six: one per CRUD door, each bare and guarded on its next line.
  */
 const SITE_FILES = REST_SERVER_REGISTRAR_FILES;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
@@ -130,7 +133,8 @@ const siteKey = (file: string, line: number) => `${file}:${line}`;
  * `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`,
  * `registerSecurityExplainEndpoints`, `registerSecurityEndpoints`,
  * `registerOpenApiEndpoints`, `registerEmailEndpoints`,
- * `registerSearchEndpoints`, `registerUiEndpoints`) hands its moved body
+ * `registerSearchEndpoints`, `registerUiEndpoints`,
+ * `registerCrudEndpoints`) hands its moved body
  * forwards each member to the server with `(...a) => this.<member>(...a)`, so
  * a moved site's stack shows
  * that forwarder above the site itself. The site is the first censused frame
@@ -713,9 +717,20 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // mention moved and `rest-server.ts` stays at 60. Still twelve
         // forwarders: (12 - 1) + 3 - 2, the module counted in
         // `MOVED_REGISTRARS_READING_NO_EXECCTX`.
-        expect(SITE_FILES).toHaveLength(12);
+        //
+        // [#23050 slice 12] 62 sites UNCHANGED / 125 → 129 mentions — the same MOVE.
+        // `registerCrudEndpoints`' body left for `crud-routes.ts` with its six BARE
+        // sites (each guarded on its next line, as before):
+        // 16 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 = 62 sites. The four new
+        // mentions are this slice's seam, the two spellings once (its host
+        // literal's forwarder, two; its host interface's member, two):
+        // `rest-server.ts` goes 60 → 56 (six sites out, one forwarder's two
+        // mentions in). Thirteen forwarders now: (13 - 1) + 3 - 2, the module
+        // carrying one registrar that reads the seam, so neither map gains an
+        // entry.
+        expect(SITE_FILES).toHaveLength(13);
         expect(SITES.length).toBe(62);
-        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(125);
+        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(129);
         const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
         expect(extraMovedRegistrars).toBe(3);
         const registrarsReadingNoExecCtx = Object.values(MOVED_REGISTRARS_READING_NO_EXECCTX).reduce((n, k) => n + (k ?? 0), 0);

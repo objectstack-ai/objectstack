@@ -8,7 +8,7 @@
           "status": "live",
           "verifiedAt": "2026-09-02",
           "evidenceScope": "in-repo",
-          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.create)` gates the POST data route mount — an author who sets it false gets no create route at all)",
+          "evidence": "packages/rest/src/crud-routes.ts#registerCrudEndpoints (`if (operations.create)` gates the POST data route mount — an author who sets it false gets no create route at all)",
           "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
           "note": "Per key, not per object: since ADR-0122 `crud.operations` is the author state, so the parse applies each `.default(true)` whenever the object is present and normalizeConfig covers the one case the schema leaves open (an absent `operations` object). REACHABILITY (#15543, measured 2026-09-08 on origin/main 8ccf7a1df): embedder-only. Written only by a host that constructs a RestServerConfig; no shipped boot path authors it, so a CLI-started deployment always gets the schema default. See this file's _note REACHABILITY paragraph. Liveness and verifiedAt are unaffected: `live` answers who READS this key, this row answers who can SET it."
         },
@@ -16,7 +16,7 @@
           "status": "live",
           "verifiedAt": "2026-09-02",
           "evidenceScope": "in-repo",
-          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.read)` gates the GET-by-id route mount)",
+          "evidence": "packages/rest/src/crud-routes.ts#registerCrudEndpoints (`if (operations.read)` gates the GET-by-id route mount)",
           "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
           "note": "Same shape as `create`. REACHABILITY (#15543, measured 2026-09-08 on origin/main 8ccf7a1df): embedder-only. Written only by a host that constructs a RestServerConfig; no shipped boot path authors it, so a CLI-started deployment always gets the schema default. See this file's _note REACHABILITY paragraph. Liveness and verifiedAt are unaffected: `live` answers who READS this key, this row answers who can SET it."
         },
@@ -24,7 +24,7 @@
           "status": "live",
           "verifiedAt": "2026-09-02",
           "evidenceScope": "in-repo",
-          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.update)` gates the PATCH route mount)",
+          "evidence": "packages/rest/src/crud-routes.ts#registerCrudEndpoints (`if (operations.update)` gates the PATCH route mount)",
           "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
           "note": "Same shape as `create`. REACHABILITY (#15543, measured 2026-09-08 on origin/main 8ccf7a1df): embedder-only. Written only by a host that constructs a RestServerConfig; no shipped boot path authors it, so a CLI-started deployment always gets the schema default. See this file's _note REACHABILITY paragraph. Liveness and verifiedAt are unaffected: `live` answers who READS this key, this row answers who can SET it."
         },
@@ -32,7 +32,7 @@
           "status": "live",
           "verifiedAt": "2026-09-02",
           "evidenceScope": "in-repo",
-          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.delete)` gates the DELETE route mount)",
+          "evidence": "packages/rest/src/crud-routes.ts#registerCrudEndpoints (`if (operations.delete)` gates the DELETE route mount)",
           "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
           "note": "Same shape as `create`. REACHABILITY (#15543, measured 2026-09-08 on origin/main 8ccf7a1df): embedder-only. Written only by a host that constructs a RestServerConfig; no shipped boot path authors it, so a CLI-started deployment always gets the schema default. See this file's _note REACHABILITY paragraph. Liveness and verifiedAt are unaffected: `live` answers who READS this key, this row answers who can SET it."
         },
@@ -40,7 +40,7 @@
           "status": "live",
           "verifiedAt": "2026-09-02",
           "evidenceScope": "in-repo",
-          "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`if (operations.list)` gates the list route mounts)",
+          "evidence": "packages/rest/src/crud-routes.ts#registerCrudEndpoints (`if (operations.list)` gates the list route mounts)",
           "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
           "note": "Same shape as `create`. REACHABILITY (#15543, measured 2026-09-08 on origin/main 8ccf7a1df): embedder-only. Written only by a host that constructs a RestServerConfig; no shipped boot path authors it, so a CLI-started deployment always gets the schema default. See this file's _note REACHABILITY paragraph. Liveness and verifiedAt are unaffected: `live` answers who READS this key, this row answers who can SET it."
         }
@@ -56,7 +56,7 @@
       "status": "live",
       "verifiedAt": "2026-09-02",
       "evidenceScope": "in-repo",
-      "evidence": "packages/rest/src/rest-server.ts#registerCrudEndpoints (`const dataPath = \\`${basePath}${crud.dataPrefix}\\`` — the base every data route is mounted under); also packages/rest/src/rest-server.ts#registerDataActionEndpoints, packages/rest/src/rest-server.ts#registerSharingEndpoints and packages/rest/src/rest-server.ts#registerBatchEndpoints (each builds its own dataPath the same way), and packages/rest/src/rest-server.ts#registerDiscoveryEndpoints (advertises it as `routes.data`)",
+      "evidence": "packages/rest/src/crud-routes.ts#registerCrudEndpoints (`const dataPath = \\`${basePath}${crud.dataPrefix}\\`` — the base every data route is mounted under); also packages/rest/src/rest-server.ts#registerDataActionEndpoints, packages/rest/src/rest-server.ts#registerSharingEndpoints and packages/rest/src/rest-server.ts#registerBatchEndpoints (each builds its own dataPath the same way), and packages/rest/src/rest-server.ts#registerDiscoveryEndpoints (advertises it as `routes.data`)",
       "producer": "packages/rest/src/rest-server.ts#normalizeConfig (threads the authored value into `this.config`, which is the object every consumer below reads; the parsed sub-config's own `.default()`s supply the value when the author omits the key)",
       "note": "Five independent consumers, so this key is live in the strong sense: changing it moves the mounted paths AND the advertised discovery document together. REACHABILITY (#15543, measured 2026-09-08 on origin/main 8ccf7a1df): embedder-only. Written only by a host that constructs a RestServerConfig; no shipped boot path authors it, so a CLI-started deployment always gets the schema default. See this file's _note REACHABILITY paragraph. Liveness and verifiedAt are unaffected: `live` answers who READS this key, this row answers who can SET it."
     },
