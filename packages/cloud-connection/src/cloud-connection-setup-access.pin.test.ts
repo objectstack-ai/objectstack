@@ -98,19 +98,28 @@ function sessionAuth() {
 }
 
 /**
- * The data engine the grants are read from, honouring the equality `where`
- * the resolver reads with (a grant row belongs to the user it names, never to
- * every caller). `outage` makes every read fail as an unreachable store does.
+ * A `find` over `rows` honouring the equality `where` the resolver reads with
+ * (a grant row belongs to the user it names, never to every caller) and the
+ * caller's `limit` — by presence, after the filter.
  */
+function boundedFind(rows: Record<string, any[]>) {
+    return async (object: string, options?: { where?: Record<string, unknown>; limit?: number }) => {
+        const matched = (rows[object] ?? []).filter((row) =>
+            Object.entries(options?.where ?? {}).every(([k, v]) => (v !== null && typeof v === 'object') || row[k] === v));
+        return typeof options?.limit === 'number' ? matched.slice(0, options.limit) : matched;
+    };
+}
+
+/** Every read fails as an unreachable store's does. */
+const unreachableFind = async (): Promise<never> => {
+    throw new Error('connect ECONNREFUSED 127.0.0.1:5432');
+};
+
+/** The data engine the grants are read from. `outage` makes every read fail. */
 function grantsEngine(opts: { outage?: boolean } = {}) {
     const rows = grantRows();
-    const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined) =>
-        Object.entries(where ?? {}).every(([k, v]) => (v !== null && typeof v === 'object') || row[k] === v);
     return bindCatalogFromTables({
-        find: async (object: string, options?: { where?: Record<string, unknown> }) => {
-            if (opts.outage) throw new Error('connect ECONNREFUSED 127.0.0.1:5432');
-            return (rows[object] ?? []).filter((row) => matches(row, options?.where));
-        },
+        find: opts.outage ? unreachableFind : boundedFind(rows),
         update: async () => undefined,
     }, rows);
 }
