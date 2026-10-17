@@ -117,7 +117,7 @@ describe('Auth Service Contract', () => {
   });
   // The verified MCP access-token result names the organization the user's
   // OAuth consent bound, as an OPTIONAL member: a token minted before consents
-  // bound one, and a client_credentials token, verify with none. The typed
+  // bound one verifies with none. The typed
   // reads below are the pin; `check:test-typecheck` compiles this file.
   it('should carry the consent-bound organization on a verified MCP access token, optionally', async () => {
     const base: IAuthService = { handleRequest: async () => new Response('OK'), verify: async () => ({ success: true }) };

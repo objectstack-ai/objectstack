@@ -304,10 +304,8 @@ export interface IAuthService {
          * the access token's `organization_id` claim.
          *
          * Absent when no consent bound one: a token minted before consents
-         * bound an organization, and a machine-to-machine
-         * (`client_credentials`) token, which no user consented to. Absent
-         * means the principal resolves with no organization, so only its
-         * global grants apply.
+         * bound an organization. Absent means the principal resolves with no
+         * organization, so only its global grants apply.
          *
          * A claim, not an authorization. The caller vets it on every request
          * by the rule that vets a session's active organization

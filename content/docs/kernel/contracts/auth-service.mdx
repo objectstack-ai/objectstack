@@ -38,7 +38,7 @@ export interface IAuthService {
   /** Whether this deployment's auth gate is live. Optional. */
   isAuthGateActive?(): boolean;
 
-  /** Verify an OAuth 2.1 access token from the embedded AS (MCP surface); the optional `organizationId` is the organization the user's OAuth consent bound, absent for a pre-binding or `client_credentials` token. Optional. */
+  /** Verify an OAuth 2.1 access token from the embedded AS (MCP surface); the optional `organizationId` is the organization the user's OAuth consent bound, absent for a token minted before consents bound an organization. Optional. */
   verifyMcpAccessToken?(token: string): Promise<{ userId: string; scopes: string[]; clientId?: string; organizationId?: string } | undefined>;
 
   /** The MCP resource identifier (RFC 8707 `resource` / token `aud`). Optional. */
