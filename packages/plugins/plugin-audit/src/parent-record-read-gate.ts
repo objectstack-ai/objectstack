@@ -35,6 +35,14 @@
  * count are one statement each, over every row the caller may read, on any
  * table size: there is no candidate window.
  *
+ * A read whose own `where` names the parents its rows are about
+ * ({@link namedParentObjects}: an equality or an `$in` on `object_name`,
+ * ANDed in at the top) enumerates only the ones it names. A parent it does not
+ * name is one no row of the read can be about, so its branch could select
+ * nothing: the read answers the same rows through fewer branches, and the
+ * bounded probe below reads only the named parents of its classes. A read of
+ * any other shape keeps every branch.
+ *
  * Rows the leaf excludes, exactly as the probe below does: a row naming no
  * parent or a non-machine name, an object this gate does not enumerate, the
  * gated object itself, or a parent that no longer exists (the subquery finds
@@ -341,24 +349,85 @@ function isDelegatedCaller(context: CommentReadMiddlewareCtx['context']): boolea
   return Boolean((context as { onBehalfOf?: { userId?: unknown } } | undefined)?.onBehalfOf?.userId);
 }
 
+/** The machine names a comparand on `object_name` confines a row to, or `null` for a shape not read. */
+function confinedObjectNames(comparand: unknown): string[] | null {
+  const machineName = (v: unknown): v is string => typeof v === 'string' && OBJECT_NAME_RE.test(v);
+  if (typeof comparand === 'string') return machineName(comparand) ? [comparand] : null;
+  if (typeof comparand !== 'object' || comparand === null || Array.isArray(comparand)) return null;
+  const operators = Object.keys(comparand);
+  if (operators.length !== 1) return null;
+  const operand = (comparand as Record<string, unknown>)[operators[0]];
+  if (operators[0] === '$eq') return machineName(operand) ? [operand] : null;
+  if (operators[0] === '$in') return Array.isArray(operand) && operand.every(machineName) ? [...operand] : null;
+  return null;
+}
+
+/**
+ * [ADR-0139 D4] The parent objects a read's own `where` confines its rows to,
+ * or `null` when it confines them to no set this can prove — and then every
+ * enumerated parent keeps its branch.
+ *
+ * A confinement is a conjunct every row the read can match satisfies: a key of
+ * the root condition, or of a condition inside a root `$and` (at any depth of
+ * `$and`). Of those, three shapes on `object_name` are read: a plain value,
+ * `{ $eq: V }` and `{ $in: [V, …] }`, each the only key of its comparand and
+ * each `V` a machine name. Two distinct machine names (lowercase ASCII letters,
+ * digits, `_`) compare unequal under every collation and coercion a driver
+ * applies, so no row matches both a named value and the branch of a parent the
+ * read does not name; a value of any other spelling (another case, a padded
+ * string, a number) could, so its conjunct is not read. Several confinements
+ * intersect. Anything else — an `$or`, a `$not`, any other operator — is passed
+ * over: it is still a conjunct of the read, so it can only narrow the rows
+ * further, and the set stays an over-approximation of the parents they name.
+ */
+export function namedParentObjects(where: unknown): ReadonlySet<string> | null {
+  let named: Set<string> | null = null;
+  const walk = (condition: unknown): void => {
+    if (typeof condition !== 'object' || condition === null || Array.isArray(condition)) return;
+    for (const [key, value] of Object.entries(condition)) {
+      if (key === '$and' && Array.isArray(value)) {
+        for (const sub of value) walk(sub);
+        continue;
+      }
+      if (key !== 'object_name') continue;
+      const confined = confinedObjectNames(value);
+      if (confined === null) continue;
+      const before: Set<string> | null = named;
+      named = new Set(before === null ? confined : confined.filter((name) => before.has(name)));
+    }
+  };
+  walk(where);
+  return named;
+}
+
 /**
  * The parent objects one gate enumerates, in name order: every registered
  * object outside `AUDIT_EXCLUDED_OBJECTS` and outside the gated object, plus
  * the gate's {@link ParentRecordGate.namedParents} — `null` when the engine
  * exposes no registry view to enumerate.
+ *
+ * Given one read's own `where` (before any gate ANDs into it), only those the
+ * read names ({@link namedParentObjects}), when it names any: a parent it does
+ * not name is one no row of that read can be about.
  */
-export function enumerateParentObjects(engine: ParentRecordGateEngine, gate: ParentRecordGate): string[] | null {
+export function enumerateParentObjects(
+  engine: ParentRecordGateEngine,
+  gate: ParentRecordGate,
+  where?: unknown,
+): string[] | null {
   const getAllObjects = engine.registry?.getAllObjects;
   if (typeof getAllObjects !== 'function') return null;
   // Read at call time, never at module load: `audit-writers.ts` sits on an
   // import cycle with this module's consumers.
   const excluded = new Set<string>(AUDIT_EXCLUDED_OBJECTS);
   for (const named of gate.namedParents ?? []) excluded.delete(named);
+  const readNames = namedParentObjects(where);
   const names = new Set<string>();
   for (const schema of getAllObjects.call(engine.registry) ?? []) {
     const name = (schema as { name?: unknown } | null | undefined)?.name;
     if (typeof name !== 'string' || !OBJECT_NAME_RE.test(name)) continue;
     if (name === gate.object || excluded.has(name)) continue;
+    if (readNames !== null && !readNames.has(name)) continue;
     names.add(name);
   }
   return [...names].sort();
@@ -367,20 +436,21 @@ export function enumerateParentObjects(engine: ParentRecordGateEngine, gate: Par
 /**
  * [ADR-0139 D4, D5] How one read of `gate.object` by `context` reaches its
  * parents. Reads the context, whether the security service answers
- * `canReadObject` (`objectAdmission`, resolved by the caller), the registry,
- * the middleware registrations and the datasource bindings only — it asks the
- * security service nothing and reads no row, so it decides the probe up front,
- * never by catching a refusal.
+ * `canReadObject` (`objectAdmission`, resolved by the caller), the read's own
+ * `where` (the parents it names), the registry, the middleware registrations
+ * and the datasource bindings only — it asks the security service nothing and
+ * reads no row, so it decides the probe up front, never by catching a refusal.
  */
 export function planParentReads(
   engine: ParentRecordGateEngine,
   gate: ParentRecordGate,
   context: CommentReadMiddlewareCtx['context'],
   objectAdmission: boolean,
+  where?: unknown,
 ): ParentReadPlan {
   if (isDelegatedCaller(context)) return { probeWholeRead: 'delegated-caller' };
   if (!objectAdmission) return { probeWholeRead: 'no-object-admission' };
-  const parents = enumerateParentObjects(engine, gate);
+  const parents = enumerateParentObjects(engine, gate, where);
   const hasObjectMiddleware = engine.hasObjectMiddleware;
   const datasourceOf = engine.resolveEffectiveDatasource;
   if (parents === null || typeof hasObjectMiddleware !== 'function' || typeof datasourceOf !== 'function') {
@@ -583,7 +653,8 @@ export function andIntoWhere(ctx: CommentReadMiddlewareCtx, filter: unknown): vo
 /**
  * The parent-visibility WHERE for one read of `gate.object`: `null` only when
  * the caller holds the gate's exempt capability (nothing to narrow);
- * otherwise one branch per enumerated parent object — a `ReadableIds` leaf, or
+ * otherwise one branch per parent object enumerated for this read (the ones
+ * the read's own `where` names, when it names any) — a `ReadableIds` leaf, or
  * the bounded probe's `$in` of readable ids for D5's classes — plus the
  * outside class's predicate, ORed; or the gate's deny-all sentinel when no
  * branch remains, or when the probe fails.
@@ -606,8 +677,9 @@ export async function computeParentRecordFilter(
   // 0. The gate's declared exemption, decided before anything else.
   if (gate.exemptCapability && callerHoldsCapability(ctx.context, gate.exemptCapability)) return null;
 
-  // 1. Leaf or probe, per parent object, before any branch is written.
-  const plan = planParentReads(engine, gate, ctx.context, hasObjectAdmission(getAdmission));
+  // 1. Leaf or probe, per parent object the read can be about, before any
+  //    branch is written. The read's own `where`, as it reached this gate.
+  const plan = planParentReads(engine, gate, ctx.context, hasObjectAdmission(getAdmission), ctx.ast?.where);
   if (plan.probeWholeRead === 'engine-cannot-classify' || plan.probeWholeRead === 'no-object-admission') {
     reportWholeReadProbeOnce(engine, logger, gate, plan.probeWholeRead);
   }

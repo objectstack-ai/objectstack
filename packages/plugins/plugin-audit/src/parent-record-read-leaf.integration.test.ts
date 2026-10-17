@@ -316,6 +316,32 @@ describe('[ADR-0139 E5] the parent-record read gates on the leaf path', () => {
     ]));
   });
 
+  it('[ADR-0139 D4] a read naming its parents is served the rows the same read spelled as an $or is, through one branch per named parent', async () => {
+    const NAMED = [DOC, VAULT, GATED];
+    const named = { object_name: { $in: NAMED } };
+    // The same rows, in a spelling the gate does not read as naming its parents: it keeps every branch.
+    const spelledOut = { $or: NAMED.map((object_name) => ({ object_name })) };
+    const atRest: Row[] = await engine.find(ACTIVITY, { limit: 100_000, context: SYS });
+    const parentOf = new Map(atRest.map((r) => [String(r.id), r.object_name]));
+    const gateConjunct = (where: any) => where.$and[1];
+    for (const reader of [MEMBER_A, MEMBER_B, ADMIN]) {
+      seenWhere[ACTIVITY].length = 0;
+      const rows = await served(ACTIVITY, reader, { where: named });
+      const narrowed = gateConjunct(seenWhere[ACTIVITY][0]);
+      expect(rows).toEqual(await served(ACTIVITY, reader, { where: spelledOut }));
+      const full = gateConjunct(seenWhere[ACTIVITY][1]);
+      expect(rows).toEqual((await truth(ACTIVITY, reader)).filter((id) => NAMED.includes(parentOf.get(id))));
+      expect(await engine.count(ACTIVITY, { where: named }, { context: reader })).toBe(rows.length);
+      // A reader who reads some of the named parents and not others: the vault's rows are its alone.
+      expect(rows.some((id) => parentOf.get(id) === VAULT)).toBe(reader === ADMIN);
+      // One branch per named parent — the doc's and the vault's leaves, the gated parent's probe — of the full enumeration's.
+      expect(narrowed.$or.map((b: any) => b.object_name)).toEqual([DOC, VAULT, GATED]);
+      expect(narrowed.$or.filter((b: any) => Array.isArray(b.record_id.$in)).map((b: any) => b.object_name)).toEqual([GATED]);
+      expect(full.$or.length).toBeGreaterThan(NAMED.length);
+      expect(full.$or.map((b: any) => b.object_name)).toEqual(expect.arrayContaining(NAMED));
+    }
+  });
+
   it('D5: a delegated caller reads through the bounded probe — no leaf — and is not refused', async () => {
     seenWhere[ACTIVITY].length = 0;
     const rows = await served(ACTIVITY, DELEGATED_A);

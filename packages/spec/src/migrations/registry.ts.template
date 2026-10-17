@@ -3162,6 +3162,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`ui-page-action-row-navigation-executor-refused`.',
   },
   {
+    id: 'ui-record-json-retired',
+    order: 100,
+    text:
+      'It also retires the `record:json` page element (ADR-0049 enforce-or-remove), one '
+      + 'prerelease after it was declared: it shipped in 18.0.0-next.3 only, for the approval request '
+      + 'page\'s raw JSON panel, and the maintainer dropped that panel — the person deciding an '
+      + 'approval has no business need to read the request as JSON — so no renderer was built and no '
+      + 'page placed it. The name leaves `PageComponentType` and is refused by name at the node, its '
+      + '`ComponentPropsMap` row stays as a whole-bag refusal carrying the same prescription, and the '
+      + 'props def `RecordJsonProps` is unpublished. No conversion is registered: the only edit is '
+      + 'deleting the node, a layout decision that is the author\'s. Its D3 record is the semantic '
+      + 'entry `ui-record-json-retired`.',
+  },
+  {
     id: 'ui-record-line-items-props-closed',
     order: 57,
     text:

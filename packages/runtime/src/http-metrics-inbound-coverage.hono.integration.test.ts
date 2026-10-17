@@ -252,7 +252,12 @@ describe('#9650 §2 — SEAM A: registering the instrumented proxy back as `http
         expect(proxy.getRawApp()).toBe(rawApp);
     });
 
-    it('MEASURED: the proxy traps only get/post/delete — put and patch pass through', () => {
+    // Evidence for the #9650 ruling, kept as it was measured: it builds its own
+    // copy of the Proxy as the dispatcher had it then. That Proxy no longer
+    // looks like this — since #24025 it wraps all five verbs, pinned on the
+    // real plugin in `dispatcher-observability-every-verb.test.ts` — so the
+    // title is in the past tense, and nothing here describes today's code.
+    it('MEASURED (the Proxy as #9650 found it): trapping only get/post/delete let put and patch pass through', () => {
         const calls: string[] = [];
         const target: any = {
             get: (r: string) => calls.push(`get:${r}`),
@@ -827,6 +832,57 @@ describe('#9835 §5 — the `afterResponse` contract seam, on the real booted co
             (s) => s.name === RUNTIME_METRICS.httpRequestDurationMs && s.labels.route === DISPATCHER_PROBE,
         );
         expect(durations.length).toBe(1);
+    }, 30_000);
+
+    it('[#24025] PUT and PATCH carry the request id as well, and widening the Proxy adds no second emitter', async () => {
+        // The case above, on every verb of one dispatcher route. `/api/v1/keys`
+        // is mounted for all five; this composition registers no `auth`, so
+        // each verb is answered by the domain's anonymous 401 — the status is
+        // not under test, the wrapper's work on the answer is.
+        //
+        // Before #24025 the Proxy trapped get/post/delete only, so PUT and
+        // PATCH came back with no `X-Request-Id` (the card's measurement on a
+        // showcase boot). The counts are the other half: the transport counts
+        // every verb through `afterResponse`, so wrapping PUT and PATCH must
+        // leave each at exactly one sample per request — a 2 here is the
+        // #9833 distortion one verb over.
+        const KEYS = '/api/v1/keys';
+        const verbs = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
+        const metrics = new InMemoryMetricsRegistry();
+        const { kernel, baseUrl } = await bootMeasurementKernel(metrics);
+        const seen: Record<string, { echoed: string | null; minted: string | null }> = {};
+        try {
+            for (const method of verbs) {
+                const hasBody = method === 'POST' || method === 'PUT' || method === 'PATCH';
+                const send = (headers: Record<string, string>) =>
+                    fetch(`${baseUrl}${KEYS}`, {
+                        method,
+                        headers: { ...(hasBody ? { 'content-type': 'application/json' } : {}), ...headers },
+                        ...(hasBody ? { body: JSON.stringify({ name: 'probe' }) } : {}),
+                    });
+                const echoed = await send({ 'X-Request-Id': `probe-${method.toLowerCase()}-24025` });
+                const minted = await send({});
+                seen[method] = {
+                    echoed: echoed.headers.get('X-Request-Id'),
+                    minted: minted.headers.get('X-Request-Id'),
+                };
+            }
+        } finally {
+            await kernel.shutdown();
+        }
+
+        for (const method of verbs) {
+            expect(seen[method].echoed, `${method} echoes the inbound id`).toBe(`probe-${method.toLowerCase()}-24025`);
+            expect(seen[method].minted, `${method} mints one when none is sent`).toMatch(/^req_[0-9a-f]+$/);
+            expect(
+                metrics.totalCounter(HTTP_REQUESTS_TOTAL, { method, route: KEYS }),
+                `${method}: two requests, two counts`,
+            ).toBe(2);
+            expect(
+                metrics.histogramValues(RUNTIME_METRICS.httpRequestDurationMs, { method, route: KEYS }),
+                `${method}: two requests, two duration samples`,
+            ).toHaveLength(2);
+        }
     }, 30_000);
 });
 
