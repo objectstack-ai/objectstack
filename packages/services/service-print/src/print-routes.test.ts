@@ -187,6 +187,22 @@ function envelope(answer: { status: number; body: any }): [unknown, number] {
   return [answer.body.error.code, answer.status];
 }
 
+/** Capture the server fault log (`console.error` / `console.warn`) for one call, and read what it was told. */
+function quietFaultLog() {
+  const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+  // Read before the restore: restoring a spy clears what it recorded.
+  let errors = '';
+  return {
+    errors: () => errors,
+    restore: () => {
+      errors = JSON.stringify(error.mock.calls);
+      error.mockRestore();
+      warn.mockRestore();
+    },
+  };
+}
+
 /** Nothing minted, rendered or stored, and the record never read. */
 function expectNothingStarted(d: Door): void {
   expect(d.mint).not.toHaveBeenCalled();
@@ -248,7 +264,9 @@ describe('the print door — a print', () => {
 describe('the print door — the refusals card ③ pins, relayed through the door', () => {
   it('no render driver configured: SERVICE_UNAVAILABLE / 503, reported, before anything is minted or read', async () => {
     const d = door({ placement: { state: 'unconfigured', reason: 'No print engine is configured. Set OS_PRINT_CHROMIUM_PATH.' } });
+    const logged = quietFaultLog();
     const answer = await d.call({ bearer: 'alice', body: { ...INVOICE, recordId: 'inv_alice' } });
+    logged.restore();
     expect(envelope(answer)).toEqual(['SERVICE_UNAVAILABLE', 503]);
     expect(answer.body.error.message.length).toBeGreaterThan(0);
     expectNothingStarted(d);
@@ -294,10 +312,19 @@ describe('the print door — the refusals card ③ pins, relayed through the doo
         },
       };
       const d = door({ service: stub });
+      const logged = quietFaultLog();
       const answer = await d.call({ bearer: 'alice', body: { ...INVOICE, recordId: 'inv_alice' } });
+      logged.restore();
       expect(envelope(answer)).toEqual([code, status]);
-      if (status < 500) expect(answer.body.error.message).toBe(text);
-      else expect(answer.body.error.message).not.toContain('/srv/secret');
+      if (status < 500) {
+        expect(answer.body.error.message).toBe(text);
+      } else {
+        expect(answer.body.error.message).not.toContain('/srv/secret');
+        // The operator keeps the text: it is in the server fault log. A 503 is a
+        // declared capability absence, reported once per route per process, so
+        // only the other 5xx are asserted here.
+        if (status !== 503) expect(logged.errors()).toContain('/srv/secret');
+      }
     });
   }
 
@@ -309,9 +336,12 @@ describe('the print door — the refusals card ③ pins, relayed through the doo
       },
     };
     const d = door({ service: stub });
+    const logged = quietFaultLog();
     const answer = await d.call({ bearer: 'alice', body: { ...INVOICE, recordId: 'inv_alice' } });
+    logged.restore();
     expect(envelope(answer)).toEqual(['INTERNAL_ERROR', 500]);
     expect(answer.body.error.message).not.toContain('/srv/secret');
+    expect(logged.errors()).toContain('/srv/secret');
   });
 });
 
