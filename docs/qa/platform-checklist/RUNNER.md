@@ -229,12 +229,48 @@ contradicts it, and correct it here when it does.
   one is the expensive mistake: the module's own header records that #7516 burned a run
   proving it was an address problem by putting a TCP forwarder on 3000, and #7538 fixed
   the resolution but could not fix a boot that never exports the variable. **Check:**
-  before scoring any connector clause, `GET /api/v1/automation/connectors` and read the
-  instance `baseUrl` — if it says `` and your server does not listen there, the
-  fixture is misconfigured, not blocked. **Fix:** boot with `OS_PORT=<port>` exported (or
+  before scoring any connector clause, read the instance's own metadata —
+  `GET /api/v1/meta/connector/showcase_status_api`, field `item.providerConfig.baseUrl`,
+  which is the value `resolveShowcaseSelfUrl()` produced
+  (`examples/app-showcase/src/system/connectors/index.ts`). ⛔ Not
+  `GET /api/v1/automation/connectors`: that route lists registry descriptors — `name`,
+  `label`, `type`, `description`, `icon`, `origin`, `state`, `degradedReason`, `actions`
+  (`getConnectorDescriptors()`, `packages/services/service-automation/src/engine.ts`) —
+  and carries no `baseUrl` at all. On `os dev` the value follows the serving process's
+  environment, not the compiled artifact. Measured on `main` at `2889760a`: `-p 47311`
+  alone answered `http://127.0.0.1:3000`, and `showcase_declarative_connector_ping`
+  (fired by a `showcase_task` create) failed `fetch failed`; `OS_PORT=47312` with
+  `-p 47312` answered `http://127.0.0.1:47312` and the same flow completed, while
+  `dist/objectstack.json` still held `http://127.0.0.1:3000`. Only an artifact-only boot
+  (`os start --artifact`) freezes the value at build time (the `self-url.ts` header). If
+  it names a port your server does not listen on, the fixture is misconfigured, not
+  blocked. **Fix:** boot with `OS_PORT=<port>` exported (or
   `SHOWCASE_SELF_URL=http://127.0.0.1:<port>`) *in addition to* `-p <port>`. ⛔ Do not
   record a connector clause as `blocked(environment)` on the strength of `fetch failed`
   alone.
+
+- **Package-authored scheduled work is OFF on a stock boot — no `schedule` or
+  `time_relative` flow binds and no packaged `defineJob` is scheduled unless you export
+  `OS_AUTOMATION_SCHEDULED_WORK_ENABLED=1`.** The switch is an environment read,
+  `resolveScheduledWorkEnabled()` / `resolveScheduledWorkPolicy()` in
+  `packages/types/src/env.ts`: unset, empty, or anything other than `true` / `1` / `on` /
+  `yes` (case-insensitive) is off, in every tenancy posture, and `os dev` sets nothing for
+  you. Every binder reads that one answer — the automation engine's trigger bind and its
+  `/_status` row (`packages/services/service-automation/src/engine.ts`), the schedule
+  trigger (`packages/triggers/trigger-schedule/src/schedule-trigger.ts`), and AppPlugin's
+  declarative-job loop, which logs `declarative jobs NOT scheduled — …` at info level
+  (`packages/runtime/src/app-artifact-handlers.ts`). It does not gate platform-internal
+  jobs (approvals escalation, the lifecycle Reaper, the messaging dispatch loop).
+  **Check:** the boot banner. Measured on `main` at `2889760a` with the canonical boot
+  below: a default boot printed `32 flow(s) 19 bound` and `1 flow declares a 'schedule'
+  trigger but is NOT bound — disabled by deployment policy …: showcase_scheduled_digest`
+  (the same line for `time_relative`: `showcase_task_due_reminder`), and
+  `GET /api/v1/automation/_status` answered `bound: false` with that reason for both; the
+  same boot with the switch exported printed `21 bound`, `_status` answered
+  `bound: true` for both, and `showcase_scheduled_digest` completed its first run
+  (`trigger.type: 'schedule'`) within a minute. **Fix:** export the switch before the boot,
+  beside `OS_PORT`. ⛔ Do not score a clock-driven clause on a default boot, and do not
+  file the unbound flow: it is the deployment policy working, not a trigger defect.
 
 - **A per-boot `OS_HOME` and `OS_STORAGE_LOCAL_ROOT` do NOT isolate a package install —
   boot every item that installs a package from a scratch copy of the app, never from the
