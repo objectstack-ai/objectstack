@@ -55,6 +55,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
   ApiKeyLifecyclePolicy,
   IEmailService,
+  II18nService,
   ISmsService,
   PrincipalSession,
   PrincipalSessionMintOptions,
@@ -159,6 +160,7 @@ import {
   interpolatePhoneSms,
   resolvePhoneSmsTemplateBody,
 } from './phone-sms-texts.js';
+import { invitationRoleLabel } from './invitation-role-label.js';
 // commit 35e94c96b — the stored rung of the ruled locale ladder reuses the messaging
 // seam's normalizer rather than growing a second one. `normalizeRecipientLocale`
 // is the platform's ONE reader of a value at rest in `sys_user.locale`, and its
@@ -895,6 +897,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * which is exactly today's behaviour.
    */
   getAuditSink?: () => AuthEventAuditSurface | undefined;
+
+  /**
+   * Accessor for the runtime's `i18n` service, read by the organization
+   * invitation mail to name the invitee's membership role by its option LABEL
+   * in the mail's locale (`成员`, not `member`) — the label the console shows
+   * for the same option, read through the same service, so a tenant's authored
+   * translation reaches the mail too.
+   *
+   * Lazy for the same reason `getTenancy` is: the service is registered on the
+   * kernel after the AuthManager is constructed, and every call happens at
+   * send time. Omitted, or resolving to `undefined` (no i18n service) → the mail
+   * names the option's authored label (`Member`), never the stored value.
+   */
+  getI18n?: () => II18nService | undefined;
 
   /**
    * Optional structured logger (the kernel `ctx.logger`) for best-effort
@@ -3620,29 +3636,40 @@ export class AuthManager {
           // the deployment default, which is the documented floor rather than a
           // failure.
           const storedLocale = await this.storedRecipientLocale({ email: recipientEmail });
+          // #14319 — DELIBERATELY no request argument, and the only one of
+          // the five sends without one. better-auth DOES hand this callback
+          // a `ctx.request`, but it is the INVITER's: stamping their
+          // browser language onto the invitee's mail would recreate this
+          // very card one seat over. The 2026-09-02 ruling enumerates
+          // signup, sign-in and password reset — sends where the requester
+          // IS the recipient — and the superseded 2026-08-13 ruling named
+          // invitations as its own counterexample. #13881's ruling item 3
+          // fixes the chain as RECIPIENT locale → deployment default, so
+          // the inviter direction stays rejected: what #14641 added above
+          // is the invitee's own column, never the inviter's header.
+          const mailLocale = this.emailLocaleArg(undefined, storedLocale);
+          // #24154 — `{{role}}` names the membership role by its option LABEL
+          // in the mail's own locale (`成员`, not `member`): every body of the
+          // template interpolates this one value, so the zh-CN mail stops
+          // printing the stored enum inside a Chinese sentence. Never throws;
+          // a value with no label is named as stored, with one warn.
+          const roleLabel = await invitationRoleLabel(invitation.role || '', mailLocale.locale, {
+            getI18n: this.config.getI18n,
+            warn: (msg, meta) =>
+              this.config.logger ? this.config.logger.warn(msg, meta) : console.warn(msg, meta),
+          });
           try {
             await emailService.sendTemplate({
               template: 'auth.invitation',
               to: recipientEmail,
-              // #14319 — DELIBERATELY no request argument, and the only one of
-              // the five sends without one. better-auth DOES hand this callback
-              // a `ctx.request`, but it is the INVITER's: stamping their
-              // browser language onto the invitee's mail would recreate this
-              // very card one seat over. The 2026-09-02 ruling enumerates
-              // signup, sign-in and password reset — sends where the requester
-              // IS the recipient — and the superseded 2026-08-13 ruling named
-              // invitations as its own counterexample. #13881's ruling item 3
-              // fixes the chain as RECIPIENT locale → deployment default, so
-              // the inviter direction stays rejected: what #14641 added above
-              // is the invitee's own column, never the inviter's header.
-              ...this.emailLocaleArg(undefined, storedLocale),
+              ...mailLocale,
               data: {
                 inviter: {
                   name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
                   email: inviter?.user?.email ?? '',
                 },
                 organization: { name: org?.name ?? invitation.organizationId },
-                role: invitation.role || '',
+                role: roleLabel,
                 acceptUrl,
                 appName: this.getAppName(),
               },

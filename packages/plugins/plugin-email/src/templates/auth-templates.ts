@@ -347,14 +347,22 @@ export const AUTH_INVITATION_TEMPLATE: EmailTemplate = {
 <p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">Accept invitation</a></p>
 <p style="font-size:13px;color:#6b7280">Or paste:<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
 `),
-  bodyText: `{{inviter.name}} ({{inviter.email}}) invited you to join {{organization.name}} on {{appName}}.
+  bodyText: `{{inviter.name}} ({{inviter.email}}) invited you to join {{organization.name}} on {{appName}} as {{role}}.
 
 Accept: {{acceptUrl}}`,
   variables: [
     { name: 'inviter.name', type: 'string', required: false },
     { name: 'inviter.email', type: 'string', required: false },
     { name: 'organization.name', type: 'string', required: true },
-    { name: 'role', type: 'string', required: false },
+    // The sender passes the membership role's option LABEL in the mail's own
+    // locale (`Member`, `成员`), never the stored value (`member`): every body
+    // interpolates this one variable, so no row needs a translation of its own.
+    {
+      name: 'role',
+      type: 'string',
+      required: false,
+      description: "The invitee's membership role, as its display label in the mail's locale (Member, not the stored value member)",
+    },
     { name: 'acceptUrl', type: 'url', required: true },
     { name: 'appName', type: 'string', required: false },
   ],
@@ -372,7 +380,7 @@ export const AUTH_INVITATION_TEMPLATE_ZH_CN: EmailTemplate = {
 <p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">接受邀请</a></p>
 <p style="font-size:13px;color:#6b7280">或复制以下链接：<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
 `, FOOTER_ZH_CN),
-  bodyText: `{{inviter.name}}（{{inviter.email}}）邀请您加入 {{appName}} 上的 {{organization.name}}。
+  bodyText: `{{inviter.name}}（{{inviter.email}}）邀请您以 {{role}} 的身份加入 {{appName}} 上的 {{organization.name}}。
 
 接受邀请：{{acceptUrl}}`,
   description: '当用户被邀请加入组织时，由 better-auth organization 插件发送。',
@@ -388,7 +396,7 @@ export const AUTH_INVITATION_TEMPLATE_JA_JP: EmailTemplate = {
 <p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">招待を承認する</a></p>
 <p style="font-size:13px;color:#6b7280">または、次のリンクを貼り付けてください：<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
 `, FOOTER_JA_JP),
-  bodyText: `{{inviter.name}}（{{inviter.email}}）さんが、{{appName}} の {{organization.name}} に招待しています。
+  bodyText: `{{inviter.name}}（{{inviter.email}}）さんが、{{appName}} の {{organization.name}} に {{role}} として参加するようあなたを招待しました。
 
 承認する: {{acceptUrl}}`,
   description: 'ユーザーが組織に招待されたときに better-auth organization プラグインが送信します。',
@@ -404,7 +412,7 @@ export const AUTH_INVITATION_TEMPLATE_ES_ES: EmailTemplate = {
 <p style="margin:24px 0"><a href="{{{acceptUrl}}}" style="${buttonStyles}">Aceptar invitación</a></p>
 <p style="font-size:13px;color:#6b7280">O pega este enlace:<br><span style="word-break:break-all">{{acceptUrl}}</span></p>
 `, FOOTER_ES_ES),
-  bodyText: `{{inviter.name}} ({{inviter.email}}) te ha invitado a unirte a {{organization.name}} en {{appName}}.
+  bodyText: `{{inviter.name}} ({{inviter.email}}) te ha invitado a unirte a {{organization.name}} en {{appName}} como {{role}}.
 
 Aceptar: {{acceptUrl}}`,
   description: 'Lo envía el plugin de organización de better-auth cuando se invita a alguien a una organización.',

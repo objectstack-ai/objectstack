@@ -511,6 +511,17 @@ export class AuthPlugin implements Plugin {
           return undefined;
         }
       },
+      // [#24154] The `i18n` service, resolved LAZILY at send time: the
+      // invitation mail names the membership role by the option label the
+      // console reads through this same service. `getService` throws for an
+      // unregistered service; the mail then names the authored label.
+      getI18n: () => {
+        try {
+          return ctx.getService<II18nService>('i18n');
+        } catch {
+          return undefined;
+        }
+      },
     };
 
     // ADR-0069 D2 — cross-node rate-limit counters, backed by the kernel

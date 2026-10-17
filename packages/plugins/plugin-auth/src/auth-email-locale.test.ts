@@ -827,7 +827,9 @@ describe("#14641 — an invitation reads the INVITEE's own sys_user.locale", () 
     expect(sent[0].relatedId).toBe('inv1');
     expect(sent[0].organizationId).toBe('o1');
     expect(sent[0].data.organization.name).toBe('Northwind');
-    expect(sent[0].data.role).toBe('member');
+    // #24154 — the role travels as its option LABEL; with no i18n service
+    // wired here, the authored one (`invitation-role-label.test.ts` owns it).
+    expect(sent[0].data.role).toBe('Member');
   });
 
   it('a placeholder address is still refused BEFORE any recipient read', async () => {
