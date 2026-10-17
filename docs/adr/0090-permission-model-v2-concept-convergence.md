@@ -536,7 +536,7 @@ not just "who did".
 > 「同意」) — the organization administrator's assignment boundary.**
 > [ADR-0131](./0131-total-organization-ownership-no-null-organization-id.md) D3 has an organization's
 > admins create and remove the assignments of its own members, while the shipped `organization_admin`
-> kept both assignment tables read-only: nothing said what a built-in organization administrator may
+> keeps both assignment tables read-only: nothing said what a built-in organization administrator may
 > hand out, and an unbounded one could bind `admin_full_access`, which the organization wall does not
 > bound, to itself. This note is that boundary. D12 names three kinds of administrator:
 >
@@ -572,8 +572,8 @@ not just "who did".
 >    platform capability; `organization_admin` itself, in both variants (`organization_admin_no_bypass`
 >    lacks the superuser bits and is outside by (c) today, and by name whatever a capability's scope
 >    later becomes); and every delegated set. Organization-administrator status is conferred by
->    membership grade only — an owner or admin `sys_member` row, granted by `auto-org-admin-grant.ts`
->    — and is never copied by an assignment.
+>    membership grade only — an owner or admin `sys_member` row, from which `auto-org-admin-grant.ts`
+>    grants the set — and is never copied by an assignment.
 > 3. **Delegated** — an `adminScope` holder, decided by the bullets above (subtree, allowlist,
 >    strict containment) as amended on 2026-10-15.
 >
