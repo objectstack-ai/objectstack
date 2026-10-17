@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { inflateSync } from 'node:zlib';
 import type { PluginContext } from '@objectstack/core';
-import { createChromiumDriver, type ChromiumDriver } from './chromium-driver.js';
+import { createChromiumDriver, type ChromiumDriver, type ChromiumLauncher } from './chromium-driver.js';
 import { PRINT_SERVICE, PrintServicePlugin } from './print-service-plugin.js';
 import type { PrintService } from './print-service.js';
 import type { PrintSessionCookie } from './principal-session.js';
@@ -306,6 +306,31 @@ describe.skipIf(!CHROMIUM)('the Chromium engine on both placements', () => {
       }, 60_000);
     });
   }
+
+  it('local: the control socket the driver opens is bound to IPv4 loopback — its wsEndpoint names 127.0.0.1', async () => {
+    // The real launcher, recording each server it starts. playwright-core builds
+    // `wsEndpoint()` from the listening socket's own `address()`, so it names where
+    // the socket is actually bound, not the host that was asked for.
+    const { chromium } = (await import('playwright-core')) as unknown as { chromium: ChromiumLauncher };
+    const endpoints: string[] = [];
+    const recording: ChromiumLauncher = {
+      launchServer: async (options) => {
+        const server = await chromium.launchServer(options);
+        endpoints.push(server.wsEndpoint());
+        return server;
+      },
+      connect: (wsEndpoint, options) => chromium.connect(wsEndpoint, options),
+      connectOverCDP: (endpoint, options) => chromium.connectOverCDP(endpoint, options),
+    };
+    const driver = createChromiumDriver(
+      { placement: 'local', target: CHROMIUM!, consoleUrl: `${fixture.origin}/_console` },
+      async () => recording,
+    );
+    const { version } = await driver.probe(30_000);
+    expect(version).toMatch(/^\d+\./);
+    expect(endpoints).toHaveLength(1);
+    expect(new URL(endpoints[0]!).hostname).toBe('127.0.0.1');
+  }, 60_000);
 
   it('remote: the render leaves no context (and so no session cookie) in a browser it does not own, and leaves it running', async () => {
     const driver = placements().find((p) => p.label === 'remote')!.driver;

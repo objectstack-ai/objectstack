@@ -9,10 +9,17 @@ import type { PrintSessionCookie } from './principal-session.js';
  * `playwright-core` (pinned exact on this package only), in either placement
  * {@link ResolvedPrintPlacement} names.
  *
- *  - **local** — `chromium.launchServer({ executablePath })` and a connection to
- *    it, one browser process per render. Disposed by closing the connection
- *    and the server; a process whose close does not settle within
- *    {@link CLOSE_GRACE_MS} is killed.
+ *  - **local** — `chromium.launchServer({ executablePath, host: '127.0.0.1' })`
+ *    and a connection to it, one browser process per render. Disposed by
+ *    closing the connection and the server; a process whose close does not
+ *    settle within {@link CLOSE_GRACE_MS} is killed. The server's control
+ *    socket is bound to the IPv4 loopback address by THIS package
+ *    ({@link LOCAL_CONTROL_HOST}), never left to playwright-core's default
+ *    host: whoever reaches that socket and knows its path drives a browser
+ *    signed in as the requesting user, so how far it reaches is decided here,
+ *    where a version bump cannot change it without a diff. A host with no IPv4
+ *    loopback address cannot open it, and the open fails; it is never bound
+ *    anywhere else instead.
  *  - **remote** — `chromium.connectOverCDP(endpoint)`, one connection per
  *    render. The context this render opened is closed first, so its cookies
  *    leave the remote browser with it; then the connection is closed, which
@@ -102,13 +109,17 @@ interface ServerHandle {
   kill(): Promise<void>;
 }
 interface ChromiumLauncher {
-  launchServer(options: { executablePath: string; headless: boolean; timeout: number }): Promise<ServerHandle>;
+  /** `host` is required here so the local placement can never open its control socket on the library's default host. */
+  launchServer(options: { executablePath: string; headless: boolean; timeout: number; host: string }): Promise<ServerHandle>;
   connect(wsEndpoint: string, options: { timeout: number }): Promise<BrowserHandle>;
   connectOverCDP(endpoint: string, options: { timeout: number }): Promise<BrowserHandle>;
 }
 
 /** How long each close in a cleanup may take before the driver stops waiting for it. */
 export const CLOSE_GRACE_MS = 2_000;
+
+/** The address the local placement binds its browser server's control socket to: IPv4 loopback, and only that. */
+const LOCAL_CONTROL_HOST = '127.0.0.1';
 
 /** Whether `promise` settles within `ms`; it is never awaited past that. */
 async function settlesWithin(promise: Promise<unknown>, ms: number): Promise<boolean> {
@@ -217,7 +228,12 @@ class PlaywrightChromiumDriver implements ChromiumDriver {
       const browser = await chromium.connectOverCDP(this.resolved.target, { timeout: timeoutMs });
       return { browser, dispose: async () => void (await settlesWithin(browser.close(), grace)) };
     }
-    const server = await chromium.launchServer({ executablePath: this.resolved.target, headless: true, timeout: timeoutMs });
+    const server = await chromium.launchServer({
+      executablePath: this.resolved.target,
+      headless: true,
+      timeout: timeoutMs,
+      host: LOCAL_CONTROL_HOST,
+    });
     let browser: BrowserHandle;
     try {
       browser = await chromium.connect(server.wsEndpoint(), { timeout: timeoutMs });

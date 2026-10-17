@@ -68,12 +68,13 @@ function stagedLauncher(stage: Stage) {
       closed.killed++;
     }),
   };
+  const launchServer = vi.fn(async (_options: Record<string, unknown>) => server);
   const launcher = {
-    launchServer: vi.fn(async () => server),
+    launchServer,
     connect: vi.fn(stage.connect ?? (async () => browser)),
     connectOverCDP: vi.fn(stage.connect ?? (async () => browser)),
   } as unknown as ChromiumLauncher;
-  return { launcher: async () => launcher, closed, page, browser };
+  return { launcher: async () => launcher, closed, page, browser, launchServer };
 }
 
 async function refusalOf(p: Promise<unknown>): Promise<{ code?: unknown; status?: unknown; message: string }> {
@@ -85,6 +86,16 @@ async function refusalOf(p: Promise<unknown>): Promise<{ code?: unknown; status?
   }
   throw new Error('expected a refusal, the call resolved');
 }
+
+describe('the local placement binds its control socket to loopback itself', () => {
+  it('launchServer receives host 127.0.0.1 on the boot probe and on every render, never the library default', async () => {
+    const { launcher, launchServer } = stagedLauncher({});
+    const driver = createChromiumDriver({ placement: 'local', target: '/usr/bin/chromium', consoleUrl: 'x' }, launcher);
+    await driver.probe(5_000);
+    await driver.renderPdf({ url: URL_, cookie: COOKIE, timeoutMs: 5_000 });
+    expect(launchServer.mock.calls.map(([options]) => options.host)).toEqual(['127.0.0.1', '127.0.0.1']);
+  });
+});
 
 describe('the driver redacts the session cookie from an engine error', () => {
   it('an engine error carrying the cookie value answers INTERNAL_ERROR / 500 with it replaced by [redacted]', async () => {
