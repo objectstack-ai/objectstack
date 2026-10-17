@@ -3165,7 +3165,7 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'ui-record-json-retired',
     order: 100,
     text:
-      'It also retires the `record:json` page element (#24162, ADR-0049 enforce-or-remove), one '
+      'It also retires the `record:json` page element (ADR-0049 enforce-or-remove), one '
       + 'prerelease after it was declared: it shipped in 18.0.0-next.3 only, for the approval request '
       + 'page\'s raw JSON panel, and the maintainer dropped that panel — the person deciding an '
       + 'approval has no business need to read the request as JSON — so no renderer was built and no '
