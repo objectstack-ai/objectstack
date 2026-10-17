@@ -460,6 +460,10 @@ export async function loadObjectItems(source: MetaReadGateListSource): Promise<a
  *    and logs nothing.
  *  - A source with no by-name read (`getObjectItem` absent) asks the list, as
  *    before.
+ *  - [#7557, #24097] A read refused `OBJECT_PACKAGE_DISABLED` is "no object
+ *    here", as the list read omits that object: no declared exposure policy to
+ *    judge, nothing failed, so nothing is logged. The data plane then refuses
+ *    the request with that same code.
  *
  * ⛔ Nothing here is cached: each request reads the object's current
  * document, so a metadata change is honoured on the next request.
@@ -473,6 +477,7 @@ export async function loadObjectItem(source: MetaReadGateListSource, name: strin
         const item = envelope?.item;
         return item !== null && typeof item === 'object' && item.name === name ? item : undefined;
     } catch (err) {
+        if ((err as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') return undefined;
         logWarn(
             '[REST] api-exposure gate: object metadata read failed — failing open ' +
                 '(auth + CRUD/FLS/RLS still enforce on the data call)',
