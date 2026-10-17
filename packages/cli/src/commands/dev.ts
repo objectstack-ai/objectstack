@@ -18,6 +18,7 @@ import {
 } from '../utils/dev-restart.js';
 import { isOrganizationOwnershipRequiredMessage, upgradeDevelopmentDatabase } from '../utils/dev-organization-ownership-upgrade.js';
 import { childEnvWithResolvedArtifact } from '../utils/internal-artifact-channel.js';
+import { makeDirectorySync } from '../utils/make-directory.js';
 // THE artifact precedence, written once (#21501) — shared with `start`, and
 // with the `serve` child this command spawns. ⛔ No rung of it is restated here.
 import {
@@ -93,7 +94,7 @@ export async function resolveDevDatabase(opts: {
 
 /**
  * Make the directory of `os dev`'s unified-default SQLite database
- * (`<state dir>/data/`), bounded — or reject at once, naming the database
+ * (`<state dir>/data/`), bounded — or throw at once, naming the database
  * file, the directory and the operating system's code (#23737).
  *
  * Only the `unified-default` source is prepared here; every other source is
@@ -108,40 +109,21 @@ export async function resolveDevDatabase(opts: {
  * `mkdir("/proc")` in its own process (64,440 failing calls in 25 s) and never
  * reached its next line.
  *
- * The walk is the one `driver-sql`'s connect and the runtime's standalone host
- * run (neither is on a package entry, hence this module-level copy): find the
- * nearest level that exists, create the missing ones top-down with a
- * NON-recursive `mkdir`, accept `EEXIST` on a created level (a concurrent
- * creator), and reject on anything else.
+ * The walk is this package's {@link makeDirectorySync}: `EEXIST` on a created
+ * level is accepted only when a directory stands there. A dangling symlink in
+ * the path answers `EEXIST` to `mkdir` and `ENOENT` to `stat`, so it is refused
+ * here, at once, naming the link (#24090). Accepting any `EEXIST` let it
+ * through to the serve child, whose boot then failed seconds later with a
+ * plugin-start error that named neither the file nor the directory.
  */
-export async function prepareDevDatabaseDirectory(
+export function prepareDevDatabaseDirectory(
   resolved: Pick<ResolvedProjectDatabaseUrl, 'url' | 'source'>,
-): Promise<void> {
+): void {
   if (resolved.source !== 'unified-default') return;
   const filename = resolved.url.replace(/^file:/, '');
   const directory = path.resolve(path.dirname(filename));
   try {
-    const missing: string[] = [];
-    let level = directory;
-    for (;;) {
-      try {
-        if (!(await fs.promises.stat(level)).isDirectory() && missing.length === 0) await fs.promises.mkdir(level);
-        break;
-      } catch (e) {
-        if ((e as { code?: unknown } | null)?.code !== 'ENOENT') throw e;
-        missing.push(level);
-        const parent = path.dirname(level);
-        if (parent === level) break;
-        level = parent;
-      }
-    }
-    for (const each of missing.reverse()) {
-      try {
-        await fs.promises.mkdir(each);
-      } catch (e) {
-        if ((e as { code?: unknown } | null)?.code !== 'EEXIST') throw e;
-      }
-    }
+    makeDirectorySync(directory);
   } catch (e) {
     const code = (e as { code?: unknown } | null)?.code;
     const reason = e instanceof Error ? e.message : String(e);
@@ -639,7 +621,7 @@ export default class Dev extends Command {
       }
       // Bounded, and refused at once when the directory cannot be made (#23737).
       try {
-        await prepareDevDatabaseDirectory(resolvedDb);
+        prepareDevDatabaseDirectory(resolvedDb);
       } catch (error: any) {
         printError(error?.message ?? String(error));
         console.error(chalk.yellow(
