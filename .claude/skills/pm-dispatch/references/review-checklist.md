@@ -19,8 +19,8 @@
 - changeset/CHANGELOG、`content/docs/**`、`apps/docs/**`:逐句核 diff,ACCEPT 点名所核句,⛔ 不起子代理。
 - Tests/docs-only 按仓库分流:本仓库走 `skip-changeset` 标签,⛔ 不走空 changeset。
 - 空 changeset 在本仓库滞留发布;含读者可见生成产物时 dev 改选 changeset 亦对。
-- dev 挂 `skip-changeset` 遭分类器拒 ⇒ 席位自核 tests/docs-only 即自挂,评论写依据是席位复核。
-- 此标是席位结论,⛔ 非替 dev 转发,自核不成立不挂;dev 报告 `deviations` 须逐字载被拒命令。
+- dev 挂 `skip-changeset` 遭分类器拒 ⇒ 席位转维护者定夺,⛔ 不径自代挂:代做即洗权限。
+- 其言与席位自核 tests/docs-only 俱备方挂,评论载两者;dev 报告 `deviations` 须逐字载被拒命令。
 - objectui 无此标签,空 frontmatter changeset 即正确形态;⛔ 永不要求或铸出该标签。
 - 就地修范围外的邻接缺陷 ⇒ 四条件逐条核:同缺陷类、机械、无他人认领、同门禁族。
 - 再核 claim 文件面同轮已修订、PR 正文点名该修并载证据;缺一条即判 REWORK。

@@ -58,7 +58,7 @@ model: opus
    - 写工具自读所需变量;⛔ 永不打印环境变量的值,转录是 AGENTS.md 禁落令牌的日志行。
    - 拼法不限于 `env`、`printenv`、`set`、`export -p`、`echo $VAR`、`cat /proc/*/environ`。
    - 判存在只用不印值形式 `[ -n "${X+x}" ] && echo set`;已印出 ⇒ `deviations` 只点名变量名。
-   - 写预算四笔:`git push`、`pr_create`(draft,含 assignee)、`label-write`(仅标签)、`os-dev-report` 评论。
+   - 写预算三笔:`git push`、`pr_create`(draft,含 assignee 与 labels)、`os-dev-report` 评论。
    - 卡与线程只走 payload 档(公开仓单卡网页内嵌 JSON,拼写住 platform-readings)或单卡 REST 读。
    - 三类发现进报告交席位代立,不 `POST /issues`、⛔ 不静默弃报;PM 去重读数当既有事实用。
    - PR 正文 dev 只写一次,在开 PR 那一笔,⛔ 不 `PATCH`;事后要改的报告点名改法,席位代写。
@@ -300,13 +300,13 @@ model: opus
 - 快速通道:`docs/adr/**` · `.claude/**` · `scripts/pm/**` · 仓根配置 · 私有包 · 注释,不发布。
 - 其余实测:构建后 grep `files[]` 所列路径找符号,带正控;符号零命中、正控命中 ⇒ 不发布。
 - PR 改到已有的 `.changeset/*.md`:⛔ 永不打 `skip-changeset`,门禁红着是对的,确认走 PR 文字。
-- objectstack:标签是真实机制,打标签是你的默认步骤,PR 一开出就打;派发词可收窄或禁写。
+- objectstack:`skip-changeset` 以 `pr_create` 的 `labels` 同笔申报;后发现的标签才走 `label-write.mjs`。
 - 范围 = 派发词点名的标签 + 上文判据下的 `skip-changeset`;禁写或交集为空 ⇒ 零写并报告。
-- 写恒经 `scripts/pm/label-write.mjs`:取现集、加法 POST、回读比 union、缺者重挂一次并报告。
+- 该腿的回读是中继回报的行:答案须列出每个送出的标签,缺者该笔 FAILED、不发后续动作。
 - 读回只检测剥除防不了(size-labeler 整组 PUT),门标签被剥恰成绿灯;加法写同样必要不充分。
 - 关此步骤的是读回不是写入;读回只验写落了,验不出有门在读:幻影门标签读回照样成功。
 - 被拒 ⇒ 报端点与状态码、席位代挂,⛔ 不报 `blocked`、不走 MCP;收尾再读一次。
-- 分类器拒外部写 ⇒ 停手,`deviations` 记命令与拒因,席位代做;⛔ 不换路重发(curl/MCP/手工)。
+- 分类器拒外部写 ⇒ 停手,`deviations` 记命令与拒因,席位只转维护者定夺;⛔ 不换路重发。
 - objectui:路径标签归 `labeler.yml`,逐 push 同步;无门禁读你打的标签 ⇒ 派发词未点名即零写。
 - objectui 的 `skip-changeset` 零读者;空 frontmatter changeset 即声明,门禁判定行为准,⛔ 永不施加。
 - 报告在本地验证走完时交付,CI 收敛等待归 PM 不归你:⛔ 不为等 CI 结论推迟报告。
