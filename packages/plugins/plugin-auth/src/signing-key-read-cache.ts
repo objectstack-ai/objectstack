@@ -40,6 +40,18 @@
  * registration threw, has no observable write seam, so half (a) cannot hold
  * and NOTHING is cached: every read goes to the table, as before.
  *
+ * ## The MCP access-token verifier reads through it too (#24186)
+ *
+ * `AuthManager.verifyMcpAccessToken` verifies against better-auth's `getJwks`
+ * endpoint — whose keyring read IS this reader — on every call, and holds no
+ * key set of its own. One held keyring, one write seam and one bound therefore
+ * serve the signer, `/jwks` and the verifier alike, and a write this process
+ * observes reaches all three in the same operation. The verifier receives the
+ * endpoint's public projection, never a keyring row. A token signed by a key
+ * the held keyring does not carry earns ONE forced re-read
+ * ({@link retireHeldKeyrings}), shared while it is in flight and never sooner
+ * than {@link UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS} after the previous one.
+ *
  * ## What it is not
  *
  * ⛔ Not a session, grant or other authorization cache. It holds the keyring
@@ -58,6 +70,22 @@ import type { StoredJwk } from './jwt-key-algorithm.js';
  * localization failure memo).
  */
 export const SIGNING_KEY_CACHE_TTL_MS = 30_000;
+
+/**
+ * How soon after one forced keyring re-read the MCP access-token verifier may
+ * force the next (#24186). It bounds what a stream of tokens naming keys the
+ * keyring does not carry can cost: at most one keyring read per interval,
+ * however many such tokens arrive and however they are spread.
+ *
+ * Equal to {@link SIGNING_KEY_CACHE_TTL_MS} on purpose. Such a stream then at
+ * most doubles the keyring read rate the TTL already allows, and while one is
+ * running, a key minted where this process cannot see it is verified no later
+ * than the TTL alone would have allowed. Thirty seconds is also `jose`'s
+ * default `cooldownDuration` for the same mechanism in its remote key set: a
+ * re-fetch on an unmatched key, at most once per cooldown. A fixed constant,
+ * deliberately not a configuration key.
+ */
+export const UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS = SIGNING_KEY_CACHE_TTL_MS;
 
 /** The keyring object, as the jwt plugin's schema maps it (`buildJwtPluginSchema`). */
 const KEYRING_OBJECT = 'sys_jwks';
@@ -106,6 +134,25 @@ function observeKeyringWrites(engine: unknown): KeyringWriteObserver | undefined
   }
   keyringWriteObservers.set(engine, observer);
   return observer;
+}
+
+/**
+ * Retire every keyring held for `engine`, so the next read of it goes to the
+ * table: the forced re-read (#24186) that a token signed by a key the held
+ * keyring does not carry earns.
+ *
+ * It is recorded as a keyring write that entered and settled, so the (a) rule
+ * needs no second case: every held entry stops matching the counters, and a
+ * read already in flight is answered but not held, exactly as when a real
+ * write overlaps it. An engine with no observer holds nothing, so there is
+ * nothing to retire.
+ */
+export function retireHeldKeyrings(engine: unknown): void {
+  if (!engine || typeof engine !== 'object') return;
+  const observer = keyringWriteObservers.get(engine);
+  if (!observer) return;
+  observer.started += 1;
+  observer.completed += 1;
 }
 
 /** better-auth's stock keyring read — the read its jwks adapter makes with no `getJwks` override. */

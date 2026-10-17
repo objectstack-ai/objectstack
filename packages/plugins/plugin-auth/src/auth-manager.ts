@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
+import type { JSONWebKeySet } from 'jose';
 import type { OrganizationOptions } from 'better-auth/plugins/organization';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
@@ -191,7 +192,11 @@ import {
   protectGetSessionJwtHook,
   resolveJwtSigningAlgorithm,
 } from './jwt-key-algorithm.js';
-import { createSigningKeyReader } from './signing-key-read-cache.js';
+import {
+  createSigningKeyReader,
+  retireHeldKeyrings,
+  UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
+} from './signing-key-read-cache.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -1381,6 +1386,18 @@ const OAUTH_ORGANIZATION_CLAIM = 'organization_id';
 function consentOrganizationOf(session: Record<string, unknown> | null | undefined): string | undefined {
   const organizationId = session?.activeOrganizationId;
   return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
+}
+
+/**
+ * [#24186] The key set the MCP access-token verifier checks signatures
+ * against: the document better-auth's `getJwks` endpoint answers, which is
+ * what `/jwks` publishes — public members only, read through the signer's
+ * keyring reader (`signing-key-read-cache.ts`). `undefined` when the instance
+ * carries no jwt plugin or the answer is not a key set.
+ */
+async function readPublishedJwks(api: unknown): Promise<JSONWebKeySet | undefined> {
+  const jwks = await (api as { getJwks?: () => Promise<unknown> } | null | undefined)?.getJwks?.();
+  return jwks && Array.isArray((jwks as { keys?: unknown }).keys) ? (jwks as JSONWebKeySet) : undefined;
 }
 
 export class AuthManager {
@@ -6714,9 +6731,15 @@ export class AuthManager {
   // in-process, no self-HTTP hop, no client credentials needed).
   // ---------------------------------------------------------------------------
 
-  /** Cached JWKS for local access-token verification (5-minute TTL). */
-  private jwksCache?: { jwks: any; fetchedAtMs: number };
-  private static readonly JWKS_CACHE_TTL_MS = 5 * 60_000;
+  /**
+   * [#24186] The one forced keyring re-read a token signed by an unknown key
+   * earns: when the last one started, and its answer while it is in flight.
+   *
+   * There is no held key set here. `verifyMcpAccessToken` reads the keyring
+   * through the signer's own reader on every call, so it is held only under
+   * both halves of the cross-request caching rule (`signing-key-read-cache.ts`).
+   */
+  private unknownKeyReread?: { readonly startedAtMs: number; pending?: Promise<JSONWebKeySet | undefined> };
 
   /** Canonical origin of this deployment (config `baseUrl`, auto-detected in dev). */
   private getCanonicalOrigin(): string {
@@ -6858,6 +6881,17 @@ export class AuthManager {
    * userinfo, plain OIDC SSO — do NOT unlock MCP), `exp`/`nbf` enforced by
    * jose.
    *
+   * [#24186] The key set is read on every call through the signer's own
+   * keyring reader — better-auth's `getJwks`, the document `/jwks` serves —
+   * and is never held here. So a `sys_jwks` write that passes this process's
+   * engine reaches the very next verification, and the reader's TTL bounds a
+   * write it cannot see, such as one on another node. A token signed by a key
+   * the set does not carry is retried ONCE against a forced fresh read before
+   * it is refused. That read is shared while it is in flight and runs at most
+   * once per `UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS`, so tokens naming keys that
+   * do not exist cost at most one keyring read per interval. Only the public
+   * projection `/jwks` publishes is ever handed to jose.
+   *
    * A `client_credentials` (M2M) token is REFUSED here — the MCP surface is
    * principal-bound by design; headless callers use API keys. The
    * discriminator is the `sub`/`client_id` PAIR, read as RFC 9068 defines it
@@ -6909,20 +6943,27 @@ export class AuthManager {
       if (!token || token.split('.').length !== 3) return null; // not a JWS compact token
       if (!this.isMcpOAuthEnabled()) return null;
 
-      const { createLocalJWKSet, jwtVerify } = await import('jose');
+      const { createLocalJWKSet, jwtVerify, errors } = await import('jose');
 
-      const now = Date.now();
-      if (!this.jwksCache || now - this.jwksCache.fetchedAtMs > AuthManager.JWKS_CACHE_TTL_MS) {
-        const api = await this.getApi();
-        const jwks = await (api as any).getJwks?.();
-        if (!jwks || !Array.isArray(jwks.keys)) return null;
-        this.jwksCache = { jwks, fetchedAtMs: now };
+      const api = await this.getApi();
+      const jwks = await readPublishedJwks(api);
+      if (!jwks) return null;
+      const expected = { issuer: this.getAuthIssuer(), audience: this.getMcpResourceUrl() };
+      const verifyAgainst = async (keys: JSONWebKeySet) =>
+        (await jwtVerify(token, createLocalJWKSet(keys), expected)).payload;
+
+      let payload: Awaited<ReturnType<typeof verifyAgainst>>;
+      try {
+        payload = await verifyAgainst(jwks);
+      } catch (error) {
+        // Only "no key in the set matches this token" earns the fresh read: a
+        // key minted where this process could not see it. Every other failure
+        // is the token's own, and a re-read could not change it.
+        if (!(error instanceof errors.JWKSNoMatchingKey)) throw error;
+        const fresh = await this.rereadKeyringForUnknownKey(api);
+        if (!fresh) return null;
+        payload = await verifyAgainst(fresh);
       }
-
-      const { payload } = await jwtVerify(token, createLocalJWKSet(this.jwksCache.jwks), {
-        issuer: this.getAuthIssuer(),
-        audience: this.getMcpResourceUrl(),
-      });
 
       const subject = typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined;
       if (!subject) return null;
@@ -6970,6 +7011,43 @@ export class AuthManager {
     } catch {
       return null; // unknown/expired/wrong-audience/garbage → no principal
     }
+  }
+
+  /**
+   * [#24186] The forced fresh keyring read a token signed by an unknown key
+   * earns, bounded twice:
+   *
+   *  - **single-flight** — a read already in flight is joined, never repeated;
+   *  - **a floor** — no new one starts sooner than
+   *    `UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS` after the last one STARTED, so a
+   *    stream of tokens naming keys that do not exist costs at most one
+   *    keyring read per interval. Inside the floor the answer is `undefined`
+   *    and the token is refused, as it would have been without the retry.
+   *
+   * The read retires the keyring the signer's reader holds for this engine
+   * first, so it goes to the table rather than to the set that just failed.
+   * A failed read still spends the interval: a keyring that cannot be read is
+   * not read again on every token.
+   */
+  private rereadKeyringForUnknownKey(api: unknown): Promise<JSONWebKeySet | undefined> {
+    const last = this.unknownKeyReread;
+    if (last?.pending) return last.pending;
+    const now = Date.now();
+    if (last && now - last.startedAtMs < UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS) {
+      return Promise.resolve(undefined);
+    }
+    retireHeldKeyrings(this.config.dataEngine);
+    const pending = readPublishedJwks(api);
+    const reread: { readonly startedAtMs: number; pending?: Promise<JSONWebKeySet | undefined> } = {
+      startedAtMs: now,
+      pending,
+    };
+    this.unknownKeyReread = reread;
+    const settle = () => {
+      reread.pending = undefined;
+    };
+    pending.then(settle, settle);
+    return pending;
   }
 
   // ---------------------------------------------------------------------------
