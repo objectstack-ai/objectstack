@@ -268,6 +268,12 @@ const MODULES = {
   // created the module so the gap never exists.
   'packages/services/service-storage/src/mount-storage-routes.ts': { responses: 0, ok: 0, err: 0 },
 
+  // The print door (`POST /api/v1/print/records`), mounted by `PrintServicePlugin`
+  // straight on `IHttpServer`. Every body it answers is written by the shared pair
+  // (`sendOk` / `sendError` / `sendServerFault`), so it builds none itself.
+  // Declared in the same PR that created the module.
+  'packages/services/service-print/src/print-routes.ts': { responses: 0, ok: 0, err: 0 },
+
   // ── Exempt ──────────────────────────────────────────────────────────────
 
   // A dev-only SSE endpoint (`GET|POST /api/v1/dev/metadata-events`) that closes

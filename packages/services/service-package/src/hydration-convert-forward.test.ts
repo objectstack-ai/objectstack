@@ -40,11 +40,14 @@
  *
  * ## The install door stays strict, and why (`protocol.installPackage`)
  *
- * The same converting body handed to the install primitive is REFUSED by the
- * registry, and nothing lands in `sys_packages`. That door is authoring-side:
- * its HTTP caller, `POST /api/v1/packages`, parses the whole body through the
- * closed `ManifestSchema` first, which refuses a `pages` key outright, so no
- * package body carrying metadata collections reaches the primitive over HTTP;
+ * The same converting body handed to the install primitive is REFUSED, and
+ * nothing lands in `sys_packages`. Since #24086 the primitive itself parses the
+ * whole manifest through the install declaration (`PackageInstallManifestSchema`,
+ * a strict close), so a body carrying a metadata collection such as `pages` is
+ * refused there, `400`, before the registry is reached. That door is
+ * authoring-side: its HTTP caller, `POST /api/v1/packages`, parses the same
+ * declaration first, so no package body carrying metadata collections reaches
+ * the primitive over HTTP;
  * `duplicatePackage` copies the registry's own record (already judged), and
  * the unmanaged install's base is identity keys only. What it does receive is
  * a manifest being authored now (AI Studio's blueprint tools call it
@@ -63,6 +66,7 @@ import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQLPlugin, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
+import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 import { PackageServicePlugin, type PackageService } from './index.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -173,7 +177,7 @@ const expectMisplacedDefault = (line: Line | undefined, id: string) => {
 };
 
 describe('the install primitive is authoring-side and stays strict', () => {
-  it('protocol.installPackage refuses the same body with the registry\'s refusal, and writes no sys_packages row', async () => {
+  it('protocol.installPackage refuses the same body at the install declaration, and writes no sys_packages row', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'os-sys-packages-install-'));
     dirs.push(dir);
     const { ql, lines, packages } = await boot(dir);
@@ -182,16 +186,18 @@ describe('the install primitive is authoring-side and stays strict', () => {
       () => new Map<string, unknown>([['package', packages]]),
     );
 
-    let refusal: (Error & { code?: string; status?: number }) | undefined;
+    let refusal: (Error & { statusCode?: number }) | undefined;
     try {
       await protocol.installPackage({ manifest: hotcrmBody() } as never);
     } catch (e) {
       refusal = e as typeof refusal;
     }
-    expect(refusal, 'the install primitive accepted a retired declaration').toBeDefined();
-    expect({ name: refusal!.name, code: refusal!.code, status: refusal!.status })
-      .toEqual({ name: 'MisplacedDefaultPageError', code: 'INVALID_METADATA', status: 422 });
-    expect(refusal!.message).toContain(`Page "sales_home_page" of package "${HOTCRM_ID}": \`isDefault: true\` is refused on a \`type: 'home'\` page`);
+    expect(refusal, 'the install primitive accepted an assembled body').toBeDefined();
+    // [#24086] The install declaration's strict close refuses the body's
+    // metadata collections before the registry ever judges a page.
+    expect(refusal!.statusCode).toBe(400);
+    expect(standardErrorCodeForHttpStatus(refusal!.statusCode!)).toBe('VALIDATION_ERROR');
+    expect(refusal!.message).toMatch(/^Invalid package manifest — manifest: .*\bpages\b/);
     expect(ql.registry.getPackage(HOTCRM_ID)).toBeUndefined();
     expect(await packages.get(HOTCRM_ID)).toBeNull();
     expect(lines.filter((l) => l.text.includes('ADR-0087 conversion'))).toEqual([]);

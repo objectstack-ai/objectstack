@@ -738,6 +738,15 @@ export class PackageServicePlugin implements Plugin {
             // the records after it keep hydrating. It used to throw out of the
             // whole loop into the catch below, which logged it at `debug` —
             // and every durable package after the bad one was silently absent.
+            //
+            // [#24086] ⚠️ STATED TOLERANCE: the row's `type` / `scope` are NOT
+            // judged here. `installPackage` now refuses a manifest the install
+            // declaration (`PackageInstallManifestSchema`) refuses, but rows it
+            // wrote before that — cloud's AI-authored bases and apps carry
+            // `type: 'application'`, `scope: 'environment'` — are data at rest
+            // and keep hydrating as stored. The tolerance is this READ's only:
+            // a new write of the same manifest is refused at the primitive
+            // (pinned in `install-primitive-declaration.test.ts`).
             try {
               registry.installPackage(convertForward ? convertForward(rec.manifest) : rec.manifest, 'authored');
               hydrated++;

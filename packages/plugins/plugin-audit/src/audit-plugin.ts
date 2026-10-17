@@ -251,30 +251,31 @@ export class AuditPlugin implements Plugin {
       defaultDatasource: 'cloud',
       namespace: 'sys',
       objects: [SysAuditLog, SysActivity, SysComment, SysCommentReaction],
-      // ADR-0029 D7 — contribute the Audit Logs entries into the Setup app's
-      // `group_diagnostics` slot. The plugin owns sys_audit_log (K2), so both
-      // doors onto it live and die with this plugin and need no item gate.
+      // ADR-0029 D7 — contribute the one Audit Log entry into the Setup app's
+      // `group_diagnostics` slot. The plugin owns sys_audit_log (K2), so the
+      // entry lives and dies with this plugin and needs no item gate.
       //
-      // #20142 — the two entries are two different surfaces, and neither is a
-      // superset of the other:
-      //  - `nav_audit_logs` is the object view: `sys_audit_log`'s named list
-      //    views (`record_views` lists the `read` rows, an action the page's
-      //    filter did not offer at the console pin this entry was measured
-      //    against), searchable, with the actor and tenant rendered as
-      //    resolved lookups.
-      //  - `nav_audit_log_browser` is the console's Audit Log page (the
-      //    `audit:log` registry key, `registerSystemComponents.tsx`): one
-      //    filterable table whose detail drawer pretty-prints a change's
-      //    before and after JSON, where the record page shows `old_value` /
-      //    `new_value` as raw textarea text.
+      // #23890 — ONE entry, and it opens the console's audit browser (the
+      // `audit:log` registry key, objectui `registerSystemComponents.tsx`):
+      // filters by action, object, actor and date, a drawer that pretty-prints
+      // a change's before and after JSON, and `sys_audit_log`'s served list
+      // views (Writes, Auth, Record Views, …) offered as presets. The object
+      // list is reached from the page's "Open as list" link, not from the menu;
+      // both halves of that page are at the console pin this entry was measured
+      // against (objectui#12667). It used to sit beside a second entry onto the
+      // object list (`nav_audit_log_browser` was the page's own id until then):
+      // two doors onto the same rows.
+      //
+      // The id is the one the object-list entry carried: users' sidebar pins
+      // (`nav:<id>`) and the Setup labels in `@objectstack/platform-objects`
+      // key on it, and the retired id is tombstoned there.
       navigationContributions: [
         {
           app: 'setup',
           group: 'group_diagnostics',
           priority: 100,
           items: [
-            { id: 'nav_audit_logs', type: 'object', label: 'Audit Logs', objectName: 'sys_audit_log', icon: 'scroll-text' },
-            { id: 'nav_audit_log_browser', type: 'component', label: 'Audit Log Browser', componentRef: 'audit:log', icon: 'file-diff' },
+            { id: 'nav_audit_logs', type: 'component', label: 'Audit Log', componentRef: 'audit:log', icon: 'scroll-text' },
           ],
         },
       ],

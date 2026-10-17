@@ -122,7 +122,7 @@ describe('[#19417] installPackage parses `manifest.id` through its declaration',
         it(`lit control — '${id}' still installs`, async () => {
             const { impl, registryCalls } = makeImpl();
             const res: any = await (impl as any).installPackage({
-                manifest: { id, name: 'X', version: '1.0.0' },
+                manifest: { id, name: 'X', type: 'app', version: '1.0.0' },
             });
             expect(registryCalls).toHaveLength(1);
             expect(registryCalls[0].manifest.id).toBe(id);
@@ -156,7 +156,7 @@ function makeDuplicateImpl(sourceId = 'com.example.leave') {
         find: vi.fn(async () => rows),
         registry: {
             getPackage: vi.fn(() => ({
-                manifest: { id: sourceId, name: 'Leave', namespace: 'leave', version: '1.0.0' },
+                manifest: { id: sourceId, name: 'Leave', type: 'app', namespace: 'leave', version: '1.0.0' },
             })),
             installPackage: vi.fn((manifest: any) => {
                 installed.push(manifest);

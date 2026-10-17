@@ -35,6 +35,7 @@
 // titling and nothing else.
 
 import { describe, it, expect, vi } from 'vitest';
+import { provisionPrimary } from '@objectstack/spec/data';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 type ObjectMeta = Record<string, unknown> & { name: string };
@@ -174,24 +175,115 @@ describe('[#8786] searchAll titles a hit from the canonical nameField', () => {
         expect(hits).toHaveLength(1);
         expect(hits[0].title).toBe('TK-77');
     });
+});
 
-    it('titleFormat still outranks the pointer', async () => {
-        // Ordering above the changed line is untouched: `titleFormat` is
-        // resolved before the candidate list is built, so a canonical
-        // `nameField` does not overtake an explicit format.
-        const account: ObjectMeta = {
-            name: 'account',
-            titleFormat: '{company_name} ({region})',
-            nameField: 'company_name',
-            fields: { company_name: text('company_name'), region: text('region') },
-        };
-        const p = makeProtocol([account], {
-            account: [{ id: 'acc_3', company_name: 'Acme Industrial', region: 'EMEA' }],
+describe('[#24087] searchAll titles nameField before the deprecated titleFormat', () => {
+    // [ADR-0079 D3] `titleFormat` is retired in favour of `nameField`, and the
+    // spec's own describe says "an explicit nameField now takes precedence".
+    // `renderTitle` used to render the template FIRST and return it whenever
+    // every placeholder resolved, so an object declaring both keys
+    // (`sys_approval_request`: `titleFormat: '{process_name} · {record_id}'`
+    // beside a `display_title` formula designated as `nameField`) was titled
+    // in the palette by its machine source.
+    //
+    // The fixtures below are passed through `provisionPrimary` — the
+    // designate-only stamp the SchemaRegistry runs on every object at
+    // registration — so each one is the body `registry.getAllObjects()`
+    // serves, not the body as authored. That stamp is why a titleFormat-only
+    // object with a title-eligible field is titled by the DERIVED pointer
+    // (pinned below): authorship is not recoverable after it, so the reader
+    // cannot tell an authored `nameField` from a stamped one.
+    const served = (o: ObjectMeta): ObjectMeta => provisionPrimary(o, { synthesize: false });
+
+    it('THE PIN — an object declaring both keys is titled by its nameField value', async () => {
+        const request = served({
+            name: 'approval_request',
+            titleFormat: '{process_name} · {record_id}',
+            nameField: 'display_title',
+            fields: {
+                display_title: { name: 'display_title', type: 'formula', returnType: 'text' },
+                process_name: text('process_name'),
+                record_id: text('record_id'),
+            },
+        });
+        const p = makeProtocol([request], {
+            approval_request: [{
+                id: 'apr_1',
+                display_title: 'Discount Sign-off · opp_45',
+                process_name: 'flow:deal_desk',
+                record_id: 'opp_45',
+            }],
         });
 
-        const { hits } = await p.searchAll({ q: 'acme', perObject: 5 });
+        const { hits } = await p.searchAll({ q: 'discount', perObject: 5 });
 
         expect(hits).toHaveLength(1);
-        expect(hits[0].title).toBe('Acme Industrial (EMEA)');
+        expect(hits[0].title).toBe('Discount Sign-off · opp_45');
+        // The defect's signature, named so a refactor of the value above
+        // cannot quietly re-admit it.
+        expect(hits[0].title).not.toBe('flow:deal_desk · opp_45');
+    });
+
+    it('CONTROL — the template still titles an object the registry designates no pointer for', async () => {
+        // No title-eligible field, so `provisionPrimary` stamps nothing and
+        // the template is the best title there is: the reorder must demote
+        // `titleFormat`, not drop it.
+        const order = served({
+            name: 'order',
+            titleFormat: 'Order {order_no}',
+            fields: { order_no: { name: 'order_no', type: 'number' } },
+            // A number is not in the auto-default search set; declaring it
+            // keeps the object scannable so the sweep reaches its title.
+            searchableFields: ['order_no'],
+        });
+        expect(order.nameField).toBeUndefined();
+        const p = makeProtocol([order], { order: [{ id: 'ord_1', order_no: 42 }] });
+
+        const { hits } = await p.searchAll({ q: '42', perObject: 5 });
+
+        expect(hits).toHaveLength(1);
+        expect(hits[0].title).toBe('Order 42');
+    });
+
+    it('CONTROL — an empty pointer value falls through to the template, not to the id', async () => {
+        const request = served({
+            name: 'approval_request',
+            titleFormat: '{process_name} · {record_id}',
+            nameField: 'display_title',
+            fields: {
+                display_title: { name: 'display_title', type: 'formula', returnType: 'text' },
+                process_name: text('process_name'),
+                record_id: text('record_id'),
+            },
+        });
+        const p = makeProtocol([request], {
+            approval_request: [{ id: 'apr_2', display_title: '', process_name: 'flow:deal_desk', record_id: 'opp_46' }],
+        });
+
+        const { hits } = await p.searchAll({ q: 'deal', perObject: 5 });
+
+        expect(hits).toHaveLength(1);
+        expect(hits[0].title).toBe('flow:deal_desk · opp_46');
+    });
+
+    it('a titleFormat-only object with a title-eligible field is titled by the STAMPED pointer', async () => {
+        // The measured consequence of mirroring `resolveDisplayField`: the
+        // registry designates `ref_code` (first title-eligible field), and the
+        // served body cannot say whether an author wrote it, so it outranks
+        // the deprecated template exactly as an authored one does.
+        const ticket = served({
+            name: 'ticket',
+            titleFormat: '[{ref_code}] {summary_text}',
+            fields: { ref_code: text('ref_code'), summary_text: text('summary_text') },
+        });
+        expect(ticket.nameField).toBe('ref_code');
+        const p = makeProtocol([ticket], {
+            ticket: [{ id: 'tk_9', ref_code: 'TK-9', summary_text: 'Printer on fire' }],
+        });
+
+        const { hits } = await p.searchAll({ q: 'tk', perObject: 5 });
+
+        expect(hits).toHaveLength(1);
+        expect(hits[0].title).toBe('TK-9');
     });
 });
