@@ -5953,7 +5953,7 @@ export function createUnknownHostnameGuardPlugin(
     optionalDependencies: ['com.objectstack.server.hono'],
     init: async (ctx: any) => {
       try {
-        const httpServer: any = ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
+        const httpServer: any = readComposedHttpServer(ctx);
         const rawApp = httpServer?.getRawApp?.();
         if (!rawApp || typeof rawApp.use !== 'function') {
           ctx.logger?.warn?.('[unknown-hostname-guard] http.server unavailable; guard not installed');
