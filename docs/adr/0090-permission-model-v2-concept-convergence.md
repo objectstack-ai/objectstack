@@ -595,7 +595,7 @@ not just "who did".
 > in place of a wider rule — therefore names those three sets; a set shipped later that the conditions
 > cannot settle joins that denylist by an amendment here. The general case — an authored set with a
 > `'*'` read and no row scope on a Layer-0-inert readable object, in a deployment with no platform
-> baseline — is not settled by this note: it is held for a maintainer decision on a separate card.
+> baseline — is not settled by this note: it is held for the maintainer's decision on #24164.
 > The delegated-administration gate's `isTenantAdmin` (a wildcard `modifyAllRecords` holder) reads
 > the walled `organization_admin` as tenant-level today; under this note it is organization-level.
 > No spec key is added, and the v18 upgrade entry's `replacement` text
