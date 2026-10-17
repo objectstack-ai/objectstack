@@ -67,7 +67,7 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 import { prepareImportRequest } from './import-prepare.js';
-import { readTemplateMode } from './import-template.js';
+import { readTemplateMode, templateFieldDefs } from './import-template.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { handleRouteError } from './error-response.js';
@@ -749,7 +749,8 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     //
     // Query params:
     //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.)
-    //   fields=a,b,c        (default: derive from object schema; falls back to keys of the first row)
+    //   fields=a,b,c        (default: the object schema's fields minus those declared
+    //                        `hidden`; falls back to keys of the first row)
     //   filter=<json>       ($filter as URL-encoded JSON, same shape as list endpoint)
     //   search=<term>       (full-text term, same semantics as the list endpoint's
     //                        $search; composes with `filter` rather than replacing it)
@@ -993,7 +994,19 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     }
                     metaMap = buildFieldMetaMap(schema);
                     if (!fields || fields.length === 0) {
-                        const names = [...metaMap.keys()];
+                        // [#24143] The default columns are the fields the object
+                        // SHOWS by default: a field declared `hidden` ("Hidden from
+                        // default UI", `FieldSchema.hidden`) is not one. Without
+                        // this the hidden `__search` companion became an empty
+                        // "Search Index" column on every export. Column selection
+                        // only: `metaMap` keeps every field, so an explicit
+                        // `?fields=` naming a hidden field is answered as before.
+                        // `templateFieldDefs` reads the field definitions under
+                        // the same names `buildFieldMetaMap` gives them.
+                        const defs = templateFieldDefs(schema);
+                        const names = [...metaMap.keys()].filter(
+                            (name) => (defs.get(name) as { hidden?: unknown } | undefined)?.hidden !== true,
+                        );
                         if (names.length > 0) { fields = names; fieldsFromSchema = true; }
                     }
                 } catch { /* fall back to first-row derivation + raw values */ }
