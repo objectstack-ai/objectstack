@@ -49,7 +49,12 @@ export const TaskReminderFlow: Flow = {
   ],
 
   nodes: [
-    { id: 'start', type: 'start', label: 'Start (Daily 8 AM)', config: { schedule: '0 8 * * *', objectName: 'todo_task' } },
+    // [#24067] No `objectName` on a schedule start node: the schedule binding
+    // carries no object (`AutomationEngine.deriveTriggerBinding` lifts
+    // `objectName` into the record-change binding only), so the key would be
+    // stored and never read. The sweep names its object where it reads, on the
+    // `get_record` step below.
+    { id: 'start', type: 'start', label: 'Start (Daily 8 AM)', config: { schedule: '0 8 * * *' } },
     {
       id: 'get_upcoming_tasks', type: 'get_record', label: 'Get Tasks Due Tomorrow',
       // `limit > 1` is the declared way to make this a LIST read (`find`, not
@@ -158,7 +163,8 @@ export const OverdueEscalationFlow: Flow = {
   ],
 
   nodes: [
-    { id: 'start', type: 'start', label: 'Start (Daily 9 AM)', config: { schedule: '0 9 * * *', objectName: 'todo_task' } },
+    // No `objectName` here either: see `task_reminder`'s start node.
+    { id: 'start', type: 'start', label: 'Start (Daily 9 AM)', config: { schedule: '0 9 * * *' } },
     {
       id: 'get_overdue_tasks', type: 'get_record', label: 'Get Severely Overdue Tasks',
       // `limit > 1` = LIST read; the undeclared `getAll` was never read (#4277).
