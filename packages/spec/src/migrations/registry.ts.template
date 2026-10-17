@@ -1743,7 +1743,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'element-flat-data-binding-retired',
     order: 90,
     text:
-      'It also retires the element layer\'s second data door (#11509, ruling A-narrow): the flat '
+      'It also retires the element layer\'s second data door (ruled 2026-10-08, which leaves the '
+      + '`object-*` blocks their native keys): the flat '
       + '`object` / `filter` / `sort` / `limit` keys of `element:record_picker` and '
       + '`element:repeater` and the flat `object` / `filter` of `element:number`, each the same query '
       + 'as a key of the node-level `dataSource` binding, resolved per element by three contradictory '
@@ -2333,8 +2334,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'object-grid-default-filters-retired',
     order: 90,
     text:
-      'It also retires `object-grid`\'s `defaultFilters` (#11509, ruling A-narrow, in the shape '
-      + 'of the `defaultSort` retirement): the legacy second spelling of `filter`, read only when '
+      'It also retires `object-grid`\'s `defaultFilters` (ruled 2026-10-08 together with the '
+      + 'element layer\'s flat binding keys, in the shape of the `defaultSort` retirement): the '
+      + 'legacy second spelling of `filter`, read only when '
       + '`filter` lowered to nothing, which an earlier narrowing in this major had shaped as the rule '
       + 'array and this retirement absorbs. The mechanical conversion moves the rules onto an empty '
       + '`filter` and deletes the key beside a `filter` with content (the renderer never read it '
