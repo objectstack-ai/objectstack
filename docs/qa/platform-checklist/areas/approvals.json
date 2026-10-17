@@ -755,7 +755,7 @@
       "title": "Approve/Reject render in the record header; Reject fires after ONE dialog; a locking approval hides inline edit",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["dev admin (holds the manager position, so showcase_budget_approval's manager_review routes to them — a pending approver standing on the record page)"],
@@ -769,13 +769,13 @@
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
         "PATCH a showcase_project budget to e.g. 200000 over /api/v1/data — showcase_budget_approval opens and parks at manager_review (routed to manager = admin), lockRecord:false",
-        "open that project's record page (/apps/showcase_app/showcase_project/:id); screenshot the header — Approve and Reject must render in the primary slot (buildApprovalDecisionActions: Approve variant 'primary' order -100, Reject variant 'destructive' order -99, both locations ['record_header'])",
+        "open that project's record page — /_console/apps/showcase_app/showcase_project/record/:id, the served record route (the shorthand /apps/showcase_app/showcase_project/:id still lands there: the console's ShorthandRecordRedirect rewrites it); screenshot the header — Approve and Reject must render in the primary slot (buildApprovalDecisionActions: Approve variant 'primary' order -100, Reject variant 'destructive' order -99, both locations ['record_header'])",
         "because manager_review is lockRecord:false, confirm inline-edit affordances remain live on this record (the editable contrast)",
         "click Reject: assert exactly ONE dialog opens — the param dialog carrying the comment textarea inline, titled by the Reject label with the confirm question as its description; there is NO separate confirm-then-comment second dialog (objectui#3126)",
         "fill the comment and Confirm; capture POST /api/v1/approvals/requests/:id/reject and re-read the request (status=rejected)",
         "approve path: raise another budget-approval request; on its record page click Approve → one dialog with an optional comment → Confirm → POST /:id/approve → re-read (status=approved)",
         "lock contrast: drive a >500000 budget to exec_review (lockRecord:true) on a project record page; screenshot — the inline-edit affordances are HIDDEN (recordLockedByApproval → canEdit suppressed)",
-        "both-sides gate: open a project record page whose pending approval routes AWAY from the admin (or has none) — the header offers NO Approve/Reject (approvals.canDecide false)"
+        "both-sides gate: open the same project's record page as a member who can READ the project but is NOT a pending approver and holds no override — e.g. a contributor-bound member — the header offers NO Approve/Reject (approvals.canDecide false). ⛔ Not the dev admin: on a record whose approval routes away from them the admin still sees 'Override Approve' / 'Override Reject' (the organization-administrator override path), so the admin cannot prove the gate's closed side"
       ],
       "acceptance": [
         {
@@ -803,9 +803,9 @@
           "evidence": "two record-page screenshots (locked vs editable)"
         },
         {
-          "clause": "the decision buttons are gated by the viewer's approver relationship — a record whose pending approval does not route to the viewer offers neither Approve nor Reject",
+          "clause": "the decision buttons are gated by the viewer's approver relationship — a viewer who is neither a pending approver nor an override holder is offered neither Approve nor Reject; an organization administrator off the slate is offered the OVERRIDE pair instead, which is a different control, not this gate failing",
           "oracle": "dom",
-          "verify": "after confirming render via screenshot, the header DOM has no approve_request/reject_request actions when approvals.canDecide is false (the current user is not in pending_approvers)",
+          "verify": "after confirming render via screenshot, the header DOM of the non-approver, non-override member (e.g. a contributor-bound member) has no approve_request/reject_request actions when approvals.canDecide is false (the current user is not in pending_approvers); record, separately, that the admin routed away sees 'Override Approve' / 'Override Reject'",
           "evidence": "screenshot + header action DOM list"
         }
       ],
@@ -822,7 +822,8 @@
         "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (BudgetApprovalFlow — manager_review lockRecord:false / exec_review lockRecord:true on showcase_project)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — the record-page approval surface (distinct from the inbox-drawer items): header Approve/Reject, one-dialog Reject (#3126), decision round-trip, and the lockRecord-driven inline-edit hide (#2902)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — the record-page approval surface (distinct from the inbox-drawer items): header Approve/Reject, one-dialog Reject (#3126), decision round-trip, and the lockRecord-driven inline-edit hide (#2902)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-17", "change": "the both-sides clause and step 9 named no persona, and the natural choice — the dev admin on a record routed away from them — sees 'Override Approve' / 'Override Reject' (#23878 checklist-accuracy finding), so it can never show the closed side; the step and clause 5 now name a non-override member. The record route in step 3 is the served /_console/apps/showcase_app/showcase_project/record/:id (the shorthand form redirects to it). Re-run on main c91af8ed6 with the console at objectui f8267df93aba: on a project whose budget approval is pending for the admin, the admin's header shows Approve and Reject; a contributor-bound member's header shows neither; with the admin's slot reassigned away the admin's header shows Override Approve and Override Reject", "ref": "#24036" }
       ]
     },
     {
@@ -1059,7 +1060,7 @@
       "title": "The bell badge and Home's action card agree on the pending-approval count and lead to an app the user can open",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["a non-admin pending approver", "an admin with >9 combined unread notifications + pending approvals"],
@@ -1070,11 +1071,11 @@
           "enough seeded sys_inbox_message rows plus pending approvals that the combined total exceeds 9, so the CLAMP case is the one exercised (a total of 9 or less never proves the breakdown is unclamped)"
         ],
         "knownGaps": [
-          "sys_inbox_message is granted by no platform permission set, so a plain member's notification count is structurally 0 and the >9 case can only be reached as an admin — tracked at #7344"
+          "[STALE premise corrected — #7344 closed 2026-08-11] a plain member's notification count is NOT structurally 0: a member holding only the baseline sets reads its own notifications (GET /api/v1/notifications?view=mine 200), so the >9 case is reachable for a non-admin. Measured on main c91af8ed6: seed it by routing approvals to the member through a runtime user-routed flow (POST /api/v1/automation, record-triggered on showcase_field_zoo; DELETE it afterwards). Notifications of one type COALESCE in the popover ('Approval requested ×9' counts as one), so drive the total past 9 with pending approvals: at 10 pending + 2 notification groups the button read 9+ and the header 12 total"
         ]
       },
       "steps": [
-        "boot showcase isolated; seed >9 combined notifications + pending approvals for the persona",
+        "boot showcase isolated; seed >9 combined notifications + pending approvals for a NON-ADMIN member (knownGaps: a runtime flow routing {type:'user', value:<the member>} on showcase_field_zoo, one create per approval — coalesced notifications count once, so the pending approvals carry the total); sign in as that member through the form",
         "open the bell popover; screenshot the header line and read the button badge",
         "open /_console/home; screenshot the 'Needs your attention' card",
         "click the card's pending-approvals row and record the URL it navigates to",
@@ -1096,7 +1097,7 @@
         {
           "clause": "Home's pending-approvals card navigates within an app the user can open — never /apps/setup/...",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the card rendered, click it and read the URL: /apps/<an app in this session's meta/app list>/system/approvals. For a non-admin whose app list excludes setup, a setup URL is a FAIL",
+          "verify": "after a screenshot confirms the card rendered, click it and read the URL: /apps/<an app in this session's meta/app list>/system/approvals. For a non-admin whose app list excludes setup, a setup URL is a FAIL. The URL's app segment may be the app's package id (measured: /apps/com.example.showcase/system/approvals, which the console resolves to the Showcase app) or its name; either is an app the session can open",
           "evidence": "the landed URL + the session's meta/app list"
         }
       ],
@@ -1111,7 +1112,8 @@
         "objectui packages/app-shell/src/console/home/HomePage.tsx (onOpenApprovals → /apps/<approvalsAppSegment>/system/approvals)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-10", "change": "initial — the bell breakdown (objectui#4073) and Home's card target had no checklist coverage", "ref": "#7331" }
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the bell breakdown (objectui#4073) and Home's card target had no checklist coverage", "ref": "#7331" },
+        { "revision": 2, "date": "2026-10-17", "change": "knownGaps[0] said a plain member's notification count is structurally 0, so the >9 case was admin-only (#7344); #7344 closed on 2026-08-11 and the #23878 run saw a member read 2 notifications. Re-run on main c91af8ed6 with the console at objectui f8267df93aba as a baseline-only member seeded with 10 pending approvals and 2 notification groups: the bell button read 9+, the popover header '12 total · 2 notifications + 10 pending approvals', Home's Awaiting approval card 10, the inbox's My Pending tab 10 and the approvals API 10; the card's View all opened /_console/apps/com.example.showcase/system/approvals inside the Showcase app. The knownGap, step 1 and clause 3's verify now say so", "ref": "#24036" }
       ]
     },
     {

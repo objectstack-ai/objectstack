@@ -2724,7 +2724,7 @@
       "title": "OS_PLATFORM_OWNER_EMAIL platform-admin anchor: only a VERIFIED stored-email match confers PLATFORM_ADMIN — unset, unverified match, non-match and malformed lists each confer nothing, fail closed",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2738,15 +2738,15 @@
           "a manage_platform_settings-floor probe route: GET /api/v1/datasources answers 401/403 BEFORE any service resolution (packages/services/service-datasource/src/admin-routes.ts; DATASOURCE_ADMIN_CAPABILITY), and admin_full_access carries that capability (packages/spec/src/identity/eval-user.zod.ts) — so the probe discriminates platform-admin standing cleanly"
         ],
         "knownGaps": [
-          "the ENTITLED live leg needs a VERIFIED second account, and no stock HTTP path verifies one: email_verified is statically readonly at the user-context API (stripped — the write-path-guards class), a fresh sign-up reads unverified, and the seeded dev admin — whose address IS stamped verified at seed time (#11343, auth-plugin.ts) — also holds the unscoped admin_full_access grant under single (the posture this item boots), so its 200s can never attribute to the config anchor. Verify M's address via a verification-enabled boot with mail capture (identity-auth.email-verification-loop's fixture, itself a knownGap there) or a system-context stamp through the same isSystem doorway the seed itself uses; without either, clause 5's live leg scores blocked(fixture) and the entitled side rests on the unit pin"
+          "the ENTITLED live leg needs a VERIFIED second account, and no stock HTTP path verifies one: email_verified is statically readonly at the user-context API (stripped — the write-path-guards class), a fresh sign-up reads unverified, and the seeded dev admin — whose address IS stamped verified at seed time (#11343, auth-plugin.ts) — also holds the unscoped admin_full_access grant under single (the posture this item boots), so its 200s can never attribute to the config anchor. Verify M's address via a verification-enabled boot with mail capture (identity-auth.email-verification-loop's fixture, itself a knownGap there) or a system-context stamp through the same isSystem doorway the seed itself uses; without either, clause 5's live leg scores blocked(fixture) and the entitled side rests on the unit pin. Measured on main c91af8ed6: POST /api/v1/auth/admin/update-user {userId, data: {emailVerified: true}} answers the seeded dev admin 403 YOU_ARE_NOT_ALLOWED_TO_UPDATE_USERS, so the HTTP lane has no verifying door; the run stamped M's email_verified directly on its own isolated scratch database with the server stopped (a system-level write, never on a shared database) and records that it did"
         ]
       },
       "steps": [
         "boot showcase single (OS_TENANCY_POSTURE=single — also what a deployment with no tenancy configuration resolves to) with the variable UNSET — a walled posture (group / isolated) refuses to boot with it unset (plugin-auth init; out of scope here, see negative) — and keep that posture for every restart below; admin session; sign up fresh member M and record M's email; as M: GET /api/v1/datasources and GET /api/v1/auth/me/permissions (read systemPermissions) — the baseline refusals",
         "restart with OS_PLATFORM_OWNER_EMAIL=<M's email> (M's row is unverified); as M repeat both probes",
         "restart with OS_PLATFORM_OWNER_EMAIL=<an address matching no sys_user row>; repeat M's probes",
-        "restart with a malformed list, e.g. OS_PLATFORM_OWNER_EMAIL='<M's email>, not an address'; capture the [authz] refusal from the process log (it prints once, on the first derivation after the value is seen); as M repeat the probes — the WHOLE variable is refused, so even the well-formed entry confers nothing",
-        "entitled side (see knownGaps for the verified-member fixture): with M's row verified and the variable naming M, as M repeat the probes and read /api/v1/auth/me/permissions — expect the declared admin envelope; where the fixture is unavailable, run the unit pin and cite its output instead",
+        "entitled side (see knownGaps for the verified-member fixture): with M's row verified and the variable naming M, as M repeat the probes and read /api/v1/auth/me/permissions — expect the declared admin envelope; where the fixture is unavailable, run the unit pin and cite its output instead. This step runs BEFORE the malformed variant on purpose: the malformed list's 'the well-formed sibling confers nothing' check only discriminates once M is verified",
+        "with M's row STILL VERIFIED from the previous step, restart with a malformed list, e.g. OS_PLATFORM_OWNER_EMAIL='<M's email>, not an address'; capture the [authz] refusal from the process log (it prints once, on the first derivation after the value is seen); as M repeat the probes — the WHOLE variable is refused, so even the well-formed entry confers nothing. Run unverified, M's refusal here could not be told apart from clause 2's unverified arm; verified, a well-formed variable naming M would confer standing (the previous step shows it does), so the refusal is attributable to the malformed entry alone",
         "the walled half of the legacy grant anchor: run the #11663 L5 posture-split unit pins named in clause 6 and cite their output. There is no live log line to grep — the once-per-process legacy-grant re-anchor pointer was retired with the walled anchor (#19136), and nothing replaces it on the request path; the only operator-facing line left is plugin-security's boot-time fail-closed error, which fires when a walled rig has no usable configured administrator"
       ],
       "acceptance": [
@@ -2771,7 +2771,7 @@
         {
           "clause": "any malformed entry fails the WHOLE variable closed, loudly once: the process log carries the [authz] refusal naming the offending entry verbatim and stating the deployment now has ZERO config-derived platform administrators (parsePlatformAdminEmails, platform-admin.ts; sink) — and the well-formed sibling entry on the same list confers nothing (never skip-and-continue)",
           "oracle": "log",
-          "verify": "log line matches the refusal text and names the entry; M (the well-formed entry) still refused on the datasource probe",
+          "verify": "log line matches the refusal text and names the entry; M (the well-formed entry) still refused on the datasource probe WHILE M's row is verified — run after the entitled step, so the same well-formed address is known to confer standing when the variable is accepted",
           "evidence": "the log excerpt + M's trace"
         },
         {
@@ -2833,6 +2833,12 @@
           "date": "2026-09-23",
           "change": "re-anchored on the walled retirement of the legacy grant anchor (#19136, issue #19145): step 6 and clause 6 told the runner to grep the process log for the once-per-process re-anchor pointer and cited reportLegacyPlatformAdminGrant, both removed — clause 6 now states the posture split (an anchor under single only, silent everywhere) with the #11663 L5 unit pins as its oracle, and the source parenthetical names live symbols. The item's live legs move from isolated to single: an isolated boot with the variable unset refuses to start (plugin-auth init), and under a walled posture the seeded admin holds no grant-anchored standing, so clauses 1 and 3 and the seeded-admin both-sides control only hold under single. Persona and knownGap state the posture. The single half is described as it ships; its fate is #11979's",
           "ref": "#19145"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps reordered (#23878 checklist-accuracy finding): the malformed-list variant ran while M was still unverified, so its refusal could not be told apart from the unverified arm, and the 'well-formed sibling confers nothing' check only bites once M is verified. The entitled step now precedes the malformed one, which keeps M verified, and clause 4's verify says so; knownGaps[0] records how the verified fixture was made (the admin update-user door refuses; a direct email_verified stamp on the isolated scratch DB). Re-run on main c91af8ed6, single posture, same DB across restarts: var unset → M 403, systemPermissions []; var = M unverified → 403, []; var = a non-matching address → 403, []; M verified and var = M in another case → datasources 200, 9 system permissions incl. manage_platform_settings; var = 'M, not an address' with M verified → 403, [] and the [authz] whole-variable refusal naming the entry; the admin answered 200 on every boot",
+          "ref": "#24036"
         }
       ]
     },
