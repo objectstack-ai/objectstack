@@ -655,7 +655,8 @@ describe('SolutionBlueprintStrictSchema (OpenAI strict mirror)', () => {
       expect(firstIssue({
         ...strictBp,
         views: [{ ...strictView, filters: [{ field: 'archived_at', operator: 'is_null' }], sort: null }],
-      })).toEqual({ path: ['views', 0, 'filters', 0, 'value'], code: 'invalid_type' });
+      // `invalid_union`: an absent key fails every arm of the nullable value union.
+      })).toEqual({ path: ['views', 0, 'filters', 0, 'value'], code: 'invalid_union' });
     });
 
     it('takes the canonical operator vocabulary only — a legacy shorthand is not a word the model may emit', () => {
