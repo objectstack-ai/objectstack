@@ -81,6 +81,18 @@ const MANIFEST: Bag = {
     }],
 };
 
+/** A driver holding no row of anything — the stored-row layer, empty. */
+const EMPTY_STORE = {
+    name: 'empty-store',
+    version: '0.0.0',
+    supports: {},
+    connect: async () => undefined,
+    disconnect: async () => undefined,
+    find: async () => [],
+    findOne: async () => null,
+    count: async () => 0,
+};
+
 let dir: string;
 const kernels: ObjectKernel[] = [];
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'mil-meta-reads-')); });
@@ -131,6 +143,12 @@ async function bootPlugin(opts: { refuseUnregister?: string; before?: (metadata:
     await kernel.bootstrap();
     const ql = kernel.getService<ObjectQL>('objectql');
     ql.registry.logLevel = 'silent';
+    // The protocol's reads consult the stored rows (`sys_metadata`) besides the
+    // registry and the metadata service. An install-local install writes no
+    // such row — it registers in memory and keeps its ledger on disk — so the
+    // store holds none here, and every answer below comes from the two
+    // in-memory layers.
+    ql.registerDriver(EMPTY_STORE as never, true);
     const protocol = kernel.getService<any>('protocol');
     const metadata = kernel.getService<any>('metadata');
     if (opts.refuseUnregister !== undefined) {
@@ -177,7 +195,10 @@ async function bootPlugin(opts: { refuseUnregister?: string; before?: (metadata:
     const uninstall = () => routes.get(`DELETE ${ROUTE}/:manifestId`)!(
         makeC(`http://localhost:3000${ROUTE}/${APP_ID}`, { manifestId: APP_ID }),
     );
-    const warnings = () => logger.warn.mock.calls.map((call: unknown[]) => String(call[0]));
+    /** The uninstall's own warnings: each one opens with `uninstalled <id>`. */
+    const warnings = () => logger.warn.mock.calls
+        .map((call: unknown[]) => String(call[0]))
+        .filter((line) => line.includes(`uninstalled ${APP_ID}`));
     return { install, uninstall, protocol, metadata, ql, warnings };
 }
 
@@ -299,7 +320,7 @@ describe('#24070: an install-local uninstall withdraws the package from every me
         expect(runCleanups).toHaveBeenCalledTimes(1);
         // The registry half still withdrew: the copies are what remains.
         expect(h.ql.registry.getPackage(APP_ID)).toBeUndefined();
-        const warned = h.warnings().filter((w) => w.includes(APP_ID));
+        const warned = h.warnings();
         expect(warned).toHaveLength(1);
         expect(warned[0]).toContain('metadata store is read-only');
         expect(warned[0]).toContain(OBJECTS[0]);
