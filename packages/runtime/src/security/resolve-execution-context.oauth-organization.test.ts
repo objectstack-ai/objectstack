@@ -42,6 +42,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import type { PermissionSet } from '@objectstack/spec/security';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { SecurityPlugin, RLS_DENY_FILTER } from '@objectstack/plugin-security';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 
 import { resolveExecutionContext } from './resolve-execution-context.js';
 import { bindCatalogFromTables } from './security-catalog.testkit.js';
@@ -134,6 +135,7 @@ function rig(posture: 'isolated' | 'group' | 'single' | undefined) {
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     async findOne(object: string, q: any = {}) {
+      assertEngineFindOnePredicate(object, q);
       return (t[object] ?? []).filter((r) => matchesWhere(r, q?.where))[0] ?? null;
     },
   }, t);
