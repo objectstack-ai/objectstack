@@ -34,8 +34,9 @@
  *
  * ## Controls
  *
- * The same caller un-held is served every route as before, and the family
- * registers nothing a CORS preflight could reach.
+ * The same caller un-held is served every route as before (the refusal-only
+ * catch-all answering its own 404, #24024), and the family registers nothing a
+ * CORS preflight could reach.
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -110,13 +111,24 @@ function mount(contextFromRequest: (req: IHttpRequest) => ExecutionContext | Pro
   return { http, calls };
 }
 
-/** One case per route: the request, and what an un-held signed-in caller gets. */
-const CASES: Record<string, { params?: Record<string, string>; body?: unknown; okStatus: number; publicRoute?: boolean }> = {
+/**
+ * One case per route: the request, and what an un-held signed-in caller gets.
+ * `refusalOnly` marks the catch-all (#24024), which serves nothing: its
+ * un-held signed-in answer is the family's 404, and it reaches nothing.
+ */
+const CASES: Record<string, {
+  params?: Record<string, string>; body?: unknown; okStatus: number; publicRoute?: boolean; refusalOnly?: boolean;
+}> = {
   [`POST ${BASE}`]: { body: { object: 'ai_conversations', recordId: 'conv_1' }, okStatus: 201 },
   [`GET ${BASE}`]: { okStatus: 200 },
   [`DELETE ${BASE}/:idOrToken`]: { params: { idOrToken: 'sl_1' }, okStatus: 200 },
   [`GET ${BASE}/:token/resolve`]: { params: { token: 'tok_abcdefgh' }, okStatus: 200, publicRoute: true },
   [`GET ${BASE}/:token/messages`]: { params: { token: 'tok_abcdefgh' }, okStatus: 200, publicRoute: true },
+  [`GET ${BASE}/*`]: { okStatus: 404, refusalOnly: true },
+  [`POST ${BASE}/*`]: { okStatus: 404, refusalOnly: true },
+  [`PUT ${BASE}/*`]: { okStatus: 404, refusalOnly: true },
+  [`PATCH ${BASE}/*`]: { okStatus: 404, refusalOnly: true },
+  [`DELETE ${BASE}/*`]: { okStatus: 404, refusalOnly: true },
 };
 
 async function drive(http: MockHttp, key: string) {
@@ -145,10 +157,11 @@ async function drive(http: MockHttp, key: string) {
 const census = [...mount(() => ({})).http.routes.keys()];
 
 describe('the share-link census — read off the registration', () => {
-  it('registers exactly five routes, every one has a case below, and no middleware or preflight route', () => {
+  it('registers exactly ten routes, every one has a case below, and no middleware or preflight route', () => {
     const { http } = mount(() => ({}));
-    // ⭐ A count, on purpose: a sixth route has to come through this file.
-    expect(census).toHaveLength(5);
+    // ⭐ A count, on purpose: an eleventh route has to come through this file.
+    // Five serve; five are the per-verb catch-all (#24024).
+    expect(census).toHaveLength(10);
     expect([...census].sort()).toEqual(Object.keys(CASES).sort());
     // Nothing here a CORS preflight could reach: no OPTIONS route and no
     // middleware, so a preflight is the host's answer, held or not.
@@ -182,6 +195,13 @@ describe('CONTROL — the same caller un-held is served as before', () => {
     const { http, calls } = mount(() => ({ userId: 'u_1', tenantId: 't_1' }));
     const answer = await drive(http, key);
     expect(answer.status).toBe(CASES[key]!.okStatus);
+    if (CASES[key]!.refusalOnly) {
+      // The catch-all serves nothing, held or not: its answer is the family's 404.
+      expect(answer.body?.success).toBe(false);
+      expect(answer.body?.error?.code).toBe('ENDPOINT_NOT_FOUND');
+      expect(calls()).toEqual([]);
+      return;
+    }
     expect(answer.body?.success).toBe(true);
     expect(calls().length).toBeGreaterThan(0);
   });

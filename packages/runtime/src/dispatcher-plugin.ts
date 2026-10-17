@@ -1400,6 +1400,58 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 }
             });
 
+            // [#24024] Each of the three faces is mounted for EVERY verb, though
+            // each serves one. The published v18 text is "`/notifications`:
+            // `401 UNAUTHENTICATED` on every face", and the domain keeps it as
+            // its first statement (`handleNotificationRequest`, ADR-0138 D2: the
+            // anonymous decision ahead of the inbox probe and of every face) —
+            // but a floor can only answer a verb that REACHES it. With the three
+            // served verbs as the only registrations, any other verb on these
+            // paths matched no route and the adapter's unmatched-route answer
+            // replied first: `405`, naming the allowed methods, to an anonymous
+            // caller as well. Same remedy as `/keys` above (#23909): register the
+            // verbs and the mismatch goes to the domain, which answers an
+            // anonymous caller 401, and a signed-in one what it answers on
+            // `createHonoApp`'s catch-all: the 501 capability answer on a
+            // deployment with no inbox, and otherwise the dispatcher's 404 for a
+            // route the domain does not serve.
+            //
+            // Exact paths only, like `/keys`: a sub-path no face names (say
+            // `/notifications/xyz`) is not mounted, and keeps the adapter's 404.
+            // No body is handed on: none of these verbs is a face, so the domain
+            // never reads one, and reading `req.body` here would answer a body
+            // the transport cannot parse with its `400` ahead of the floor's 401.
+            // The PUT and PATCH mounts are not wrapped by the per-route
+            // instrumentation (the observability Proxy wraps only
+            // get/post/delete), as the other PUT/PATCH mounts in this file are not.
+            const mountNotificationsVerb = (
+                subPath: '/notifications' | '/notifications/read' | '/notifications/read/all',
+                method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE',
+            ) => {
+                const register =
+                    method === 'GET' ? server.get
+                        : method === 'POST' ? server.post
+                            : method === 'PUT' ? server.put
+                                : method === 'PATCH' ? server.patch
+                                    : server.delete;
+                register.call(server, `${prefix}${subPath}`, async (req: any, res: any) => {
+                    try {
+                        const result = await dispatcher.dispatch(method, subPath, undefined, req.query, { request: req });
+                        sendResult(result, res);
+                    } catch (err: any) {
+                        errorResponse(err, res);
+                    }
+                });
+            };
+            for (const method of ['POST', 'PUT', 'PATCH', 'DELETE'] as const) {
+                mountNotificationsVerb('/notifications', method);
+            }
+            for (const subPath of ['/notifications/read', '/notifications/read/all'] as const) {
+                for (const method of ['GET', 'PUT', 'PATCH', 'DELETE'] as const) {
+                    mountNotificationsVerb(subPath, method);
+                }
+            }
+
             // ── Packages ────────────────────────────────────────────────
             // Single pipeline (ADR-0076 D11 / OQ#9): every package route flows
             // through dispatch() — like analytics / i18n / automation / AI —

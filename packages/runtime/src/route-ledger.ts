@@ -277,7 +277,7 @@ export const NON_DISPATCH_MOUNT_PREFIXES = [
 /**
  * The ledger.
  *
- * CENSUS (generated): this list holds 92 rows.
+ * CENSUS (generated): this list holds 105 rows.
  *
  * ⛔ THAT NUMBER IS WRITTEN BY A TOOL — never by hand.
  * `pnpm check:route-ledger-census` counts the rows below and fails when the two
@@ -340,6 +340,36 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'GET /notifications', domain: '/notifications', disposition: 'sdk', client: 'notifications.list' },
   { route: 'POST /notifications/read', domain: '/notifications', disposition: 'sdk', client: 'notifications.markRead' },
   { route: 'POST /notifications/read/all', domain: '/notifications', disposition: 'sdk', client: 'notifications.markAllRead' },
+  // [#24024] Refusal-only mounts. Each face serves one verb, but the v18 text
+  // (changeset `23225-domain-floor-anonymous-deny`) answers an anonymous caller
+  // `401 UNAUTHENTICATED` on every face, and the domain's floor answers only a
+  // verb that is mounted. Exact rows, as for `/keys`, deliberately not a
+  // `* /notifications/**` family: no sub-path the three faces do not name is
+  // mounted on the standalone server.
+  { route: 'POST /notifications', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'PUT /notifications', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'PATCH /notifications', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'DELETE /notifications', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'GET /notifications/read', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'PUT /notifications/read', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'PATCH /notifications/read', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'DELETE /notifications/read', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'GET /notifications/read/all', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'PUT /notifications/read/all', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'PATCH /notifications/read/all', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
+  { route: 'DELETE /notifications/read/all', domain: '/notifications', disposition: 'server-only',
+    note: 'refusal-only, mounted for the v18 every-face anonymous floor (changeset 23225): anonymous 401 UNAUTHENTICATED, signed-in the notifications domain\'s 404 (or its 501 with no inbox)' },
 
   // ── security (ADR-0090 suggested audience bindings) ───────────────────────
   { route: 'GET /security/suggested-bindings', domain: '/security', disposition: 'sdk', client: 'security.suggestedBindings.list' },
@@ -421,6 +451,16 @@ export const ROUTE_LEDGER: readonly RouteLedgerEntry[] = [
   { route: 'DELETE /share-links/:idOrToken', domain: '/share-links', disposition: 'sdk', client: 'shareLinks.revoke' },
   { route: 'GET /share-links/:token/resolve', domain: '/share-links', disposition: 'public', note: 'unauthenticated token resolution for shared-record pages' },
   { route: 'GET /share-links/:token/messages', domain: '/share-links', disposition: 'public', note: 'unauthenticated shared-conversation messages' },
+  // [#24024] The refusal-only catch-all, a family row on purpose. The v18 text
+  // (changeset `23225-domain-floor-anonymous-deny`) answers an anonymous caller
+  // `401 UNAUTHENTICATED` "on every path the domain does not serve", which is a
+  // sub-path claim, not a verb list: the dispatcher domain matches the whole
+  // `/share-links` segment, and on the standalone server `plugin-sharing`'s
+  // `registerShareLinkRoutes` mounts `${base}/*` for every verb, after the five
+  // rows above, so the family's door answers every request under the base. The
+  // rows above stay exact and keep their own dispositions.
+  { route: '* /share-links/**', domain: '/share-links', disposition: 'server-only',
+    note: 'refusal-only catch-all for every verb and every path the five routes do not serve: anonymous 401 UNAUTHENTICATED, signed-in 404' },
 
   // ── packages ──────────────────────────────────────────────────────────────
   // [#17431] The `/packages` READ rows carry a `responseSchema` again: the
