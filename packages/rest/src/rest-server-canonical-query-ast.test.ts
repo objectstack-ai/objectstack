@@ -164,9 +164,17 @@ interface CensusEntry {
  * public form doors (`form-routes.ts`) build no `query:` literal either — they
  * list the environment's views and objects by `type` and insert through
  * `createData`, never through a `query:` slot.
+ *
+ * [#23050 slice 12] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1, a
+ * MOVE: `rest-server.ts`' one slot, the list door's caller-supplied
+ * `query: req.query`, left with `registerCrudEndpoints`' body for
+ * `crud-routes.ts` (the QueryAST door's `query` is a shorthand member, which
+ * `querySlots` does not read, as before). Each floor equals its file's
+ * measured count, so `rest-server.ts`' goes 1 → 0 and the moved slot keeps
+ * its floor of 1 there.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
-    'rest-server.ts': 1,
+    'rest-server.ts': 0,
     'data-action-routes.ts': 3,
     'batch-routes.ts': 0,
     'approvals-routes.ts': 0,
@@ -178,6 +186,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'search-routes.ts': 0,
     'ui-routes.ts': 0,
     'form-routes.ts': 0,
+    'crud-routes.ts': 1,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -373,7 +382,9 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#23050 slice 9] Length 9 → 10, the sum unchanged.
         // [#23050 slice 10] Length 10 → 11, the sum unchanged.
         // [#23050 slice 11] Length 11 → 12, the sum unchanged.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(12);
+        // [#23050 slice 12] Length 12 → 13, the sum unchanged (its one slot moved
+        // from `rest-server.ts` to `crud-routes.ts`).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(13);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

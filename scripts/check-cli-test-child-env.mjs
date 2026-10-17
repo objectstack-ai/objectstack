@@ -2635,7 +2635,7 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the twelve files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the thirteen files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#21733] Joined the population deliberately: the card's acceptance is
         // a plain `os dev` restart on the BUILT packages, and its production leg
@@ -2659,6 +2659,11 @@ export function selfTest() {
         'packages/cli/test/serve-datasource-mapping-before-sync.integration.test.ts',
         'packages/cli/test/serve-mcp-capability-collision.e2e.test.ts',
         'packages/cli/test/serve-mcp-stdio-answers.e2e.test.ts',
+        // [#24191] Joined the population deliberately: its subject is `os serve`
+        // spawned directly the way an MCP client's server entry names it, in
+        // PRODUCTION posture, and `bin/run-dev.js` sets `NODE_ENV=development`
+        // before argv is parsed. Every spawn hands its child `NODE_ENV: undefined`.
+        'packages/cli/test/serve-mcp-stdio-early-initialize.integration.test.ts',
         // [#23573] Joined the population deliberately: the no-storage boot
         // guard is registered only when a PRODUCTION storage step declared
         // nothing, and `bin/run-dev.js` sets `NODE_ENV=development` before argv

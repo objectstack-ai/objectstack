@@ -259,7 +259,10 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // [#23050 slice 11] Nor do the public form doors (`form-routes.ts`): they
         // read the environment's view and object lists, never a draft:
         // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0, length 11 → 12.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(12);
+        // [#23050 slice 12] Nor do the six CRUD doors (`crud-routes.ts`): they
+        // read and write records, never a draft:
+        // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 12 → 13.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(13);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });

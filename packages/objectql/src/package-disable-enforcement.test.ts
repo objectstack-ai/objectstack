@@ -176,6 +176,15 @@ async function seed(protocol: any, registry: SchemaRegistry) {
   ] as const) {
     registry.installPackage({ id: pkg, name: pkg, version: '1.0.0' } as any, 'code');
     await protocol.saveMetaItem({ type: 'object', name: obj, packageId: pkg, item: objectBody(obj) });
+    // [#24097] A pending draft too, so the by-name read's `state: 'draft'` row
+    // has a draft to serve before the disable (else it answers NO_DRAFT there).
+    await protocol.saveMetaItem({
+      type: 'object',
+      name: obj,
+      packageId: pkg,
+      mode: 'draft',
+      item: { ...objectBody(obj), label: 'Demo (draft)' },
+    });
     // `app` rather than `view` as the non-object specimen: a `view` is saved as
     // an ADR-0017 CONTAINER and only becomes independently listable once the
     // registrar expands it into ViewItems, which this metadata-only harness has
@@ -200,6 +209,21 @@ const listItemsOf = async (protocol: any, type: string): Promise<any[]> => {
 
 const listNames = async (protocol: any, type: string): Promise<string[]> =>
   (await listItemsOf(protocol, type)).map((i) => i?.name).filter(Boolean);
+
+/**
+ * [#24097] Whether a by-name read serves `demo_widget`. Only the
+ * `OBJECT_PACKAGE_DISABLED` refusal counts as "refuses": any other throw
+ * (`NO_DRAFT`, a bare not-found) is rethrown, so a row cannot read an
+ * unrelated failure as enforcement.
+ */
+const servesByName = async (read: () => Promise<any>, pick: (r: any) => unknown): Promise<boolean> => {
+  try {
+    return (pick(await read()) ?? null) !== null;
+  } catch (e: any) {
+    if (e?.code === 'OBJECT_PACKAGE_DISABLED') return false;
+    throw e;
+  }
+};
 
 /**
  * Items a listing serves for one package. Counted by `_packageId` rather than
@@ -239,6 +263,50 @@ const READERS: Array<{
     enforces: true,
     why: 'the pre-existing behaviour the objects half was made consistent with; regression guard',
     serves: async ({ protocol }) => (await servedFor(protocol, 'app', PKG)) > 0,
+  },
+  {
+    reader: 'getMetaItem({ type: "object", name }) — GET /meta/object/:name',
+    enforces: true,
+    why: 'the by-name half of the listing: the console record form, metadata provider and SDK getItem read it',
+    serves: async ({ protocol }) =>
+      servesByName(() => protocol.getMetaItem({ type: 'object', name: 'demo_widget' }), (r) => r?.item),
+  },
+  {
+    reader: 'getMetaItem({ type: "objects", name }) — the plural spelling of the same route',
+    enforces: true,
+    why: 'folded to the singular before the refusal; pinned so the fold cannot silently stop folding',
+    serves: async ({ protocol }) =>
+      servesByName(() => protocol.getMetaItem({ type: 'objects', name: 'demo_widget' }), (r) => r?.item),
+  },
+  {
+    reader: 'getMetaItem({ state: "draft" }) — GET /meta/object/:name?state=draft',
+    enforces: true,
+    why: 'the designer\'s draft read: the refusal is checked once, before any layer, in every state',
+    serves: async ({ protocol }) =>
+      servesByName(
+        () => protocol.getMetaItem({ type: 'object', name: 'demo_widget', state: 'draft' }),
+        (r) => r?.item,
+      ),
+  },
+  {
+    reader: 'getMetaItem({ previewDrafts: true }) — GET /meta/object/:name?preview=draft',
+    enforces: true,
+    why: 'the render path\'s draft-overlay preview, which returns before the active read does',
+    serves: async ({ protocol }) =>
+      servesByName(
+        () => protocol.getMetaItem({ type: 'object', name: 'demo_widget', previewDrafts: true }),
+        (r) => r?.item,
+      ),
+  },
+  {
+    reader: 'getMetaItemLayered — GET /meta/object/:name?layers=true',
+    enforces: true,
+    why: 'a by-name API face that reads its layers without getMetaItem, so it carries the refusal itself',
+    serves: async ({ protocol }) =>
+      servesByName(
+        () => protocol.getMetaItemLayered({ type: 'object', name: 'demo_widget' }),
+        (r) => r?.effective,
+      ),
   },
   {
     reader: 'assertObjectRegistered — the data plane (findData / getData funnel here)',
@@ -345,6 +413,78 @@ describe('#7557 (A) — a disabled package stops serving, on every API reader at
     expect(err.code).not.toBe('OBJECT_NOT_FOUND');
     // …and the message must name the remedy, not just the state.
     expect(String(err.message)).toMatch(/re-enable/i);
+  });
+
+  it('[#24097] the by-name refusal is the data plane\'s: OBJECT_PACKAGE_DISABLED / 404, one envelope', async () => {
+    const h = makeHarness();
+    await seed(h.protocol, h.registry);
+    h.registry.disablePackage(PKG);
+
+    const caught = async (read: () => Promise<unknown>): Promise<any> => {
+      try {
+        await read();
+      } catch (e) {
+        return e;
+      }
+      return undefined;
+    };
+    let dataPlane: any;
+    try {
+      (h.protocol as any).assertObjectRegistered('demo_widget');
+    } catch (e) {
+      dataPlane = e;
+    }
+    const byName = await caught(() => h.protocol.getMetaItem({ type: 'object', name: 'demo_widget' }));
+    const layered = await caught(() => h.protocol.getMetaItemLayered({ type: 'object', name: 'demo_widget' }));
+
+    for (const err of [byName, layered]) {
+      expect(err?.code).toBe('OBJECT_PACKAGE_DISABLED');
+      expect(err?.status).toBe(404);
+      expect(err?.object).toBe('demo_widget');
+      // One constructor for both halves of the answer, so they cannot drift.
+      expect(err?.message).toBe(dataPlane?.message);
+    }
+  });
+
+  it('[#24097] the control: another package\'s object is still served by name', async () => {
+    const h = makeHarness();
+    await seed(h.protocol, h.registry);
+    h.registry.disablePackage(PKG);
+
+    const served: any = await h.protocol.getMetaItem({ type: 'object', name: 'healthy_widget' });
+    expect(served?.item?.name).toBe('healthy_widget');
+    expect(served?.item?._packageId).toBe(OTHER_PKG);
+    const layered: any = await h.protocol.getMetaItemLayered({ type: 'object', name: 'healthy_widget' });
+    expect((layered?.effective as any)?.name).toBe('healthy_widget');
+  });
+
+  it('[#24097] a field drop on a disabled package\'s object still answers 409 DESTRUCTIVE_CHANGE', async () => {
+    // The save's destructive-change check reads the prior schema through the
+    // protocol's private shared body, not the refusing API face. Read through
+    // the API face, its `catch` took the refusal for "skip the check" and the
+    // drop landed with no confirmation.
+    const h = makeHarness();
+    await seed(h.protocol, h.registry);
+    h.registry.disablePackage(PKG);
+
+    let err: any;
+    try {
+      await h.protocol.saveMetaItem({
+        type: 'object',
+        name: 'demo_widget',
+        packageId: PKG,
+        item: { ...objectBody('demo_widget'), fields: { other: { name: 'other', type: 'text', label: 'Other' } } },
+      });
+    } catch (e) {
+      err = e;
+    }
+    expect(err?.code).toBe('DESTRUCTIVE_CHANGE');
+    expect(err?.status).toBe(409);
+    const stored = [...h.rows.values()].find(
+      (r: any) => r.type === 'object' && r.name === 'demo_widget' && (r.state ?? 'active') === 'active',
+    );
+    const body = typeof stored?.metadata === 'string' ? JSON.parse(stored.metadata) : stored?.metadata;
+    expect(Object.keys(body?.fields ?? {})).toContain('name');
   });
 
   it('an object that is genuinely absent still answers OBJECT_NOT_FOUND', async () => {
