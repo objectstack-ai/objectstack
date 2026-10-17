@@ -43,9 +43,10 @@ import { fileURLToPath } from 'node:url';
  *
  * Shapes 1 and 2 also pin that the boot diagnostics carry the datasource admin
  * routes plugin's own degrade line and never "route registration failed" or
- * "ordering fault": `--no-server` composed no server on purpose. Shape 3 pins
- * the CONTROL: `/api/v1/datasources` is mounted (not 404, while an unmounted
- * sibling path is) and the plugin prints nothing. The plugin's unit shapes,
+ * "ordering fault": `--no-server` composed no server on purpose. Shapes 3 and
+ * 4 pin the CONTROL: `/api/v1/datasources` is mounted (not 404, while an
+ * unmounted sibling path is) and the plugin prints nothing, shape 4 on the
+ * config's own server under `--no-server`. The plugin's unit shapes,
  * including a registration that genuinely throws, live in
  * `serve-datasource-admin-routes.test.ts`.
  *
@@ -344,7 +345,7 @@ describe('os serve — the ready banner names an address only when an HTTP serve
   it(
     'control: --no-server with a config-mounted HonoServerPlugin prints API:, and that port answers',
     async () => {
-      const { banner, stop } = await boot(honoDir, { OS_DATABASE_URL: 'file:./ctl.db' }, ['--no-server', '--preset', 'minimal']);
+      const { banner, output, stop } = await boot(honoDir, { OS_DATABASE_URL: 'file:./ctl.db' }, ['--no-server', '--preset', 'minimal']);
       const seen = `\n--- banner ---\n${banner}`;
       try {
         // ⭐ The read is off the kernel, not off the flag: the flag skipped serve's
@@ -354,6 +355,11 @@ describe('os serve — the ready banner names an address only when an HTTP serve
         expect(port, `no API row naming a localhost port${seen}`).not.toBeNull();
         // Any HTTP status proves a server listens there; `/` is not mounted on this shape.
         expect(await statusOf(port as number, '/'), `nothing answered on the API: port${seen}`).toBeGreaterThanOrEqual(100);
+        // #24022 CONTROL: the same read decides the datasource admin routes, so
+        // they mount on the config's server under `--no-server` too.
+        expect(await statusOf(port as number, '/api/v1/datasources-not-a-route'), `unmounted paths no longer 404${seen}`).toBe(404);
+        expect(await statusOf(port as number, '/api/v1/datasources'), `the datasource admin routes are not mounted${seen}`).not.toBe(404);
+        expect(output.split('\n').filter((l) => l.includes(DATASOURCE_ADMIN)), `a [datasource-admin] warning on a composed boot${seen}`).toEqual([]);
       } finally {
         stop();
       }
