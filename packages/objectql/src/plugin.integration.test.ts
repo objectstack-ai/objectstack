@@ -6,6 +6,8 @@ import { ObjectQLPlugin } from '../src/plugin';
 import { ObjectSchema } from '@objectstack/spec/data';
 import { readServiceSelfInfo } from '@objectstack/spec/api';
 import { SysMetadataAuditObject, SysMetadataCommitObject, SysMetadataHistoryObject, SysMetadataObject } from '@objectstack/metadata-core';
+import type { IMetadataService } from '@objectstack/spec/contracts';
+import type { ObjectQL } from './engine';
 
 describe('ObjectQLPlugin - Metadata Service Integration', () => {
   let kernel: ObjectKernel;
@@ -1922,10 +1924,10 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
         const manifest = kernel.getService('manifest') as WithdrawingManifestService;
         await manifest.register(crmManifest());
         await manifest.register(extenderManifest());
-        const metadata = kernel.getService('metadata') as any;
-        const registry = (kernel.getService('objectql') as any).registry;
+        const metadata = kernel.getService<IMetadataService>('metadata');
+        const registry = kernel.getService<ObjectQL>('objectql').registry;
         // Identity: the extender's bridge rewrote the owner's copy.
-        const extended = await metadata.getObject('crm_contact');
+        const extended = await metadata.getObject('crm_contact') as any;
         expect(extended._packageId).toBe('com.acme.crm');
         expect(Object.keys(extended.fields)).toEqual(expect.arrayContaining(['name', 'ext_score']));
         return { manifest, metadata, registry };
@@ -1936,15 +1938,15 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
         registry.uninstallPackage('com.acme.crmext');
         // The registry already serves the owner's body; only the copy lags.
-        expect(Object.keys(registry.getObject('crm_contact').fields)).not.toContain('ext_score');
+        expect(Object.keys(registry.getObject('crm_contact')!.fields ?? {})).not.toContain('ext_score');
         await manifest.restoreExtendedObjectCopies('com.acme.crmext');
 
-        const restored = await metadata.getObject('crm_contact');
+        const restored = await metadata.getObject('crm_contact') as any;
         expect(restored._packageId).toBe('com.acme.crm');
         expect(restored.label).toBe('Contact');
         // The registry's own body, field for field (its injected system fields
         // included): the owner's `name` kept, the extension's `ext_score` gone.
-        expect(Object.keys(restored.fields)).toEqual(Object.keys(registry.getObject('crm_contact').fields));
+        expect(Object.keys(restored.fields)).toEqual(Object.keys(registry.getObject('crm_contact')!.fields ?? {}));
         expect(Object.keys(restored.fields)).toContain('name');
         expect(Object.keys(restored.fields)).not.toContain('ext_score');
       });
@@ -1954,7 +1956,7 @@ describe('ObjectQLPlugin - Metadata Service Integration', () => {
 
         await manifest.restoreExtendedObjectCopies('com.acme.crmext');
 
-        expect(Object.keys((await metadata.getObject('crm_contact')).fields)).toContain('ext_score');
+        expect(Object.keys(((await metadata.getObject('crm_contact')) as any).fields)).toContain('ext_score');
       });
     });
 
