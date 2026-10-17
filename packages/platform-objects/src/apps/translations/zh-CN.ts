@@ -101,7 +101,6 @@ export const zhCN: TranslationData = {
 
         nav_sessions: { label: '会话' },
         nav_audit_logs: { label: '审计日志' },
-        nav_audit_log_browser: { label: '审计日志浏览器' },
         nav_notifications: { label: '通知' },
 
         // Integrations — contributed at RUNTIME by the owning capability
