@@ -774,6 +774,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     this.reportProtocolIncompatibleEntry(ctx, entry, compat.diagnostic);
                     continue;
                 }
+                // ADR-0087 D2 — the ledger entry is data at rest: the body is
+                // converted forward ONCE here ({@link convertPackageBodyForward}),
+                // and that converted body is what registers, what the binder
+                // binds, what the side effects replay and what the heal seeds.
+                // The ledger keeps the body as installed, so it converts again
+                // at every rehydrate.
+                const converted = this.convertPackageBodyForward(ctx, entry.manifest);
                 // Awaited: register also bridges the manifest's objects into
                 // the metadata service (late-registration bridge in
                 // ObjectQLPlugin) — wait for that so metadata consumers see
@@ -781,7 +788,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // [#23972] Every ledger entry is a marketplace install, so its
                 // registry row says so (`source: 'marketplace'`) after a restart
                 // exactly as it did when it was installed.
-                await manifestService!.register(entry.manifest, { source: 'marketplace' });
+                await manifestService!.register(converted, { source: 'marketplace' });
                 // Sync schemas so the driver creates tables for the newly-
                 // registered objects (idempotent — already-synced tables
                 // are no-ops).
@@ -791,12 +798,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 } catch { /* non-fatal */ }
                 // [#21321] Bind the package's script-action bodies and body
                 // hooks — `register` above makes them declared, not runnable.
-                await this.bindArtifactHandlers(ctx, entry.manifest, entry.manifestId);
+                await this.bindArtifactHandlers(ctx, converted, entry.manifestId);
                 // Replay translations + register seed datasets, but don't
                 // re-run seeding — existing rows are already in the DB from
                 // the original install, and multi-tenant orgs will replay
                 // via the security middleware on next sys_organization insert.
-                await this.applySideEffects(ctx, entry.manifest, { seedNow: false });
+                await this.applySideEffects(ctx, converted, { seedNow: false });
                 // …EXCEPT when the database no longer has them: the ledger is
                 // anchored to <cwd> while the database can be swapped out from
                 // under it (`os dev --fresh`, a deleted dev.db, a --database
@@ -804,7 +811,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // boot via AppPlugin, but a rehydrated marketplace package
                 // would stay empty forever — app visible, tables created,
                 // zero rows. Heal that case.
-                await this.maybeHealSampleData(ctx, entry);
+                await this.maybeHealSampleData(ctx, entry, converted);
                 ctx.logger?.info?.(`[MarketplaceInstallLocal] rehydrated ${entry.manifestId}@${entry.version}`);
             } catch (err: any) {
                 ctx.logger?.error?.(`[MarketplaceInstallLocal] rehydrate failed for ${entry.manifestId}`, err instanceof Error ? err : new Error(String(err)));
@@ -825,11 +832,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *     install-time rows (or the user's own data) are still present, and
      *     re-upserting would silently revert user edits on every boot.
      *
+     * `converted` is the entry's manifest as rehydrate converted it — the one the
+     * package registered — so the heal seeds what registered, not the raw
+     * ledger bytes.
+     *
      * Never throws — a failed heal logs and leaves the boot untouched.
      */
-    private maybeHealSampleData = async (ctx: PluginContext, entry: InstalledEntry): Promise<void> => {
-        const datasets = Array.isArray(entry.manifest?.data)
-            ? entry.manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
+    private maybeHealSampleData = async (ctx: PluginContext, entry: InstalledEntry, converted: any): Promise<void> => {
+        const datasets = Array.isArray(converted?.data)
+            ? converted.data.filter((d: any) => d && d.object && Array.isArray(d.records))
             : [];
         if (datasets.length === 0) return;
         if (entry.sampleDataPurged === true) return;
@@ -1553,6 +1564,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //    running kernel held a package it did not, and the console read
         //    that answer as "the app should now appear".
         let hotLoadError: string | undefined;
+        // ADR-0087 D2 — the fetched bundle is a published artifact, so it is
+        // converted forward ONCE here ({@link convertPackageBodyForward}); the
+        // converted body is what registers, what the binder binds (4c) and
+        // what the side effects replay (5). The ledger entry (4) keeps the
+        // body as installed, and rehydrate converts it again at every boot.
+        const converted = this.convertPackageBodyForward(ctx, manifest);
         try {
             const manifestService = ctx.getService('manifest') as any;
             // Awaited: register also bridges the manifest's objects into the
@@ -1560,7 +1577,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // 200 (AI describe_object, Studio object list) must see them.
             // [#23972] The registry row records where this package came
             // from: the marketplace (`source: 'marketplace'`).
-            await manifestService.register(manifest, { source: 'marketplace' });
+            await manifestService.register(converted, { source: 'marketplace' });
         } catch (err: any) {
             const registerError = String(err?.message ?? err);
             // For offline file imports we treat a register failure as a hard
@@ -1624,14 +1641,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     through the runtime's ONE binder — the call `AppPlugin.start`
         //     makes for a boot artifact. A reinstall replaces the previous
         //     version's set rather than adding to it.
-        await this.bindArtifactHandlers(ctx, manifest, manifestId);
+        await this.bindArtifactHandlers(ctx, converted, manifestId);
 
         // 5. Replicate the AppPlugin start-time side-effects that the
         //    `manifest` service does NOT do on its own:
         //      • load translation bundles into the i18n service
         //      • stash seed datasets on the kernel + run them now so the
         //        installed app has demo data on first paint.
-        const seededSummary = await this.applySideEffects(ctx, manifest, { seedNow: true, c });
+        const seededSummary = await this.applySideEffects(ctx, converted, { seedNow: true, c });
         // `skipped` counts too: an all-skip run means the rows are ALREADY in
         // the database (e.g. a reinstall/upgrade over live sample data) — the
         // install carries sample data either way. Leaving the flag false here
@@ -2759,6 +2776,30 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             success: false,
             error: { code: refusal.code, message: refusal.message, details: refusal.details },
         }, refusal.status);
+    };
+
+    /**
+     * ADR-0087 D2 for this plugin's two loads of a ledger body — the install
+     * and the rehydrate. The body is data at rest (a published artifact), so it
+     * replays the versioned forward conversion inside the window its own
+     * `engines.protocol` opens, through the engine's ONE registration-door entry
+     * point (`ObjectQL.convertPackageBodyForward`), reused here, never
+     * re-derived: a body with no declared range comes back by reference, and the
+     * named warning is the engine's own.
+     *
+     * Converted once per load and handed to EVERY reader of that load —
+     * `manifest.register`, {@link bindArtifactHandlers}, {@link applySideEffects}
+     * and the sample-data heal — so none of them reads the raw bytes while the
+     * registry holds the converted copy. `register` meets the same entry point
+     * again, which hands an already-converted body back by reference with no
+     * second warning.
+     *
+     * An engine without that door (not ObjectQL) is handed the body as before.
+     */
+    private convertPackageBodyForward = (ctx: PluginContext, manifest: unknown): any => {
+        let ql: { convertPackageBodyForward?: (body: unknown) => unknown } | undefined;
+        try { ql = ctx.getService('objectql') as typeof ql; } catch { /* no data engine */ }
+        return typeof ql?.convertPackageBodyForward === 'function' ? ql.convertPackageBodyForward(manifest) : manifest;
     };
 
     /**

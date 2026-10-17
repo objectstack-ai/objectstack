@@ -20,7 +20,23 @@ export interface IHttpRequest {
     params: Record<string, string>;
     /** Request query parameters */
     query: Record<string, string | string[]>;
-    /** Request body (parsed — JSON or form data when applicable) */
+    /**
+     * Request body, parsed by its declared content type: the parsed JSON
+     * document for `application/json`, or the parsed fields of a form
+     * (`multipart/form-data`, `application/x-www-form-urlencoded`). `{}` when
+     * the request carries no body.
+     *
+     * Reading it may REFUSE: an implementation that cannot parse the body, or
+     * that does not read the body's media type, throws from the read rather
+     * than hand over an invented value. The standard transport
+     * (`@objectstack/plugin-hono-server`) does, and answers the request itself
+     * with 400 `INVALID_REQUEST`, replacing whatever the handler wrote; so a
+     * handler must not catch the refusal and carry on, because anything it
+     * does after the catch acts on a request that has already been refused.
+     *
+     * A handler that needs the raw bytes (a file upload, a media type not
+     * listed above) reads {@link rawBody} and never reads `body`.
+     */
     body?: any;
     /** Request headers */
     headers: Record<string, string | string[]>;

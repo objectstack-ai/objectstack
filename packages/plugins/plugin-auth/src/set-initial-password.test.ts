@@ -25,11 +25,29 @@ describe('runSetInitialPassword', () => {
     expect(api.setPassword).not.toHaveBeenCalled();
   });
 
-  it('rejects a non-JSON body with 400', async () => {
+  // [#24032] This row asserted only 400 + INVALID_REQUEST, which the old
+  // `parsed = {}` swallow also answered ("newPassword is required"), so it
+  // could not tell a refused body from one read as empty. It now pins the
+  // refusal itself, and the undeclared spelling, which is still no body.
+  it('refuses a declared-JSON body that does not parse, before setPassword', async () => {
     const api: SetPasswordCapableApi = { setPassword: vi.fn() };
     const res = await runSetInitialPassword(api, makeRequest('not-json{'));
     expect(res.status).toBe(400);
     expect(res.body.error?.code).toBe('INVALID_REQUEST');
+    expect(res.body.error?.message.startsWith('The request body could not be parsed as JSON')).toBe(true);
+    expect(api.setPassword).not.toHaveBeenCalled();
+  });
+
+  it('a body that does not declare JSON and does not parse is still no body', async () => {
+    const api: SetPasswordCapableApi = { setPassword: vi.fn() };
+    const req = new Request('https://example.test/api/v1/auth/set-initial-password', {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain', cookie: 'better-auth.session_token=abc' },
+      body: 'not-json{',
+    });
+    const res = await runSetInitialPassword(api, req);
+    expect(res.body).toEqual({ success: false, error: { code: 'INVALID_REQUEST', message: 'newPassword is required' } });
+    expect(api.setPassword).not.toHaveBeenCalled();
   });
 
   it('forwards newPassword + session headers to better-auth and returns 200 on success', async () => {

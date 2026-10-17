@@ -30,7 +30,8 @@
  * ## The policy
  *
  * Let `floor` be the lowest version the artifact's declared protocol range
- * admits (the leading version token of `engines.protocol`), and `runtime` the
+ * admits (the leading version token of `engines.protocol`; of a `||` union,
+ * the lowest alternative's — {@link parseRangeFloor}), and `runtime` the
  * `@objectstack/spec` version this process actually runs — its package label.
  * The window is decided PER ENTRY: a registry entry E is replayed when
  *
@@ -326,10 +327,26 @@ export interface ArtifactReplayedRetirement {
  * tooling stamps or the docs teach leads with its floor. A range this cannot
  * read returns `null`, and the caller treats an unreadable floor like an
  * undeclared one — the never-false-reject direction.
+ *
+ * A `||` union admits what any alternative admits (the handshake's reading),
+ * so its floor is the LOWEST alternative's, in whatever order they are written
+ * (`^18.0.0 || ^17.1.0` → 17.1.0, as `^17.1.0 || ^18.0.0`). One alternative
+ * this cannot read, an empty one included, leaves that floor unknown: `null`.
  */
 export function parseRangeFloor(range: string): [number, number, number] | null {
   const r = range.trim();
   if (r === '' || r.length > 128) return null;
+  let lowest: [number, number, number] | null = null;
+  for (const alternative of r.split('||')) {
+    const floor = alternativeFloor(alternative.trim());
+    if (floor === null) return null;
+    if (lowest === null || compareTriples(floor, lowest) < 0) lowest = floor;
+  }
+  return lowest;
+}
+
+/** The floor of one `||` alternative of a range (see {@link parseRangeFloor}). */
+function alternativeFloor(r: string): [number, number, number] | null {
   // Strip a leading range operator (`^`, `~`, `>=`, `>`, `=`, `v`).
   const m = r.match(/^[\^~>=<\s]*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
   if (!m) return null;

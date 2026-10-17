@@ -233,6 +233,12 @@ export const ShowcaseTranslationBundle = {
           paid_on: { label: 'Paid On' },
           total: { label: 'Total' },
         },
+        // `ui/pages/invoice-document.page.ts` `record:details` sections — the
+        // invoice print page's headings.
+        _sections: {
+          invoice: { label: 'Invoice' },
+          amounts: { label: 'Amounts' },
+        },
         // The object's ONE authored rule message, on the #14253 channel. The
         // `en` entry is the authored sentence VERBATIM — the bundle WINS over
         // `rule.message` in every locale, so a drifted entry would turn the
@@ -668,6 +674,10 @@ export const ShowcaseTranslationBundle = {
           paid_on: { label: '付款日期' },
           total: { label: '合计' },
         },
+        _sections: {
+          invoice: { label: '发票' },
+          amounts: { label: '金额' },
+        },
         // The zh-CN mirror of the `en` `_validations` block above.
         _validations: {
           no_invoice_for_churned_account: {
@@ -1049,6 +1059,8 @@ export const ShowcaseTranslationBundle = {
     // The pages' own label/title/subtitle predate the ratchet and stay in the
     // frozen baseline, same as Revenue Pulse's older widget titles above.
     pages: {
+      // `ui/pages/invoice-document.page.ts` — the invoice print page.
+      showcase_invoice_document: { label: '发票' },
       showcase_contact_form: {
         components: {
           field_name: { label: '姓名', placeholder: '艾达·洛夫莱斯' },

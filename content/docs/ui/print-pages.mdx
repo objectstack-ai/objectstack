@@ -1,0 +1,128 @@
+---
+title: Print pages — printing a record to a PDF file
+navTitle: Print Pages
+description: Declare print on a record page, then archive a record's PDF as an attachment with the print service, rendered in headless Chromium as the requesting user
+---
+
+A **print page** is an ordinary page with one more key, `print`. The console
+draws it on screen as before and, when a user prints, puts only that page on
+paper: the sheet size, margins, page numbers and repeated header and footer come
+from the `print` declaration, mapped to print CSS by the console.
+
+`@objectstack/service-print` prints the same page on the server. It renders the
+record's print page in **headless Chromium**, as the requesting user, and
+archives the PDF as a file attached to the record — downloadable from the
+record's attachments, and usable wherever a file is.
+
+## Declare the print page
+
+A print page is a `kind: 'full'` record page whose blocks are all from the
+printable subset (`PRINTABLE_PAGE_COMPONENT_TYPES` in `@objectstack/spec/ui`;
+`os validate` refuses anything else). The record's object must allow files.
+
+```ts
+import { definePage } from '@objectstack/spec/ui';
+
+export const InvoiceDocumentPage = definePage({
+  name: 'invoice_document',
+  label: 'Invoice',
+  type: 'record',
+  object: 'invoice',
+  kind: 'full',
+  isDefault: true,          // the console renders a record on its default record page
+  print: { paperSize: 'A4', orientation: 'portrait', repeatHeader: true, pageNumbers: true },
+  regions: [
+    { name: 'header', components: [{ type: 'element:text', properties: { content: 'ACME Ltd' } }] },
+    { name: 'main', components: [{ type: 'record:details' }] },
+  ],
+});
+
+// …and on the object: enable: { files: true }
+```
+
+The server prints a record on the page the console renders it on, which is the
+object's **default record page** (`isDefault: true`). A print page that is not
+the default is refused rather than printed as some other page.
+
+## Compose the print service
+
+The service is composed explicitly; a deployment that does not list it never
+loads a browser driver.
+
+```ts
+import { PrintServicePlugin } from '@objectstack/service-print';
+
+export default defineStack({
+  // …
+  plugins: [new PrintServicePlugin()],
+});
+```
+
+The engine is headless Chromium, in one of two placements. Configure exactly
+one, plus the URL the browser loads the console from:
+
+| Setting | Plugin option | What it is |
+|:---|:---|:---|
+| `OS_PRINT_CHROMIUM_PATH` | `chromiumPath` | **Local placement**: a Chromium executable on this host, launched per print. |
+| `OS_PRINT_BROWSER_ENDPOINT` | `browserEndpoint` | **Remote placement**: a browser's DevTools WebSocket endpoint (`ws://` or `wss://`), connected per print. For hosts that cannot carry a browser of their own. The requesting user's session cookie travels in the endpoint's frames: use `wss://` for a browser off this host, and `ws://` only on loopback. |
+| `OS_PRINT_CONSOLE_URL` | `consoleUrl` | The console's URL as that browser reaches it, `/_console` included (`http://127.0.0.1:3000/_console`). A URL carrying credentials (`user:password@`) is refused. |
+
+A plugin option wins over its variable. At startup the plugin probes the engine
+— launches the executable or connects to the endpoint — and logs the placement
+and Chromium version. An engine that is not configured, is configured twice, or
+does not answer is reported once, at startup, with the setting to fix; every
+print is then refused until it is. The remote endpoint is never logged beyond
+its scheme and host, since it may carry a token.
+
+Chinese, Japanese and Korean text prints with whatever fonts the browser's host
+has: install a CJK font there (for example `fonts-noto-cjk`), or those
+characters print as empty boxes.
+
+## Print a record
+
+The service is reached in-process, through the `print` service:
+
+```ts
+const print = kernel.getService<IPrintService>('print');
+
+print.status();
+// { state: 'ready', placement: 'local', version: '141.0.7390.37' }
+
+const file = await print.printRecordToFile(
+  { app: 'sales', object: 'invoice', recordId: 'inv_1', page: 'invoice_document' },
+  context, // the requesting user's execution context
+);
+// { fileId, attachmentId, size, filename: 'invoice_document-inv_1.pdf' }
+```
+
+The page is rendered as the requesting user — never as the system — through a
+short-lived session minted for that user and revoked as soon as the print ends,
+whether it succeeded or not. The PDF is archived as theirs: the attachment is
+written under their own permissions, and both the file and the attachment name
+them. A user can never archive a record they could not read, or attach a file
+where they could not attach one by hand.
+
+## Refusals
+
+Each refusal carries `code` and `status`, and every one of them is decided
+before a session is minted or a browser is started, in this order:
+
+| Order | Condition | `code` / `status` |
+|:---|:---|:---|
+| 1 | The caller is not a signed-in user acting for themselves (system, agent, service or guest principal; a sign-in held by an authentication policy) | `PERMISSION_DENIED` / 403 |
+| 2 | The engine is not ready (`status()` says why) | `SERVICE_UNAVAILABLE` / 503 |
+| 3 | No such page | `RESOURCE_NOT_FOUND` / 404 |
+| 3 | The page is not the object's default record page, or declares no `print` | `VALIDATION_ERROR` / 400 |
+| 4 | The record does not exist, or the caller cannot read it | `RECORD_NOT_FOUND` / 404 |
+| 5 | The object does not declare `enable: { files: true }` | `FILES_DISABLED` / 403 |
+| 5 | The caller may not create attachments at all | `PERMISSION_DENIED` / 403 |
+| 5 | The caller may not attach a file to this record (attaching needs edit access to it) | `ATTACHMENT_PARENT_ACCESS` / 403 |
+
+An engine that did not answer its last probe is probed once more only after
+step 5, so no browser is started before every refusal above has had its say.
+
+After those, a print can still fail as the render or the archive does: the page
+not rendering within the 30 s budget (`TIMEOUT` / 504), or the archive's own
+refusals, such as a file over the upload size limit (`PAYLOAD_TOO_LARGE` / 413).
+A failure to end the session afterwards never replaces the print's own outcome;
+it is logged, and the session expires on its own within 60 s.

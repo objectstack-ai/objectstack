@@ -45,12 +45,19 @@ export const SysApprovalRequest = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Live approval instance tracked per submission',
-  // [ADR-0079] The record title is `display_title`, a text formula over the
-  // same two columns `titleFormat` names. The pointer used to be `id`: once a
-  // renderer honours ADR-0079's order (an explicit `nameField` wins over
-  // `titleFormat`), that made the record page's H1 the raw id. `titleFormat`
-  // stays for renderers that still read it first;
-  // `sys-approval-display-title.test.ts` holds the two to the same text.
+  // [ADR-0079] The record title is `display_title`, a text formula. The
+  // pointer used to be `id`: once a renderer honours ADR-0079's order (an
+  // explicit `nameField` wins over `titleFormat`), that made the record page's
+  // H1 the raw id. The formula reads the flow's label (`process_label`) and
+  // falls back to the machine source (`process_name`) where no label is
+  // stored. `titleFormat` stays for renderers that still read it first — the
+  // global search palette (`searchAll` in `@objectstack/metadata-protocol`)
+  // ranks it above `nameField` — and keeps `{process_name}`: a placeholder
+  // template cannot say "else", and `process_label` can be null after the boot
+  // fill (a row the fill could not label, or a failed fill run), where a
+  // `{process_label}` template draws a title with no source at all.
+  // `sys-approval-display-title.test.ts` holds the two to the same text where
+  // no label is stored, and pins where they differ.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{process_name} · {record_id}',
@@ -128,12 +135,15 @@ export const SysApprovalRequest = ObjectSchema.create({
     id: Field.text({ label: 'Request ID', required: true, readonly: true, group: 'System' }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. Both source columns are required, so the
-    // expression needs no null guard.
+    // read and has no stored column. Its flow half is the flow's label,
+    // `process_label`, the same column the request lists show. That column is
+    // nullable — a row the boot fill could not label, or one written before
+    // the fill ran — so the expression guards it and falls back to
+    // `process_name`, which is required, as is `record_id`.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.process_name + ' · ' + record.record_id`,
+      expression: F`record.process_label != null ? record.process_label + ' · ' + record.record_id : record.process_name + ' · ' + record.record_id`,
       description: 'Record title: the request source and the record it is about (computed on read)',
       group: 'Target',
     }),

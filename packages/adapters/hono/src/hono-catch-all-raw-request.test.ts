@@ -20,10 +20,13 @@
  *
  *  1. PRESERVATION — the `body` argument is the value the old line produced, for
  *     every input: each case is checked against a reference Hono app that runs
- *     that exact line, and against the literal value written out. One input
- *     left this table on purpose (#23914): a declared `application/json` body
- *     that does not parse is handed on as a body whose READ is refused with a
- *     400 (`hono-body-refusal.test.ts`); the request beside it still arrives
+ *     that exact line, and against the literal value written out. Inputs left
+ *     this table on purpose: a declared `application/json` body that does not
+ *     parse (#23914), and, since the body is read by `plugin-hono-server`'s
+ *     rule (#24042), a body that declares neither JSON nor a form (handed on
+ *     as a body whose READ is refused with a 400) and a form (handed on
+ *     parsed). Their answers are pinned in `hono-body-refusal.test.ts`, and
+ *     the describes below pin that the request beside them still arrives
  *     unread, every byte readable.
  *  2. THE FIX — at dispatch the request is unread (`bodyUsed === false`) and
  *     reads back the exact bytes the client sent, JSON included.
@@ -98,15 +101,14 @@ const CASES: ReadonlyArray<readonly [string, string | undefined, string, unknown
   ['JSON number', 'application/json', '42', 42],
   ['JSON string', 'application/json', '"hi"', 'hi'],
   ['JSON behind a byte-order mark', 'application/json', '\uFEFF{"bom":true}', { bom: true }],
-  ['JSON sent as text/plain (the Content-Type was never read)', 'text/plain', '{"a":1}', { a: 1 }],
   // [#23914] Not here any more: a body declared `application/json` that does
   // not parse is no longer handed on as `{}` but as a body whose READ is
-  // refused — pinned in `hono-body-refusal.test.ts`. The undeclared garbage
-  // rows below are unchanged.
-  ['invalid JSON that does not declare JSON', 'text/plain', '{ not json', {}],
+  // refused — pinned in `hono-body-refusal.test.ts`.
+  // [#24042] Nor are the rows `JSON sent as text/plain`, `invalid JSON that
+  // does not declare JSON`, `plain text` and `a form body`: the first three are
+  // refused when read, the form is handed on parsed. They moved to the
+  // `[#24042]` describe below, which pins that the request still arrives unread.
   ['empty body', 'application/json', '', {}],
-  ['a form body', 'application/x-www-form-urlencoded', 'token=abc&token=def&x=1', {}],
-  ['plain text', 'text/plain', 'hello', {}],
   ['no Content-Type at all', undefined, 'token=abc', {}],
 ];
 
@@ -204,5 +206,80 @@ describe('[#23914] a declared JSON body that does not parse: the request still a
     expect(seen).toHaveLength(1);
     expect(seen[0]!.bodyUsed).toBe(false);
     expect(seen[0]!.text).toBe(text);
+  });
+});
+
+/**
+ * [#24042] The rows that left the table above: the body is read by
+ * `plugin-hono-server`'s rule now, and the request beside it is unread as
+ * before. Each sends `Content-Length` the way a client does: both doors judge
+ * whether a body is present by its framing headers.
+ */
+describe('[#24042] a body read by plugin-hono-server\'s rule: the request still arrives unread', () => {
+  const post = (contentType: string | undefined, text: string, bytes = false) =>
+    createHonoApp({ kernel, prefix: PREFIX, cors: false }).request(`http://hosted.test${PATH}`, {
+      method: 'POST',
+      headers: {
+        ...(contentType ? { 'Content-Type': contentType } : {}),
+        'Content-Length': String(Buffer.byteLength(text)),
+      },
+      body: bytes ? new TextEncoder().encode(text) : text,
+    });
+
+  /** What reading the handed-on body throws; the fixture domain itself never reads it. */
+  function readRefusal(body: unknown): unknown {
+    try {
+      JSON.stringify(body);
+    } catch (err) {
+      return err;
+    }
+    return undefined;
+  }
+
+  it.each([
+    ['JSON sent as text/plain', 'text/plain', '{"a":1}', /sent as text\/plain/],
+    ['invalid JSON that does not declare JSON', 'text/plain', '{ not json', /sent as text\/plain/],
+    ['plain text', 'text/plain', 'hello', /sent as text\/plain/],
+  ])('%s: handed on as a body whose read is refused 400, and every byte still readable on the request', async (_label, contentType, text, names) => {
+    const res = await post(contentType, text);
+    // The fixture domain records the body without reading it, so nothing
+    // refuses: the answer is the domain's.
+    expect(res.status).toBe(200);
+    expect(mockDispatcher.dispatch).toHaveBeenCalledTimes(1);
+    const [{ body, bodyUsed, text: forwarded }] = seen;
+    expect(readRefusal(body)).toMatchObject({ status: 400, code: 'INVALID_REQUEST', message: expect.stringMatching(names) });
+    expect(bodyUsed).toBe(false);
+    expect(forwarded).toBe(text);
+  });
+
+  it('a body with no Content-Type at all: the same, and every byte still readable', async () => {
+    const text = 'token=abc';
+    expect((await post(undefined, text, true)).status).toBe(200);
+    const [{ body, bodyUsed, text: forwarded }] = seen;
+    expect(readRefusal(body)).toMatchObject({ status: 400, code: 'INVALID_REQUEST', message: expect.stringMatching(/with no Content-Type/) });
+    expect(bodyUsed).toBe(false);
+    expect(forwarded).toBe(text);
+  });
+
+  it('a form body: handed on parsed (the last value of a repeated name, as Hono\'s parseBody answers), and every byte still readable', async () => {
+    const text = 'token=abc&token=def&x=1';
+    expect((await post('application/x-www-form-urlencoded', text)).status).toBe(200);
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.body).toEqual({ token: 'def', x: '1' });
+    expect(seen[0]!.bodyUsed).toBe(false);
+    expect(seen[0]!.text).toBe(text);
+  });
+
+  it('a form body something upstream already read through c.req: the parsed form still arrives, from Hono\'s cache', async () => {
+    const parent = new Hono();
+    parent.use('*', async (c, next) => { await c.req.parseBody(); await next(); });
+    parent.route('/', createHonoApp({ kernel, prefix: PREFIX, cors: false }));
+
+    await parent.request(`http://hosted.test${PATH}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'token=abc',
+    });
+    expect(seen).toHaveLength(1);
+    expect(seen[0]!.body).toEqual({ token: 'abc' });
+    expect(seen[0]!.bodyUsed).toBe(true);
   });
 });

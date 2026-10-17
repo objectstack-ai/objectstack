@@ -177,7 +177,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
-import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { ALL_CONVERSIONS, applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel, defaultRecordPageObject } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -6612,6 +6612,32 @@ export class ObjectStackProtocolImplementation implements
      *
      * Read with no `try`/`catch`, as the lock family's baseline is: a stored row
      * that could not be read is not an absent one.
+     *
+     * [#23903, ruling B′] A re-save is authored input too where its body NEWLY
+     * INTRODUCES a retired spelling — an author or an AI adding a node with an
+     * old spelling to a legacy flow. The rule compares conversion hits: a
+     * retired entry that fires on the request at a site where it does not fire
+     * on a stored row answers `false`, exactly as a new flow does; a request
+     * whose every retired hit a stored row carries keeps the full chain, so a
+     * served legacy body re-saves and is healed as before.
+     *
+     * A hit is one firing of a retired entry, named by the entry, the spelling
+     * it rewrote (the notice's `from`) and its site: the notice's `path`, with
+     * each array element on the way that carries an `id` (a node, a region's
+     * node, an edge) named by that id instead of its index. So the same retired
+     * spelling on a node the stored row does not have is a new hit even when
+     * another node carries it, and adding, removing or moving a node never turns
+     * a carried hit into a new one. Both bodies are scanned by the spec's own
+     * pass (`applyConversionsToFlow`, the full chain minus
+     * {@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}), never by the engine, so a
+     * host with no automation service reaches the same answer (#21982).
+     *
+     * The rows that may carry a hit are the save's baseline above, and for a
+     * DRAFT save the active row the draft overlays even when a draft row
+     * exists. Studio keeps its buffer after a draft save: on an engine host the
+     * first save heals the draft row, so the next autosave re-sends spellings
+     * only the active row still carries, and judged against the draft row
+     * alone Studio's second save of a legacy flow would be refused.
      */
     private async flowSaveReplaysRetired(request: {
         name: string;
@@ -6622,14 +6648,57 @@ export class ObjectStackProtocolImplementation implements
     }, mode: 'draft' | 'publish'): Promise<boolean> {
         if (request.source !== undefined) return true;
         if (request.writeFace === 'package-duplicate' || request.writeFace === 'package-unmanaged-import') return true;
+        const retired = new Set(ALL_CONVERSIONS.filter((c) => c.retiredFromLoadPath).map((c) => c.id));
+        // The site of a notice's path, ids standing in for the indexes of the
+        // array elements that carry one, read on the converted body it names.
+        const siteOf = (root: unknown, path: string): string => {
+            let at: unknown = root;
+            let site = '';
+            for (const [, key, index] of path.matchAll(/([^.[\]]+)|\[(\d+)\]/g)) {
+                if (key !== undefined) {
+                    site += site === '' ? key : `.${key}`;
+                    at = at !== null && typeof at === 'object' ? (at as Record<string, unknown>)[key] : undefined;
+                    continue;
+                }
+                const element: unknown = Array.isArray(at) ? at[Number(index)] : undefined;
+                const id = element !== null && typeof element === 'object' ? (element as { id?: unknown }).id : undefined;
+                site += typeof id === 'string' && id !== '' ? `[#${id}]` : '[' + index + ']';
+                at = element;
+            }
+            return site;
+        };
+        const retiredHits = (body: unknown): Set<string> => {
+            const fired: ConversionNotice[] = [];
+            const converted = applyConversionsToFlow(body, {
+                includeRetired: true,
+                excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
+                onNotice: (n) => { if (retired.has(n.conversionId)) fired.push(n); },
+            });
+            const root = { flows: [converted] };
+            return new Set(fired.map((n) => `${n.conversionId}|${n.from}|${siteOf(root, n.path)}`));
+        };
+        // The request's retired hits; each one a stored row carries is struck off.
+        const uncarried = retiredHits(request.item);
+        const strikeCarried = (body: unknown): void => {
+            if (uncarried.size === 0) return;
+            for (const hit of retiredHits(body)) uncarried.delete(hit);
+        };
         const repo = this.getOverlayRepo();
         const ref = { type: 'flow', name: request.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
         const member = itemDiscriminator('flow', request.item);
         const state: 'active' | 'draft' = mode === 'draft' ? 'draft' : 'active';
         const target = await repo.headAt(ref, { state, packageId: request.packageId ?? null, member });
-        if (target.head) return true;
-        if (state !== 'draft') return false;
-        return (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head !== null;
+        if (target.head) {
+            strikeCarried(target.head.body);
+            if (uncarried.size === 0) return true;
+            if (state !== 'draft') return false;
+        } else if (state !== 'draft') {
+            return false;
+        }
+        const active = (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
+        if (!active) return false;
+        strikeCarried(active.body);
+        return uncarried.size === 0;
     }
 
     /**
@@ -23024,6 +23093,12 @@ export class ObjectStackProtocolImplementation implements
         // so a spelling retired from the authoring funnel (#23487, #23543) is
         // not lifted here either and meets the parse refusal below, with the
         // prescription `os validate` prints, on both hosts alike.
+        //
+        // [#23903, ruling B′] So does a re-save whose body NEWLY INTRODUCES a
+        // retired spelling — a retired entry firing at a site where no stored
+        // row carries it (a node added with an old spelling): authored input,
+        // judged whole without the retired entries. A re-save whose retired
+        // hits the stored row all carries keeps the full chain, as above.
         let flowGateVerdictBody: unknown;
         // [#4580, #23775] The fallback's warning, said once the gate below has
         // accepted the body it falls back to — never for a save it refuses.
@@ -23033,8 +23108,9 @@ export class ObjectStackProtocolImplementation implements
             // No automation service reachable (control-plane / metadata-only
             // host): the fallback below judges the body and it is saved as
             // written — a host must not start refusing flow writes it accepted
-            // yesterday, save the retired spelling on a new flow (#23775), which
-            // an engine host refuses too.
+            // yesterday, save the retired spelling on a new flow (#23775) or one
+            // a re-save newly introduces (#23903), which an engine host refuses
+            // too.
             const canonicalizeFlow = this.resolveFlowCanonicalizer();
             let canonicalized = false;
             if (canonicalizeFlow) {
@@ -27002,7 +27078,9 @@ export class ObjectStackProtocolImplementation implements
      * `sys_metadata` keys on (type,name,org), so a same-name copy would collide
      * with the source — and rewriting every intra-package reference (lookup
      * `reference`, view `object`, expressions, etc.) to the new names. Per-item
-     * best-effort; one failure never aborts the whole clone.
+     * best-effort; one failure never aborts the whole clone. The copy's package
+     * record is not an item: when its install is refused, that refusal refuses
+     * the whole duplicate, before any item is written.
      *
      * Every copied object is named in the target namespace: `iojn_customer`
      * becomes `iojn2_customer`, and an object whose name lacks the source
@@ -27056,12 +27134,10 @@ export class ObjectStackProtocolImplementation implements
         // covers the WRITE. It does not cover this method, for two reasons that
         // are both about where the refusal lands:
         //
-        //   ① the `installPackage` call below sits inside a `catch {}` that is
-        //     deliberately best-effort (a manifest row is not worth aborting a
-        //     copy for), so a refusal raised THERE would be swallowed here and
-        //     the caller would read `success: true` on a package with no
-        //     manifest row — a silent partial state, strictly worse than the
-        //     201 this card set out to close;
+        //   ① a refusal of the `installPackage` call below is rethrown before
+        //     any item is copied, so it would not be lost — but it names
+        //     `manifest.id`, the key of a manifest this door builds, never the
+        //     `targetPackageId` the caller wrote (the closing paragraph below);
         //   ② the refusal has to precede the MUTATIONS, and the manifest write
         //     is not the first of them. #14451 already established the position
         //     for this door's other precondition: `duplicatePackage` mints the
@@ -27451,8 +27527,41 @@ export class ObjectStackProtocolImplementation implements
                 };
                 delete dupManifest.scope;
                 await this.installPackage({ manifest: dupManifest } as InstallPackageRequest);
-            } catch {
-                /* best-effort — the per-item package binding still works without a manifest row */
+            } catch (e: any) {
+                // [#24041] ⭐ A REFUSED PACKAGE RECORD REFUSES THE DUPLICATE —
+                // the refusal itself, rethrown unchanged, before any item is
+                // copied (ruling B, claim amendment 6227008947).
+                //
+                // This catch used to drop it and copy anyway. A refused install
+                // leaves no registry record and no `sys_packages` row, so the
+                // copy's items were live, bound to an id no package record
+                // holds, absent from `GET /packages`. After a namespace conflict
+                // they also sat inside a namespace another package owns — the
+                // very state ADR-0048 Phase 1's install-time gate in
+                // `SchemaRegistry.installPackage` exists to refuse. The sibling
+                // verb {@link importUnmanagedPackage} states the rule this door
+                // now keeps: "There is no half-copied app."
+                //
+                // Nothing needs undoing: this call is the duplicate's FIRST
+                // mutation (everything above it reads), and a refused install
+                // leaves nothing behind — the registry judges before it writes,
+                // and a failed persist undoes the registry write before it
+                // throws (#21243). So the door answers the refusal's own status:
+                // `422 NAMESPACE_CONFLICT` with the registry's remedy (choose
+                // another namespace), or the primitive's `500` for a store fault.
+                //
+                // Logged once, because neither the primitive nor the HTTP door
+                // logs it. A store fault's driver text rides only on the error's
+                // `cause`, which no answer quotes, so the error itself is handed
+                // to the log for that one; a client refusal's sentence is
+                // already the whole story.
+                console.warn(
+                    `[protocol.duplicatePackage] refused: the package record for '${request.targetPackageId}' `
+                    + `(copy of '${request.sourcePackageId}') was not installed, so nothing was copied: `
+                    + `${typeof e?.code === 'string' ? `${e.code}: ` : ''}${e?.message ?? e}`,
+                    ...(declaresClientRefusal(e) ? [] : [e]),
+                );
+                throw e;
             }
         }
 
@@ -31318,6 +31427,20 @@ export class ObjectStackProtocolImplementation implements
 
         // [#23972] Every package this primitive installs is AUTHORED — a Studio
         // base, a duplicate, an HTTP install — persisted to `sys_packages` below.
+        //
+        // ADR-0087 D2 — this door is AUTHORING-side, so the registry judges the
+        // manifest exactly as handed, and no forward conversion runs here (the
+        // window the registration door, the `sys_packages` hydration and the
+        // marketplace install open is for bodies at rest). Its callers hand it
+        // a manifest being written now: `POST /api/v1/packages` parses the
+        // whole body through the closed `ManifestSchema` first, which refuses
+        // a metadata collection such as `pages` outright; `duplicatePackage`
+        // copies the registry's own record, already judged; the unmanaged
+        // install's base carries identity keys only; and AI Studio's blueprint
+        // tools author in-process. A retired declaration there is the author's
+        // to fix, refused loudly at the moment of writing. Once the body sits
+        // in `sys_packages` it is data at rest, and the boot hydration
+        // (`@objectstack/service-package`) converts it at every load.
         let pkg = this.engine.registry.installPackage(manifest as any, 'authored', request.settings);
 
         // [#19277] HONOUR `enableOnInstall` — the key THIS request contract

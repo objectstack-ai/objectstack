@@ -183,9 +183,9 @@ describe('[#19417] duplicatePackage refuses a target id the declaration refuses'
             expect(err.message).toBe(manifestIdRefusal('targetPackageId', id));
             // ⭐ Nothing was minted and nothing was scanned: the refusal
             // precedes the manifest write AND the copy loop, so no empty shell
-            // is left behind. The manifest write below sits inside a
-            // best-effort `catch {}` — a refusal raised only there would be
-            // swallowed and reported as `success: true`.
+            // is left behind. A refusal raised only at the manifest write would
+            // refuse the duplicate too, but under `manifest.id`, a key the
+            // caller never wrote.
             expect(installed).toHaveLength(0);
             expect(engine.registry.installPackage).not.toHaveBeenCalled();
             expect(engine.find).not.toHaveBeenCalled();
