@@ -3605,6 +3605,22 @@ export class ApprovalService implements IApprovalService {
     // audit trail (a system action, no human actor) and notified to both the
     // delegate — who now owns the slot — and the skipped approver. [#23978]
     // Both bodies name the record the way every approval notification does.
+    //
+    // [#24065] And each body names the person by display name, through the
+    // chain the approvals door names people with (`resolveUserNames`):
+    // both people of every hop in ONE read for the whole fan-out, and no read
+    // at all when nothing was substituted. A person the chain answers no name
+    // for (no account row, or the read failed) is named by the stored id, the
+    // way every reader of that chain renders an unresolved address. A body is
+    // a STORED copy of the name (messaging stores it, the inbox serves it),
+    // like the stored labels the `resolveUserNames` docblock lists.
+    //
+    // The audit `comment` keeps the ids by design: it is the request's audit
+    // trail of identities, served as written by the timeline and the action
+    // lists. Display names belong in read-time `*_name` companions (the
+    // `reassign` hand-off's shape), not frozen into an audit row.
+    const oooNames = await this.resolveUserNames(substitutions.flatMap((sub) => [sub.from, sub.to]));
+    const oooPerson = (userId: string): string => oooNames.get(userId) || userId;
     for (const sub of substitutions) {
       await this.engine.insert('sys_approval_action', await this.actionRow(row, {
         id: uid('aact'), request_id: id, organization_id: requestOrg,
@@ -3621,7 +3637,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-${id}-${sub.to}`,
         payload: {
           title: 'Approval routed to you (out-of-office cover)',
-          body: `You are covering an approval on ${this.nameSubjectRecord(input.object, input.recordId)} while ${sub.from} is out of office.`,
+          body: `You are covering an approval on ${this.nameSubjectRecord(input.object, input.recordId)} while ${oooPerson(sub.from)} is out of office.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -3633,7 +3649,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-skip-${id}-${sub.from}`,
         payload: {
           title: 'Approval routed to your delegate',
-          body: `An approval on ${this.nameSubjectRecord(input.object, input.recordId)} was routed to ${sub.to} while you are out of office.`,
+          body: `An approval on ${this.nameSubjectRecord(input.object, input.recordId)} was routed to ${oooPerson(sub.to)} while you are out of office.`,
           actionUrl: '/system/approvals',
         },
       });
