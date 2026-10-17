@@ -20,7 +20,7 @@ export const esES: PlatformTranslationData = {
       title: 'Envío de correo',
       description: 'Configuración de SMTP y del proveedor de correo transaccional.',
       groups: {
-        provider: { title: 'Proveedor', description: 'Elige cómo envía correo saliente este espacio de trabajo.' },
+        provider: { title: 'Proveedor', description: 'Elige cómo envía correo saliente este entorno.' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'Clave de API' },
         from_address: { title: 'Dirección de remitente' },
@@ -60,13 +60,13 @@ export const esES: PlatformTranslationData = {
 
     branding: {
       title: 'Marca',
-      description: 'Nombre del espacio de trabajo, logotipo y color de acento.',
+      description: 'Nombre de la organización, logotipo y color de acento.',
       groups: {
         identity: { title: 'Identidad' },
         appearance: { title: 'Apariencia' },
       },
       keys: {
-        workspace_name: { label: 'Nombre del espacio de trabajo' },
+        workspace_name: { label: 'Nombre de la organización' },
         support_email: { label: 'Correo de soporte', help: 'Ejemplo: support@example.com' },
         theme_mode: {
           label: 'Tema predeterminado',
@@ -129,7 +129,7 @@ export const esES: PlatformTranslationData = {
         require_email_verification: { label: 'Requerir verificación de correo' },
         membership_policy: {
           label: 'Pertenencia de los usuarios nuevos',
-          help: 'La opción automática vincula cada usuario nuevo a la organización predeterminada del despliegue. «Solo por invitación» concede la pertenencia únicamente mediante un acto explícito: crear un espacio de trabajo, aceptar una invitación, que un administrador lo añada o el aprovisionamiento just-in-time por SSO.',
+          help: 'La opción automática vincula cada usuario nuevo a la organización predeterminada del despliegue. «Solo por invitación» concede la pertenencia únicamente mediante un acto explícito: crear una organización, aceptar una invitación, que un administrador lo añada o el aprovisionamiento just-in-time por SSO.',
           options: {
             auto: 'Unirse automáticamente a la organización predeterminada',
             'invite-only': 'Solo por invitación: nunca se une automáticamente',
@@ -251,7 +251,7 @@ export const esES: PlatformTranslationData = {
       title: 'Envío de SMS',
       description: 'Configuración del proveedor de SMS para inicio de sesión con OTP, invitaciones y notificaciones.',
       groups: {
-        provider: { title: 'Proveedor', description: 'Elige cómo envía este espacio de trabajo los SMS salientes.' },
+        provider: { title: 'Proveedor', description: 'Elige cómo envía este entorno los SMS salientes.' },
         aliyun: { title: 'Aliyun SMS' },
         twilio: { title: 'Twilio' },
         limits: { title: 'Límites de gasto', description: 'Limita el volumen de SMS salientes del despliegue. El SMS es un canal de pago y cada envío cuesta dinero real.' },
@@ -292,7 +292,7 @@ export const esES: PlatformTranslationData = {
         contact: { title: 'Contacto' },
       },
       keys: {
-        legal_name: { label: 'Razón social', help: 'Nombre legal registrado de la organización (puede diferir del nombre del espacio de trabajo).' },
+        legal_name: { label: 'Razón social', help: 'Nombre legal registrado de la organización (puede diferir del nombre de la organización indicado en Marca).' },
         registration_number: { label: 'Número de registro', help: 'Número de registro / constitución de la empresa (p. ej. EIN, n.º de sociedad).' },
         tax_id: { label: 'ID fiscal / IVA', help: 'Identificador fiscal que aparece en las facturas (p. ej. IVA, GST, ABN).' },
         address_line1: { label: 'Dirección línea 1' },
@@ -326,7 +326,7 @@ export const esES: PlatformTranslationData = {
 
     feature_flags: {
       title: 'Indicadores de función',
-      description: 'Activa funciones experimentales y en beta para este espacio de trabajo.',
+      description: 'Activa funciones experimentales y en beta para esta organización.',
       groups: {
         productivity: { title: 'Productividad' },
         collaboration: { title: 'Colaboración' },
