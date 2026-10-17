@@ -1587,7 +1587,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "参照 ID",
-        help: "呼び出し元が指定した相関識別子"
+        help: "このトークンの発行根拠となった同意が紐づけた組織。紐づけがない場合は空"
       },
       authorization_code_id: {
         label: "認可コード ID",
@@ -1647,7 +1647,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "参照 ID",
-        help: "呼び出し元が指定した相関識別子"
+        help: "このリフレッシュトークン系列を開始した同意が紐づけた組織。紐づけがない場合は空"
       },
       authorization_code_id: {
         label: "認可コード ID",
@@ -1715,7 +1715,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "参照 ID",
-        help: "呼び出し元が指定した相関識別子"
+        help: "この同意が紐づける組織。同意時のユーザーのアクティブな組織で、アクティブな組織がなかった場合は空"
       },
       resources: {
         label: "リソース",

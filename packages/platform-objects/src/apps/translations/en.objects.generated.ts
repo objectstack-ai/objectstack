@@ -1587,7 +1587,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "Reference ID",
-        help: "Caller-supplied correlation identifier"
+        help: "Organization bound by the consent this token was issued under; empty when none was bound"
       },
       authorization_code_id: {
         label: "Authorization Code ID",
@@ -1647,7 +1647,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "Reference ID",
-        help: "Caller-supplied correlation identifier"
+        help: "Organization bound by the consent that started this refresh family; empty when none was bound"
       },
       authorization_code_id: {
         label: "Authorization Code ID",
@@ -1715,7 +1715,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "Reference ID",
-        help: "Caller-supplied correlation identifier"
+        help: "Organization this consent binds: the consenting user's active organization at consent; empty when none was active"
       },
       resources: {
         label: "Resources",

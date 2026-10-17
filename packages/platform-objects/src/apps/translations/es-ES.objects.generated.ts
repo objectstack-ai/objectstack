@@ -1587,7 +1587,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "ID de referencia",
-        help: "Identificador de correlación proporcionado por quien llama."
+        help: "Organización vinculada por el consentimiento con el que se emitió este token; vacío si no se vinculó ninguna."
       },
       authorization_code_id: {
         label: "ID del código de autorización",
@@ -1647,7 +1647,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "ID de referencia",
-        help: "Identificador de correlación proporcionado por quien llama."
+        help: "Organización vinculada por el consentimiento que inició esta familia de tokens de actualización; vacío si no se vinculó ninguna."
       },
       authorization_code_id: {
         label: "ID del código de autorización",
@@ -1715,7 +1715,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "ID de referencia",
-        help: "Identificador de correlación proporcionado por quien llama."
+        help: "Organización que vincula este consentimiento: la organización activa del usuario al consentir; vacío si no había ninguna."
       },
       resources: {
         label: "Recursos",

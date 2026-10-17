@@ -1587,7 +1587,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "引用 ID",
-        help: "调用方提供的关联标识符"
+        help: "签发该令牌所依据的同意所绑定的组织；未绑定组织时为空"
       },
       authorization_code_id: {
         label: "授权码 ID",
@@ -1647,7 +1647,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "引用 ID",
-        help: "调用方提供的关联标识符"
+        help: "开启该刷新令牌族的同意所绑定的组织；未绑定组织时为空"
       },
       authorization_code_id: {
         label: "授权码 ID",
@@ -1715,7 +1715,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "引用 ID",
-        help: "调用方提供的关联标识符"
+        help: "该同意绑定的组织：同意时用户的当前活动组织；同意时无活动组织则为空"
       },
       resources: {
         label: "资源",
