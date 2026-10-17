@@ -1,5 +1,25 @@
 # @objectstack/objectql
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- 2ac0616: refactor(objectql): the record validator reads `isMissing` / `isEmptyForRequired` from `@objectstack/core` instead of private copies
+  
+  Clause-②: no
+  
+  - **No behaviour change.** The object-level `required` check, the `required_cleared` PATCH check, the blank-to-`null` normalisation of typed columns and the value-shape scan judge "missing" exactly as before; the private copies of the two predicates are deleted and `@objectstack/core`'s exports, moved there unchanged, are imported at every read site.
+  - **Why:** `@objectstack/rest`'s public-form submit route now judges a form's `required` by the same rule, and it cannot import the engine.
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ac0616]
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/metadata-protocol@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes

@@ -1,5 +1,42 @@
 # @objectstack/dogfood
 
+## 0.0.48-next.4
+
+### Patch Changes
+
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ac0616]
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/example-crm@4.0.100-next.4
+  - @objectstack/example-multi-package@0.0.7-next.4
+  - @objectstack/example-showcase@0.3.22-next.4
+  - @objectstack/connector-mcp@18.0.0-next.4
+  - @objectstack/connector-openapi@18.0.0-next.4
+  - @objectstack/connector-rest@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/mcp@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/plugin-approvals@18.0.0-next.4
+  - @objectstack/plugin-audit@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/plugin-email@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-sharing@18.0.0-next.4
+  - @objectstack/plugin-webhooks@18.0.0-next.4
+  - @objectstack/service-analytics@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-messaging@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/trigger-record-change@18.0.0-next.4
+  - @objectstack/trigger-schedule@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+  - @objectstack/verify@18.0.0-next.4
+  - @objectstack/plugin-pinyin-search@18.0.0-next.4
+
 ## 0.0.48-next.3
 
 ### Patch Changes
