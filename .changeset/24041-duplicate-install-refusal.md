@@ -1,12 +1,14 @@
 ---
-"@objectstack/metadata-protocol": patch
+"@objectstack/metadata-protocol": minor
 ---
 
-fix(metadata-protocol): `duplicatePackage` reports a refused install of the copy's package record, on its answer and in the log
+fix(metadata-protocol): `duplicatePackage` is refused, with nothing copied, when the install of the copy's package record is refused
 
-Clause-②: no
+Clause-②: no (narrowing)
 
-- **What was silent.** The duplicate installs the copy's package record before it copies the items, and a refusal of that install was caught and dropped. A refused install leaves no registry record and no `sys_packages` row, so the copy's id was not an installed package (absent from `GET /packages` at once, not only after a restart) while every copied item was bound to it, and the answer read `success: true` with an empty `failed[]`. Nothing was logged. It is reached whenever the copy's namespace is one another installed package owns (`NAMESPACE_CONFLICT`, 422): an explicit `targetNamespace`, or one derived from a target id whose last segment another package's namespace already uses. A failed `sys_packages` write fails the install the same way.
-- **The answer now names it.** One `failed[]` entry `{ type: 'package', name, error }`, where `name` is the source package id (the source's package item, which the clone could not copy). Its `error` names the target id and quotes the refusal when the refusal declares a client status, so a namespace conflict arrives with its own remedy. A store fault is not quoted. The duplicate's `success` is therefore `false` and `failedCount` counts the entry; the HTTP status stays 200, so a consumer reading `data.success` now sees a partial duplicate.
-- **The log now names it.** One `warn` line from `[protocol.duplicatePackage]` names the target id and the source id, then the refusal's code and full message, store faults included.
-- **Unchanged:** the duplicate still copies the items after a refused install; the response's shape; every other `failed[]` entry.
+<!-- adr-0087: not-required (no-migration-prescription) The refusal is one verb's runtime answer at call time; no stored metadata, spec key or published type changes, so there is nothing for `objectstack migrate meta` to rewrite. The remedy is a different argument on the next call. -->
+
+- **Refused now.** `duplicatePackage`, and `POST /api/v1/packages/:id/duplicate` which calls it, installs the copy's package record before it copies any item. When that install is refused, the duplicate is now refused with that same refusal, and nothing is minted or copied. A copy whose namespace another installed package owns answers `422 NAMESPACE_CONFLICT` with the registry's own sentence (ADR-0048); that covers an explicit `targetNamespace` and one derived from the last segment of `targetPackageId`. A failed `sys_packages` write answers the install's own `500`. Before, both refusals were dropped and the items were copied anyway: bound to an id with no package record (absent from `GET /packages`), after a namespace conflict inside the namespace the other package owns, and the answer read `success: true`.
+- **Unchanged.** A duplicate whose package record installs copies exactly as before, with the same answer shape, and per-item failures still ride `failed[]`. A source with no package record still copies without installing one.
+- **Remedy.** Choose a target namespace no installed package owns: pass `targetNamespace` explicitly, or pick a `targetPackageId` whose last segment derives a free one. For a deliberate migration, `OS_METADATA_COLLISION=warn` still downgrades the namespace gate to a warning, and the duplicate then proceeds.
+- **Logged.** The refusal is logged once at `warn` by `[protocol.duplicatePackage]`, naming the target and source ids and the refusal's code and message. For a store fault the error itself is attached, so its cause reaches the log.
