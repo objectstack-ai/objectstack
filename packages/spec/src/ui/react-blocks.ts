@@ -16,6 +16,7 @@ import type { ZodTypeAny } from 'zod';
 import { ListViewSchema, FormViewSchema } from './view.zod';
 import { ComponentPropsMap } from './component.zod';
 import { ChartConfigSchema } from './chart.zod';
+import { LIST_VIEW_RETIRED_ALIASES } from './list-view-retired-aliases';
 
 export type ReactPropKind = 'data' | 'binding' | 'controlled' | 'callback';
 
@@ -105,19 +106,11 @@ export const REACT_OVERLAY_SHADOWS: Readonly<Record<string, readonly string[]>> 
 export const REACT_RETIRED_OVERLAY_PROPS: Readonly<
   Record<string, Readonly<Record<string, { replacedBy: string; note: string }>>>
 > = {
-  ListView: {
-    // Commit 5383fa670 published these as deprecated aliases of ListViewSchema's own
-    // `data` / `type`; #14791 retires them outright, the consumer fold having
-    // landed (objectui `normalizeListViewSchema`, console pin a472b071).
-    objectName: {
-      replacedBy: 'data',
-      note: "Write data={{ provider: 'object', object: '…' }} — the metadata-tier data source, the same spelling a metadata list view authors.",
-    },
-    viewType: {
-      replacedBy: 'type',
-      note: 'Write type="kanban" — ListViewSchema\'s own `type`, the metadata-tier view kind.',
-    },
-  },
+  // [#22444] Declared once in `./list-view-retired-aliases.ts`: a page
+  // `list-view` node's `properties` refuses the same two aliases with the same
+  // notes (`ComponentPropsMap['list-view']`), and that row cannot import this
+  // module.
+  ListView: LIST_VIEW_RETIRED_ALIASES,
 };
 
 /**

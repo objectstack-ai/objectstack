@@ -45,7 +45,17 @@ import {
   FormFieldSchema,
   type FormField,
   type FormFieldInput,
+  // [#22444] The `list-view` row is the list view itself: its members by
+  // reference, its two object-level checks, and the list overlay member's
+  // judged `options` bag (`VIEW_METADATA_MEMBERS.listOverlay`) — see
+  // `ListViewPageProps`.
+  checkListViewCalendarVisualization,
+  checkListViewChartBinding,
+  VIEW_METADATA_MEMBERS,
 } from './view.zod';
+// [#22444] The one prescription both tiers refuse a list view's retired
+// `objectName` / `viewType` with (the react tier's `REACT_RETIRED_OVERLAY_PROPS.ListView`).
+import { LIST_VIEW_RETIRED_ALIASES } from './list-view-retired-aliases';
 // [#21445] `object-grid.bulkActionDefs` is the list view's bulk-action def,
 // by identity — the element `ListViewSchema.bulkActionDefs` declares.
 import { BulkActionDefSchema } from './bulk-action.zod';
@@ -8177,6 +8187,91 @@ export type ObjectTimelineProps = z.input<typeof ObjectTimelinePropsSchema>;
 export type ObjectTimelinePropsParsed = z.infer<typeof ObjectTimelinePropsSchema>;
 
 /**
+ * The guidance a page `list-view` node's retired binding alias is refused
+ * with: what to write in the bag, then the react tier's own note for the same
+ * alias, verbatim ({@link LIST_VIEW_RETIRED_ALIASES}), so the two tiers carry
+ * one prescription.
+ */
+const LIST_VIEW_PAGE_ALIAS_GUIDANCE: Readonly<Record<'objectName' | 'viewType', string>> = {
+  objectName:
+    '`objectName` is retired on a page `list-view` node: the list view names its object in its own '
+    + `\`${LIST_VIEW_RETIRED_ALIASES.objectName.replacedBy}\` source — write \`data: { provider: 'object', object: '…' }\` `
+    + 'in `properties`, or name the object on the node\'s `dataSource` binding (`dataSource.object`). The '
+    + 'console reads no `objectName` off this node, so the list queries nothing. Run `os migrate meta --from 17` '
+    + 'to list the mechanical edits for existing sources; `--write` applies the ones it can prove. The react '
+    + `tier retired the same alias on \`ListView\`: ${LIST_VIEW_RETIRED_ALIASES.objectName.note}`,
+  viewType:
+    '`viewType` is retired on a page `list-view` node: the list kind is the list view\'s own '
+    + `\`${LIST_VIEW_RETIRED_ALIASES.viewType.replacedBy}\`, written in \`properties\` (\`type: 'kanban'\`) — the `
+    + 'node\'s own `type` stays `list-view`, the registry key. The console reads no `viewType` off this node, '
+    + 'so the list draws as a grid. Run `os migrate meta --from 17` to list the mechanical edits for existing '
+    + 'sources; `--write` applies the ones it can prove. The react tier retired the same alias on `ListView`: '
+    + LIST_VIEW_RETIRED_ALIASES.viewType.note,
+};
+
+/**
+ * `list-view` — a list view embedded on a page (#22444, ruling C, the
+ * maintainer's 「同意」: the page carrier converges on the spec spelling; one
+ * list view has one set of property names wherever it is embedded).
+ *
+ * ## Built from the list view, by reference
+ *
+ * Every member is {@link ListViewSchema}'s own schema object (its `shape`
+ * spread), and both of its object-level checks are attached
+ * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding}),
+ * so a key or value the authoring door refuses on a list view is refused here
+ * with the same issue. So `kanban.groupField` is an unknown key of the kanban
+ * block, and the list kind is the bag's own `type` (the node's `type` is the
+ * registry key `list-view`, and objectui's page renderer reads the bag's
+ * `type` as the list kind).
+ *
+ * ## The two members the list OVERLAY member declares instead
+ *
+ * The ruling takes the overlay layer's two differences, measured on the seat's
+ * probes, and nothing else:
+ *
+ * - `columns` OPTIONAL — the overlay member's own spelling
+ *   (`shape.columns.optional()`). A page node bound to a saved view through
+ *   its `dataSource.view` draws that view's columns, and the list renderer
+ *   draws a column-less list from the object; the authoring
+ *   {@link ListViewSchema} keeps `columns` required, because an authored list
+ *   view is a full config. The row judges `properties` only, so it cannot see
+ *   the node's binding: `columns` is optional whatever the binding.
+ * - `options` judged PER KIND — the overlay member's own bag, by reference
+ *   (`VIEW_METADATA_MEMBERS.listOverlay.shape.options`): each `options.KIND` is
+ *   judged by that kind's block, an unknown key refused by name, and
+ *   `options.grid` refused with its own guidance (a grid has no per-kind
+ *   block).
+ *
+ * ## The retired aliases
+ *
+ * `objectName` and `viewType` were the page carrier's own spelling of `data`
+ * and `type`. The pinned console reads neither off a page `list-view` node,
+ * and the react tier retired both on `ListView` with no window. They are
+ * undeclared here and answered by name ({@link LIST_VIEW_PAGE_ALIAS_GUIDANCE});
+ * stored pages carry them forward through the D2 conversion
+ * `page-list-view-object-name-view-type-to-data-type`, never a fallback read.
+ *
+ * Not exported: a top-level exported schema mints a protocol def and a full
+ * set of authorable-surface keys, which would duplicate every `ui/ListView`
+ * key under a second name (the reason `ListViewShapeSchema` is not exported).
+ * The row reaches readers through {@link ComponentPropsMap}.
+ */
+const ListViewPageProps = lazySchema(() => strictObject({
+  surface: 'this page `list-view`',
+  history:
+    'Until this row a page `list-view` node\'s `properties` were judged by nothing: a key every list view '
+    + 'door refuses (a kanban block\'s `groupField`, an `options.grid` bag) saved green on a page and reached '
+    + 'the renderer.',
+  guidance: LIST_VIEW_PAGE_ALIAS_GUIDANCE,
+  guidanceSets: [COMPONENT_NODE_VISIBILITY_GUIDANCE],
+}, {
+  ...ListViewSchema.shape,
+  columns: ListViewSchema.shape.columns.optional(),
+  options: VIEW_METADATA_MEMBERS.listOverlay.shape.options,
+}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding));
+
+/**
  * ----------------------------------------------------------------------
  * Component Props Map
  * Maps Component Type to its Property Schema
@@ -8430,6 +8525,15 @@ export const ComponentPropsMap = {
   // own header carries the per-key reading and what it deliberately does NOT
   // declare.
   'object-timeline': ObjectTimelinePropsSchema,
+  // #22444, ruling C (the maintainer's 「同意」): a list view embedded on a
+  // page is judged as a list view. Until this row the node's `properties` were
+  // judged by nothing, so `kanban.groupField` and `options.grid`, refused at
+  // every list view door, saved green on a page. The row is the list view's
+  // members by reference plus the list overlay member's two differences
+  // (`columns` optional, `options` judged per kind), and the page carrier's
+  // retired `objectName` / `viewType` are refused by name — see the schema's
+  // own header.
+  'list-view': ListViewPageProps,
 } as const;
 
 /**
