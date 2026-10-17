@@ -455,9 +455,10 @@ const emptyProps = (type: string) =>
 
 /**
  * A component RETIRED at element grain whose props bag is refused WHOLE —
- * `user:profile` (#14159), and `ai:chat_window` (#21504), whose four keys left
- * with its props def. The `retiredKey` channel one grain wider: where a
- * tombstoned KEY accepts absence and refuses any value, a retired ELEMENT has
+ * `user:profile` (#14159), `ai:chat_window` (#21504), whose four keys left
+ * with its props def, and `record:json` (#24162), whose three did. The
+ * `retiredKey` channel one grain wider: where a tombstoned KEY accepts absence
+ * and refuses any value, a retired ELEMENT has
  * nothing an author may write at all, so the row is `z.never` — `{}` is refused
  * exactly like a populated bag, `expected: 'never'` / `code: 'invalid_type'` is
  * the same issue shape a key tombstone raises, and the message is the element's
@@ -2568,76 +2569,13 @@ const RecordApprovalsProps = strictObject({
   },
 }, {});
 
-/**
- * `record:json` (#23745, the spec half of face 4 of objectui#12438's ruling,
- * letter C): one key of the bound record, drawn as indented JSON in a panel
- * that starts collapsed, with a copy control. The worked case is the approval
- * request page's raw request snapshot (`payload` on a `sys_approval_request`
- * row), which only a caller holding `studio.access` may see.
- *
- * A NEW block rather than a widened one, on the ruling's own test ("A NEW block
- * is opened only where no existing block can carry the face"): no declared
- * block draws a record value as JSON, `record:details` draws JSON only for a
- * DECLARED `json` field, and the gate this face needs fails CLOSED, which the
- * record blocks' gate of the same name does not
- * ({@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}, clause 5). That
- * shared gate is left exactly as it is.
- *
- * Declared spec first, like `record:approval_decision`: no renderer draws it
- * and no page authors it on the day it lands. objectui registers the renderer,
- * and plugin-approvals places it on the request page, after this declaration.
- *
- * Three keys, all of them the renderer's whole contract:
- *
- *  - `field` — the key to draw. It is NOT judged against the object's
- *    declared fields (it has no entry in `@objectstack/lint`'s
- *    `COMPONENT_FIELD_SPECS`), because the key this block exists for is one
- *    the read route serves beside the declared fields: the request's
- *    `payload` is parsed from the declared column `payload_json`, which is
- *    never served under its own name. `attachedOnRead` on the object does not
- *    describe such a key either — it declares per-caller blocks with a fixed
- *    set of scalar leaves, and a snapshot's leaves are the source record's
- *    fields. So a misspelled `field` draws nothing, and nothing at publish
- *    says so.
- *  - `label` — the collapsed panel's summary line.
- *  - `requiredPermissions` — REQUIRED, and fail-CLOSED: see the describe.
- *    Presentation only, like every block-level gate: it authorises nothing.
- */
-export const RecordJsonProps = strictObject({
-  surface: 'this `record:json`',
-  history: PROPS_HISTORY,
-  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
-  aliases: {
-    key: 'field', path: 'field', fieldName: 'field',
-    title: 'label', summary: 'label',
-    permissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
-  },
-}, {
-  field: z.string()
-    .regex(/^[a-z_][a-z0-9_]*$/, {
-      message: 'record:json `field` must be a lowercase snake_case key of the bound record (e.g. "payload").',
-    })
-    .describe(
-      'The key of the bound record whose value this block draws as indented JSON, in a panel that starts '
-      + 'collapsed, with a copy control. A declared field, or a key the record\'s read route serves beside '
-      + 'the declared fields (`payload` on a `sys_approval_request` row). It is NOT checked against the '
-      + 'object\'s fields: a key with no value on the served record draws nothing, so a misspelled `field` '
-      + 'draws nothing and no publish check reports it.',
-    ),
-  label: I18nLabelSchema.optional().describe(
-    'The collapsed panel\'s summary line — a string or an inline locale map (renderer default: "Raw data (JSON)").',
-  ),
-  requiredPermissions: z.array(z.string().min(1)).min(1).describe(
-    '[ADR-0066] REQUIRED, at least one. Capabilities the user must ALL hold — names that permission sets grant '
-    + 'through `systemPermissions`, not object actions. It fails CLOSED, unlike the record blocks\' gate of the '
-    + 'same name: a client that cannot resolve the user\'s capabilities (no permission provider, or one that '
-    + 'does not report `systemPermissions`) draws nothing, and so does a user missing any of them — no notice, '
-    + 'no summary line, no empty panel. '
-    + 'Presentation only: it authorises nothing, and the read route still serves the value to the same user. '
-    + 'To keep a value from a user, gate the object, the field or the route.',
-  ),
-});
-export type RecordJsonProps = z.input<typeof RecordJsonProps>;
+// `RecordJsonProps` REMOVED (#24162, ADR-0049) with the `record:json` element
+// it described (#23745): `field` / `label` / `requiredPermissions` were the
+// contract of a renderer that was never built, for the approval request page's
+// raw JSON panel, which the maintainer dropped before anything drew or placed
+// the type. Its row in `ComponentPropsMap` below now refuses the whole bag
+// (`retiredComponentProps`), and the def is recorded in
+// `migrations/entries/retired-defs/18.ui__RecordJsonProps.ts`.
 
 export const PageAccordionProps = strictObject({
   surface: 'this `page:accordion`',
@@ -8325,13 +8263,14 @@ export const ComponentPropsMap = {
   //    attributes it reads are node-level, never `properties`.
   'record:approvals': RecordApprovalsProps,
   'record:attachments': emptyProps('record:attachments'),
-  // #23745 — one key of the bound record drawn as indented JSON, behind a
-  // REQUIRED, fail-closed `requiredPermissions` gate (objectui#12438 ruling,
-  // letter C, face 4). A `PageComponentType` member declared spec first, as
-  // `record:approval_decision` was: no renderer and no authored page yet, so
-  // the key set is the declared contract the renderer is built to, not a
-  // measurement of read points. See the schema's own header.
-  'record:json': RecordJsonProps,
+  // RETIRED by name (#24162, ADR-0049; the maintainer dropped the approval
+  // request page's raw JSON panel, the one face `record:json` was declared
+  // for, #23745). The row STAYS, for the reason `user:profile`'s does: every
+  // reader that dispatches on the row keeps recognising the name and answers
+  // with the prescription instead of skipping it as an unregistered custom
+  // string. Its three keys (`field`, `label`, `requiredPermissions`) left with
+  // `RecordJsonProps`, so the WHOLE bag is refused, as `ai:chat_window`'s is.
+  'record:json': retiredComponentProps('record:json'),
 
   // Navigation
   'app:launcher': emptyProps('app:launcher'),

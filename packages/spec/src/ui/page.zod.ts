@@ -142,6 +142,26 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
     + 'is the supported entry point. Delete the `ai:chat_window` component node and put nothing '
     + "in its place; to choose which platform agent the overlay answers with, set the app's "
     + '`defaultAgent`.'],
+  // #24162, ADR-0049 enforce-or-remove, by the maintainer's ruling quoted on
+  // that card (triage record 6232511377): face 4 of the objectui#12438 ruling C —
+  // the approval request page's raw JSON panel — is dropped, because the person
+  // deciding an approval has no business need to read the request as JSON.
+  // `record:json` (#23745) was declared spec first for that one panel and
+  // shipped only in the 18.0.0-next.3 prerelease: no renderer registered it,
+  // no page placed it (objectui and objectstack measured zero), and its one
+  // planned producer was closed unmerged. The `ai:chat_window` shape: the
+  // row's three keys go with the element, so the kept `ComponentPropsMap` row
+  // refuses the WHOLE bag (`retiredComponentProps`) with this text. No
+  // `os migrate meta` sentence: there is no mechanical edit to list (a
+  // conversion does not delete authored page nodes), and the D3 entry
+  // `ui-record-json-retired` carries the delegated deletion. No replacement is
+  // named, by ruling.
+  ['record:json', '`record:json` was removed in @objectstack/spec 18 (ADR-0049) — it shipped '
+    + 'only in the 18.0.0-next.3 prerelease, declared for one raw-JSON panel on the approval '
+    + 'request page, and that panel was dropped: the person deciding an approval has no business '
+    + 'need to read a record as raw JSON, so no renderer draws the type and no page places it, and '
+    + 'its `field`, `label` and `requiredPermissions` props configure nothing. Delete the '
+    + '`record:json` component node and put nothing in its place.'],
   ['element:form', '`element:form` was removed in @objectstack/spec 17 '
     + '(ADR-0049) — the whole `element:form` element is retired: no renderer for it '
     + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
@@ -174,6 +194,11 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
  * kept as a whole-bag refusal. No renderer ever shipped and none is wanted —
  * the console's floating chat overlay is the supported AI chat entry point, so
  * an inline page-level chat window is not part of the authorable surface.
+ *
+ * `record:json` REMOVED (#24162, ADR-0049 enforce-or-remove) the same way, one
+ * prerelease after it was declared (#23745, published in 18.0.0-next.3 only):
+ * the approval request page's raw JSON panel it was declared for was dropped
+ * by the maintainer, so it has no renderer, no placement and no producer.
  */
 export const PageComponentType = z.enum([
   // Structure
@@ -202,12 +227,10 @@ export const PageComponentType = z.enum([
   // every record page of an `enable.files` object. Each has a
   // `ComponentPropsMap` row measured from its renderer's read points.
   'record:approvals', 'record:attachments',
-  // #23745 (the spec half of face 4 of the objectui#12438 ruling, letter C):
-  // one key of the bound record drawn as indented JSON behind a REQUIRED,
-  // fail-closed `requiredPermissions` gate. Declared spec first, as
-  // `record:approval_decision` above was: objectui registers the renderer and
-  // plugin-approvals places it after this declaration exists.
-  'record:json',
+  // `record:json` REMOVED (#24162, ADR-0049; the maintainer dropped face 4 of
+  // the objectui#12438 ruling, the approval request page's raw JSON panel it
+  // was declared for): refused by name through `RETIRED_PAGE_COMPONENT_TYPES`
+  // above, not merely de-advertised.
   // Navigation
   'app:launcher', 'nav:menu', 'nav:breadcrumb',
   // Utility — `user:profile` REMOVED (#14159): shell chrome, refused by name
@@ -1291,7 +1314,6 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
   ['record:approval_decision', 'is the decision panel of an approval request: action controls that differ by viewer, beside a progress tally each decision changes, with nothing to print'],
   ['record:approvals', 'is the record\'s live approval timeline, with a remind control only the submitter sees, so what prints would depend on who prints it'],
   ['record:attachments', 'is a list of attached files with upload, download and delete controls, and the files themselves never reach paper'],
-  ['record:json', 'is a panel that starts collapsed behind a per-viewer capability gate, so what prints would depend on who prints it and whether they opened it'],
   ['element:button', 'is an action control, with nothing to print'],
   ['element:record_picker', 'is an input control, with nothing to print'],
   ['element:text_input', 'is an input control, with nothing to print'],

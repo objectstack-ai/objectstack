@@ -1521,14 +1521,13 @@ export type Iso_ui_chart__ChartTypeSchema = Assert<Eq< z.input< typeof M158.Char
 // default-free on the same principle: the renderer's one-column and
 // "No details" fallbacks stay the renderer's facts. Its five sibling rows from
 // that card carry an expression or a filter rule and declare `XParsed` instead.
-// #23745 — `record:json` (`RecordJsonProps`), default-free and transform-free:
-// the renderer's "Raw data (JSON)" summary-line fallback stays the renderer's.
+// #23745's `record:json` pin (`RecordJsonProps`) LEFT at #24162 with the def:
+// the element was retired, its row now refuses the whole bag.
 export type Iso_ui_component__ElementDefinitionListPropsSchema = Assert<Eq< z.input< typeof M170.ElementDefinitionListPropsSchema >, z.infer< typeof M170.ElementDefinitionListPropsSchema > >>;
 export type Iso_ui_component__PageContainerProps = Assert<Eq< z.input< typeof M170.PageContainerProps >, z.infer< typeof M170.PageContainerProps > >>;
 export type Iso_ui_component__RecordAlertActionSchema = Assert<Eq< z.input< typeof M170.RecordAlertActionSchema >, z.infer< typeof M170.RecordAlertActionSchema > >>;
 export type Iso_ui_component__RecordHighlightsField = Assert<Eq< z.input< typeof M170.RecordHighlightsField >, z.infer< typeof M170.RecordHighlightsField > >>;
 export type Iso_ui_component__RecordHistoryProps = Assert<Eq< z.input< typeof M170.RecordHistoryProps >, z.infer< typeof M170.RecordHistoryProps > >>;
-export type Iso_ui_component__RecordJsonProps = Assert<Eq< z.input< typeof M170.RecordJsonProps >, z.infer< typeof M170.RecordJsonProps > >>;
 export type Iso_ui_component__RecordPathProps = Assert<Eq< z.input< typeof M170.RecordPathProps >, z.infer< typeof M170.RecordPathProps > >>;
 export type Iso_ui_component__RecordQuickActionsProps = Assert<Eq< z.input< typeof M170.RecordQuickActionsProps >, z.infer< typeof M170.RecordQuickActionsProps > >>;
 export type Iso_ui_component__RecordReferenceRailProps = Assert<Eq< z.input< typeof M170.RecordReferenceRailProps >, z.infer< typeof M170.RecordReferenceRailProps > >>;
@@ -2542,7 +2541,11 @@ describe('ADR-0122 type-alias convention', () => {
     // origin — a plain string enum, so it is pinned here
     // (Iso_kernel_packageRegistry__InstalledPackageSourceSchema) rather than
     // given a `…Parsed` synonym. +1 added.
-    expect(pins).toHaveLength(789);
+    //
+    // 789 -> 788 is #24162: `RecordJsonProps` left with the retired
+    // `record:json` element, so its pin (Iso_ui_component__RecordJsonProps)
+    // left with it. -1.
+    expect(pins).toHaveLength(788);
 
     // The count is stated in PROSE twice as well — this case's title and the
     // section header above the pin list — and until commit c6b05c76a nothing read either
