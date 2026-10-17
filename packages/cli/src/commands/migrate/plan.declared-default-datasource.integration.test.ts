@@ -1,5 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
-// test-budget: 70 — spawns the real producer once per single-cause fixture: three spawns of the source CLI over one staged fixture (os dev to provision the declared datasource, os dev over the staged drift, os migrate plan --json); 51.6 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
+// test-budget: 80 — spawns the real producer once per single-cause fixture: four spawns of the source CLI over one staged fixture (os dev to provision the declared datasource, os dev over the staged drift, os migrate plan --json, os migrate unmapped-columns --json); 56.1 s, the slower of two local runs on a shared container, x 1.25, no CI reading yet
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
