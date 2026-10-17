@@ -238,10 +238,12 @@ describe('[#24061] one authenticated request\'s prelude, counted on a real engin
     // keyring held before it was retired. This signature reads it once: the
     // key rows, then the `private_key` readback.
     const first = await probe.measure(getSession);
-    expect(tally(first.objects).sys_jwks).toBe(2);
+    expect(tally(first.objects)).toEqual({ ...PRELUDE_READS, sys_jwks: 2 });
+    expect(first.legs).toBe(6);
     // …and holds it: the next signature reads no key at all.
     const again = await probe.measure(getSession);
-    expect(tally(again.objects).sys_jwks ?? 0).toBe(0);
+    expect(tally(again.objects)).toEqual(PRELUDE_READS);
+    expect(again.legs).toBe(4);
 
     for (const response of [first.result, again.result]) {
       const jwt = response.headers.get('set-auth-jwt');
