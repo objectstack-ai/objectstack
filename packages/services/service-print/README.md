@@ -23,4 +23,8 @@ const print = kernel.getService<IPrintService>('print');
 await print.printRecordToFile({ app, object, recordId, page }, context);
 ```
 
+The plugin also mounts `POST /api/v1/print/records` on the kernel's HTTP server:
+the same request as a JSON body, printed as the signed-in caller, answering
+`201` with the stored file. A console `type: 'api'` action targets it.
+
 Documentation: [Print Pages](https://objectstack.ai/docs/ui/print-pages).

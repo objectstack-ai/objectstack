@@ -2635,7 +2635,7 @@ export function selfTest() {
       .filter((abs) => builtEntrypointSpawns(abs, readFileSync(abs, 'utf8')).spawns > 0)
       .map((abs) => relative(REPO_ROOT, abs).split(sep).join('/'))
       .sort();
-    t('the built-entrypoint population is exactly the ten files that spawn bin/run.js',
+    t('the built-entrypoint population is exactly the eleven files that spawn bin/run.js',
       JSON.stringify(builtFiles) === JSON.stringify([
         // [#21733] Joined the population deliberately: the card's acceptance is
         // a plain `os dev` restart on the BUILT packages, and its production leg
@@ -2672,6 +2672,12 @@ export function selfTest() {
         // so the tsx shim every `runServe()` caller uses cannot reach it at all.
         'packages/cli/test/serve-ready-degraded-boot.e2e.test.ts',
         'packages/cli/test/serve-stdio-stdout-purity.e2e.test.ts',
+        // [#24002] Joined the population deliberately: its subject is the
+        // documented stdio invocation, `os start` in PRODUCTION posture (start
+        // forces a production `serve` child unless `NODE_ENV` is set), and
+        // `bin/run-dev.js` sets `NODE_ENV=development` before argv is parsed.
+        // Every spawn hands its child `NODE_ENV: undefined`.
+        'packages/cli/test/start-mcp-stdio-early-initialize.integration.test.ts',
         // [#23858] Joined the population deliberately: its four bounded
         // children (`os start` and `os create`, each with a creatable-path
         // control) must start fast enough to keep the file under the 10 s

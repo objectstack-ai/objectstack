@@ -12,6 +12,7 @@ import {
   RuntimeConfigPlugin,
   resolveCloudUrl,
 } from '@objectstack/cloud-connection';
+import { PrintServicePlugin } from '@objectstack/service-print';
 
 import * as objects from './src/data/objects/index.js';
 import { ShowcaseExternalDatasource } from './src/system/datasources/showcase-external.datasource.js';
@@ -161,6 +162,12 @@ export default defineStack({
         ]
       : []),
     new RuntimeConfigPlugin({ controlPlaneUrl: '', singleEnvironment: true, installLocal: true }),
+    // The print service and its door, `POST /api/v1/print/records`, which the
+    // invoice's Generate PDF action calls (src/ui/actions/). The engine is
+    // headless Chromium, configured by environment: `OS_PRINT_CHROMIUM_PATH`
+    // (or `OS_PRINT_BROWSER_ENDPOINT`) and `OS_PRINT_CONSOLE_URL`. With none set
+    // the plugin says so once at startup, and every print is refused 503.
+    new PrintServicePlugin(),
   ],
 
   // Infrastructure

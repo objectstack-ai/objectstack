@@ -55,6 +55,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
   ApiKeyLifecyclePolicy,
   IEmailService,
+  II18nService,
   ISmsService,
   PrincipalSession,
   PrincipalSessionMintOptions,
@@ -159,6 +160,7 @@ import {
   interpolatePhoneSms,
   resolvePhoneSmsTemplateBody,
 } from './phone-sms-texts.js';
+import { invitationRoleLabel } from './invitation-role-label.js';
 // commit 35e94c96b — the stored rung of the ruled locale ladder reuses the messaging
 // seam's normalizer rather than growing a second one. `normalizeRecipientLocale`
 // is the platform's ONE reader of a value at rest in `sys_user.locale`, and its
@@ -189,6 +191,7 @@ import {
   protectGetSessionJwtHook,
   resolveJwtSigningAlgorithm,
 } from './jwt-key-algorithm.js';
+import { createSigningKeyReader } from './signing-key-read-cache.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -895,6 +898,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
    * which is exactly today's behaviour.
    */
   getAuditSink?: () => AuthEventAuditSurface | undefined;
+
+  /**
+   * Accessor for the runtime's `i18n` service, read by the organization
+   * invitation mail to name the invitee's membership role by its option LABEL
+   * in the mail's locale (`成员`, not `member`) — the label the console shows
+   * for the same option, read through the same service, so a tenant's authored
+   * translation reaches the mail too.
+   *
+   * Lazy for the same reason `getTenancy` is: the service is registered on the
+   * kernel after the AuthManager is constructed, and every call happens at
+   * send time. Omitted, or resolving to `undefined` (no i18n service) → the mail
+   * names the option's authored label (`Member`), never the stored value.
+   */
+  getI18n?: () => II18nService | undefined;
 
   /**
    * Optional structured logger (the kernel `ctx.logger`) for best-effort
@@ -2996,13 +3013,20 @@ export class AuthManager {
    * 2. **Existing EdDSA keys.** `resolveSigningKey` falls back to *any* stored
    *    key when none matches the configured algorithm, so a deployment that
    *    already minted an EdDSA key would still die in `importJWK` after the
-   *    fallback. On a host without Ed25519 we install better-auth's
-   *    `adapter.getJwks` keyring seam so unusable keys are not offered at all
-   *    and a fresh ES256 key is minted instead. Rows are hidden, never
-   *    deleted — moving back to a host with Ed25519 restores them.
+   *    fallback. On a host without Ed25519 the `adapter.getJwks` keyring seam
+   *    hides unusable keys, so they are not offered at all and a fresh ES256
+   *    key is minted instead. Rows are hidden, never deleted — moving back to
+   *    a host with Ed25519 restores them.
+   *
+   * The same seam carries the signing-key read cache on every host (#24061,
+   * `signing-key-read-cache.ts`): the keyring is held across requests only
+   * until a `sys_jwks` write passes the engine or its TTL lapses.
    *
    * Belt-and-braces, on every host: a signing failure degrades the
-   * `set-auth-jwt` header instead of 500ing `/get-session`.
+   * `set-auth-jwt` header instead of 500ing `/get-session`, and the header is
+   * signed only for an HTTP `/get-session` — an in-process `auth.api.getSession`
+   * read discards it, so it no longer pays the key read and the signature
+   * (#24061; see `protectGetSessionJwtHook`).
    */
   private async buildJwtPlugin(jwt: (options: any) => any): Promise<any> {
     if (!this.ed25519ProbeResult) this.ed25519ProbeResult = probeEd25519Support();
@@ -3026,12 +3050,20 @@ export class AuthManager {
     const jwtPlugin = jwt({
       schema: buildJwtPluginSchema(),
       jwks: { keyPairConfig },
-      // The keyring override is installed ONLY on a host that needs it, so a
-      // normal deployment runs better-auth's stock read path with no
-      // ObjectStack code in it and nothing to regress.
-      ...(ed25519Supported
-        ? {}
-        : { adapter: { getJwks: createHostUsableJwksReader() } }),
+      // [#24061] The keyring read goes through `createSigningKeyReader` on
+      // every host: it holds the rows across requests only while no
+      // `sys_jwks` write has passed this engine's middleware since they were
+      // read, and never past `SIGNING_KEY_CACHE_TTL_MS` — both halves of the
+      // cross-request caching rule (see `signing-key-read-cache.ts`). A miss
+      // reads exactly what it read before: better-auth's stock read, or, on a
+      // host without Ed25519, the host-usable keyring that hides keys this
+      // host cannot import (#3585).
+      adapter: {
+        getJwks: createSigningKeyReader({
+          engine: this.config.dataEngine,
+          read: ed25519Supported ? undefined : createHostUsableJwksReader(),
+        }),
+      },
     });
 
     const protectedHook = protectGetSessionJwtHook(jwtPlugin, (error) =>
@@ -3043,7 +3075,8 @@ export class AuthManager {
       console.error(
         '[AuthManager] Could not attach the JWT signing guard to better-auth\'s /get-session hook ' +
           '(its `hooks.after` shape changed). A JWT signing failure will now 500 every /get-session ' +
-          'instead of degrading to a missing set-auth-jwt header. Re-check ' +
+          'instead of degrading to a missing set-auth-jwt header, and every in-process session read ' +
+          'signs a JWT it discards (two sys_jwks reads per authenticated request). Re-check ' +
           'the better-auth version in better-auth-schema-parity.test.ts.',
       );
     }
@@ -3620,29 +3653,40 @@ export class AuthManager {
           // the deployment default, which is the documented floor rather than a
           // failure.
           const storedLocale = await this.storedRecipientLocale({ email: recipientEmail });
+          // #14319 — DELIBERATELY no request argument, and the only one of
+          // the five sends without one. better-auth DOES hand this callback
+          // a `ctx.request`, but it is the INVITER's: stamping their
+          // browser language onto the invitee's mail would recreate this
+          // very card one seat over. The 2026-09-02 ruling enumerates
+          // signup, sign-in and password reset — sends where the requester
+          // IS the recipient — and the superseded 2026-08-13 ruling named
+          // invitations as its own counterexample. #13881's ruling item 3
+          // fixes the chain as RECIPIENT locale → deployment default, so
+          // the inviter direction stays rejected: what #14641 added above
+          // is the invitee's own column, never the inviter's header.
+          const mailLocale = this.emailLocaleArg(undefined, storedLocale);
+          // #24154 — `{{role}}` names the membership role by its option LABEL
+          // in the mail's own locale (`成员`, not `member`): every body of the
+          // template interpolates this one value, so the zh-CN mail stops
+          // printing the stored enum inside a Chinese sentence. Never throws;
+          // a value with no label is named as stored, with one warn.
+          const roleLabel = await invitationRoleLabel(invitation.role || '', mailLocale.locale, {
+            getI18n: this.config.getI18n,
+            warn: (msg, meta) =>
+              this.config.logger ? this.config.logger.warn(msg, meta) : console.warn(msg, meta),
+          });
           try {
             await emailService.sendTemplate({
               template: 'auth.invitation',
               to: recipientEmail,
-              // #14319 — DELIBERATELY no request argument, and the only one of
-              // the five sends without one. better-auth DOES hand this callback
-              // a `ctx.request`, but it is the INVITER's: stamping their
-              // browser language onto the invitee's mail would recreate this
-              // very card one seat over. The 2026-09-02 ruling enumerates
-              // signup, sign-in and password reset — sends where the requester
-              // IS the recipient — and the superseded 2026-08-13 ruling named
-              // invitations as its own counterexample. #13881's ruling item 3
-              // fixes the chain as RECIPIENT locale → deployment default, so
-              // the inviter direction stays rejected: what #14641 added above
-              // is the invitee's own column, never the inviter's header.
-              ...this.emailLocaleArg(undefined, storedLocale),
+              ...mailLocale,
               data: {
                 inviter: {
                   name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
                   email: inviter?.user?.email ?? '',
                 },
                 organization: { name: org?.name ?? invitation.organizationId },
-                role: invitation.role || '',
+                role: roleLabel,
                 acceptUrl,
                 appName: this.getAppName(),
               },

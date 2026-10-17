@@ -1,7 +1,7 @@
 ---
 title: Component schema — UI Protocol reference
 navTitle: Component
-description: "Component schemas of the ObjectStack UI Protocol: ActionButtonProps and 44 more — each property with its type, default and a TypeScript example."
+description: "Component schemas of the ObjectStack UI Protocol: ActionButtonProps and 43 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Component schemas of the ObjectStack UI Protocol: ActionButtonProp
 ## TypeScript Usage
 
 ```typescript
-import { ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema, ActionMenuPropsSchema, ElementButtonPropsSchema, ElementDefinitionListPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementRepeaterPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordJsonProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
-import type { ActionButtonProps, ActionGroupProps, ActionIconProps, ActionMenuProps, ElementDefinitionListProps, ElementNumberProps, ElementRecordPickerProps, ElementRepeaterProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordJsonProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
+import { ActionButtonPropsSchema, ActionGroupPropsSchema, ActionIconPropsSchema, ActionMenuPropsSchema, ElementButtonPropsSchema, ElementDefinitionListPropsSchema, ElementFilterPropsSchema, ElementFormPropsSchema, ElementImagePropsSchema, ElementMetadataViewerPropsSchema, ElementNumberPropsSchema, ElementRecordPickerPropsSchema, ElementRepeaterPropsSchema, ElementTextInputPropsSchema, ElementTextPropsSchema, ObjectCalendarPropsSchema, ObjectFormPropsSchema, ObjectGanttPropsSchema, ObjectGridPropsSchema, ObjectKanbanPropsSchema, ObjectMapPropsSchema, ObjectMasterDetailFormPropsSchema, ObjectMetricPropsSchema, ObjectTimelinePropsSchema, ObjectTreePropsSchema, PageAccordionProps, PageCardProps, PageContainerProps, PageHeaderProps, PageTabsProps, RecordActivityProps, RecordAlertActionSchema, RecordAlertProps, RecordChatterProps, RecordDetailsProps, RecordHighlightsField, RecordHighlightsProps, RecordHistoryProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, RecordRelatedListProps, ReferenceRailEntrySchema } from '@objectstack/spec/ui';
+import type { ActionButtonProps, ActionGroupProps, ActionIconProps, ActionMenuProps, ElementDefinitionListProps, ElementNumberProps, ElementRecordPickerProps, ElementRepeaterProps, ObjectCalendarProps, ObjectFormProps, ObjectGanttProps, ObjectGridProps, ObjectKanbanProps, ObjectMapProps, ObjectMasterDetailFormProps, ObjectMetricProps, ObjectTimelineProps, ObjectTreeProps, PageContainerProps, RecordAlertAction, RecordAlertProps, RecordHighlightsField, RecordHistoryProps, RecordLineItemsProps, RecordPathProps, RecordQuickActionsProps, RecordReferenceRailProps, ReferenceRailEntry } from '@objectstack/spec/ui';
 
 // Validate data
 const result = ActionButtonPropsSchema.parse(data);
@@ -1792,19 +1792,6 @@ Type: `string`
 
 ---
 
-## RecordJsonProps
-
-### Properties
-
-| Property | Type | Required | Description |
-| :--- | :--- | :--- | :--- |
-| **field** | `string` | ✅ | The key of the bound record whose value this block draws as indented JSON, in a panel that starts collapsed, with a copy control. A declared field, or a key the record's read route serves beside the declared fields (`payload` on a `sys_approval_request` row). It is NOT checked against the object's fields: a key with no value on the served record draws nothing, so a misspelled `field` draws nothing and no publish check reports it. |
-| **label** | `string \| Record<string, string>` | optional | The collapsed panel's summary line — a string or an inline locale map (renderer default: "Raw data (JSON)"). |
-| **requiredPermissions** | `string[]` | ✅ | [ADR-0066] REQUIRED, at least one. Capabilities the user must ALL hold — names that permission sets grant through `systemPermissions`, not object actions. It fails CLOSED, unlike the record blocks' gate of the same name: a client that cannot resolve the user's capabilities (no permission provider, or one that does not report `systemPermissions`) draws nothing, and so does a user missing any of them — no notice, no summary line, no empty panel. Presentation only: it authorises nothing, and the read route still serves the value to the same user. To keep a value from a user, gate the object, the field or the route. |
-
-
----
-
 ## RecordLineItemsProps
 
 ### Properties
@@ -1813,7 +1800,7 @@ Type: `string`
 | :--- | :--- | :--- | :--- |
 | **childObject** | `string` | optional | Child object whose records this grid lists, edits and saves. Optional because the component-level `dataSource` binding can supply the object instead; with neither, the panel shows a configuration hint and fetches nothing |
 | **relationshipField** | `string` | ✅ | FK on the child object pointing back to the parent record — the rows are queried as `{ [relationshipField]: parentId }`. Required: this panel does not auto-detect it |
-| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | ✅ | Editable grid columns, drawn exactly as declared. Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, options?, … }` — objectui GridColumn); unknown keys and the retired `field` spelling are refused. Unlike the master-detail carriers, this block does NOT hydrate a column from the child object's field: declare `label`, `type` and `options` yourself — an identity-only `{ name }` column is a text cell headed by its name. Required, with at least one column: nothing derives them, and an empty list draws a grid with no cells |
+| **columns** | `{ name: string; label?: string; type?: Enum<'text' \| 'number' \| 'currency' \| 'date' \| 'datetime' \| 'time' \| 'select' \| 'lookup' \| 'file'>; width?: number; … }[]` | ✅ | Editable grid columns. Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes (`{ name, label?, type?, options?, … }` — objectui GridColumn); unknown keys and the retired `field` spelling are refused. As on the master-detail carriers, identity-only entries (`{ name }`) hydrate everything else from the child object's fields, `label`, `type` and `options` included, so an identity-only column is headed by the child field's label and translates with it. Declaring `type` opts a column out of hydration — supply its `label`, `options` and other extras yourself. Required, with at least one column: nothing derives them, and an empty list draws a grid with no cells |
 | **parentObject** | `string` | optional | Parent object the `totalField` rollup is written to (default: the object of the record on the page) |
 | **parentId** | `string` | optional | Parent record id the rows belong to (default: the record on the page). Wins over `recordId` |
 | **recordId** | `string` | optional | Alternate spelling of `parentId` the renderer also reads; `parentId` wins when both are set |

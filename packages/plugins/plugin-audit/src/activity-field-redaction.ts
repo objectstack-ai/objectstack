@@ -169,6 +169,7 @@ import {
   PARENT_GATE_READ_OPS,
   andIntoWhere,
   enumerateParentObjects,
+  namedParentObjects,
   type ParentRecordGateEngine,
 } from './parent-record-read-gate.js';
 import {
@@ -450,8 +451,13 @@ export function keptRowsOfParent(
  * every registered object the CRUD mirror can write about), narrowed to the
  * ONE parent the read pins by equality on `object_name` when it pins one
  * (`pinnedParentObject`, the query guard's reading): no row of any other parent
- * can match such a read. A parent the service gives no answer for is kept
- * whole (`{ object_name: P }`), as the redaction serves it.
+ * can match such a read. Otherwise it is narrowed as the gate narrows its own,
+ * to the parents the read's `where` names (`namedParentObjects`), and it judges
+ * every row that read can match exactly as the full enumeration would: whether
+ * the rule narrows the read at all is still asked of every enumerated parent,
+ * so when it does, the rows of a named object no enumeration holds are
+ * withheld as before. A parent the service gives no answer for is kept whole
+ * (`{ object_name: P }`), as the redaction serves it.
  *
  * It reads no row, as no context: no SYSTEM pre-scan, no window, and no leaf
  * composed for anyone (the security service's own field answers are its only
@@ -466,11 +472,10 @@ export async function computeWithheldUpdateFilter(
   logger: ActivityRedactionLogger,
 ): Promise<unknown | null> {
   const pinned = pinnedParentObject(ast.where, ACTIVITY_OBJECT);
-  const parents = pinned !== null ? [pinned] : enumerateParentObjects(
-    // It reads the registry view alone (the read gate's own enumeration).
-    engine as ParentRecordGateEngine,
-    ACTIVITY_GATE,
-  );
+  // It reads the registry view alone (the read gate's own enumeration),
+  // narrowed to the parents the read names, as the gate narrows its own.
+  const registry = engine as ParentRecordGateEngine;
+  const parents = pinned !== null ? [pinned] : enumerateParentObjects(registry, ACTIVITY_GATE, ast.where);
   if (parents === null) {
     reportOnce(
       engine,
@@ -493,7 +498,19 @@ export async function computeWithheldUpdateFilter(
     narrowed = true;
     branches.push(keptRowsOfParent(parent, served.map(String), currentMilestoneWatched(engine, parent)));
   }
+  if (!narrowed && pinned === null && namedParentObjects(ast.where) !== null) {
+    // Narrowed to the named parents, none of which is narrowed: the full
+    // enumeration's answer is still "narrow" when any other parent is, and its
+    // WHERE then keeps, of this read's rows, the named parents' rows alone.
+    for (const parent of enumerateParentObjects(registry, ACTIVITY_GATE) ?? []) {
+      if (!parents.includes(parent) && (await servedFor(parent)) !== undefined) {
+        narrowed = true;
+        break;
+      }
+    }
+  }
   if (!narrowed) return null;
+  if (branches.length === 0) return WITHHELD_DENY_ALL;
   return branches.length === 1 ? branches[0] : { $or: branches };
 }
 

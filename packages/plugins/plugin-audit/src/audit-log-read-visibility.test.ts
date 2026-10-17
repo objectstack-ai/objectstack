@@ -339,6 +339,18 @@ describe('[ADR-0139 D4] the ledger on the leaf path', () => {
     expect(where.$or.map(leafOf)).toEqual(['crm_case', SystemObjectName.SESSION, null]);
   });
 
+  it('a read naming its parent objects keeps a leaf for each named one, and the outside class beside them, whole', async () => {
+    const { mw } = installClassifying(['crm_case', 'crm_deal', 'crm_lead', 'sys_audit_log']);
+    const named = { object_name: { $in: ['crm_deal', 'sys_setting'] } };
+    const where = (await read(mw, { ast: { object: 'sys_audit_log', where: named } })).where as any;
+    expect(where.$and[0]).toBe(named);
+    expect(where.$and[1].$or.map(leafOf)).toEqual(['crm_deal', null]);
+    expect(where.$and[1].$or[1]).toEqual(OUTSIDE);
+    // Naming no parent it enumerates: the outside class alone, never the deny-all sentinel.
+    const none = (await read(mw, { ast: { object: 'sys_audit_log', where: { object_name: 'sys_setting' } } })).where as any;
+    expect(none.$and[1]).toEqual(OUTSIDE);
+  });
+
   it('the exemption is decided before anything is enumerated', async () => {
     const getAllObjects = vi.fn(() => [{ name: 'crm_case' }]);
     let mw!: Mw;

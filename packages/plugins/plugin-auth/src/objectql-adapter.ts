@@ -928,11 +928,16 @@ export function createObjectQLAdapterFactory(
         // injection parses `sys_sso_provider.oidc_config` off this row, and
         // the blob is itself `internal` now — injecting into a row the strip
         // emptied would find nothing to inject into.
+        //
+        // [#24061] The read's own `where` rides along: a column the read was
+        // keyed on (the session lookup by `token`) is answered from it, so
+        // only columns the caller cannot already know cost a privileged read.
         await reattachInternalFieldsOnRead(
           internalFieldEngine,
           objectName,
           result,
           bridged && select ? select.map(camelToSnake) : select,
+          bridged ? remapWhere(where) : where,
         );
         // [#8009] Read half — MANDATORY. `/sso/callback` reads the provider back
         // and authenticates to the IdP with the plaintext; encrypt-on-write

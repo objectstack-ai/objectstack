@@ -219,6 +219,10 @@ export default class MigrateApply extends Command {
         deferredDdlUnsupported: 'skip-schema-sync',
         composeHostStack: true,
         composeServedPlatform: true,
+        // [#24120] The plan's datasources too: each declared datasource a
+        // `datasourceMapping` rule routes objects to, connected as `os serve`
+        // connects it, reconciled where they live.
+        composeDeclaredDatasources: true,
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }

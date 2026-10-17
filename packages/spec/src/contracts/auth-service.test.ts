@@ -115,6 +115,27 @@ describe('Auth Service Contract', () => {
     expect(service.getMcpResourceUrl).toBeUndefined();
     expect(service.getMcpResourceMetadataUrl).toBeUndefined();
   });
+  // The verified MCP access-token result names the organization the user's
+  // OAuth consent bound, as an OPTIONAL member: a token minted before consents
+  // bound one verifies with none. The typed
+  // reads below are the pin; `check:test-typecheck` compiles this file.
+  it('should carry the consent-bound organization on a verified MCP access token, optionally', async () => {
+    const base: IAuthService = { handleRequest: async () => new Response('OK'), verify: async () => ({ success: true }) };
+    const bound: IAuthService = {
+      ...base,
+      verifyMcpAccessToken: async () => ({ userId: 'u1', scopes: ['data:read'], clientId: 'c1', organizationId: 'org_alpha' }),
+    };
+    const unbound: IAuthService = {
+      ...base,
+      verifyMcpAccessToken: async () => ({ userId: 'u1', scopes: ['data:read'], clientId: 'c1' }),
+    };
+
+    const boundOrganization: string | undefined = (await bound.verifyMcpAccessToken!('t'))?.organizationId;
+    const unboundOrganization: string | undefined = (await unbound.verifyMcpAccessToken!('t'))?.organizationId;
+    expect(boundOrganization).toBe('org_alpha');
+    expect(unboundOrganization).toBeUndefined();
+  });
+
   // [#23772] The principal-session mint is OPTIONAL: an auth service that
   // cannot mint a session keeps satisfying the contract unchanged, and a
   // consumer reads its absence as "no mint here", never as a failed mint.

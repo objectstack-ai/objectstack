@@ -143,6 +143,21 @@ describe('KNOWN_COMPONENT_TYPES covers every declared face', () => {
     // Lit control: the kept member of the same namespace is a candidate.
     expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toContain('ai:suggestion');
   });
+
+  /**
+   * #24162 — `record:json` is retired BY NAME the `ai:chat_window` way: out of
+   * the enum, KNOWN through its kept `ComponentPropsMap` row, and out of the
+   * typo candidates, so the suggester no longer offers it for `record:jsn`.
+   * `record:` stays reserved — a dozen live members populate it.
+   */
+  it('record:json is known through its kept row, not a candidate, and `record:` stays reserved', () => {
+    expect(PageComponentType.options).not.toContain('record:json');
+    expect(isKnownComponentType('record:json')).toBe(true);
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).not.toContain('record:json');
+    expect(hasReservedComponentNamespace('record:json')).toBe(true);
+    // Lit control: a kept member of the same namespace is a candidate.
+    expect(KNOWN_COMPONENT_TYPE_CANDIDATES).toContain('record:details');
+  });
 });
 
 describe('STRING_ARM_REGISTERED_TYPES ledger discipline', () => {
