@@ -110,6 +110,7 @@ export type {
   SysFilePublicScopeBackfillReport,
 } from './backfill-sys-file-public-scope.js';
 export { installAttachmentAccessHooks, installAttachmentReadVisibility } from './attachment-access-hooks.js';
+export type { ICallerFileAttachmentService } from './file-attachment-service.js';
 export type { AttachmentSharingLike, AttachmentSecurityLike } from './attachment-access-hooks.js';
 export { runFilesToReferencesMigration } from './files-to-references-migration.js';
 export type {

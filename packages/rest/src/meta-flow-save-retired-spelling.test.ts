@@ -224,3 +224,79 @@ describe('[#23775] PUT /meta/flow/:name — a retired spelling on a NEW flow is 
         expect((await h.stored('draft')).map((b) => b.label)).toEqual(['Settle Order (draft)']);
     });
 });
+
+/**
+ * [#23903, ruling B′] A re-save that NEWLY INTRODUCES a retired spelling is
+ * refused like a new flow's: here a client adds a second `wait` node carrying
+ * the same loose `config.duration` the stored row already carries on `hold`.
+ * The stored row carries `hold`'s hit, not the added node's, so the save is
+ * judged without the retired entries — the whole body, so the refusal lists
+ * `hold`'s site beside the new one, and fixing either the new node alone or
+ * both lets it through. The served legacy body re-saves unchanged.
+ */
+describe('[#23903] PUT /meta/flow/:name — a node added with a retired spelling to a stored legacy flow is refused', () => {
+    /** The added `wait` as a client writes it: the same loose key, beside its own block. */
+    const looseAdded: Record<string, unknown> = { waitEventConfig: { eventType: 'timer', timerDuration: 'PT2M' }, config: { duration: 'PT3M' } };
+    /** The stored legacy flow with a second `wait`, `hold_again`, between `hold` and `end`. */
+    const withAddedHold = (label = 'Settle Order', added: Record<string, unknown> = looseAdded) => {
+        const base = looseBesideBlock();
+        return {
+            ...base,
+            label,
+            nodes: [
+                base.nodes[0],
+                base.nodes[1],
+                { id: 'hold_again', type: 'wait', label: 'Hold again', ...added },
+                base.nodes[2],
+            ],
+            edges: [
+                { id: 'e1', source: 'start', target: 'hold' },
+                { id: 'e2', source: 'hold', target: 'hold_again' },
+                { id: 'e3', source: 'hold_again', target: 'end' },
+            ],
+        };
+    };
+    /** The refusal names the added node's key and the key it moved to. */
+    const expectAddedNodeRefused = (issues: Array<{ path: string; message: string }>) => {
+        expect(issues.map((i) => i.path)).toEqual(['nodes.1.config.duration', 'nodes.2.config.duration']);
+        expect(issues[1]!.message).toContain('waitEventConfig.timerDuration');
+    };
+
+    it('publish: 422 INVALID_METADATA at the added node\'s `config.duration`, naming `waitEventConfig.timerDuration`; the stored row is untouched', async () => {
+        const h = await boot();
+        await h.seed('active', looseBesideBlock());
+
+        expectAddedNodeRefused(refusedInvalid(await h.save(withAddedHold())));
+
+        expect(await h.stored('active')).toEqual([looseBesideBlock()]);
+    });
+
+    it('draft mode with no draft row yet (the active row is the baseline): refused the same way, nothing stored', async () => {
+        const h = await boot();
+        await h.seed('active', looseBesideBlock());
+
+        expectAddedNodeRefused(refusedInvalid(await h.save(withAddedHold(), { mode: 'draft' })));
+
+        expect(await h.stored('draft')).toEqual([]);
+    });
+
+    it('draft mode over a stored draft row: refused the same way, the draft untouched', async () => {
+        const h = await boot();
+        await h.seed('draft', looseBesideBlock());
+
+        expectAddedNodeRefused(refusedInvalid(await h.save(withAddedHold(), { mode: 'draft' })));
+
+        expect(await h.stored('draft')).toEqual([looseBesideBlock()]);
+    });
+
+    it('the served legacy body re-saves unchanged, and the added node saves once it is written in the canonical spelling', async () => {
+        const h = await boot();
+        await h.seed('active', looseBesideBlock());
+        const served = ok(await h.read()).item;
+
+        ok(await h.save(served));
+
+        ok(await h.save(withAddedHold('Settle Order (edited)', { waitEventConfig: { eventType: 'timer', timerDuration: 'PT2M' } })));
+        expect((await h.stored('active')).map((b) => b.label)).toEqual(['Settle Order (edited)']);
+    });
+});

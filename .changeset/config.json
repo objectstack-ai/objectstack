@@ -67,6 +67,7 @@
       "@objectstack/service-job",
       "@objectstack/service-knowledge",
       "@objectstack/service-mailbox",
+      "@objectstack/service-print",
       "@objectstack/service-messaging",
       "@objectstack/service-package",
       "@objectstack/service-queue",
