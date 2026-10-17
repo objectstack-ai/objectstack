@@ -213,6 +213,9 @@ import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@ob
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
+// [#24086] The install door's own manifest declaration — `ManifestSchema` with
+// `scope` narrowed to `project` — judged whole at the top of `installPackage`.
+import { PackageInstallManifestSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { REFERENCE_SITES } from './reference-sites.js';
 // [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
@@ -31372,10 +31375,9 @@ export class ObjectStackProtocolImplementation implements
         // reach `deriveNamespaceFromPackageId` below, which already ASSUMES the
         // reverse-domain shape it was never given a chance to enforce.
         //
-        // ⛔ SCOPE — THE `id` LEG ALONE. `InstallPackageRequestSchema` /
-        // `ManifestSchema` are still not parsed whole here; the residual
-        // classes the HTTP door's own docblock records are untouched by this
-        // and are each their own narrowing of a published contract.
+        // The id leg keeps its own gate, ahead of the whole-manifest parse
+        // below (#24086), so its sentence and its repair arm are not
+        // displaced by a generic issue list.
         const rawId = (request.manifest as { id?: unknown } | undefined)?.id;
         const declaredId = ManifestSchema.shape.id.safeParse(rawId);
         if (!declaredId.success) {
@@ -31396,6 +31398,43 @@ export class ObjectStackProtocolImplementation implements
         const manifest: any = { ...(request.manifest as any) };
         if (typeof manifest.version !== 'string' || !manifest.version) {
             manifest.version = '0.1.0';
+        }
+
+        // [#24086] ⭐ THE WHOLE MANIFEST IS JUDGED BY THE DOOR'S DECLARATION —
+        // `PackageInstallManifestSchema`, the one `POST /api/v1/packages`
+        // parses its body through, ⛔ not `ManifestSchema`, which still admits
+        // the platform scopes (`cloud` / `system`) that declaration refuses
+        // for an authored install. The id leg above was the only leg judged
+        // here, so an in-process caller could store what the door answers
+        // `400` for — an off-spec `type` such as `'application'`, an off-spec
+        // `scope` such as `'environment'`, an unknown key — and the row was
+        // read back on every boot.
+        //
+        // Placed AFTER the version default and BEFORE the namespace one, on
+        // purpose: the declaration REQUIRES `version`, and the versionless
+        // manifest this primitive has completed since #2532 keeps installing;
+        // `namespace` is optional in the declaration, so its derivation needs
+        // nothing from the parse. Nothing else is supplied — a manifest with
+        // no `type` is refused, as the door refuses it.
+        //
+        // A GATE, not a normaliser, as at the door: the parse's defaults
+        // (`scope`, `defaultDatasource`) are not copied onto the manifest that
+        // is stored. Each issue is surfaced as the declaration words it, under
+        // its `manifest.<key>` path — no sentence of this file's own for a rule.
+        //
+        // ⛔ Rows already in `sys_packages` are not judged by this: they are
+        // data at rest, and the boot hydration (`PackageServicePlugin.start`,
+        // `@objectstack/service-package`) replays them as stored — see the
+        // tolerance stated there.
+        const declaredManifest = PackageInstallManifestSchema.safeParse(manifest);
+        if (!declaredManifest.success) {
+            const located = declaredManifest.error.issues
+                .map((issue) => `${['manifest', ...issue.path.map(String)].join('.')}: ${issue.message}`)
+                .join('; ');
+            throw Object.assign(
+                new Error(`Invalid package manifest — ${located}`),
+                { statusCode: 400 },
+            );
         }
 
         // Studio-authored writable packages arrive WITHOUT a namespace. The
