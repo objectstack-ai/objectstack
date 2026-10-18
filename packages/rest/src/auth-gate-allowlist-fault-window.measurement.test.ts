@@ -286,13 +286,27 @@ describe('[#15021] §2 the subject — an allow-listed path inside the fail-clos
   it('MEASURED: the throw is upstream of the path — `computeExecCtx` never reads `req.path` for the gate decision', () => {
     // Structural corroboration of the drive above, derived from today's source
     // rather than quoted from the card. `isAuthGateAllowlisted` is imported by
-    // this module, but the gate block that raises does not consult it.
-    const start = SOURCE.indexOf('if (gateActive) {');
+    // this module, but the gate decision that raises does not consult it.
+    //
+    // SUPERSEDED READING, quoted. [#23217 slice 2, ruling record 6227928430
+    // letter A] the gate block this sliced left `rest-server.ts` for the ONE
+    // request-to-context composition (`resolveRequestExecutionContext`,
+    // @objectstack/core), so its anchors are gone from this file:
+    //     const start = SOURCE.indexOf('if (gateActive) {');
+    //     const block = SOURCE.slice(start, SOURCE.indexOf('normalizeAuthGate(gatedSession?.user)', start));
+    //     expect(block).toContain("throw new AuthzStoreUnavailableError('auth_gate', err);");
+    // ⭐ RE-AIMED to the door's half of the same fact: the decision is made
+    // from what the door hands the composition, and that call names the gate
+    // choice and hands over no path. The raise itself is pinned where it lives
+    // (`packages/core/src/security/request-execution-context.test.ts`, choice
+    // 2), and the drives above still read it on this door's wire.
+    const start = SOURCE.indexOf('const base = await resolveRequestExecutionContext({');
     expect(start).toBeGreaterThan(-1);
-    const block = SOURCE.slice(start, SOURCE.indexOf('normalizeAuthGate(gatedSession?.user)', start));
-    expect(block).toContain("throw new AuthzStoreUnavailableError('auth_gate', err);");
-    expect(block).not.toContain('isAuthGateAllowlisted');
-    expect(block).not.toContain('req.path');
+    const call = SOURCE.slice(start, SOURCE.indexOf('\n            });\n', start));
+    expect(call).toContain("authGate: 'reread-when-active',");
+    expect(call).not.toContain('isAuthGateAllowlisted');
+    expect(call).not.toContain('req.path');
+    expect(call).not.toMatch(/\bpath\b/);
   });
 });
 

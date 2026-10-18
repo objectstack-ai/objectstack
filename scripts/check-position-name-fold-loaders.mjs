@@ -111,7 +111,27 @@ const DECLARED_INSTRUMENTS = [
   'scripts/check-position-name-fold-loaders.mjs',
 ];
 
-const SCAN_ROOTS = ['packages', 'examples', 'apps', 'scripts', 'tools', '.github'];
+/**
+ * The roots the walk visits, spelled as the subtree population this gate
+ * DECLARES to `scripts/pm/dispatch-gates.mjs` (the `ROOT_DIR_WATCH_HINTS`
+ * idiom; `check:watch-hint-literal` holds it to a literal array the extractor
+ * admits). A literal is how the declaration reaches the derivation: the
+ * extractor reads source text, and a bare single-segment word (`'packages'`)
+ * yields no hint at all, so while the walk read a private list of bare words a
+ * card editing any file under these roots was told nothing about this gate and
+ * met it first in CI (#24037).
+ *
+ * ONE list, two readers: {@link SCAN_ROOTS} is DERIVED from it, so the walk and
+ * the declaration cannot drift apart. ⛔ Never hand-copy the roots back into a
+ * second literal — the declaration would then be free to say one thing while
+ * the walk does another, which is the silent-green shape the derivation exists
+ * to refuse. Every root is live in the tree: a root the tree does not have
+ * scans nothing and would be printed by the derivation as a dead lead.
+ */
+export const ROOT_DIR_WATCH_HINTS = ['packages/**', 'examples/**', 'apps/**', 'scripts/**', '.github/**'];
+
+/** The directories the walk descends from, read off {@link ROOT_DIR_WATCH_HINTS}. */
+const SCAN_ROOTS = ROOT_DIR_WATCH_HINTS.map((hint) => hint.replace(/\/\*\*$/, ''));
 
 const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.turbo', '.next', 'coverage', '.git']);
 

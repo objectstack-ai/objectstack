@@ -1470,24 +1470,24 @@ describe('ComponentPropsMap', () => {
     });
   });
 
-  // #11575 — the two `@objectstack/cloud-connection` console widgets. Rows
-  // exist so the #5068 gate's dispatch reaches them; the accepted key set is
-  // EMPTY, measured from the renderers' read points (both registrations
-  // discard the schema node — `() => <Widget />`; read points recorded in `liveness/page.json`, row `regions`).
+  // #11575 — the `@objectstack/cloud-connection` console widgets. The row
+  // exists so the #5068 gate's dispatch reaches it; the accepted key set is
+  // EMPTY, measured from the renderer's read points (the registration
+  // discards the schema node — `() => <Widget />`; read points recorded in `liveness/page.json`, row `regions`).
+  // Its sibling `marketplace:installed-list` was retired by name at #24230:
+  // its pins live in `component-marketplace-installed-list-retirement.test.ts`.
   describe('plugin console widgets', () => {
-    it('declares rows for cloud-connection:panel and marketplace:installed-list', () => {
+    it('declares a row for cloud-connection:panel', () => {
       expect(ComponentPropsMap['cloud-connection:panel']).toBeDefined();
-      expect(ComponentPropsMap['marketplace:installed-list']).toBeDefined();
     });
 
-    it('accepts the empty bag both shipped pages author', () => {
+    it('accepts the empty bag its shipped page authors', () => {
       expect(() => ComponentPropsMap['cloud-connection:panel'].parse({})).not.toThrow();
-      expect(() => ComponentPropsMap['marketplace:installed-list'].parse({})).not.toThrow();
     });
 
     it('refuses any authored key, naming the surface — the pre-row silent no-op', () => {
-      // Before the rows, both keys below rode through every validator in
-      // silence (the widgets read nothing). The refusal must name WHICH
+      // Before the row, the key below rode through every validator in
+      // silence (the widget reads nothing). The refusal must name WHICH
       // zero-prop component refused, or the author is left guessing.
       const panel = ComponentPropsMap['cloud-connection:panel'].safeParse({ pollInterval: 5 });
       expect(panel.success).toBe(false);
@@ -1495,14 +1495,6 @@ describe('ComponentPropsMap', () => {
         const message = panel.error.issues.map((i) => i.message).join('\n');
         expect(message).toContain('cloud-connection:panel');
         expect(message).toContain('pollInterval');
-      }
-
-      const list = ComponentPropsMap['marketplace:installed-list'].safeParse({ filter: 'installed' });
-      expect(list.success).toBe(false);
-      if (!list.success) {
-        const message = list.error.issues.map((i) => i.message).join('\n');
-        expect(message).toContain('marketplace:installed-list');
-        expect(message).toContain('filter');
       }
     });
   });

@@ -21,7 +21,7 @@
 // the protocol actually receives.
 
 import { describe, it, expect, vi } from 'vitest';
-import { hashApiKey } from '@objectstack/core';
+import { hashApiKey, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS } from '@objectstack/core';
 import { runWithPerfDisclosure, type PerfDisclosureGate } from '@objectstack/observability';
 import { RestServer } from './rest-server';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
@@ -127,7 +127,7 @@ function makeRes() {
  * ExecutionContext the transport handed it — the instrumentation point of the
  * issue, moved into a test.
  */
-function boot() {
+function boot(auth: unknown = makeAuth()) {
     const seen: any[] = [];
     const protocol: any = {
         getMetaItems: vi.fn().mockResolvedValue({ items: [TASK] }),
@@ -140,7 +140,7 @@ function boot() {
         undefined,              // kernelManager
         undefined,              // envRegistry
         undefined,              // defaultEnvironmentIdProvider
-        async () => makeAuth(), // authServiceProvider
+        async () => auth,       // authServiceProvider
         async () => makeQl(),   // objectQLProvider
     );
     rest.registerRoutes();
@@ -150,8 +150,8 @@ function boot() {
 }
 
 /** Drive `GET /api/v1/data/task` with the given request headers. */
-async function request(headers: Record<string, string>) {
-    const { route, seen, protocol } = boot();
+async function request(headers: Record<string, string>, auth?: unknown) {
+    const { route, seen, protocol } = boot(auth);
     const out = makeRes();
     await route!.handler({
         method: 'GET',
@@ -389,5 +389,102 @@ describe('#7280 — the ADR-0069 gate posture is an ASSEMBLED field on this face
 
         expect(out.getStatus()).toBe(200);
         expect(protocol.findData).toHaveBeenCalled();
+    });
+});
+
+/**
+ * [ruling record 6227928430, letter A item 2] REST's door, proven on the one
+ * request-to-`ExecutionContext` composition by this pin plus its existing ones.
+ *
+ * `computeExecCtx` resolves through `resolveRequestExecutionContext`
+ * (`@objectstack/core`), with REST's differences stated as that function's
+ * named parameters. The two answers a door owes before any other are pinned
+ * here on the real data route and read at the protocol, the engine's door:
+ *
+ *  - ADR-0096: a request that resolves no principal never reaches the engine.
+ *    REST answers it at its anonymous floor, with the shared body.
+ *  - ADR-0069: a session the authentication policy holds is refused with its
+ *    posture. REST reads the session's posture again only while the auth
+ *    service says a gate is active, a key is judged by its own owner's posture
+ *    whatever cookie rides beside it, and a re-read that fails is the outage,
+ *    never an admission.
+ *
+ * Every row was green on the door's hand-written composition and is green on
+ * the shared one.
+ */
+describe('[ruling 6227928430 item 2] REST\'s door: the ADR-0096 principal-less refusal and the ADR-0069 gate on the data route', () => {
+    const HELD = { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' };
+
+    /** `makeAuth`'s sessions, with the gate feature on or off, and a re-read that may fail. */
+    const authWith = (opts: { gateActive: boolean; rereadFails?: boolean }) => {
+        const sessions = makeAuth();
+        let reads = 0;
+        return {
+            isAuthGateActive: () => opts.gateActive,
+            api: {
+                getSession: async (input: { headers: any }) => {
+                    // The identity read is the request's first; the gate's re-read is its second.
+                    if (opts.rereadFails && ++reads > 1) throw new Error('session backend unavailable');
+                    return sessions.api.getSession(input);
+                },
+            },
+        };
+    };
+
+    const ROWS: Array<{
+        name: string;
+        headers: Record<string, string>;
+        gate: { gateActive: boolean; rereadFails?: boolean };
+        status: number;
+        body?: unknown;
+        code?: string;
+        principal?: string;
+    }> = [
+        {
+            name: 'ADR-0096: no credential is refused at the anonymous floor with the shared body, and the engine is never asked',
+            headers: {}, gate: { gateActive: true },
+            status: ANONYMOUS_DENY_STATUS, body: ANONYMOUS_DENY_BODY,
+        },
+        {
+            name: 'ADR-0069: a held session while a gate is active is refused 403 with its posture, and the engine is never asked',
+            headers: { cookie: 'member-gated' }, gate: { gateActive: true },
+            status: 403, body: { error: HELD },
+        },
+        {
+            name: 'ADR-0069: the same held session while no gate is active is admitted, and the engine is asked as that principal',
+            headers: { cookie: 'member-gated' }, gate: { gateActive: false },
+            status: 200, principal: 'member1',
+        },
+        {
+            name: 'ADR-0069: an API key beside the held cookie answers for its own owner, never for the cookie',
+            headers: { cookie: 'member-gated', 'x-api-key': RAW_API_KEY }, gate: { gateActive: true },
+            status: 200, principal: 'member1',
+        },
+        {
+            name: 'ADR-0069: an active gate whose re-read fails is the 503 outage, and the engine is never asked',
+            headers: { cookie: 'member' }, gate: { gateActive: true, rereadFails: true },
+            status: 503, code: 'SERVICE_UNAVAILABLE',
+        },
+        {
+            name: 'CONTROL: an ungated session while a gate is active is admitted, and the engine is asked as that principal',
+            headers: { cookie: 'member' }, gate: { gateActive: true },
+            status: 200, principal: 'member1',
+        },
+    ];
+
+    it.each(ROWS)('$name', async (row) => {
+        const { ctx, out, protocol } = await request(row.headers, authWith(row.gate));
+
+        expect(out.getStatus()).toBe(row.status);
+        if (row.body !== undefined) expect(out.getJson()).toEqual(row.body);
+        // The data route answers a thrown outage in its flat dialect: `code` beside `error`.
+        if (row.code !== undefined) expect(out.getJson()?.code).toBe(row.code);
+        if (row.principal === undefined) {
+            expect(protocol.findData).not.toHaveBeenCalled();
+            return;
+        }
+        expect(protocol.findData).toHaveBeenCalledTimes(1);
+        expect(ctx?.userId).toBe(row.principal);
+        expect('authGate' in ctx).toBe(false);
     });
 });
