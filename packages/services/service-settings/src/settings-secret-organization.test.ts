@@ -116,4 +116,14 @@ describe('[ADR-0131 D3/D9] the sys_setting_audit writer stamps the entry\'s orga
     expect(warned).toHaveLength(1);
     expect(warned[0]).toContain('refused');
   });
+
+  it('keeps the accept set it had: no sink, an empty sink, and an error-only sink are all taken', async () => {
+    const refusing = { async findOne() { return { id: 'usr-1' }; }, async insert() { throw new Error('refused'); } };
+    await expect(buildSettingAuditWriter(refusing as any).write(entry)).resolves.toBeUndefined();
+    await expect(buildSettingAuditWriter(refusing as any, {}).write(entry)).resolves.toBeUndefined();
+    const errors: string[] = [];
+    await buildSettingAuditWriter(refusing as any, { error: (m) => errors.push(m) }).write(entry);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('NOT persisted');
+  });
 });

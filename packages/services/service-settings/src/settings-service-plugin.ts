@@ -568,14 +568,16 @@ export class SettingsServicePlugin implements Plugin {
  */
 export function buildSettingAuditWriter(
   engine: IDataEngine,
-  logger?: { error?: (message: string) => void; warn: (message: string) => void },
+  // The accept set `main` published (`{ warn? }`), plus a sink that carries
+  // `error` — declared REQUIRED on that member, so no shape here makes `error`
+  // optional with no channel beside it.
+  logger?: { warn?: (message: string) => void } | { error: (message: string) => void; warn?: (message: string) => void },
 ): SettingsAuditWriter {
   const eng: any = engine;
-  // `error` when the host's sink carries it; `warn` is the declared fallback
-  // channel for a reduced sink, so a lost row is never reported to nobody.
+  // `error` when the host's sink carries it (a durability loss), else `warn`.
   const report = (message: string): void => {
-    if (logger?.error) logger.error(message);
-    else logger?.warn(message);
+    if (logger && 'error' in logger && typeof logger.error === 'function') logger.error(message);
+    else logger?.warn?.(message);
   };
   // The consequence and the fix ride the first failure only (AGENTS.md,
   // degradation log levels); every later lost row is still named, briefly.
