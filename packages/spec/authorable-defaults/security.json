@@ -10,6 +10,7 @@
     "security/CapabilityDeclaration:scope = \"platform\"",
     "security/CriteriaSharingRule:accessLevel = \"read\"",
     "security/CriteriaSharingRule:active = true",
+    "security/DefaultRowScope:enabled = true",
     "security/EffectiveObjectPermission:allowCreate = false",
     "security/EffectiveObjectPermission:allowDelete = false",
     "security/EffectiveObjectPermission:allowEdit = false",
