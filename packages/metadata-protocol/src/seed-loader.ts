@@ -1003,13 +1003,24 @@ export class SeedLoaderService implements ISeedLoaderService {
     // own copy (otherwise upsert would clobber other tenants' rows
     // that share the same natural key — e.g. `name: 'Acme Corp'`).
     let existingRecords: Map<string, any> | undefined;
+    /**
+     * [#24301] Natural key → the row holding it with NO organization, read
+     * only on an organization-scoped upsert/ignore: the two modes whose
+     * unmatched key is written as a new row. Kept apart from
+     * `existingRecords` so such a row is never matched as this
+     * organization's own (see {@link decideWriteAction}'s `refuse`).
+     */
+    let unownedHolders: Map<string, any> | undefined;
     if ((mode === 'upsert' || mode === 'update' || mode === 'ignore') && !config.dryRun) {
+      if (config.organizationId && mode !== 'update') unownedHolders = new Map();
       existingRecords = await this.loadExistingRecords(
         objectName,
         externalId,
         config.organizationId,
+        unownedHolders,
       );
     }
+    let unownedHolderRefusalLogged = false;
 
     // [#21665] Per-organization row identity. On a per-organization replay,
     // decide which id each row authored with an `id` holds in THIS
@@ -1669,6 +1680,46 @@ export class SeedLoaderService implements ISeedLoaderService {
       if (unresolvedRefError && !config.dryRun) {
         errored++;
         continue;
+      }
+
+      // [#24301] A natural key this organization does not hold, held by a row
+      // that has NO organization: refused by name, before either write path.
+      // Inserting would put a twin beside that row; updating it would adopt
+      // it, and which organization an unowned row belongs to is the
+      // organization-ownership ceremony's attribution, never the loader's.
+      if (unownedHolders && unownedHolders.size > 0) {
+        const decision = this.decideWriteAction(record, mode, externalId, existingRecords, unownedHolders);
+        if (decision.action === 'refuse') {
+          errored++;
+          const label = this.externalIdLabel(externalId);
+          const keyValue = this.externalIdKey(record, externalId);
+          const error: ReferenceResolutionError = {
+            sourceObject: objectName,
+            field: 'organization_id',
+            targetObject: objectName,
+            targetField: label,
+            attemptedValue: keyValue,
+            recordIndex: i,
+            message:
+              `Seed record #${i} of '${objectName}' was REFUSED: its natural key ` +
+              `(${label}=${this.externalIdDisplay(keyValue)}) is already held by row '${String(decision.holderId)}', ` +
+              `which has no organization (organization_id is NULL), and this seed load writes for organization ` +
+              `${config.organizationId}. Inserting the record would put a twin beside that row, and updating the ` +
+              `row would hand it to this organization: which organization an unowned row belongs to is decided by ` +
+              `the organization-ownership ceremony, not by a seed load. Attribute the unowned rows first ` +
+              `(\`os migrate organization-ownership\`, then the same command with --apply), then re-run this seed: ` +
+              `the row is this organization's own by then, and the upsert matches it.`,
+          };
+          errors.push(error);
+          allErrors.push(error);
+          // `error`, not `warn` (#4632): the record is dropped. Said once per
+          // dataset; every refused row is still counted in `allErrors`.
+          if (!unownedHolderRefusalLogged) {
+            unownedHolderRefusalLogged = true;
+            this.logger.error(`[SeedLoader] ${error.message}`, undefined, { object: objectName, recordIndex: i });
+          }
+          continue;
+        }
       }
 
       // [commit 1cba33f16] EARLY SIGNAL — emitted here, before this row reaches the
@@ -2624,14 +2675,28 @@ export class SeedLoaderService implements ISeedLoaderService {
    * should do with a record — mirrors {@link writeRecord}'s mode/existing
    * logic exactly, but WITHOUT performing the write, so insert decisions can
    * be buffered and flushed as a batch instead of one call per record.
+   *
+   * [#24301] `unownedHolders` (an organization-scoped upsert/ignore only, see
+   * {@link loadExistingRecords}) turns an unmatched key that a row with NO
+   * organization holds into `refuse`: never `insert` (a twin beside that
+   * row) and never `update`/`skip` against it (adopting it). The
+   * organization's own row always wins over an unowned one.
    */
   private decideWriteAction(
     record: Record<string, unknown>,
     mode: string,
     externalId: string | string[],
     existingRecords?: Map<string, any>,
-  ): { action: 'insert' } | { action: 'update'; id: string } | { action: 'skip'; id?: string } {
-    const existing = existingRecords?.get(this.externalIdKey(record, externalId));
+    unownedHolders?: Map<string, any>,
+  ):
+    | { action: 'insert' }
+    | { action: 'update'; id: string }
+    | { action: 'skip'; id?: string }
+    | { action: 'refuse'; holderId?: string } {
+    const key = this.externalIdKey(record, externalId);
+    const existing = existingRecords?.get(key);
+    const unowned = !existing && (mode === 'upsert' || mode === 'ignore') ? unownedHolders?.get(key) : undefined;
+    if (unowned) return { action: 'refuse', holderId: this.extractId(unowned) };
 
     switch (mode) {
       case 'update':
@@ -3120,10 +3185,25 @@ export class SeedLoaderService implements ISeedLoaderService {
     }
   }
 
+  /**
+   * Natural key → the existing row, for the write decision (see the #8896
+   * note in the catch). Scoped to `organizationId`'s own rows when one is set.
+   *
+   * [#24301] `unownedHolders`, passed by the scoped upsert/ignore pre-load
+   * only, also collects every key held by a row with NO organization and not
+   * by this organization: a second read, `organization_id` NULL, kept OUT of
+   * the returned map so no caller ever matches such a row as this
+   * organization's own. The two rechecks pass none: a row an earlier attempt
+   * of this load committed carries the organization, so an unowned row is
+   * never one of them. Another organization's row stays invisible to both
+   * reads, and the NULL read keeps only rows that really carry no
+   * organization, whatever the driver answers.
+   */
   private async loadExistingRecords(
     objectName: string,
     externalId: string | string[],
     organizationId?: string,
+    unownedHolders?: Map<string, any>,
   ): Promise<Map<string, any>> {
     const map = new Map<string, any>();
     try {
@@ -3141,6 +3221,17 @@ export class SeedLoaderService implements ISeedLoaderService {
         const key = this.externalIdKey(record, externalId);
         if (key) {
           map.set(key, record);
+        }
+      }
+      if (organizationId && unownedHolders) {
+        const unowned = await this.engine.find(objectName, {
+          where: { organization_id: null },
+          context: { isSystem: true },
+        } as any);
+        for (const record of unowned || []) {
+          if (record?.organization_id != null) continue;
+          const key = this.externalIdKey(record, externalId);
+          if (key && !map.has(key) && !unownedHolders.has(key)) unownedHolders.set(key, record);
         }
       }
     } catch (error) {
