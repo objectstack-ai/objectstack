@@ -221,6 +221,20 @@ export interface ApprovalRequestRow {
   process_label?: string;
   /** Human label of the approval step / node (e.g. "Manager Review"). */
   step_label?: string;
+  /**
+   * The step's label under the declared column's own name:
+   * `sys_approval_request.current_step_label`, the Approval node's authored
+   * label as it stood when the request reached the step (the value
+   * {@link ApprovalRequestRow.step_label} carries). Served so a page bound to
+   * `sys_approval_request` can list the step by its label. Such a page names
+   * the object's declared fields, and `step_label` is not one, so without this
+   * member it can list only `current_step`, the node's machine id.
+   *
+   * Declared ahead of its producer: plugin-approvals' `rowFromRequest` serves
+   * it from #24281 on, the card this declaration unblocks. `step_label` stays
+   * for its existing readers.
+   */
+  current_step_label?: string;
   /** Display name of the target record (its name/title field), when resolvable. */
   record_title?: string;
   /** Display name of the submitter (`sys_user.name`), when resolvable. */
