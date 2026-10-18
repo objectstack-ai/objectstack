@@ -160,6 +160,19 @@ export {
   type TenancyServiceResolver,
 } from './admission-tenancy-posture.js';
 
+// [ruling record 6227928430, letter A] The ONE request-to-ExecutionContext
+// composition the platform's doors call: the session read, the posture
+// classification above, `resolveAuthzContext`, the localization, the ADR-0069
+// gate and the assembly below, with the anonymous entry and the gate decided
+// once and every door's intentional difference a named parameter.
+export {
+  resolveRequestExecutionContext,
+  type RequestExecutionContextInput,
+  type RequestAuthService,
+  type EstablishedRequestSession,
+  type RequestAdmission,
+} from './request-execution-context.js';
+
 // [commit 6a180e42d] The LOUD failure an unreachable permission store raises, and the
 // brand predicate a fail-closed `catch` uses to re-raise it instead of
 // degrading an outage into a capability denial. Ruled 2026-08-30.
