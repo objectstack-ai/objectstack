@@ -117,7 +117,7 @@ function plantUnowned(store: Record<string, any[]>) {
   store.tw_widget = [{ id: 'w_unowned', sku: 'W-HELD', label: 'old', organization_id: null }];
 }
 
-const refusalsOf = (result: { errors: Array<{ field: string; sourceObject: string; targetObject: string }> }) =>
+const refusalsOf = <E extends { field: string; sourceObject: string; targetObject: string }>(result: { errors: E[] }) =>
   result.errors.filter((e) => e.field === 'organization_id' && e.targetObject === e.sourceObject);
 
 describe('[#24301] a scoped load over a NULL-organization holder of a natural key', () => {
