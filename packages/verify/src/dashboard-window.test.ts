@@ -8,7 +8,11 @@
 //     published seam (`registerMiddleware`), no engine change: one drops the
 //     window from the query (a floor that matches every row), one makes a
 //     windowed query match nothing (a window that zeroes the widget). Both are
-//     found, and the first is named inert;
+//     found — on a count, a sum and a derived ratio alike — and the first is
+//     named inert;
+//   • a DERIVED-VALUE control: a door whose derived value is not the op over
+//     the operands it answers beside it is contradicted, while its operands
+//     hold;
 //   • the ATTRIBUTION control: an app hook that rewrites the window's field on
 //     write makes the probe not run, never contradicted — the family judges a
 //     window only over rows that read back as written;
@@ -88,6 +92,12 @@ const source = {
         { name: 'assigned_count', label: 'Assigned', aggregate: 'count', field: 'assignee' },
         { name: 'avg_effort', label: 'Effort', aggregate: 'avg', field: 'effort' },
         { name: 'closed_rate', label: 'Closed rate', derived: { op: 'ratio', of: ['closed_count', 'ticket_count'] } },
+        { name: 'effort_total', label: 'Effort total', aggregate: 'sum', field: 'effort' },
+        { name: 'open_count', label: 'Not closed', derived: { op: 'difference', of: ['ticket_count', 'closed_count'] } },
+        { name: 'effort_per_ticket', label: 'Effort per ticket', derived: { op: 'ratio', of: ['effort_total', 'ticket_count'] } },
+        { name: 'effort_index', label: 'Effort index', derived: { op: 'ratio', of: ['avg_effort', 'ticket_count'] } },
+        { name: 'rate_of_rate', label: 'Rate of rate', derived: { op: 'ratio', of: ['closed_rate', 'ticket_count'] } },
+        { name: 'distinct_effort', label: 'Distinct effort', aggregate: 'count_distinct', field: 'effort' },
       ],
     },
     {
@@ -114,10 +124,19 @@ const source = {
         // A declared option the condition does not exclude holds the column.
         { id: 'not_closed', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filter: { status: { $nin: ['closed'] } } },
         { id: 'mixed', type: 'table', dataset: 'ticket_metrics', dimensions: ['priority'], values: ['ticket_count', 'avg_effort'] },
+        // A sum, alone, grouped and beside a count; derived measures over counts and sums.
+        { id: 'effort_sum', type: 'metric', dataset: 'ticket_metrics', values: ['effort_total'] },
+        { id: 'workload', type: 'bar', dataset: 'ticket_metrics', dimensions: ['priority'], values: ['effort_total'] },
+        { id: 'count_and_sum', type: 'table', dataset: 'ticket_metrics', values: ['ticket_count', 'effort_total'] },
+        { id: 'rate', type: 'metric', dataset: 'ticket_metrics', values: ['closed_rate'] },
+        { id: 'still_open', type: 'metric', dataset: 'ticket_metrics', values: ['open_count'] },
+        { id: 'per_ticket', type: 'bar', dataset: 'ticket_metrics', dimensions: ['status'], values: ['effort_per_ticket'] },
         // Outside the population, each with its reason.
         { id: 'trend', type: 'line', dataset: 'ticket_metrics', values: ['ticket_count'], filterBindings: { dateRange: false } },
         { id: 'effort', type: 'metric', dataset: 'ticket_metrics', values: ['avg_effort'] },
-        { id: 'rate', type: 'metric', dataset: 'ticket_metrics', values: ['closed_rate'] },
+        { id: 'index', type: 'metric', dataset: 'ticket_metrics', values: ['effort_index'] },
+        { id: 'nested', type: 'metric', dataset: 'ticket_metrics', values: ['rate_of_rate'] },
+        { id: 'distinct', type: 'metric', dataset: 'ticket_metrics', values: ['distinct_effort'] },
         { id: 'recent', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filter: { opened_at: { $gte: '{30_days_ago}' } } },
         { id: 'either', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filter: { $or: [{ status: 'open' }, { is_closed: true }] } },
         { id: 'not_x', type: 'metric', dataset: 'ticket_metrics', values: ['ticket_count'], filter: { subject: { $ne: 'x' } } },
@@ -137,7 +156,10 @@ const source = {
   ],
 };
 
-const PROVEN = ['open_tickets', 'by_status', 'due_window', 'mine', 'closed_tickets', 'with_assignee', 'high_or_low', 'not_closed', 'mixed', 'all_tickets'];
+const PROVEN = [
+  'open_tickets', 'by_status', 'due_window', 'mine', 'closed_tickets', 'with_assignee', 'high_or_low', 'not_closed', 'mixed',
+  'effort_sum', 'workload', 'count_and_sum', 'rate', 'still_open', 'per_ticket', 'all_tickets',
+];
 
 const widgetOf = (report: DashboardWindowReport, widget: string) => {
   const r = report.results.find((x) => x.widget === widget);
@@ -195,8 +217,17 @@ describe('deriveDashboardWindowCases — what the family reads from the metadata
     expect(cases.get('wnd_desk/with_assignee')!.measures).toEqual([{ measure: 'assigned_count', countField: 'assignee' }]);
     expect(cases.get('wnd_desk/closed_tickets')!.measures).toEqual([{ measure: 'closed_count', filter: { is_closed: true } }]);
     expect(cases.get('wnd_desk/mixed')!.measures.map((m) => m.excluded?.kind ?? 'probed')).toEqual(['probed', 'not-a-count']);
+    // A sum and a derived measure over counts or sums are in the population.
+    expect(cases.get('wnd_desk/effort_sum')!.measures).toEqual([{ measure: 'effort_total' }]);
+    expect(cases.get('wnd_desk/rate')!.measures).toEqual([{ measure: 'closed_rate' }]);
+    expect(cases.get('wnd_desk/rate')!.excluded).toBeUndefined();
+    expect(cases.get('wnd_desk/per_ticket')!.excluded).toBeUndefined();
+    // What is not additive stays out, and says why.
     expect(cases.get('wnd_desk/effort')!.excluded).toMatchObject({ kind: 'no-count-measure' });
-    expect(cases.get('wnd_desk/rate')!.excluded!.reason).toMatch(/"closed_rate" is derived \(ratio of closed_count, ticket_count\)/);
+    expect(cases.get('wnd_desk/effort')!.excluded!.reason).toMatch(/"avg_effort" averages effort: an average is not additive/);
+    expect(cases.get('wnd_desk/index')!.excluded!.reason).toMatch(/"effort_index" is derived \(ratio of avg_effort, ticket_count\), and its operand "avg_effort" averages effort/);
+    expect(cases.get('wnd_desk/nested')!.excluded!.reason).toMatch(/its operand "closed_rate" is itself derived/);
+    expect(cases.get('wnd_desk/distinct')!.excluded!.reason).toMatch(/"distinct_effort" counts the distinct values of effort/);
     expect(cases.get('wnd_desk/users')!.excluded).toMatchObject({ kind: 'object-undeclared' });
   });
 
@@ -263,13 +294,19 @@ describe('runDashboardWindowProofs — the fixture app', () => {
     expect(widgetOf(report, 'open_tickets').measures[0]!.fixture).toBe('smallest');
     expect(widgetOf(report, 'due_window').fieldType).toBe('date');
     expect(widgetOf(report, 'all_tickets').fieldType).toBe('datetime');
+    // A derived measure shows its operands' value, which its answer carries beside it.
+    const rate = widgetOf(report, 'rate').measures[0]!;
+    expect(rate.fixture).toBe('every-field');
+    for (const p of rate.presets) expect(p.shown).toBeGreaterThan(0);
   });
 
   it('names every widget outside the population, with its reason', () => {
     expect(widgetOf(report, 'trend').status).toBe('unbound');
     const excluded = (w: string) => [widgetOf(report, w).status, widgetOf(report, w).excludedKind];
     expect(excluded('effort')).toEqual(['excluded', 'no-count-measure']);
-    expect(excluded('rate')).toEqual(['excluded', 'no-count-measure']);
+    expect(excluded('index')).toEqual(['excluded', 'no-count-measure']);
+    expect(excluded('nested')).toEqual(['excluded', 'no-count-measure']);
+    expect(excluded('distinct')).toEqual(['excluded', 'no-count-measure']);
     expect(excluded('recent')).toEqual(['excluded', 'filter-unmodelled']);
     expect(widgetOf(report, 'recent').reason).toMatch(/a condition on opened_at, the field the window lands on/);
     expect(excluded('either')).toEqual(['excluded', 'filter-unmodelled']);
@@ -315,10 +352,26 @@ const controlSource = {
         opened_at: { type: 'datetime', label: 'Opened at' },
         logged_at: { type: 'datetime', label: 'Logged at' },
         audited_at: { type: 'datetime', label: 'Audited at', internal: true },
+        closed_at: { type: 'datetime', label: 'Closed at' },
+        hours: { type: 'number', label: 'Hours' },
+        flagged: { type: 'boolean', label: 'Flagged' },
       },
     },
   ],
-  datasets: [{ name: 'case_metrics', label: 'Cases', object: 'wnc_case', dimensions: [], measures: [{ name: 'case_count', label: 'Cases', aggregate: 'count' }] }],
+  datasets: [
+    {
+      name: 'case_metrics',
+      label: 'Cases',
+      object: 'wnc_case',
+      dimensions: [],
+      measures: [
+        { name: 'case_count', label: 'Cases', aggregate: 'count' },
+        { name: 'hours_total', label: 'Hours', aggregate: 'sum', field: 'hours' },
+        { name: 'flagged_count', label: 'Flagged', aggregate: 'count', filter: { flagged: true } },
+        { name: 'flagged_share', label: 'Flagged share', derived: { op: 'ratio', of: ['flagged_count', 'case_count'] } },
+      ],
+    },
+  ],
   dashboards: [
     {
       name: 'wnc_board',
@@ -328,6 +381,10 @@ const controlSource = {
         { id: 'cases', type: 'metric', dataset: 'case_metrics', values: ['case_count'] },
         { id: 'logged', type: 'metric', dataset: 'case_metrics', values: ['case_count'], filterBindings: { dateRange: 'logged_at' } },
         { id: 'audited', type: 'metric', dataset: 'case_metrics', values: ['case_count'], filterBindings: { dateRange: 'audited_at' } },
+        { id: 'hours', type: 'metric', dataset: 'case_metrics', values: ['hours_total'] },
+        { id: 'share', type: 'metric', dataset: 'case_metrics', values: ['flagged_share'] },
+        // On a field the plugin leaves alone: the derived-value control (below).
+        { id: 'tampered', type: 'metric', dataset: 'case_metrics', values: ['flagged_share'], filterBindings: { dateRange: 'closed_at' } },
       ],
     },
   ],
@@ -374,6 +431,26 @@ const windowBreaker = (mode: 'drop' | 'zero') => ({
   },
 });
 
+/**
+ * The derived-value control: the door as `stack` answers it, except that a
+ * `flagged_share` windowed on `closed_at` comes back as half the ratio its own
+ * operands make — a derived value computed from something other than the
+ * operands the answer carries beside it. The operands are left as answered.
+ */
+function tamperingDerived(stack: VerifyStack): VerifyStack {
+  return {
+    ...stack,
+    apiAs: async (...args: Parameters<VerifyStack['apiAs']>) => {
+      const res = await stack.apiAs(...args);
+      const selection = (args[3] as { selection?: { measures?: string[]; runtimeFilter?: unknown } } | undefined)?.selection;
+      if (!selection?.measures?.includes('flagged_share') || !mentions(selection.runtimeFilter, 'closed_at') || res.status !== 200) return res;
+      const body = (await res.json()) as { rows: Array<Record<string, unknown>> };
+      for (const row of body.rows) if (typeof row.flagged_share === 'number') row.flagged_share = row.flagged_share / 2;
+      return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+    },
+  };
+}
+
 describe.each(['drop', 'zero'] as const)("NEGATIVE CONTROL — an app plugin that keeps the window from storage (%s)", (mode) => {
   let stack: VerifyStack;
   let report: DashboardWindowReport;
@@ -383,7 +460,7 @@ describe.each(['drop', 'zero'] as const)("NEGATIVE CONTROL — an app plugin tha
     stack = await bootStack(app as never);
     const token = await stack.signIn();
     wallClockAtMidnight();
-    report = await onFrozenClock(() => runDashboardWindowProofs(stack, token, app));
+    report = await onFrozenClock(() => runDashboardWindowProofs(tamperingDerived(stack), token, app));
   }, BOOT_TIMEOUT + RUN_TIMEOUT);
 
   afterAll(async () => {
@@ -405,8 +482,40 @@ describe.each(['drop', 'zero'] as const)("NEGATIVE CONTROL — an app plugin tha
       expect(m.presets.map((p) => p.outcome)).toEqual(DATE_RANGE_PRESETS.map(() => 'blank'));
       expect(m.inert).toBe(false);
     }
-    expect(report.summary.hardFailures).toBe(1);
     expect(formatDashboardWindowReport(report)).toContain('✗ wnc_board/cases (wnc_case.opened_at, datetime)  CONTRADICTED');
+  });
+
+  it('is found on a sum, and on a derived ratio through its operands', () => {
+    for (const widget of ['hours', 'share']) {
+      const r = widgetOf(report, widget);
+      expect(r.status, `${widget}\n${formatDashboardWindowReport(report)}`).toBe('contradicted');
+      const m = r.measures[0]!;
+      expect(m.unwindowed!.answered).toBe(m.days!.length);
+      if (mode === 'drop') {
+        expect(m.presets.map((p) => p.outcome)).toEqual(DATE_RANGE_PRESETS.map(() => 'contradicted'));
+        expect(m.presets.every((p) => p.answered === m.days!.length)).toBe(true);
+        expect(m.inert).toBe(true);
+      } else {
+        expect(m.presets.map((p) => p.outcome)).toEqual(DATE_RANGE_PRESETS.map(() => 'blank'));
+      }
+    }
+    expect(widgetOf(report, 'hours').measures[0]!.presets[0]!.detail).toMatch(
+      mode === 'drop' ? /^the window counted \d+ fixture row\(s\) \(a sum of \d+ at 7 per row\), and it selects \d+ \(wider\)$/ : /^the widget showed nothing/,
+    );
+    if (mode === 'drop') {
+      expect(widgetOf(report, 'share').measures[0]!.presets[0]!.detail).toMatch(/^the window counted \d+ fixture row\(s\) in flagged_count, and it selects \d+ \(wider\)$/);
+    }
+  });
+
+  it('DERIVED-VALUE CONTROL — a derived value that is not the op over its operands is contradicted, while they hold', () => {
+    const m = widgetOf(report, 'tampered').measures[0]!;
+    expect(widgetOf(report, 'tampered').status).toBe('contradicted');
+    // Every operand took in exactly the rows each window selects…
+    expect(m.presets.every((p) => p.answered === p.expected)).toBe(true);
+    // …and the value shown is not the ratio they make.
+    expect(m.presets.map((p) => p.outcome)).toEqual(DATE_RANGE_PRESETS.map(() => 'contradicted'));
+    expect(m.presets[0]!.detail).toMatch(/^the widget shows flagged_share = [\d.]+ where its operands in the same row \(flagged_count = \d+, case_count = \d+\) make [\d.]+$/);
+    expect(report.summary.hardFailures).toBe(4);
   });
 
   it("ATTRIBUTION CONTROL — a hook rewriting the window's field makes the probe not run, never contradicted", () => {
@@ -418,7 +527,7 @@ describe.each(['drop', 'zero'] as const)("NEGATIVE CONTROL — an app plugin tha
     const audited = widgetOf(report, 'audited');
     expect(audited.status).toBe('inconclusive');
     expect(audited.reason).toMatch(/reads back no audited_at \(the read does not return that field\), so what was written there cannot be confirmed$/);
-    expect(report.summary.widgets).toMatchObject({ contradicted: 1, inconclusive: 2, proven: 0 });
+    expect(report.summary.widgets).toMatchObject({ contradicted: 4, inconclusive: 2, proven: 0 });
   });
 });
 

@@ -341,7 +341,7 @@ function notAdditive(name: string, m: any): string {
   const of = m.field ? ` of ${m.field}` : '';
   switch (m.aggregate) {
     case 'avg':
-      return `"${name}" averages${of}: an average is not additive — the rows the app already holds in the window enter its denominator, and an average does not say how many there are, so what the fixture rows change cannot be derived without guessing that number`;
+      return `"${name}" averages${m.field ? ` ${m.field}` : ''}: an average is not additive — the rows the app already holds in the window enter its denominator, and an average does not say how many there are, so what the fixture rows change cannot be derived without guessing that number`;
     case 'min':
     case 'max':
       return `"${name}" takes the ${m.aggregate === 'min' ? 'minimum' : 'maximum'}${of}: the fixture rows move it only where theirs is the extreme, which the rows the app already holds in the window decide`;
