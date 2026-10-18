@@ -605,11 +605,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "重命名组织",
         successMessage: "组织已重命名"
       },
-      change_slug: {
-        label: "修改标识符",
-        description: "重命名标识符会重写该组织所有平台子域名，旧标识符将保留占用 90 天。继续吗？",
-        successMessage: "组织标识符已修改"
-      },
       leave_organization: {
         label: "退出组织",
         confirmText: "要退出该组织吗？退出后你将失去对其环境和成员的访问权限。",

@@ -605,11 +605,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
         label: "組織名を変更",
         successMessage: "組織名を変更しました"
       },
-      change_slug: {
-        label: "スラッグを変更",
-        description: "スラッグを変更すると、この組織のすべてのプラットフォームサブドメインが書き換えられ、旧スラッグは 90 日間確保されます。続行しますか？",
-        successMessage: "組織のスラッグを変更しました"
-      },
       leave_organization: {
         label: "組織から退出",
         confirmText: "この組織から退出しますか？この組織の環境とメンバーへのアクセスを失います。",

@@ -605,11 +605,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Rename Organization",
         successMessage: "Organization renamed"
       },
-      change_slug: {
-        label: "Change Slug",
-        description: "Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?",
-        successMessage: "Organization slug changed"
-      },
       leave_organization: {
         label: "Leave Organization",
         confirmText: "Leave this organization? You will lose access to its environments and members.",
