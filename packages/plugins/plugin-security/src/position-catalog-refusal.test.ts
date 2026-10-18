@@ -33,10 +33,7 @@ import type { PermissionSet } from '@objectstack/spec/security';
 import { SecurityPlugin } from './security-plugin.js';
 import { SysUser, SysMember } from '@objectstack/platform-objects/identity';
 import { SysMetadataActivation } from '@objectstack/platform-objects/system';
-import { SysPosition } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPosition } from './objects/sys-user-position.object.js';
-import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
-import { SysPositionPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
 import { SysUserPermissionSet } from './objects/sys-user-permission-set.object.js';
 import { namesWithoutCatalogRow, positionNotInCatalogMessage } from './position-catalog-refusal.js';
 
@@ -95,7 +92,7 @@ const ADMIN = { userId: 'u_admin', positions: [], permissions: ['qa_admin'] };
 const ORG_ADMIN_LIKE = { userId: 'u_org_admin', positions: [], permissions: ['qa_org_admin_like'] };
 const PLAIN_MEMBER = { userId: 'u_member', positions: [], permissions: [] };
 
-/** The auditor position's catalog row — the row whose ID the measured authors wrote. */
+/** A position record id — the spelling the measured authors wrote where the position's NAME belongs. */
 const AUDITOR_POSITION_ID = 'position_mtur8hz5jp7ptm3r';
 
 const engines: ObjectQL[] = [];
@@ -122,7 +119,7 @@ async function boot(opts: { walled?: boolean } = {}) {
     // `sys_member` is provisioned: an organization-scoped assignment must name
     // a member of its organization (`grant-holder-membership-refusal.ts`).
     // `sys_metadata_activation`: the ledger the resolver reads deactivation from (ADR-0131 D3).
-    objects: [SysPosition, SysUserPosition, SysPermissionSet, SysPositionPermissionSet, SysUserPermissionSet, SysMember, SysMetadataActivation, QA_INQUIRY],
+    objects: [SysUserPosition, SysUserPermissionSet, SysMember, SysMetadataActivation, QA_INQUIRY],
   } as any);
   await engine.syncSchemas();
   // [#21516] The authz resolver reads these on every grant resolution; in a
@@ -131,7 +128,7 @@ async function boot(opts: { walled?: boolean } = {}) {
   // here, AFTER the DDL above, and stay unprovisioned: the resolver reads a
   // missing table and answers "no grants", exactly as it did when the engine
   // still handed an unregistered name to the driver (which it now refuses).
-  for (const o of [SysUser, SysMember, SysPosition, SysUserPosition, SysPermissionSet, SysUserPermissionSet, SysPositionPermissionSet]) {
+  for (const o of [SysUser, SysMember, SysUserPosition, SysUserPermissionSet]) {
     if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
   }
   engines.push(engine);
@@ -172,27 +169,9 @@ async function boot(opts: { walled?: boolean } = {}) {
   // tenant-scoped object, so the fixture is seeded INTO org_a there.
   const seed = opts.walled ? { isSystem: true, tenantId: 'org_a' } : SYS;
 
-  // The catalog, the one DB-authored set it distributes, and three rows it reads.
-  await engine.insert('sys_permission_set', {
-    id: 'ps_auditor',
-    name: 'qa_auditor_set',
-    label: 'QA Auditor',
-    object_permissions: JSON.stringify({ qa_inquiry: { allowRead: true, viewAllRecords: true } }),
-    field_permissions: '{}',
-    system_permissions: '[]',
-    active: true,
-  }, { context: seed } as any);
-  await engine.insert('sys_position', [
-    { id: AUDITOR_POSITION_ID, name: 'qa_auditor', label: 'Auditor', active: true },
-    // ADR-0049 shape E: deactivated, still a catalog row, still bound.
-    { id: 'pos_retired', name: 'qa_retired', label: 'Retired', active: false },
-  ], { context: seed } as any);
-  await engine.insert('sys_position_permission_set', [
-    { id: 'pps_auditor', position_id: AUDITOR_POSITION_ID, permission_set_id: 'ps_auditor' },
-    { id: 'pps_retired', position_id: 'pos_retired', permission_set_id: 'ps_auditor' },
-  ], { context: seed } as any);
-  // [ADR-0131 D3, ADR-0126 §4] The switch the resolver honours: the row's own
-  // `active: false` above is no longer read.
+  // [ADR-0131 D3, ADR-0126 §4] ADR-0049 shape E: `qa_retired` is deactivated in
+  // the activation ledger, the switch the resolver honours — still a position,
+  // still bound by its definition below.
   await engine.insert('sys_metadata_activation', {
     metadata_type: 'position', name: 'qa_retired', package_id: 'com.objectstack.qa.position-catalog-refusal', active: false,
   }, { context: seed } as any);
@@ -202,7 +181,7 @@ async function boot(opts: { walled?: boolean } = {}) {
     { id: 'inq_3', subject: 'three' },
   ], { context: seed } as any);
   // [ADR-0131 D3/D4] What the resolver reads: the set's definition, and each
-  // position's definition naming it — the junction rows above bind nothing.
+  // position's definition naming it.
   const pkg = 'com.objectstack.qa.position-catalog-refusal';
   engine.registry.registerItem('permission', {
     name: 'qa_auditor_set', label: 'QA Auditor', objects: { qa_inquiry: { allowRead: true, viewAllRecords: true } },
@@ -262,8 +241,8 @@ async function assignmentsOf(h: Harness, userId: string): Promise<any[]> {
 // The refusal, and the ruling's control leg
 // ---------------------------------------------------------------------------
 
-describe('a position spelled as the catalog row ID is refused, and the account is provably fine', () => {
-  it('refuses 400 VALIDATION_FAILED, reference_not_found at position, naming the value and the name to write', async () => {
+describe('a position spelled as a record id is refused, and the account is provably fine', () => {
+  it('refuses 400 VALIDATION_FAILED, reference_not_found at position, naming the value and the remedy', async () => {
     const h = await boot();
     const err = await refusalOf(() => h.engine.insert(
       'sys_user_position', { user_id: 'u_holder', position: AUDITOR_POSITION_ID }, { context: ADMIN } as any,
@@ -278,9 +257,8 @@ describe('a position spelled as the catalog row ID is refused, and the account i
       value: AUDITOR_POSITION_ID,
       constraint: { target: 'sys_position', targetField: 'name' },
     });
-    // The fix is the exact name — the value is that position's record id.
-    expect(env.fields[0].message).toBe(positionNotInCatalogMessage(AUDITOR_POSITION_ID, 'qa_auditor'));
-    expect(env.fields[0].message).toContain(`write 'qa_auditor'`);
+    // The remedy names the column's contract: a position's machine name, never a record id.
+    expect(env.fields[0].message).toBe(positionNotInCatalogMessage(AUDITOR_POSITION_ID));
 
     // Nothing was stored, and the account reads nothing …
     expect(await assignmentsOf(h, 'u_holder')).toHaveLength(0);
@@ -312,10 +290,9 @@ describe('a position spelled as the catalog row ID is refused, and the account i
 });
 
 describe('the accepted half — a catalog NAME, active or deactivated', () => {
-  it('a position declared only in the registry, with no sys_position row, is accepted', async () => {
+  it('a position registered after boot is accepted — the catalog is read per write', async () => {
     const h = await boot();
     h.engine.registry.registerItem('position', { name: 'qa_registry_only', label: 'Registry only' } as any, 'name' as any, 'com.objectstack.qa.position-catalog-refusal');
-    expect(await h.engine.find('sys_position', { where: { name: 'qa_registry_only' }, context: SYS })).toHaveLength(0);
     const created = await h.engine.insert(
       'sys_user_position', { user_id: 'u_reg', position: 'qa_registry_only' }, { context: ADMIN } as any,
     );
@@ -331,7 +308,7 @@ describe('the accepted half — a catalog NAME, active or deactivated', () => {
     expect(await rowsReadBy(h, 'u_named')).toBe(3);
   });
 
-  it('ADR-0049 shape E: a DEACTIVATED position is still a catalog row — accepted, stored, and grants nothing', async () => {
+  it('ADR-0049 shape E: a DEACTIVATED position is still a position — accepted, stored, and grants nothing', async () => {
     const h = await boot();
     const created = await h.engine.insert(
       'sys_user_position', { user_id: 'u_retired', position: 'qa_retired' }, { context: ADMIN } as any,
@@ -342,11 +319,9 @@ describe('the accepted half — a catalog NAME, active or deactivated', () => {
     expect(await rowsReadBy(h, 'u_retired')).toBe(0);
   });
 
-  it('single posture: an organization-bound writer still reads organization-less catalog rows', async () => {
-    // A `single` posture seeds its declared catalog with no organization, and
-    // this fixture seeds its rows the same way. The scoped read
-    // (`{ ...context, isSystem: true }`) forwards the writer's tenant, and the
-    // driver's `organization_id IS NULL` term keeps those rows visible.
+  it('single posture: an organization-bound writer is judged against the same environment catalog', async () => {
+    // [ADR-0131 D3] The catalog takes no organization: a writer bound to one
+    // reads the same definitions as a writer bound to none.
     const h = await boot();
     const orgBound = { ...ADMIN, tenantId: 'org_a' };
     await addMember(h, 'u_ob', 'org_a');
@@ -559,18 +534,11 @@ describe('scope — the stand-downs are declared, not accidental', () => {
 // ---------------------------------------------------------------------------
 
 describe('walled posture, two organizations — the predicate reads the environment catalog, never an organization row', () => {
-  // [ADR-0131 D3/D4] Each organization holds a `sys_position` row; only
-  // `qa_a_own` also has a definition in the security catalog. The catalog is
-  // environment-level, so a row alone — whichever organization holds it —
-  // is not a position an assignment can take effect under.
+  // [ADR-0131 D3/D4] The catalog is environment-level: `qa_a_own` has a
+  // definition in it and `qa_undeclared` has none, and no organization holds a
+  // position of its own that could move either verdict.
   async function bootTwoOrgs() {
     const h = await boot({ walled: true });
-    await h.engine.insert('sys_position',
-      { id: 'pos_b_only', name: 'qa_b_only', label: 'B only', active: true },
-      { context: { isSystem: true, tenantId: 'org_b' } } as any);
-    await h.engine.insert('sys_position',
-      { id: 'pos_a_own', name: 'qa_a_own', label: 'A own', active: true },
-      { context: { isSystem: true, tenantId: 'org_a' } } as any);
     h.engine.registry.registerItem('position', { name: 'qa_a_own', label: 'A own' } as any, 'name' as any, 'com.objectstack.qa.position-catalog-refusal');
     return h;
   }
@@ -585,42 +553,40 @@ describe('walled posture, two organizations — the predicate reads the environm
     expect(env.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found', value: 'nope_position' });
   });
 
-  it("a name only an organization's ROW carries is REFUSED, answered exactly like a name nothing carries", async () => {
-    // [ADR-0131 D3/D4] org_b's `qa_b_only` row has no definition in the
-    // security catalog, so it grants nothing anywhere and the write is refused
-    // — with the answer a name that exists nowhere gets, so the refusal is no
-    // oracle for "some organization has a row of it" (#20297).
+  it('a name the catalog does not hold is answered key for key like any other — by insert and by predicate update', async () => {
+    // [ADR-0131 D3/D4] The verdict reads the environment catalog and nothing an
+    // organization stores, so two names it does not hold get one answer: the
+    // refusal is no oracle for anything an organization holds (#20297).
     const h = await bootTwoOrgs();
-    const foreign = envelopeOf(await refusalOf(() => h.engine.insert(
-      'sys_user_position', { user_id: 'u_wb', position: 'qa_b_only' }, { context: ORG_A_ADMIN } as any,
+    const undeclared = envelopeOf(await refusalOf(() => h.engine.insert(
+      'sys_user_position', { user_id: 'u_wb', position: 'qa_undeclared' }, { context: ORG_A_ADMIN } as any,
     )));
-    expect([foreign.code, foreign.status]).toEqual(['VALIDATION_FAILED', 400]);
-    expect(foreign.fields).toHaveLength(1);
-    expect(foreign.fields[0]).toMatchObject({
+    expect([undeclared.code, undeclared.status]).toEqual(['VALIDATION_FAILED', 400]);
+    expect(undeclared.fields).toHaveLength(1);
+    expect(undeclared.fields[0]).toMatchObject({
       field: 'position',
       code: 'reference_not_found',
-      value: 'qa_b_only',
+      value: 'qa_undeclared',
       constraint: { target: 'sys_position', targetField: 'name' },
     });
-    // Byte-identical to the "exists nowhere" message for that value …
-    expect(foreign.fields[0].message).toBe(positionNotInCatalogMessage('qa_b_only'));
-    // … and the same envelope, key for key, as a name nobody carries.
+    expect(undeclared.fields[0].message).toBe(positionNotInCatalogMessage('qa_undeclared'));
+    // The same envelope, key for key, as another name nobody carries.
     const nowhere = envelopeOf(await refusalOf(() => h.engine.insert(
       'sys_user_position', { user_id: 'u_wb', position: 'nope_position' }, { context: ORG_A_ADMIN } as any,
     )));
-    const shape = (e: typeof foreign) => [e.code, e.status, e.fields.map((f) => [f.field, f.code, Object.keys(f).sort(), f.constraint])];
-    expect(shape(foreign)).toEqual(shape(nowhere));
+    const shape = (e: typeof undeclared) => [e.code, e.status, e.fields.map((f) => [f.field, f.code, Object.keys(f).sort(), f.constraint])];
+    expect(shape(undeclared)).toEqual(shape(nowhere));
     expect(await assignmentsOf(h, 'u_wb')).toHaveLength(0);
 
     // A predicate update that sets it reads the same catalog, and is refused the same way.
     await addMember(h, 'u_wm', 'org_a');
     await h.engine.insert('sys_user_position', { id: 'upw', user_id: 'u_wm', position: 'qa_a_own' }, { context: ORG_A_ADMIN } as any);
     const multi = envelopeOf(await refusalOf(() => h.engine.update(
-      'sys_user_position', { position: 'qa_b_only' }, { where: { user_id: 'u_wm' }, multi: true, context: ORG_A_ADMIN } as any,
+      'sys_user_position', { position: 'qa_undeclared' }, { where: { user_id: 'u_wm' }, multi: true, context: ORG_A_ADMIN } as any,
     )));
     expect([multi.code, multi.status]).toEqual(['VALIDATION_FAILED', 400]);
-    expect(multi.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found', value: 'qa_b_only' });
-    expect(multi.fields[0].message).toBe(positionNotInCatalogMessage('qa_b_only'));
+    expect(multi.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found', value: 'qa_undeclared' });
+    expect(multi.fields[0].message).toBe(positionNotInCatalogMessage('qa_undeclared'));
     expect((await assignmentsOf(h, 'u_wm'))[0]?.position).toBe('qa_a_own');
   });
 
@@ -638,9 +604,9 @@ describe('walled posture, two organizations — the predicate reads the environm
     // refuses a write with no active organization (403) before this refusal
     // runs, so the full chain cannot carry a writer naming none.
     const h = await bootTwoOrgs();
-    const names = ['qa_b_only', 'qa_a_own', 'nope_position'];
-    expect(await namesWithoutCatalogRow({ ql: h.engine }, names, ADMIN)).toEqual(['qa_b_only', 'nope_position']);
-    expect(await namesWithoutCatalogRow({ ql: h.engine }, names, ORG_A_ADMIN)).toEqual(['qa_b_only', 'nope_position']);
+    const names = ['qa_undeclared', 'qa_a_own', 'nope_position'];
+    expect(await namesWithoutCatalogRow({ ql: h.engine }, names, ADMIN)).toEqual(['qa_undeclared', 'nope_position']);
+    expect(await namesWithoutCatalogRow({ ql: h.engine }, names, ORG_A_ADMIN)).toEqual(['qa_undeclared', 'nope_position']);
   });
 
   it("an update by id of ANOTHER organization's row answers exactly like an id that exists nowhere", async () => {
@@ -650,7 +616,7 @@ describe('walled posture, two organizations — the predicate reads the environm
     // is reachable for a row outside the writer's organization.
     const h = await bootTwoOrgs();
     await h.engine.insert('sys_user_position',
-      { id: 'upb_foreign', user_id: 'u_bx', position: 'qa_b_only' },
+      { id: 'upb_foreign', user_id: 'u_bx', position: 'qa_undeclared' },
       { context: { isSystem: true, tenantId: 'org_b' } } as any);
     for (const position of ['nope_position', 'qa_a_own']) {
       const foreignErr = await refusalOf(() => h.engine.update(
@@ -671,17 +637,17 @@ describe('walled posture, two organizations — the predicate reads the environm
         .toBe(resolveThrownHttpError(nowhereErr).message.replace('up_nowhere', 'ID'));
     }
     const [row] = await h.engine.find('sys_user_position', { where: { id: 'upb_foreign' }, context: SYS });
-    expect(row?.position).toBe('qa_b_only');
+    expect(row?.position).toBe('qa_undeclared');
   });
 
   it('the org boundary holds for a VALID foreign organization — 403 at the wall, whatever the name', async () => {
     // The leg the card carried as NOT MEASURED on a single-org posture: an
     // organization_a writer stamping organization_b on the row. The tenant wall
     // refuses it before the catalog is consulted, identically for a name the
-    // catalog carries, a name only organization_b carries, and a name nobody
-    // carries — so the catalog verdict leaks nothing across the wall.
+    // catalog carries and a name nobody carries — so the catalog verdict leaks
+    // nothing across the wall.
     const h = await bootTwoOrgs();
-    for (const position of ['qa_auditor', 'qa_b_only', 'nope_position']) {
+    for (const position of ['qa_auditor', 'nope_position']) {
       const env = envelopeOf(await refusalOf(() => h.engine.insert(
         'sys_user_position', { user_id: 'u_wf', position, organization_id: 'org_b' }, { context: ORG_A_ADMIN } as any,
       )));
@@ -690,22 +656,16 @@ describe('walled posture, two organizations — the predicate reads the environm
     expect(await assignmentsOf(h, 'u_wf')).toHaveLength(0);
   });
 
-  it("the id hint never names another organization's position", async () => {
+  it('a record id is refused from inside an organization with the remedy, never an id-to-name hint', async () => {
     const h = await bootTwoOrgs();
-    const env = envelopeOf(await refusalOf(() => h.engine.insert(
-      'sys_user_position', { user_id: 'u_wc', position: 'pos_b_only' }, { context: ORG_A_ADMIN } as any,
-    )));
-    expect([env.code, env.status]).toEqual(['VALIDATION_FAILED', 400]);
-    expect(env.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found' });
-    expect(env.fields[0].message).toBe(positionNotInCatalogMessage('pos_b_only'));
-    expect(env.fields[0].message).not.toContain('qa_b_only');
-    // … while its own organization's row, whose name the catalog holds, is named.
-    const own = envelopeOf(await refusalOf(() => h.engine.insert(
-      'sys_user_position', { user_id: 'u_wc', position: 'pos_a_own' }, { context: ORG_A_ADMIN } as any,
-    )));
-    expect([own.code, own.status]).toEqual(['VALIDATION_FAILED', 400]);
-    expect(own.fields[0]).toMatchObject({ field: 'position', code: 'reference_not_found' });
-    expect(own.fields[0].message).toBe(positionNotInCatalogMessage('pos_a_own', 'qa_a_own'));
+    for (const position of ['pos_b_only', 'pos_a_own']) {
+      const env = envelopeOf(await refusalOf(() => h.engine.insert(
+        'sys_user_position', { user_id: 'u_wc', position }, { context: ORG_A_ADMIN } as any,
+      )));
+      expect([env.code, env.status], position).toEqual(['VALIDATION_FAILED', 400]);
+      expect(env.fields[0], position).toMatchObject({ field: 'position', code: 'reference_not_found', value: position });
+      expect(env.fields[0].message, position).toBe(positionNotInCatalogMessage(position));
+    }
   });
 });
 
