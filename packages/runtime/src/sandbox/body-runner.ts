@@ -60,6 +60,9 @@ import {
   hookRecordState,
   resolveRecordTitle,
   resolveRelatedTitleTarget,
+  resolveServedRecordTitle,
+  servedRecordTitle,
+  type FormulaServingChannel,
 } from '@objectstack/objectql';
 import { refuseStoredMetadataBodyReads, refuseStoredMetadataBodyWrites } from '../stored-metadata-reader-seam.js';
 import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
@@ -196,36 +199,46 @@ function buildBodyLogSurface(
  * AI writing a hook reaches for it for the same reason. Hence the whole point
  * of this seam: put the correct answer closer to hand than the wrong one.
  *
- * ## Why the two forms cost different things
+ * ## What the two forms cost
  *
  *  - **`ctx.title()`** — this record. `hookRecordState` is the state the hook
  *    is ALREADY firing on (stored ⊕ payload, materialized over the declared
  *    fields — the very state the declarative `condition` gate evaluates), so
- *    the record is in hand. A formula title is evaluated against it in-process
- *    by `resolveRecordTitle`: **zero round trips**, even for the majority
- *    formula case. Measured cost is one CEL evaluation of one expression.
+ *    the record is in hand. A formula title over the record's OWN columns is
+ *    evaluated against it with **zero round trips** — one CEL evaluation of one
+ *    expression. [#24197] A formula title that reads ONE hop through a
+ *    reference (`record.book.title + ' · ' + record.reader.name`) is served the
+ *    way a read serves it (`resolveServedRecordTitle` → the channel's
+ *    `serveFormulaField`, the engine's own one-hop loader): **one batched read
+ *    per reference field the title reads through**, following the in-flight
+ *    foreign key — a `beforeUpdate` that moves `book` names the new book.
  *  - **`ctx.title('account_id')`** — a related record. A lookup column hands
  *    the body an id and nothing else, so this costs **exactly one `findOne`**,
- *    and no more: the engine's read path already materializes formula fields
- *    onto what it returns, so the related record arrives with its own
- *    `display_title` computed. There is no second pass and no per-field
- *    round trip.
+ *    plus the one-hop reads that related record's OWN title formula makes on
+ *    that read: the engine's read path materializes formula fields onto what
+ *    it returns, and the title is read off that row (`servedRecordTitle`),
+ *    never re-derived — a synchronous re-derivation serves no hop and threw a
+ *    served one-hop title away.
  *
- * That asymmetry is why the VM-facing wire gates only the second form behind
- * `api.read` (see `installCtx`): the token gates a read, and the first form has
- * no read to gate.
+ * The VM-facing wire gates only the second form behind `api.read` (see
+ * `installCtx`): that token gates the body's own reach for another record. The
+ * first form names THIS record by its declaration, and the reads a declared
+ * title formula makes are the platform's, under the body's own channel.
  *
- * ## Why the read goes through `ctx.api` and not the engine directly
+ * ## Why every read goes through `ctx.api` and not the engine directly
  *
  * `api` is handed in per call by the installer rather than closed over, so it
  * is the transaction-scoped context whenever a body-opened
- * `ctx.api.transaction` is in flight. A related-title read that bypassed it
- * would ask the pool for a second connection — invisible on a roomy pool, a
- * deadlock on `pool max=1`, which is SQLite and therefore the default
- * datasource for `objectstack dev`. It also means the read obeys the caller's
- * scope and field-level security exactly as the body's own
- * `ctx.api.object(...).findOne` would: the accessor is a convenience over the
- * read channel a body already has, never a privilege escalation around it.
+ * `ctx.api.transaction` is in flight. A title read that bypassed it — the
+ * related `findOne`, or a hop of this record's title — would ask the pool for a
+ * second connection — invisible on a roomy pool, a deadlock on `pool max=1`,
+ * which is SQLite and therefore the default datasource for `objectstack dev`.
+ * It also means the read obeys the caller's scope and field-level security
+ * exactly as the body's own `ctx.api.object(...).findOne` would: the accessor
+ * is a convenience over the read channel a body already has, never a
+ * privilege escalation around it. A related record that channel does not
+ * return leaves a title over it `undefined`, as the REST read of the same
+ * record shows it no title.
  */
 function buildTitleSurface(
   engineCtx: any,
@@ -244,28 +257,35 @@ function buildTitleSurface(
       throw new Error(`${label}: object '${objectName}' is not registered`);
     }
     const record = hookRecordState(engineCtx);
-    const execCtx = executionContextFromHook(engineCtx);
+    const source = (api ?? engineCtx?.api) as
+      | { object?: (n: string) => any; serveFormulaField?: FormulaServingChannel['serveFormulaField'] }
+      | undefined;
 
     if (field === undefined) {
-      return resolveRecordTitle(schema, record, execCtx);
+      // [#24197] Served on the body's own channel, so a title formula's one hop
+      // is read as the body reads, on the body's connection.
+      if (source && typeof source.serveFormulaField === 'function') {
+        return resolveServedRecordTitle(schema, record, source as FormulaServingChannel);
+      }
+      // A channel that cannot read (the unscoped api a `runAs: 'user'` hook gets
+      // with no user) serves no hop: a title over the record's own columns
+      // still resolves, one over a reference answers `undefined`.
+      return resolveRecordTitle(schema, record, executionContextFromHook(engineCtx));
     }
 
     const target = resolveRelatedTitleTarget(schema, record, field, label);
     // A declared but EMPTY reference: an ordinary state, answered as absence.
     if (!target) return undefined;
 
-    const source = (api ?? engineCtx?.api) as { object?: (n: string) => any } | undefined;
     if (!source || typeof source.object !== 'function') {
       throw new Error(`${label}: no read channel is available to resolve '${field}'`);
     }
     const related = await source.object(target.object).findOne({ where: { id: target.id } });
     if (!related) return undefined;
-    // The read path already evaluated the related object's formula fields onto
-    // this row; `resolveRecordTitle` re-derives the SAME value from the same
-    // declaration rather than trusting whichever repo facade answered, so a
-    // minimal embedder's `findOne` cannot quietly downgrade a formula title to
-    // absence.
-    return resolveRecordTitle(ql.getObject(target.object), related as Record<string, unknown>, execCtx);
+    // [#24197] The read already served the related object's title — its one
+    // hop included, under this caller's permissions — so it is read off the
+    // row, never re-derived (see `servedRecordTitle`).
+    return servedRecordTitle(ql.getObject(target.object), related as Record<string, unknown>);
   };
 }
 

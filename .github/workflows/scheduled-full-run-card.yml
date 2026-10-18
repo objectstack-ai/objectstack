@@ -42,9 +42,19 @@ name: Scheduled Full Run Card
 #              REFUSES rather than filing. The oldest match wins — it is the one
 #              any duplicates were closed against, and the one the devx seat
 #              already graded.
-#   REFRESH    the body is rewritten in place, never a comment per run. ⛔ Labels
-#              are applied on CREATE only: grading is the seat's and a refresh
-#              must not undo it.
+#   REFRESH    the body is rewritten in place, never a comment per run. ⛔ Grade
+#              labels (priority, lane, type) are applied on CREATE only:
+#              grading is the seat's and a refresh must not undo it. The one
+#              label a refresh may move is a STATE: a card still `pm:blocked`
+#              whose every `Blocked-by:` target (body or comments) is a LOCAL
+#              card that has closed goes back to `pm:queue` — a new red after
+#              the last blocker's fix landed on this `main` is new work, and
+#              `pm:blocked` hides it from every seat. ⛔ A closed CROSS-REPO
+#              target never releases it: closed there is merged upstream, not
+#              consumable here through the `.objectui-sha` pin. That, any
+#              target open or unreadable, no target and an assignee are among
+#              the cases where no label moves; every case and its reason:
+#              "A STALE `pm:blocked`" in the module.
 #   BODY       the run link, and the commits between the previous GREEN
 #              scheduled run of THIS workflow and this one. That range is the
 #              hour in which `main` broke, and an EMPTY range is a reading of
@@ -113,7 +123,7 @@ jobs:
     permissions:
       actions: read # list the previous green scheduled run
       contents: read # checkout, and the compare API
-      issues: write # the card, and nothing else
+      issues: write # the card (body, and the stale-block label swap) and the reads that judge it
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -214,11 +224,13 @@ jobs:
 
             // The DECISION is the module's, driven offline by its self-test
             // against a mutable board (one red run files one card; the next
-            // refreshes it and files no second). What is left here is three
-            // callbacks over the API.
+            // refreshes it and files no second; a refresh of a card whose
+            // every blocker is a closed LOCAL card moves `pm:blocked` to
+            // `pm:queue`). What is left here is thin callbacks over the API.
             const outcome = await mod.fileOrRefreshCard({
               identity,
               body,
+              ownerRepo: `${owner}/${repo}`,
               perPage: 100,
               maxPages: 10,
               listPage: async (page) => {
@@ -236,10 +248,31 @@ jobs:
                 const res = await github.rest.issues.create({ owner, repo, title, body: b, labels });
                 return { number: res.data.number };
               },
+              // Read only for a card carrying `pm:blocked`.
+              listComments: async ({ number, page, perPage }) => {
+                const res = await github.rest.issues.listComments({
+                  owner, repo, issue_number: number, per_page: perPage, page,
+                });
+                return res.data;
+              },
+              getIssue: async ({ repo: target, number }) => {
+                const [targetOwner, targetRepo] = target.split('/');
+                const res = await github.rest.issues.get({ owner: targetOwner, repo: targetRepo, issue_number: number });
+                return { state: res.data.state, closed_at: res.data.closed_at };
+              },
+              // The swap: an additive POST and ONE remove by name.
+              addLabels: async ({ number, labels }) => {
+                await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels });
+              },
+              removeLabel: async ({ number, name }) => {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number: number, name });
+              },
             });
 
             core.info(`${outcome.action} ${identity.marker} card #${outcome.number} (${body.length} chars)`);
-            core.notice(`${run.name} is red on the hourly full run — card #${outcome.number} ${outcome.action}.`);
+            if (outcome.block) core.info(`block: ${outcome.blockSummary}`);
+            const moved = outcome.block === 'expired' ? ' (every blocker closed: pm:blocked moved to pm:queue)' : '';
+            core.notice(`${run.name} is red on the hourly full run — card #${outcome.number} ${outcome.action}${moved}.`);
             core.setOutput('action', outcome.action);
             core.setOutput('number', String(outcome.number));
 

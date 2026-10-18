@@ -204,7 +204,10 @@ describe('#11293 ctx.title() inside a real QuickJS hook body', () => {
     expect(updated.notified).not.toBe('c2');
   }, 30000);
 
-  it('MEASUREMENT — a formula title for THIS record costs no extra read', async () => {
+  // [#24197] Kept for a title over the record's OWN columns. A title formula
+  // that reads one hop through a reference costs one read per reference it
+  // reads through — measured in `hook-ctx-title-one-hop.integration.test.ts`.
+  it('MEASUREMENT — a formula title over THIS record\'s own columns costs no extra read', async () => {
     await wire('tc_case', "ctx.input.notified = await ctx.title();");
     seed('tc_case', { id: 'c3', case_number: 'CASE-0044', subject: 'Coffee machine', status: 'open' });
 
@@ -256,10 +259,12 @@ describe('#11293 ctx.title() inside a real QuickJS hook body', () => {
     expect(updated.notified).not.toContain('acc_9');
   }, 30000);
 
-  it('MEASUREMENT — a related title costs exactly ONE extra read, formula included', async () => {
+  it('MEASUREMENT — a related title over its own columns costs exactly ONE extra read, formula included', async () => {
     // The related object's `nameField` is itself a FORMULA, and the engine's
     // read path materializes formula fields onto what it returns — so the one
-    // `findOne` is the whole cost. There is no second pass and no per-field
+    // `findOne` is the whole cost. [#24197] A related title that reads a hop
+    // of its own adds that hop's reads to the `findOne`, as any read of it
+    // does (`hook-ctx-title-one-hop.integration.test.ts`). There is no second pass and no per-field
     // round trip, which is the number that decides whether this accessor is
     // usable in a hook body's hot path.
     const baseline = "ctx.input.notified = 'x';";
