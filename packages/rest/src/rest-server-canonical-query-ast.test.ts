@@ -193,6 +193,11 @@ interface CensusEntry {
  * [#23050 slice 13d] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0 + 0 + 0,
  * unchanged: the history family (`meta-item-history-routes.ts`) builds no
  * `query:` slot either, so the moved module's floor is 0.
+ *
+ * [#23050 slice 13e] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0 + 0 + 0 + 0,
+ * unchanged: neither the object state-machine read (`meta-object-state-routes.ts`)
+ * nor the published read (now in `meta-item-history-routes.ts`) builds a `query:`
+ * slot, so the new module's floor is 0 and the history module's stays 0.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 0,
@@ -212,6 +217,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'meta-item-read-routes.ts': 0,
     'meta-item-write-routes.ts': 0,
     'meta-item-history-routes.ts': 0,
+    'meta-object-state-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -417,7 +423,9 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // carry no slot).
         // [#23050 slice 13d] Length 16 → 17, the sum unchanged (the history family
         // carries no slot).
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(17);
+        // [#23050 slice 13e] Length 17 → 18, the sum unchanged (neither the object
+        // state-machine read nor the published read carries a slot).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

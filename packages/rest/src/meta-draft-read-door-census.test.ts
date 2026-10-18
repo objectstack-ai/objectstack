@@ -280,7 +280,12 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // carrying no draft switch: none of its five doors reads one, so no ledger row
         // changed:
         // 8 = 0 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3 + 2 + 1 + 0, length 16 → 17.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(17);
+        // [#23050 slice 13e] The object state-machine read moved to
+        // `meta-object-state-routes.ts`, and the published read to
+        // `meta-item-history-routes.ts`, carrying no draft switch: neither door reads
+        // one, so no ledger row changed:
+        // 8 = 0 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3 + 2 + 1 + 0 + 0, length 17 → 18.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });
