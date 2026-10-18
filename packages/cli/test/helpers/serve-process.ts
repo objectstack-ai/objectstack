@@ -873,6 +873,13 @@ export function childEnv(
 export interface ServeRun {
   stdout: string;
   stderr: string;
+  /**
+   * The port the child BOUND, read back out of its own ready banner — the only
+   * number a caller may address the child on. `undefined` when the run ended
+   * without a complete banner (a boot that died, or a `waitFor` that matched
+   * an earlier line, as `serve-no-artifact`'s refusals do).
+   */
+  port: number | undefined;
 }
 
 /**
@@ -922,8 +929,17 @@ function portOf(args: string[]): string | undefined {
  *     free port and boots clean. Read the docblock there for why a green is the
  *     more expensive outcome of the two.
  *
- * Only the SECOND needs the caller to have passed `--port`; both read the
+ * Both apply only to a caller that passed `--port` itself; both read the
  * child's own output for the port they name, never the harness's expectation.
+ *
+ * ⭐ A caller that passes NO `--port` gets {@link KERNEL_ASSIGNED_PORT} (#24342):
+ * the child's own `listen()` picks the port, so no released number crosses a
+ * gap and there is nothing to contend for or drift from. The drift check then
+ * becomes the read-back: a complete banner must name the non-zero port the
+ * child bound ({@link readKernelAssignedPort} — an unreadable `API:` row or an
+ * announced `localhost:0` rejects), and that port is the returned `port`.
+ * ⛔ So a test of the port doors themselves (`OS_PORT`, `PORT`, the built-in
+ * default) cannot ride this default; it passes the port it means explicitly.
  *
  * `waitFor` is matched against **stdout and stderr together** (#7915). `serve`
  * writes every human line — banner, boot progress, kernel logs — to stderr now,
@@ -941,8 +957,10 @@ export function runServe(
   // exercises use `??` and an empty string is not nullish.
   opts: { waitFor: RegExp; timeoutMs?: number; config?: string; env?: Record<string, string | undefined> },
 ): Promise<ServeRun> {
+  const requested = portOf(args);
+  const argv = requested === undefined ? [...args, '--port', KERNEL_ASSIGNED_PORT] : args;
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...args], {
+    const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...argv], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header for the
       // measured reason (commit 1ddda1d00).
@@ -980,7 +998,20 @@ export function runServe(
         return;
       }
       const what = 'os serve (bin/run-dev.js, via runServe)';
-      const contended = portContentionError(stdout + stderr, what, portOf(args));
+      const output = stdout + stderr;
+      if (requested === undefined) {
+        // Kernel-assigned (#24342): no `portContentionError()` — this child was
+        // handed no number to lose, so a port it could not bind is not that race.
+        if (boundPortFromBanner(output).state === 'no-banner') {
+          resolveRun({ stdout, stderr, port: undefined });
+          return;
+        }
+        const bound = readKernelAssignedPort(output, what);
+        if (bound instanceof Error) rejectRun(bound);
+        else resolveRun({ stdout, stderr, port: bound });
+        return;
+      }
+      const contended = portContentionError(output, what, requested);
       if (contended) {
         rejectRun(contended);
         return;
@@ -989,12 +1020,13 @@ export function runServe(
       // succeeded. `bin/run-dev.js` pins `NODE_ENV=development`, so the branch
       // above (a loud refusal to bind) is not the one these children take; this
       // is. See `portDriftError`.
-      const drifted = portDriftError(stdout + stderr, what, portOf(args));
+      const drifted = portDriftError(output, what, requested);
       if (drifted) {
         rejectRun(drifted);
         return;
       }
-      resolveRun({ stdout, stderr });
+      const readback = boundPortFromBanner(output);
+      resolveRun({ stdout, stderr, port: readback.state === 'bound' ? readback.port : undefined });
     };
 
     const timer = setTimeout(

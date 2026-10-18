@@ -54,7 +54,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runServe, randomPort } from './helpers/serve-process.js';
+import { runServe } from './helpers/serve-process.js';
 
 /** An ordinary app: manifest + an object, exactly what `os init` scaffolds. */
 const APP_CONFIG = `
@@ -159,7 +159,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
   it(
     'serves an app defined only by objectstack.config.ts',
     async () => {
-      const { stdout, stderr } = await runServe(appDir, ['--port', randomPort()], {
+      const { stdout, stderr } = await runServe(appDir, [], {
         waitFor: /Press Ctrl\+C to stop/,
         timeoutMs: 240_000,
       });
@@ -195,7 +195,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
   it(
     'serves a config authored through defineStack(), the shape every real project has (#3887)',
     async () => {
-      const { stdout, stderr } = await runServe(defineStackDir, ['--port', randomPort()], {
+      const { stdout, stderr } = await runServe(defineStackDir, [], {
         waitFor: /Press Ctrl\+C to stop/,
         timeoutMs: 240_000,
       });
@@ -236,7 +236,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
   it(
     'serves a config with no application at all',
     async () => {
-      const { stdout, stderr } = await runServe(bareDir, ['--port', randomPort()], {
+      const { stdout, stderr } = await runServe(bareDir, [], {
         waitFor: /Press Ctrl\+C to stop/,
         timeoutMs: 240_000,
       });
@@ -262,7 +262,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
     async () => {
       const emptyDir = mkdtempSync(join(tmpdir(), 'os-nothing-to-serve-'));
       try {
-        const { stdout, stderr } = await runServe(emptyDir, ['--port', randomPort()], {
+        const { stdout, stderr } = await runServe(emptyDir, [], {
           // It never boots, so wait on something that can only appear on the way
           // down; the harness resolves on exit regardless.
           waitFor: /Nothing to serve/,
@@ -295,7 +295,7 @@ describe('os serve — boots without a compiled artifact (#4085)', () => {
   it(
     'serves on, and says why, when the config carries an app it cannot register',
     async () => {
-      const { stdout, stderr } = await runServe(orphanDir, ['--port', randomPort()], {
+      const { stdout, stderr } = await runServe(orphanDir, [], {
         waitFor: /Press Ctrl\+C to stop/,
         timeoutMs: 240_000,
       });
