@@ -180,7 +180,11 @@ const REPO_ROOT = fileURLToPath(new URL('../../../..', import.meta.url));
  */
 const TRANSPORT_LEDGER: Record<string, 'guarded' | 'propagates'> = {
   'packages/rest/src/rest-server.ts': 'guarded',
-  'packages/runtime/src/security/resolve-execution-context.ts': 'propagates',
+  // The one request-to-ExecutionContext composition (ruling record 6227928430,
+  // letter A). It catches nothing around the resolver: every door that calls
+  // it — the runtime dispatcher's `resolve-execution-context.ts` first —
+  // receives the outage and answers it at its own net.
+  'packages/core/src/security/request-execution-context.ts': 'propagates',
   'packages/mcp/src/plugin.ts': 'propagates',
   'packages/services/service-datasource/src/admin-routes.ts': 'guarded',
   'packages/services/service-settings/src/settings-service-plugin.ts': 'guarded',
