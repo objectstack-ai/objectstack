@@ -81,10 +81,9 @@ import {
   CLI,
   childEnv,
   E2E_SECRET_KEY,
-  portContentionError,
-  portDriftError,
+  KERNEL_ASSIGNED_PORT,
   probeThroughChild,
-  randomPort,
+  readKernelAssignedPort,
   TSX,
 } from './helpers/serve-process.js';
 import { defineStackSourceFromLiteral, linkSpec, writeDefineStackConfig } from './helpers/define-stack-fixture.js';
@@ -125,7 +124,7 @@ interface Live {
   output: () => string;
 }
 
-function boot(argv: string[], cwd: string, port: string, env: Record<string, string | undefined>): Promise<Live> {
+function boot(argv: string[], cwd: string, env: Record<string, string | undefined>): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(TSX, [CLI, ...argv], {
       cwd,
@@ -147,12 +146,12 @@ function boot(argv: string[], cwd: string, port: string, env: Record<string, str
     groups.push(child);
     let out = '';
     let settled = false;
-    const settle = (err: Error | null) => {
+    const settle = (verdict: Error | number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (err) rejectBoot(err);
-      else resolveBoot({ child, base: `http://localhost:${port}`, output: () => out });
+      if (verdict instanceof Error) rejectBoot(verdict);
+      else resolveBoot({ child, base: `http://localhost:${verdict}`, output: () => out });
     };
     const timer = setTimeout(
       () => settle(new Error(`${argv[0]} never printed ${READY}\n--- output ---\n${out.slice(-4000)}`)),
@@ -160,13 +159,13 @@ function boot(argv: string[], cwd: string, port: string, env: Record<string, str
     );
     const onData = (d: unknown) => {
       out += String(d);
-      if (READY.test(out)) settle(portDriftError(out, `os ${argv[0]}`, port));
+      // The child is the authority on the port it bound: a kernel-assigned one (#24342).
+      if (READY.test(out)) settle(readKernelAssignedPort(out, `os ${argv[0]}`));
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('exit', (code) =>
-      settle(portContentionError(out, `os ${argv[0]}`, port)
-        ?? new Error(`os ${argv[0]} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
+      settle(new Error(`os ${argv[0]} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
     );
   });
 }
@@ -250,10 +249,9 @@ interface Reading {
 }
 
 async function measure(argv: string[], cwd: string, env: Record<string, string | undefined> = {}): Promise<Reading> {
-  const port = randomPort();
   let live: Live | undefined;
   try {
-    live = await boot([...argv.slice(0, 1), '-p', port, ...argv.slice(1)], cwd, port, env);
+    live = await boot([...argv.slice(0, 1), '-p', KERNEL_ASSIGNED_PORT, ...argv.slice(1)], cwd, env);
     const signIn = await http(live, 'POST', '/api/v1/auth/sign-in/email', '', { email: EMAIL, password: PASSWORD });
     const token = signIn.body?.token;
     if (signIn.status !== 200 || typeof token !== 'string') {

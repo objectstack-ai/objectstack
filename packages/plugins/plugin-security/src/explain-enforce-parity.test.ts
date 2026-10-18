@@ -58,16 +58,11 @@
  *
  * ## Measured divergences
  *
- * Two disagreements this table measured are findings of this card, reported
- * and not fixed here. Their rows carry the finding's name and assert the
+ * A disagreement this table measured is a finding of this card, reported and
+ * not fixed here. Its rows carry the finding's name and assert the
  * disagreement itself, so they turn red the day either face moves, and the row
  * then joins the invariant:
  *
- * - `NATIVE_SCOPING_UNDER_SINGLE` (explain's side): under `single` the engine
- *   still scopes a tenant object's read to the context's organization, which
- *   explain's tenant layer does not report. Its `readFilter` row measures it;
- *   its record row joined the invariant once the record story was gated on the
- *   asker's own read (#22792), which that scoping answers.
  * - `CLAIM_KEPT_UNDER_A_WALL` (enforcement's side): with `org-scoping` and no
  *   `tenancy` service, admission reads no posture and never drops a removed
  *   member's organization claim, while this plugin walls Layer 0 at
@@ -874,18 +869,6 @@ function principalRows(
 }
 
 /**
- * Under `single` there is no tenant wall, yet the engine still scopes a tenant
- * object's read to the context's organization (driver-native tenant scoping,
- * any posture). Explain's tenant layer contributes nothing under `single`, so
- * its `readFilter` reports the other organization's rows as served. Explain's
- * side; a finding of this card, not fixed here. [#22792] The record verdict no
- * longer carries it: whether an explanation may say a record exists is the
- * asker's own by-id read, which that same native scoping answers, so the other
- * organization's row is answered as an id no row carries.
- */
-const NATIVE_SCOPING_UNDER_SINGLE =
-  'under `single`, the engine scopes the read to the context organization; explain reports the other organization\'s row';
-/**
  * With `org-scoping` and no `tenancy` service, admission hands the resolver no
  * posture, so a removed member's organization claim is never dropped, while
  * this plugin probes `org-scoping` and walls Layer 0 at `isolated`. Explain
@@ -963,15 +946,13 @@ const TABLE: Row[] = [
     removed: { LEDGER: REFUSED_DENIED, PROBE: REFUSED_DENIED, NOTES: REFUSED_DENIED },
     member: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
   }),
+  // [ADR-0131 D8] The `single` rows joined the invariant: the driver's read
+  // scope is the wall's verdict, and under `single` that verdict is `none`, so
+  // the engine no longer narrows the read to the context organization that
+  // explain's tenant layer (correctly) never reported.
   ...principalRows('#20580 control · #20604 P3', { tenancy: 'single' }, '`single`', {
     removed: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
     member: { LEDGER: 'rows', PROBE: 'rows', NOTES: REFUSED_DENIED },
-  }, {
-    // [#22792] `record:l_beta` joined the invariant: the asker's own read is
-    // scoped to the context organization the same way, so the record verdict
-    // is the missing record's, as the explained user's read answers.
-    removed: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE },
-    member: { 'readFilter:LEDGER': NATIVE_SCOPING_UNDER_SINGLE },
   }),
   // The posture-source asymmetry: the member's rows hold; the removed member's are enforcement's finding.
   ...principalRows('#20604 A4', { orgScopingOnly: true }, '`org-scoping` with no `tenancy` service', {

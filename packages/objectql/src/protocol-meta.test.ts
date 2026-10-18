@@ -75,14 +75,16 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         };
 
         it('getMetaItem serves the environment row, and never names an organization', async () => {
-            mockEngine.findOne.mockImplementation(envOnly(
-                { type: 'view', name: 'test_grid', state: 'active', metadata: JSON.stringify({ ...sampleView, label: 'Env Default' }) },
-            ));
+            // [#24371] The item's active rows are ONE `find`; the head read
+            // behind `version` is a `findOne`. Neither names an organization.
+            const envRow = { type: 'view', name: 'test_grid', state: 'active', metadata: JSON.stringify({ ...sampleView, label: 'Env Default' }) };
+            mockEngine.find.mockImplementation(envOnly([envRow]));
+            mockEngine.findOne.mockImplementation(envOnly(envRow));
             const result = await protocol.getMetaItem({
                 type: 'view', name: 'test_grid', organizationId: 'org_alpha',
             } as { type: string; name: string });
             expect((result.item as any).label).toBe('Env Default');
-            for (const [table, query] of mockEngine.findOne.mock.calls) {
+            for (const [table, query] of [...mockEngine.find.mock.calls, ...mockEngine.findOne.mock.calls]) {
                 if (table === 'sys_metadata') expect((query as any)?.where ?? {}).not.toHaveProperty('organization_id');
             }
         });
@@ -161,12 +163,16 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         });
 
         it('falls back to active when previewDrafts but no draft exists (no no_draft 404)', async () => {
+            const active = { type: 'object', name: 'lead', state: 'active', metadata: JSON.stringify({ name: 'lead', label: 'Active Lead' }) };
             mockEngine.findOne.mockImplementation((_t: string, opts: any) => {
                 const w = opts?.where ?? {};
-                if (w.state === 'active' && w.name === 'lead') {
-                    return Promise.resolve({ type: 'object', name: 'lead', state: 'active', metadata: JSON.stringify({ name: 'lead', label: 'Active Lead' }) });
-                }
+                if (w.state === 'active' && w.name === 'lead') return Promise.resolve(active);
                 return Promise.resolve(null); // no draft row
+            });
+            // [#24371] The active rows are one `find` (both spellings).
+            mockEngine.find.mockImplementation((_t: string, opts: any) => {
+                const w = opts?.where ?? {};
+                return Promise.resolve(w.state === 'active' && w.name === 'lead' ? [active] : []);
             });
             const res: any = await protocol.getMetaItem({ type: 'object', name: 'lead', previewDrafts: true });
             expect(res.item.label).toBe('Active Lead');
@@ -602,10 +608,11 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             const result = await protocol.getMetaItem({ type: 'app', name: 'test_app' });
 
             // Registry value is still returned (no overlay row exists),
-            // but sys_metadata MUST have been queried.
+            // but sys_metadata MUST have been queried — [#24371] in ONE read
+            // of the item's active rows under both spellings.
             expect(result.item).toMatchObject(sampleApp);
-            expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
-                where: expect.objectContaining({ type: 'app', name: 'test_app', state: 'active' }),
+            expect(mockEngine.find).toHaveBeenCalledWith('sys_metadata', expect.objectContaining({
+                where: { type: { $in: ['app', 'apps'] }, name: 'test_app', state: 'active' },
             }));
         });
 
@@ -619,18 +626,20 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         });
 
         it('should return overlay row content from DB when present', async () => {
-            mockEngine.findOne.mockResolvedValue({
+            mockEngine.find.mockResolvedValue([{
                 type: 'app',
                 name: 'test_app',
                 state: 'active',
                 metadata: JSON.stringify(sampleApp),
-            });
+            }]);
 
             const result = await protocol.getMetaItem({ type: 'app', name: 'test_app' });
 
             expect(result.item).toMatchObject(sampleApp);
-            expect(mockEngine.findOne).toHaveBeenCalledWith('sys_metadata', {
-                where: { type: 'app', name: 'test_app', state: 'active' },
+            // [#24371] The item's active rows, both spellings, in ONE read.
+            expect(mockEngine.find).toHaveBeenCalledTimes(1);
+            expect(mockEngine.find).toHaveBeenCalledWith('sys_metadata', {
+                where: { type: { $in: ['app', 'apps'] }, name: 'test_app', state: 'active' },
                 // [#21911] The platform store read carries the explicit system opt-in.
                 context: { isSystem: true },
             });
@@ -653,28 +662,30 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         });
 
         it('should try alternate type name in DB when primary type not found', async () => {
-            // 'app' not found, try 'apps'
-            mockEngine.findOne
-                .mockResolvedValueOnce(null) // first call: type='app' not found
-                .mockResolvedValueOnce({    // second call: type='apps' found
-                    type: 'apps',
-                    name: 'test_app',
-                    state: 'active',
-                    metadata: JSON.stringify(sampleApp),
-                });
+            // Only an 'apps' row is stored: the canonical 'app' has none.
+            mockEngine.find.mockResolvedValue([{
+                type: 'apps',
+                name: 'test_app',
+                state: 'active',
+                metadata: JSON.stringify(sampleApp),
+            }]);
 
             const result = await protocol.getMetaItem({ type: 'app', name: 'test_app' });
 
             expect(result.item).toMatchObject(sampleApp);
-            // Two overlay reads, the canonical spelling and then the other —
+            // [#24371] ONE overlay read, both spellings (the served row is the
+            // canonical spelling's, else the other's, selected from it) —
             // and [#22114] then ONE head read at the SAVE's address (canonical
             // spelling, env-wide, package-unbound), which serves the read's
             // `version`. The row served here sits under the other spelling,
             // which no save writes, so that head is empty and `version` is null.
-            const reads = mockEngine.findOne.mock.calls.map(([table, opts]: any[]) => ({ table, where: opts?.where }));
-            expect(reads.map((r: any) => r.where?.type)).toEqual(['app', 'apps', 'app']);
-            expect(reads.every((r: any) => r.table === 'sys_metadata')).toBe(true);
-            expect(reads[2].where).toMatchObject({
+            expect(mockEngine.find.mock.calls.map(([table, opts]: any[]) => [table, opts?.where])).toEqual([
+                ['sys_metadata', { type: { $in: ['app', 'apps'] }, name: 'test_app', state: 'active' }],
+            ]);
+            const heads = mockEngine.findOne.mock.calls.map(([table, opts]: any[]) => ({ table, where: opts?.where }));
+            expect(heads).toHaveLength(1);
+            expect(heads[0].table).toBe('sys_metadata');
+            expect(heads[0].where).toMatchObject({
                 type: 'app', name: 'test_app', state: 'active', package_id: null,
             });
             expect((result as any).version).toBeNull();
@@ -699,6 +710,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
         // reason; everything else is reported.
         it('an unreadable store is REPORTED, not answered as an absent item (#5532)', async () => {
             const outage = new Error('DB down');
+            mockEngine.find.mockRejectedValue(outage);
             mockEngine.findOne.mockRejectedValue(outage);
 
             await expect(protocol.getMetaItem({ type: 'app', name: 'test_app' }))
@@ -710,6 +722,7 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             // rows, so the registry answer is the truth and first boot must not
             // explode. This is the half of the old test that was right.
             registry.registerItem('app', sampleApp, 'name' as any);
+            mockEngine.find.mockRejectedValue(new Error('SQLITE_ERROR: no such table: sys_metadata'));
             mockEngine.findOne.mockRejectedValue(new Error('SQLITE_ERROR: no such table: sys_metadata'));
 
             const result = await protocol.getMetaItem({ type: 'app', name: 'test_app' });
@@ -799,6 +812,11 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
             mockEngine.findOne.mockImplementation(async (_collection: string, query: any) =>
                 query?.where?.package_id ? (rows[query.where.package_id] ?? null) : null,
             );
+            // [#24371] The item's active rows are one `find`, and the served
+            // row is selected from them by the same package-scoped `where`.
+            mockEngine.find.mockImplementation(async (_collection: string, query: any) =>
+                query?.where?.name === 'intro' && query?.where?.state === 'active' ? Object.values(rows) : [],
+            );
 
             const studio = await protocol.getMetaItem({ type: 'doc', name: 'intro', packageId: 'com.objectstack.studio' });
             const setup = await protocol.getMetaItem({ type: 'doc', name: 'intro', packageId: 'com.objectstack.setup' });
@@ -815,6 +833,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 state: 'active',
                 metadata: JSON.stringify(complexData),
             });
+            // [#24371] The item's active rows are one `find` (both spellings).
+            mockEngine.find.mockResolvedValue([{
+                type: 'object',
+                name: 'complex',
+                state: 'active',
+                metadata: JSON.stringify(complexData),
+            }]);
 
             const result = await protocol.getMetaItem({ type: 'object', name: 'complex' });
 
@@ -828,6 +853,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 state: 'active',
                 metadata: sampleApp, // already an object, not a string
             });
+            // [#24371] The item's active rows are one `find` (both spellings).
+            mockEngine.find.mockResolvedValue([{
+                type: 'app',
+                name: 'test_app',
+                state: 'active',
+                metadata: sampleApp, // already an object, not a string
+            }]);
 
             const result = await protocol.getMetaItem({ type: 'app', name: 'test_app' });
 
@@ -856,6 +888,13 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 state: 'active',
                 metadata: JSON.stringify(sampleObject),
             });
+            // [#24371] The item's active rows are one `find` (both spellings).
+            mockEngine.find.mockResolvedValue([{
+                type: 'object',
+                name: 'customer',
+                state: 'active',
+                metadata: JSON.stringify(sampleObject),
+            }]);
         });
 
         it('produces distinct ETags for distinct locales', async () => {
@@ -1957,16 +1996,23 @@ describe('ObjectStackProtocolImplementation - Metadata Persistence', () => {
                 state: 'active',
                 metadata: JSON.stringify(userHook),
             });
+            // [#24371] The item's active rows are one `find` (both spellings).
+            mockEngine.find.mockResolvedValue([{
+                type: 'hook',
+                name: 'my_runtime_hook',
+                state: 'active',
+                metadata: JSON.stringify(userHook),
+            }]);
 
             const result = await scoped.getMetaItem({ type: 'hook', name: 'my_runtime_hook' });
 
             expect(result.item).toMatchObject(userHook);
             // The first call must query sys_metadata — proves the read
             // path consults the DB regardless of supportsOverlay:false.
-            expect(mockEngine.findOne).toHaveBeenCalledWith(
+            expect(mockEngine.find).toHaveBeenCalledWith(
                 'sys_metadata',
                 expect.objectContaining({
-                    where: expect.objectContaining({ type: 'hook', name: 'my_runtime_hook', state: 'active' }),
+                    where: expect.objectContaining({ type: { $in: ['hook', 'hooks'] }, name: 'my_runtime_hook', state: 'active' }),
                 }),
             );
         });

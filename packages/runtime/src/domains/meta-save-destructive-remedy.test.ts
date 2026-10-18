@@ -98,6 +98,12 @@ interface StoredRow {
     state: string; metadata: string; checksum: string; version: number;
 }
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 function boot() {
     const rows = new Map<string, StoredRow>();
     rows.set('row_task', {
@@ -142,7 +148,7 @@ function boot() {
         return Object.entries(where ?? {}).every(([k, v]) =>
             v === null || v === undefined
                 ? r[k] === null || r[k] === undefined
-                : r[k] === v,
+                : whereValueMatches(r[k], v),
         );
     };
 

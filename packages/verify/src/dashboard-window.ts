@@ -7,8 +7,8 @@
 // ## The promise, and where each half of it is read from
 //
 // A dashboard's `dateRange` is a picker. Each widget it binds is narrowed to
-// the picked window on one of the widget's own fields, and the widget's count
-// is the count of the rows that window selects. Three published sources:
+// the picked window on one of the widget's own fields, and the widget's
+// measure is taken over the rows that window selects. Three published sources:
 //
 //   - WHICH field a widget's window lands on: `DashboardWidgetSchema.filterBindings`
 //     (`@objectstack/spec/ui`). A string binds the built-in date range to that
@@ -34,36 +34,58 @@
 // ## The door, and who walks through it
 //
 // `POST {basePath}/analytics/dataset/query` with the saved dataset's name and
-// the widget's own selection (its dimensions, one count measure, and its
-// filter with the window ANDed in as `runtimeFilter`) — the request a
-// dashboard widget makes — as the signed-in principal the caller hands in.
-// `{current_user_id}` in a widget's filter is that principal.
+// the widget's own selection (its dimensions, one measure, and its filter with
+// the window ANDed in as `runtimeFilter`) — the request a dashboard widget
+// makes — as the signed-in principal the caller hands in. `{current_user_id}`
+// in a widget's filter is that principal.
 //
 // ## The ground truth, and the control that keeps it honest
 //
-// Per widget and count measure, fixture rows are written through the seed door
+// Per widget and measure, fixture rows are written through the seed door
 // (system, hooks and validations live) on known days that straddle every
 // preset's past edges, each row stamped at UTC noon (a `date` field takes the
 // day itself), with every column the widget's own filter, the dataset's filter
 // and the measure's filter read held to a value those filters select, and
 // owned by the principal. Each row is read back: a row whose stamp or held
 // columns do not read back as written (an app hook rewrote them) makes the
-// probe not run, never contradicted. Every answer is a DIFFERENCE — the count
-// after the fixtures minus the count before, under the same window — so the
-// app's own rows cancel out. The control leg is the widget with no window: it
-// must count every fixture row, or the fixtures do not meet the widget's own
-// selection and no window is judged.
+// probe not run, never contradicted. Every answer is a DIFFERENCE — the
+// measure after the fixtures minus the measure before, under the same window —
+// so the app's own rows cancel out. The control leg is the widget with no
+// window: it must take in every fixture row, or the fixtures do not meet the
+// widget's own selection and no window is judged.
+//
+// Every verdict is in fixture rows, so a measure is compared only where a
+// difference can be read back as rows — where the measure is ADDITIVE:
+//
+//   - a `count` adds one per fixture row (a count of a named field: the
+//     fixtures carry a value there);
+//   - a `sum` adds the value each fixture row carries in the summed field,
+//     held to the one the CRUD derivation synthesizes, so its difference over
+//     that value is the rows it took in;
+//   - a `derived` measure (`ratio`, `sum`, `difference`, `product`) is read
+//     through its operands, which the widget's own answer carries beside it:
+//     each operand must be a count or a sum, the fixtures meet every operand's
+//     filter, every operand must take in exactly the rows the window selects,
+//     and the value the widget shows must be the server's own evaluator
+//     (`evaluateDerivedMeasures`) applied to those operands, row by row.
+//
+// An `avg`, `min`, `max` or `count_distinct` is not additive: what a fixture
+// row does to it depends on the rows the app already holds in the window
+// (their number, their extreme, their values), which nothing the widget
+// answers reveals. Deriving it would mean guessing that data, so such a
+// measure, and a derived measure over one, is excluded with that reason.
 //
 // Three verdicts per preset: the widget is not blank where the window holds
-// fixture rows; its count equals the rows the window selects; and a narrower
-// preset never answers more than a wider one (a window that never narrows is
-// inert, a finding).
+// fixture rows; it takes in exactly the rows the window selects; and a
+// narrower preset never takes in more than a wider one (a window that never
+// narrows is inert, a finding).
 //
 // Run it on a fresh stack of its own: it writes fixtures.
 
 import { DashboardSchema, DatasetSchema } from '@objectstack/spec/ui';
 import { DATE_RANGE_PRESETS, DATE_RANGE_PRESET_MACRO_WINDOWS, type DateRangePreset } from '@objectstack/spec/data';
 import { resolveFilterTokens } from '@objectstack/core';
+import { evaluateDerivedMeasures } from '@objectstack/service-analytics';
 import { declaredCollection } from './artifact-collections.js';
 import { deriveCrudCases, fillRelationalRefs, fixtureBody, type CrudCase } from './derive.js';
 import type { VerifyStack } from './harness.js';
@@ -86,7 +108,14 @@ const CURRENT_USER_TOKEN = '{current_user_id}';
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
-/** Why the family cannot compare a widget, or one of its measures. */
+/**
+ * Why the family cannot compare a widget, or one of its measures. Three name
+ * the measure: `not-a-count` — it is not additive (`avg`, `min`, `max`,
+ * `count_distinct`), or derived over a measure that is not, or derived over a
+ * derived one; `count-field-unsynthesizable` — the field a count or a sum
+ * reads cannot be held on a fixture row; `no-count-measure` — no measure the
+ * widget selects can be compared.
+ */
 export type DashboardWindowExclusion =
   | 'dashboard-unparsed'
   | 'dataset-undeclared'
@@ -158,7 +187,7 @@ export interface DashboardWindowPreset {
 export interface DashboardWindowAnswer {
   kind: 'answered' | 'refused' | 'faulted';
   status: number;
-  /** The measure summed over every returned row. */
+  /** The measure summed over every returned row (a null value adds nothing). */
   count?: number;
   rows?: number;
   code?: string;
@@ -170,16 +199,24 @@ export interface DashboardWindowPresetProbe {
   preset: DateRangePreset;
   /** Fixture rows the window selects (the ground truth). */
   expected: number;
-  /** The count the window added once the fixtures were written (after minus before). */
+  /**
+   * The fixture rows the window added once the fixtures were written (after
+   * minus before): a count's difference; a sum's difference over the value
+   * each fixture row carries; a derived measure's operands', which must agree
+   * (the first one that does not, when they do not).
+   */
   answered?: number;
-  /** The count the widget showed after the fixtures, all rows included. */
+  /** The measure the widget showed after the fixtures, summed over its rows. */
   shown?: number;
   /**
-   * - `held`         — the window counted exactly the fixture rows it selects;
+   * - `held`         — the window took in exactly the fixture rows it selects
+   *                    (and a derived measure showed its operands' value);
    * - `blank`        — it showed nothing where it selects fixture rows;
-   * - `contradicted` — it counted another number of them;
+   * - `contradicted` — it took in another number of them, or a derived measure
+   *                    showed another value than its operands make;
    * - `failed`       — the door refused or faulted on the windowed query (the unwindowed one answered);
-   * - `not-run`      — the fixtures could not be written, or the day turned mid-probe.
+   * - `not-run`      — the fixtures could not be written, the day turned mid-probe,
+   *                    or a sum's own total is too large to resolve one fixture row.
    */
   outcome: 'held' | 'blank' | 'contradicted' | 'failed' | 'not-run';
   answer?: DashboardWindowAnswer;
@@ -195,7 +232,7 @@ export interface DashboardWindowMeasureResult {
   days?: string[];
   /** `smallest` — the required fields only; `every-field` — the seed door refused that, so every field the CRUD derivation synthesizes. */
   fixture?: 'smallest' | 'every-field';
-  /** The control leg: the widget with no window must count every fixture row. */
+  /** The control leg: the widget with no window must take in every fixture row. */
   unwindowed?: { expected: number; answered?: number; answer?: DashboardWindowAnswer };
   presets: DashboardWindowPresetProbe[];
   /** Every preset answered what the unwindowed query answered: the window never narrows. */
@@ -279,6 +316,92 @@ const firstIssue = (error: any): string => {
   return `${issue?.path?.join('.') || 'root'}: ${clip(issue?.message, 120)}`;
 };
 
+/** An additive measure the family reads back as fixture rows: a count, or a sum. */
+interface AdditiveMeasure {
+  /** The measure's name — the column the door answers it under. */
+  name: string;
+  aggregate: 'count' | 'sum';
+  /** The field a count of a named field counts, or the field a sum sums. */
+  field?: string;
+  /** The measure's own scoped filter, as parsed. */
+  filter?: Record<string, unknown>;
+}
+
+/** How one probed measure is read back: its additive measures, and the derived value over them. */
+interface MeasurePlan {
+  /** The measure itself (a count or a sum), or a derived measure's operands. */
+  additive: AdditiveMeasure[];
+  derived?: { name: string; op: 'ratio' | 'sum' | 'difference' | 'product'; of: string[] };
+}
+
+type Excluded = { excluded: { kind: DashboardWindowExclusion; reason: string } };
+
+/** Why a non-additive aggregate cannot be read back as fixture rows. */
+function notAdditive(name: string, m: any): string {
+  const of = m.field ? ` of ${m.field}` : '';
+  switch (m.aggregate) {
+    case 'avg':
+      return `"${name}" averages${m.field ? ` ${m.field}` : ''}: an average is not additive — the rows the app already holds in the window enter its denominator, and an average does not say how many there are, so what the fixture rows change cannot be derived without guessing that number`;
+    case 'min':
+    case 'max':
+      return `"${name}" takes the ${m.aggregate === 'min' ? 'minimum' : 'maximum'}${of}: the fixture rows move it only where theirs is the extreme, which the rows the app already holds in the window decide`;
+    case 'count_distinct':
+      return `"${name}" counts the distinct values${of}: whether a fixture row adds one depends on the values the rows the app already holds in the window carry`;
+    default:
+      return `"${name}" aggregates ${m.aggregate ?? 'nothing'}${of}, which is not additive`;
+  }
+}
+
+/** A count or a sum, read from the dataset's parsed measure; anything else names why not. */
+function additiveOf(name: string, m: any): { measure: AdditiveMeasure } | Excluded {
+  const filter = nonEmpty(m.filter) ? { filter: m.filter } : {};
+  if (m.aggregate === 'count') {
+    if (typeof m.field === 'string' && m.field !== '*') {
+      if (m.field.includes('.')) {
+        return { excluded: { kind: 'count-field-unsynthesizable', reason: `"${name}" counts the relationship path ${m.field}, which a fixture row cannot be held to` } };
+      }
+      return { measure: { name, aggregate: 'count', field: m.field, ...filter } };
+    }
+    return { measure: { name, aggregate: 'count', ...filter } };
+  }
+  if (m.aggregate === 'sum' && typeof m.field === 'string') {
+    if (m.field.includes('.')) {
+      return { excluded: { kind: 'count-field-unsynthesizable', reason: `"${name}" sums the relationship path ${m.field}, which a fixture row cannot be held to` } };
+    }
+    return { measure: { name, aggregate: 'sum', field: m.field, ...filter } };
+  }
+  return { excluded: { kind: 'not-a-count', reason: notAdditive(name, m) } };
+}
+
+/**
+ * The plan for one measure a widget selects: a count or a sum is read back
+ * itself; a derived measure through its operands, each of which must be a
+ * count or a sum declared in the same dataset (the spec's parse already
+ * refuses an operand it does not declare).
+ */
+function planOf(name: string, measures: Map<string, any>, dataset: string): { plan: MeasurePlan } | Excluded {
+  const m = measures.get(name);
+  if (!m) return { excluded: { kind: 'measure-undeclared', reason: `dataset "${dataset}" declares no measure "${name}"` } };
+  if (!m.derived) {
+    const a = additiveOf(name, m);
+    return 'excluded' in a ? a : { plan: { additive: [a.measure] } };
+  }
+  const of: string[] = (m.derived.of ?? []).map(String);
+  const what = `"${name}" is derived (${m.derived.op} of ${of.join(', ')})`;
+  const additive: AdditiveMeasure[] = [];
+  for (const o of of) {
+    const om = measures.get(o);
+    if (!om) return { excluded: { kind: 'measure-undeclared', reason: `${what}, and dataset "${dataset}" declares no measure "${o}"` } };
+    if (om.derived) {
+      return { excluded: { kind: 'not-a-count', reason: `${what}, and its operand "${o}" is itself derived: a derived measure is read through operands that are counts or sums` } };
+    }
+    const a = additiveOf(o, om);
+    if ('excluded' in a) return { excluded: { kind: a.excluded.kind, reason: `${what}, and its operand ${a.excluded.reason}` } };
+    if (!additive.some((x) => x.name === o)) additive.push(a.measure);
+  }
+  return { plan: { additive, derived: { name, op: m.derived.op, of } } };
+}
+
 /**
  * Derive one case per widget of every dashboard the app declares with a
  * `dateRange`, as the spec's parse of the dashboard and of its datasets states
@@ -290,7 +413,12 @@ export function deriveDashboardWindowCases(config: any): DashboardWindowCase[] {
   return derive(config).cases;
 }
 
-function derive(config: any): { cases: DashboardWindowCase[]; dashboards: DashboardWindowDashboard[] } {
+function derive(config: any): {
+  cases: DashboardWindowCase[];
+  dashboards: DashboardWindowDashboard[];
+  plans: Map<DashboardWindowMeasureCase, MeasurePlan>;
+} {
+  const plans = new Map<DashboardWindowMeasureCase, MeasurePlan>();
   const crud = new Map<string, CrudCase>(deriveCrudCases(config).map((c) => [c.object, c]));
   const datasets = new Map<string, any>();
   for (const ds of declaredCollection(config, 'datasets')) if (ds?.name) datasets.set(ds.name, ds);
@@ -366,41 +494,29 @@ function derive(config: any): { cases: DashboardWindowCase[]; dashboards: Dashbo
 
       const measures = new Map<string, any>((dataset.measures ?? []).map((m: any) => [m.name, m]));
       for (const name of (Array.isArray(w?.values) ? w.values : []).map(String)) {
-        const m = measures.get(name);
         const mc: DashboardWindowMeasureCase = { measure: name };
         c.measures.push(mc);
-        if (!m) {
-          mc.excluded = { kind: 'measure-undeclared', reason: `dataset "${w.dataset}" declares no measure "${name}"` };
+        const planned = planOf(name, measures, String(w.dataset));
+        if ('excluded' in planned) {
+          mc.excluded = planned.excluded;
           continue;
         }
-        if (m.derived) {
-          mc.excluded = { kind: 'not-a-count', reason: `"${name}" is derived (${m.derived.op} of ${(m.derived.of ?? []).join(', ')}), not a row count` };
-          continue;
-        }
-        if (m.aggregate !== 'count') {
-          mc.excluded = { kind: 'not-a-count', reason: `"${name}" aggregates ${m.aggregate ?? 'nothing'}${m.field ? ` of ${m.field}` : ''}, not a row count` };
-          continue;
-        }
-        if (typeof m.field === 'string' && m.field !== '*') {
-          if (m.field.includes('.')) {
-            mc.excluded = { kind: 'count-field-unsynthesizable', reason: `"${name}" counts the relationship path ${m.field}, which a fixture row cannot be held to` };
-            continue;
-          }
-          mc.countField = m.field;
-        }
-        if (nonEmpty(m.filter)) mc.filter = m.filter;
+        plans.set(mc, planned.plan);
+        const own = planned.plan.derived ? undefined : planned.plan.additive[0]!;
+        if (own?.aggregate === 'count' && own.field) mc.countField = own.field;
+        if (own?.filter) mc.filter = own.filter;
       }
       if (c.measures.length > 0 && c.measures.every((m) => m.excluded)) {
-        const counts = c.measures.filter((m) => m.excluded!.kind !== 'not-a-count' && m.excluded!.kind !== 'measure-undeclared');
-        c.excluded = counts.length > 0
-          ? { kind: counts[0]!.excluded!.kind, reason: counts[0]!.excluded!.reason }
-          : { kind: 'no-count-measure', reason: `no measure the widget selects is a row count (${c.measures.map((m) => m.excluded!.reason).join('; ')})` };
+        const fields = c.measures.filter((m) => m.excluded!.kind !== 'not-a-count' && m.excluded!.kind !== 'measure-undeclared');
+        c.excluded = fields.length > 0
+          ? { kind: fields[0]!.excluded!.kind, reason: fields[0]!.excluded!.reason }
+          : { kind: 'no-count-measure', reason: `no measure the widget selects can be compared (${c.measures.map((m) => m.excluded!.reason).join('; ')})` };
       } else if (c.measures.length === 0) {
         c.excluded = { kind: 'no-count-measure', reason: 'the widget selects no measure' };
       }
     });
   }
-  return { cases, dashboards };
+  return { cases, dashboards, plans };
 }
 
 // ── Held columns: what the widget's own selection asks of a row ─────────────
@@ -512,31 +628,92 @@ const nestedIn = (a: Record<string, unknown>, b: Record<string, unknown>): boole
 
 // ── The verdict ─────────────────────────────────────────────────────────────
 
+/** One door answer, with the rows it returned. */
+interface Asked {
+  answer: DashboardWindowAnswer;
+  rows: Array<Record<string, unknown>>;
+}
+
+/** A column summed over an answer's rows (a null value adds nothing). */
+const total = (asked: Asked, column: string): number => asked.rows.reduce((s, r) => s + (Number(r?.[column]) || 0), 0);
+
+/**
+ * The fixture rows one additive measure took in between two answers under the
+ * same window: a count's difference, or a sum's difference over the value
+ * each fixture row carries (`unit`). A sum of float values is snapped to the
+ * nearest whole row only within its own rounding noise (2^-36 of its
+ * magnitude: a naive float sum of up to 2^17 rows); where that noise reaches a
+ * quarter of a row, one row cannot be resolved and `undefined` is returned.
+ */
+function rowsTakenIn(before: Asked, after: Asked, a: AdditiveMeasure, unit: number): number | undefined {
+  const b = total(before, a.name);
+  const x = total(after, a.name);
+  if (a.aggregate === 'count') return x - b;
+  const noise = (Math.max(Math.abs(b), Math.abs(x), 1) * 2 ** -36) / Math.abs(unit);
+  if (noise >= 0.25) return undefined;
+  const rows = (x - b) / unit;
+  const whole = Math.round(rows);
+  return Math.abs(rows - whole) <= noise ? whole : rows;
+}
+
+/** The first row whose derived value is not the server's own evaluator over that row's operands. */
+function inconsistentRow(after: Asked, d: NonNullable<MeasurePlan['derived']>): string | undefined {
+  for (const row of after.rows) {
+    const made = evaluateDerivedMeasures([row], [d])[0]?.[d.name] ?? null;
+    const shown = row?.[d.name] ?? null;
+    if (made === null || shown === null ? made === shown : Number(made) === Number(shown)) continue;
+    const operands = d.of.map((o) => `${o} = ${JSON.stringify(row?.[o] ?? null)}`).join(', ');
+    return `the widget shows ${d.name} = ${JSON.stringify(shown)} where its operands in the same row (${operands}) make ${JSON.stringify(made)}`;
+  }
+  return undefined;
+}
+
 /**
  * Compare one windowed answer against the ground truth. The whole verdict of
  * the family is this function: it reads the expectation and the door's two
- * answers under the same window, and nothing else.
+ * answers under the same window, and nothing else. Every additive measure the
+ * plan reads (the measure itself, or a derived measure's operands) must take
+ * in exactly the fixture rows the window selects, and a derived measure must
+ * show the server's evaluator over its operands.
  */
 function judge(
   expected: number,
-  before: DashboardWindowAnswer,
-  after: DashboardWindowAnswer,
+  before: Asked,
+  after: Asked,
+  plan: MeasurePlan,
+  units: Map<string, number>,
 ): Pick<DashboardWindowPresetProbe, 'outcome' | 'answered' | 'shown' | 'detail'> {
-  const failed = before.kind !== 'answered' ? before : after.kind !== 'answered' ? after : undefined;
+  const failed = before.answer.kind !== 'answered' ? before.answer : after.answer.kind !== 'answered' ? after.answer : undefined;
   if (failed) {
     return { outcome: 'failed', detail: `the windowed query answered ${failed.status}${failed.code ? ` ${failed.code}` : ''}: ${failed.detail ?? ''}` };
   }
-  const answered = after.count! - before.count!;
-  const shown = after.count!;
-  if (expected > 0 && (after.rows === 0 || shown === 0)) {
-    return { outcome: 'blank', answered, shown, detail: `the widget showed nothing where the window selects ${expected} fixture row(s)` };
+  const shown = after.answer.count!;
+  const taken: Array<{ a: AdditiveMeasure; rows: number }> = [];
+  for (const a of plan.additive) {
+    const rows = rowsTakenIn(before, after, a, units.get(a.name)!);
+    if (rows === undefined) {
+      return { outcome: 'not-run', shown, detail: `the sum ${a.name} totals ${total(after, a.name)}: at that size its float difference cannot resolve one fixture row of ${units.get(a.name)}` };
+    }
+    taken.push({ a, rows });
   }
-  if (answered === expected) return { outcome: 'held', answered, shown };
+  const off = taken.find((t) => t.rows !== expected);
+  const answered = (off ?? taken[0]!).rows;
+  const blank = `the widget showed nothing where the window selects ${expected} fixture row(s)`;
+  if (expected > 0 && after.answer.rows === 0) return { outcome: 'blank', answered, shown, detail: blank };
+  const inconsistent = plan.derived ? inconsistentRow(after, plan.derived) : undefined;
+  if (!off && !inconsistent) return { outcome: 'held', answered, shown };
+  const nothingShown = plan.derived ? after.rows.every((r) => r?.[plan.derived!.name] == null) : shown === 0;
+  if (expected > 0 && nothingShown) return { outcome: 'blank', answered, shown, detail: blank };
+  if (!off) return { outcome: 'contradicted', answered, shown, detail: inconsistent };
+  const where = plan.derived ? ` in ${off.a.name}` : '';
+  const sum = off.a.aggregate === 'sum'
+    ? ` (a sum of ${total(after, off.a.name) - total(before, off.a.name)} at ${units.get(off.a.name)} per row)`
+    : '';
   return {
     outcome: 'contradicted',
     answered,
     shown,
-    detail: `the window counted ${answered} fixture row(s), and it selects ${expected} (${answered > expected ? 'wider' : 'narrower'})`,
+    detail: `the window counted ${off.rows} fixture row(s)${where}${sum}, and it selects ${expected} (${off.rows > expected ? 'wider' : 'narrower'})`,
   };
 }
 
@@ -544,12 +721,13 @@ function judge(
 
 /**
  * Run the dashboard date-window family against a live stack, as the principal
- * `token` signs in: for every widget a `dateRange` binds, every count measure
- * it selects is asked through the dataset door with no window and under each
- * preset of `DATE_RANGE_PRESETS`, before and after fixture rows are written on
- * known days, and each difference is compared with the rows that window
- * selects. Returns a structured report; a per-widget failure is collected,
- * not thrown.
+ * `token` signs in: for every widget a `dateRange` binds, every measure it
+ * selects that is a count, a sum or derived over those is asked through the
+ * dataset door with no window and under each preset of `DATE_RANGE_PRESETS`,
+ * before and after fixture rows are written on known days, and each
+ * difference, read back as fixture rows, is compared with the rows that
+ * window selects. Returns a structured report; a per-widget failure is
+ * collected, not thrown.
  *
  * The presets resolve once, when the run starts, on the current instant: the
  * server resolves them per request on its own clock, so no other instant
@@ -561,7 +739,7 @@ export async function runDashboardWindowProofs(
   token: string,
   config: any,
 ): Promise<DashboardWindowReport> {
-  const { cases, dashboards } = derive(config);
+  const { cases, dashboards, plans } = derive(config);
   const crud = new Map<string, CrudCase>(deriveCrudCases(config).map((c) => [c.object, c]));
   const objectDefs = new Map<string, any>();
   for (const o of declaredCollection(config, 'objects')) if (o?.name) objectDefs.set(o.name, o);
@@ -590,22 +768,27 @@ export async function runDashboardWindowProofs(
   };
 
   // ── The door ──────────────────────────────────────────────────────────────
-  async function ask(dataset: string, selection: Record<string, unknown>, measure: string): Promise<DashboardWindowAnswer> {
+  async function ask(dataset: string, selection: Record<string, unknown>, measure: string): Promise<Asked> {
     try {
       const res = await stack.apiAs(token, 'POST', '/analytics/dataset/query', { datasetName: dataset, selection });
       const body = (await res.json().catch(() => undefined)) as { rows?: unknown; code?: unknown; message?: unknown } | undefined;
       if (res.status === 200 && Array.isArray(body?.rows)) {
         const rows = body!.rows as Array<Record<string, unknown>>;
-        return { kind: 'answered', status: 200, rows: rows.length, count: rows.reduce((s, r) => s + (Number(r?.[measure]) || 0), 0) };
+        const asked: Asked = { rows, answer: { kind: 'answered', status: 200, rows: rows.length } };
+        asked.answer.count = total(asked, measure);
+        return asked;
       }
       return {
-        kind: res.status >= 500 ? 'faulted' : 'refused',
-        status: res.status,
-        ...(typeof body?.code === 'string' ? { code: body.code } : {}),
-        detail: clip(body?.message),
+        rows: [],
+        answer: {
+          kind: res.status >= 500 ? 'faulted' : 'refused',
+          status: res.status,
+          ...(typeof body?.code === 'string' ? { code: body.code } : {}),
+          detail: clip(body?.message),
+        },
       };
     } catch (e) {
-      return { kind: 'faulted', status: 0, detail: clip((e as Error)?.message ?? e) };
+      return { rows: [], answer: { kind: 'faulted', status: 0, detail: clip((e as Error)?.message ?? e) } };
     }
   }
 
@@ -646,6 +829,66 @@ export async function runDashboardWindowProofs(
     }
     bases.set(object, made);
     return made;
+  }
+
+  // ── Held columns per measure ──────────────────────────────────────────────
+  /**
+   * Hold, onto the widget's own held columns, what every additive measure the
+   * plan reads asks of a fixture row: its filter, a value in the field a count
+   * counts, and a non-zero number in the field a sum sums. `units` is what one
+   * fixture row adds to each (1 for a count, the held value for a sum).
+   */
+  async function holdFor(
+    c: DashboardWindowCase,
+    plan: MeasurePlan,
+    held: Map<string, unknown>,
+    holdCtx: Parameters<typeof holdColumns>[2],
+  ): Promise<{ held: Map<string, unknown>; units: Map<string, number> } | Excluded> {
+    const units = new Map<string, number>();
+    const cc = crud.get(c.object!)!;
+    for (const a of plan.additive) {
+      const filterReason = holdColumns(a.filter, held, holdCtx);
+      if (filterReason) {
+        const whose = plan.derived ? `operand ${a.name}'s` : "measure's own";
+        return { excluded: { kind: 'filter-unmodelled', reason: `the ${whose} filter carries ${filterReason}, which the ground truth cannot model` } };
+      }
+      if (a.aggregate === 'count') {
+        units.set(a.name, 1);
+        // A count of a field counts its non-null values: hold one.
+        if (!a.field || held.has(a.field)) continue;
+        const ref = (cc.relationalRefs ?? []).find((x) => x.field === a.field);
+        if (ref) {
+          const dep = await baseRecord(ref.target);
+          if (!dep.id) {
+            return { excluded: { kind: 'count-field-unsynthesizable', reason: `"${a.name}" counts ${a.field}, and no ${ref.target} record can be written for it: ${dep.reason}` } };
+          }
+          held.set(a.field, ref.multiple ? [dep.id] : dep.id);
+        } else if (cc.body && a.field in cc.body) {
+          held.set(a.field, cc.body[a.field]);
+        } else {
+          return { excluded: { kind: 'count-field-unsynthesizable', reason: `"${a.name}" counts ${a.field}, and the CRUD derivation synthesizes no value for it` } };
+        }
+        continue;
+      }
+      // A sum adds the value each fixture row carries: the one the selection
+      // already holds there, else the one the CRUD derivation synthesizes (it
+      // honours the field's declared min / max / step).
+      const field = a.field!;
+      const value = held.has(field) ? held.get(field) : cc.body?.[field];
+      if (typeof value !== 'number' || !Number.isFinite(value) || value === 0) {
+        return {
+          excluded: {
+            kind: 'count-field-unsynthesizable',
+            reason: value === undefined
+              ? `"${a.name}" sums ${field}, and the CRUD derivation synthesizes no value for it`
+              : `"${a.name}" sums ${field}, and the value a fixture row would carry there (${clip(JSON.stringify(value), 40)}) is not a non-zero number, so the rows it adds cannot be read back`,
+          },
+        };
+      }
+      held.set(field, value);
+      units.set(a.name, value);
+    }
+    return { held, units };
   }
 
   // ── Probes ────────────────────────────────────────────────────────────────
@@ -715,34 +958,16 @@ export async function runDashboardWindowProofs(
     for (const [i, m] of c.measures.entries()) {
       const r = measureResults[i]!;
       if (m.excluded) continue;
-      const held = new Map(objectHeld);
-      const measureReason = holdColumns(m.filter, held, holdCtx);
-      if (measureReason) {
-        Object.assign(r, { reason: `the measure's own filter carries ${measureReason}, which the ground truth cannot model`, excludedKind: 'filter-unmodelled' });
+      const plan = plans.get(m)!;
+      const holding = await holdFor(c, plan, new Map(objectHeld), holdCtx);
+      if ('excluded' in holding) {
+        Object.assign(r, { reason: holding.excluded.reason, excludedKind: holding.excluded.kind });
         continue;
-      }
-      // A count of a field counts its non-null values: hold one.
-      if (m.countField && !held.has(m.countField)) {
-        const cc = crud.get(c.object!)!;
-        const ref = (cc.relationalRefs ?? []).find((x) => x.field === m.countField);
-        if (ref) {
-          const dep = await baseRecord(ref.target);
-          if (!dep.id) {
-            Object.assign(r, { reason: `"${m.measure}" counts ${m.countField}, and no ${ref.target} record can be written for it: ${dep.reason}`, excludedKind: 'count-field-unsynthesizable' });
-            continue;
-          }
-          held.set(m.countField, ref.multiple ? [dep.id] : dep.id);
-        } else if (cc.body && m.countField in cc.body) {
-          held.set(m.countField, cc.body[m.countField]);
-        } else {
-          Object.assign(r, { reason: `"${m.measure}" counts ${m.countField}, and the CRUD derivation synthesizes no value for it`, excludedKind: 'count-field-unsynthesizable' });
-          continue;
-        }
       }
       r.status = 'probed';
       delete r.reason;
       delete r.excludedKind;
-      await probeMeasure(c, m, r, held, fieldType, ownerColumn);
+      await probeMeasure(c, m, r, holding.held, fieldType, ownerColumn, plan, holding.units);
     }
 
     const probed = measureResults.filter((m) => m.status === 'probed');
@@ -751,7 +976,7 @@ export async function runDashboardWindowProofs(
       results.push({
         ...base,
         excludedKind: first?.excludedKind ?? 'no-count-measure',
-        reason: first?.reason ?? 'no measure the widget selects is a row count',
+        reason: first?.reason ?? 'no measure the widget selects can be compared',
         measures: measureResults,
       });
       continue;
@@ -766,6 +991,8 @@ export async function runDashboardWindowProofs(
     held: Map<string, unknown>,
     fieldType: string,
     ownerColumn: boolean,
+    plan: MeasurePlan,
+    units: Map<string, number>,
   ): Promise<void> {
     const selection = (window?: Record<string, string>): Record<string, unknown> => {
       const windowed = window ? { [c.field!]: window } : undefined;
@@ -787,9 +1014,10 @@ export async function runDashboardWindowProofs(
 
     // The control leg, before any fixture: the widget's own query must answer.
     const before0 = await ask(c.dataset!, selection(), m.measure);
-    if (before0.kind !== 'answered') {
-      r.unwindowed = { expected: 0, answer: before0 };
-      notRun(`the widget's own query, with no window, answered ${before0.status}${before0.code ? ` ${before0.code}` : ''}: ${before0.detail ?? ''}`);
+    if (before0.answer.kind !== 'answered') {
+      const refused = before0.answer;
+      r.unwindowed = { expected: 0, answer: refused };
+      notRun(`the widget's own query, with no window, answered ${refused.status}${refused.code ? ` ${refused.code}` : ''}: ${refused.detail ?? ''}`);
       return;
     }
     const day0 = todayAt(new Date());
@@ -800,7 +1028,7 @@ export async function runDashboardWindowProofs(
       notRun(`the day turned after the run started (${startDay} → ${day0}), so the windows the presets resolved then are not the ones the server resolves now`);
       return;
     }
-    const before = new Map<DateRangePreset, DashboardWindowAnswer>();
+    const before = new Map<DateRangePreset, Asked>();
     for (const p of presets) before.set(p.preset, await ask(c.dataset!, selection(p.condition), m.measure));
 
     // Fixtures: one row per day, every held column held, owned by the principal.
@@ -879,21 +1107,37 @@ export async function runDashboardWindowProofs(
     }
 
     const after0 = await ask(c.dataset!, selection(), m.measure);
-    const after = new Map<DateRangePreset, DashboardWindowAnswer>();
+    const after = new Map<DateRangePreset, Asked>();
     for (const p of presets) after.set(p.preset, await ask(c.dataset!, selection(p.condition), m.measure));
     if (todayAt(new Date()) !== day0) {
       notRun(`the day turned during the probe (${day0} → ${todayAt(new Date())}), so the windows the server resolved moved under the fixtures`);
       return;
     }
 
-    // The control leg: with no window, the widget counts every fixture row.
-    const unwindowedAnswered = after0.kind === 'answered' ? after0.count! - before0.count! : undefined;
-    r.unwindowed = { expected: written.length, ...(unwindowedAnswered !== undefined ? { answered: unwindowedAnswered } : {}), answer: after0 };
+    // The control leg: with no window, the widget takes in every fixture row —
+    // every additive measure the plan reads, each by the rows it took in. A
+    // derived measure's operands are read from the widget's own answer, so
+    // that answer must carry them.
+    const answered0 = after0.answer.kind === 'answered';
+    const unread = answered0 && plan.derived
+      ? plan.additive.find((a) => after0.rows.length > 0 && after0.rows.every((row) => !(a.name in (row ?? {}))))
+      : undefined;
+    const taken0 = answered0 && !unread ? plan.additive.map((a) => rowsTakenIn(before0, after0, a, units.get(a.name)!)) : [];
+    const unresolved = plan.additive.find((_, k) => taken0.length > 0 && taken0[k] === undefined);
+    const unwindowedAnswered = taken0.length > 0 && !unresolved
+      ? (taken0.find((t) => t !== written.length) ?? taken0[0])
+      : undefined;
+    r.unwindowed = { expected: written.length, ...(unwindowedAnswered !== undefined ? { answered: unwindowedAnswered } : {}), answer: after0.answer };
     if (unwindowedAnswered !== written.length) {
+      const verb = plan.additive.every((a) => a.aggregate === 'count') ? 'counts' : 'takes in';
       notRun(
-        after0.kind !== 'answered'
-          ? `the widget's own query, with no window, answered ${after0.status} once the fixtures were written: ${after0.detail ?? ''}`
-          : `with no window the widget counts ${unwindowedAnswered} of the ${written.length} fixture rows, so the fixtures do not meet its own selection and no window can be judged`,
+        !answered0
+          ? `the widget's own query, with no window, answered ${after0.answer.status} once the fixtures were written: ${after0.answer.detail ?? ''}`
+          : unread
+            ? `the widget's answer carries no ${unread.name} column, so the operands of "${m.measure}" cannot be read back`
+            : unresolved
+              ? `the sum ${unresolved.name} totals ${total(after0, unresolved.name)}: at that size its float difference cannot resolve one fixture row of ${units.get(unresolved.name)}`
+              : `with no window the widget ${verb} ${unwindowedAnswered} of the ${written.length} fixture rows, so the fixtures do not meet its own selection and no window can be judged`,
       );
       return;
     }
@@ -902,7 +1146,7 @@ export async function runDashboardWindowProofs(
       const expected = written.filter((w) => selects(p.resolved, w.day)).length;
       const b = before.get(p.preset)!;
       const a = after.get(p.preset)!;
-      return { preset: p.preset, expected, ...judge(expected, b, a), answer: a };
+      return { preset: p.preset, expected, ...judge(expected, b, a, plan, units), answer: a.answer };
     });
 
     // An inert window: every preset answered what no window answered.
@@ -986,7 +1230,7 @@ function widgetStatus(measures: DashboardWindowMeasureResult[]): { status: Dashb
 export function formatDashboardWindowReport(report: DashboardWindowReport): string {
   const lines: string[] = [`\n=== objectstack verify — dashboard date windows — ${report.app} ===`];
   lines.push(
-    `  door: POST /analytics/dataset/query as the signed-in principal; ${report.presets.length} preset(s) per count measure, ` +
+    `  door: POST /analytics/dataset/query as the signed-in principal; ${report.presets.length} preset(s) per measure, ` +
       `each window resolved on ${report.timezone} calendar days`,
   );
   for (const d of report.dashboards.filter((x) => x.status === 'excluded')) {
@@ -1015,7 +1259,7 @@ export function formatDashboardWindowReport(report: DashboardWindowReport): stri
   lines.push(
     `  ── ${s.widgets.proven} proven, ${s.widgets.contradicted} CONTRADICTED, ${s.widgets.failed} FAILED, ` +
       `${s.widgets.inconclusive} inconclusive, ${s.widgets.unbound} unbound, ${s.widgets.excluded} excluded ` +
-      `(${s.dashboards.windowed} windowed dashboard(s) of ${s.dashboards.declared}; ${s.measures.probed} count measure(s) probed, ` +
+      `(${s.dashboards.windowed} windowed dashboard(s) of ${s.dashboards.declared}; ${s.measures.probed} measure(s) probed, ` +
       `${s.measures.excluded} excluded; ${s.probes} window(s): ${s.held} held, ${s.blank} blank, ${s.contradictions} contradicted, ` +
       `${s.faults} faulted, ${s.notRun} not run; ${s.inert} inert, ${s.narrowing} narrowing violation(s))`,
   );

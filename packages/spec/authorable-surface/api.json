@@ -789,6 +789,7 @@
     "api/GetMetaItemRequest:state",
     "api/GetMetaItemRequest:type",
     "api/GetMetaItemResponse:deletable",
+    "api/GetMetaItemResponse:draftChanges",
     "api/GetMetaItemResponse:editable",
     "api/GetMetaItemResponse:item",
     "api/GetMetaItemResponse:lock",

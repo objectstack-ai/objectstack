@@ -140,6 +140,23 @@ function rowsOf(body: any): any[] {
   return Array.isArray(body) ? body : (body?.records ?? []);
 }
 
+/**
+ * The organization `@objectstack/verify`'s `signUp` files its audience-gate
+ * invitations under — one per fixture identity, so the `invite_only` gate
+ * admits it (harness.ts, `inviteForAudienceGate`).
+ *
+ * [ADR-0131 D8] Those rows used to be kept out of this ledger by the driver
+ * alone: under `single` it still narrowed a read to the session's active
+ * organization. The driver's read scope is now the organization wall's verdict,
+ * and `single` has no wall, so on this one-tenant install the harness's rows
+ * are part of what an owner reads. They are the harness's admission plumbing,
+ * not this organization's ledger, so `rows` leaves them out. `raw` is the
+ * unfiltered body: a harness row is addressed to the persona that signed up,
+ * so it reaches that persona alone through the addressee carve-out, and never
+ * carries an invitee address this file writes.
+ */
+const HARNESS_AUDIENCE_GATE_ORGANIZATION = 'org_verify_audience_gate';
+
 /** Read `/data/sys_invitation` as a persona and return `{ status, rows, raw }`. */
 async function readLedger(stack: VerifyStack, token: string) {
   const res = await stack.apiAs(token, 'GET', '/data/sys_invitation');
@@ -150,7 +167,8 @@ async function readLedger(stack: VerifyStack, token: string) {
   } catch {
     /* non-JSON body — `raw` is still asserted on */
   }
-  return { status: res.status, rows: rowsOf(body), raw };
+  const rows = rowsOf(body).filter((r) => r?.organization_id !== HARNESS_AUDIENCE_GATE_ORGANIZATION);
+  return { status: res.status, rows, raw };
 }
 
 describe('#8095/#8240: the sys_invitation ledger, read by four personas', () => {
@@ -382,8 +400,11 @@ describe('#8095/#8240: the sys_invitation ledger, read by four personas', () => 
     // The delegate is the addressee of NOTHING, so this row cannot have arrived
     // through `sys_invitation_self`. Without this the test would still pass if
     // the issuer policy were deleted and the fixture quietly addressed a row to
-    // the delegate instead.
-    expect(raw).not.toContain(DELEGATE_EMAIL);
+    // the delegate instead. Asserted on `rows`: the harness's own audience-gate
+    // invitation IS addressed to the delegate, in its own organization, and
+    // reaches it through that carve-out on a `single` install (see
+    // `HARNESS_AUDIENCE_GATE_ORGANIZATION`).
+    expect(rows.map((r) => r.email)).not.toContain(DELEGATE_EMAIL);
   }, 60_000);
 
   it('[#8240] the ADR-0105 D8 checklist step reads correctly — and stops being vacuous', async () => {

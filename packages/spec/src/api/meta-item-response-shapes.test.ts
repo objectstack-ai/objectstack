@@ -32,6 +32,7 @@ import type {
   GetMetaItemResponse,
   GetMetaItemsResponse,
   GetMetaItemLayeredResponse,
+  ListDraftsResponse,
   MetadataConflictError,
 } from './protocol.zod';
 import type { MetadataLock } from '../kernel/metadata-protection.zod';
@@ -303,5 +304,66 @@ describe('the engine\'s verdict on a stored flow: `registration` beside the item
     });
     expect(parsed.registrations).toEqual({ nightly_sync: REFUSED });
     expect('registrations' in GetMetaItemsResponseSchema.parse({ type: 'flow', items: [FLOW] })).toBe(false);
+  });
+});
+
+/**
+ * #24298 — a pending draft's per-key provenance, `draftChanges`, beside the
+ * item on the draft read: a closed `by` vocabulary, a path that is an ARRAY of
+ * keys, and absence kept distinct from "nothing changed". Typed at the level
+ * an SDK caller branches on, and deliberately not on the `_drafts` row.
+ */
+type DraftChange = NonNullable<GetMetaItemResponse['draftChanges']>[number];
+export type DraftChangeByIsTheClosedSurfaceSet = Assert< Eq< DraftChange['by'], 'copilot' | 'studio' | 'api' > >;
+export type DraftChangePathIsAnArrayOfKeys = Assert< Eq< DraftChange['path'], string[] > >;
+export type DraftChangeActorIsIdOrNull = Assert< Eq< DraftChange['actor'], string | null > >;
+export type DraftChangesMayBeAbsent = Assert< Eq< undefined extends GetMetaItemResponse['draftChanges'] ? true : false, true > >;
+export type DraftsRowCarriesNoDraftChanges = Assert< Eq< 'draftChanges' extends keyof ListDraftsResponse['drafts'][number] ? true : false, false > >;
+
+describe('`draftChanges` — which surface last changed each key of a pending draft, beside the item', () => {
+  const VIEW = { name: 'loan_board', label: 'Loans', columns: ['title', 'due_on'] };
+  const AT = '2026-10-18T11:02:38.000Z';
+  const ENTRIES = [
+    { path: [], by: 'copilot', actor: 'usr_1', at: AT },
+    { path: ['columns'], by: 'studio', actor: 'usr_1', at: AT },
+    { path: ['fields', 'account.name', 'readable'], by: 'api', actor: null, at: AT },
+  ];
+  const DRAFT_READ = { type: 'view', name: 'loan_board', item: VIEW, version: 'v1', draftChanges: ENTRIES };
+
+  it('keeps every entry through a parse — each surface, a root path, a dotted KEY and a null actor', () => {
+    expect(GetMetaItemResponseSchema.parse(DRAFT_READ).draftChanges).toEqual(ENTRIES);
+  });
+
+  it('an older response without the key still parses, and the key stays ABSENT — never defaulted to []', () => {
+    const parsed = GetMetaItemResponseSchema.parse({ type: 'view', name: 'loan_board', item: VIEW, version: 'v1' });
+    expect('draftChanges' in parsed).toBe(false);
+  });
+
+  /** The issue a refused body raises, located — never a bare "it failed". */
+  const issueOf = (draftChanges: unknown) => {
+    const verdict = GetMetaItemResponseSchema.safeParse({ ...DRAFT_READ, draftChanges });
+    expect(verdict.success).toBe(false);
+    return verdict.success ? undefined : verdict.error.issues[0];
+  };
+
+  it('refuses a surface outside the closed set, at the entry\'s `by`', () => {
+    for (const by of ['ai', 'user', 'mcp', 'Copilot']) {
+      expect(issueOf([{ ...ENTRIES[0], by }])).toMatchObject({ code: 'invalid_value', path: ['draftChanges', 0, 'by'] });
+    }
+  });
+
+  it('refuses a dotted-string path and an empty key segment — a path is an array of stored keys', () => {
+    expect(issueOf([{ ...ENTRIES[1], path: 'fields.renewal_count' }]))
+      .toMatchObject({ code: 'invalid_type', path: ['draftChanges', 0, 'path'] });
+    expect(issueOf([{ ...ENTRIES[1], path: ['fields', ''] }]))
+      .toMatchObject({ code: 'too_small', path: ['draftChanges', 0, 'path', 1] });
+  });
+
+  it('refuses an entry without its write\'s time, or with one that is not an ISO-8601 instant', () => {
+    const withoutAt: Record<string, unknown> = { ...ENTRIES[0] };
+    delete withoutAt.at;
+    expect(issueOf([withoutAt])).toMatchObject({ code: 'invalid_type', path: ['draftChanges', 0, 'at'] });
+    expect(issueOf([{ ...ENTRIES[0], at: 'two minutes ago' }]))
+      .toMatchObject({ code: 'invalid_format', path: ['draftChanges', 0, 'at'] });
   });
 });

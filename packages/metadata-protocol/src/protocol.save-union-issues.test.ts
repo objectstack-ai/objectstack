@@ -47,6 +47,12 @@ interface Row {
 const keyOf = (w: Record<string, unknown>) =>
     `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}`;
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 /**
  * The engine surface the repository write path touches.
  *
@@ -72,18 +78,25 @@ function makeProtocol(seed: Array<{ type: string; name: string; metadata: Record
     };
     const rows = tableOf('sys_metadata');
     let nextId = 0;
+    const seedRowsAt = (where: Record<string, unknown>) => seed
+        .filter((r) => whereValueMatches(r.type, where.type) && r.name === where.name
+            && (where.state ?? 'active') === 'active' && (where.organization_id ?? null) === null)
+        .map((hit) => ({
+            id: `seed_${hit.name}`, type: hit.type, name: hit.name, organization_id: null, state: 'active',
+            metadata: JSON.stringify(hit.metadata),
+        }));
     const engine: any = {
         async findOne(object: string, query?: EngineFindOneQueryInput) {
             assertEngineFindOnePredicate(object, query);
-            if (object !== 'sys_metadata' || seed.length === 0) return null;
-            const where = ((query as { where?: Record<string, unknown> } | undefined)?.where ?? {});
-            const hit = seed.find((r) => r.type === where.type && r.name === where.name
-                && (where.state ?? 'active') === 'active' && (where.organization_id ?? null) === null);
-            return hit
-                ? { id: `seed_${hit.name}`, type: hit.type, name: hit.name, organization_id: null, state: 'active', metadata: JSON.stringify(hit.metadata) }
-                : null;
+            if (object !== 'sys_metadata') return null;
+            return seedRowsAt((query as { where?: Record<string, unknown> } | undefined)?.where ?? {})[0] ?? null;
         },
-        async find() { return []; },
+        // [#24371] The by-name read takes the item's active rows from ONE
+        // `find` (both spellings, `type: { $in }`), so the seed is found there too.
+        async find(object: string, query?: { where?: Record<string, unknown> }) {
+            if (object !== 'sys_metadata') return [];
+            return seedRowsAt(query?.where ?? {});
+        },
         async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
             const row = { id: `r_${nextId}`, ...(data as any) } as Row;

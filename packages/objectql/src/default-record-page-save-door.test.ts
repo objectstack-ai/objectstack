@@ -85,6 +85,11 @@ function makeMemoryDriver() {
             }
             if (k.startsWith('$')) continue;
             const rowVal = row[k];
+            // [#24371] The by-name read's both-spellings `type: { $in: [...] }`.
+            if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
+                if (!(v as any).$in.includes(rowVal === undefined ? null : rowVal)) return false;
+                continue;
+            }
             const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
             const a = rowVal === undefined ? null : rowVal;
             const b = expected === undefined ? null : expected;

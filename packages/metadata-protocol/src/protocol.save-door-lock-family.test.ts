@@ -53,12 +53,20 @@ const PACKAGE_ID = 'com.example.locks';
 const LOCK_KEYS = ['_lock', '_lockReason', '_lockDocsUrl', '_lockSource'] as const;
 
 /** Equality and `null`; any other operator is refused, so a matcher that ignored one cannot prove anything. */
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 function matches(row: Row, where: Record<string, unknown> = {}): boolean {
     for (const [key, want] of Object.entries(where)) {
         if (want === undefined) continue;
         if (key.startsWith('$')) throw new Error(`stub engine: unsupported operator ${key}`);
-        if (want !== null && typeof want === 'object') throw new Error(`stub engine: unsupported operator on ${key}`);
-        if ((row[key] ?? null) !== want) return false;
+        if (want !== null && typeof want === 'object' && !Array.isArray((want as { $in?: unknown }).$in)) {
+            throw new Error(`stub engine: unsupported operator on ${key}`);
+        }
+        if (!whereValueMatches(row[key] ?? null, want)) return false;
     }
     return true;
 }

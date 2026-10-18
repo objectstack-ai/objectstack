@@ -65,10 +65,10 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   E2E_SECRET_KEY,
+  KERNEL_ASSIGNED_PORT,
   RUN_JS_RESOLVES_FROM_DIST,
   childEnv,
   probeThroughChild,
-  randomPort,
   requireBuiltCli,
 } from './helpers/serve-process.js';
 
@@ -152,13 +152,14 @@ export default {
 `;
 
 let dir: string;
-let port: string;
 let apiKey: string;
 /** Every child this file spawns, so a failed assertion never leaks a server. */
 const children: ChildProcessWithoutNullStreams[] = [];
 
 interface Booted {
   child: ChildProcessWithoutNullStreams;
+  /** The port the child bound, read back off its own output. */
+  port: string;
   stdout: () => string;
   stderr: () => string;
 }
@@ -186,7 +187,7 @@ function boot(
   nodeArgs: readonly string[] = [],
 ): Promise<Booted> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(process.execPath, [...nodeArgs, CLI, 'serve', '-p', port, '--dev'], {
+    const child = spawn(process.execPath, [...nodeArgs, CLI, 'serve', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, not a bare `...process.env`: the vitest worker exports
@@ -251,29 +252,30 @@ function boot(
       if (settled) return;
       settled = true;
       rejectBoot(
-        new Error(`serve never printed ${waitFor} (child-reported bound port: ${boundPort(out + err) ?? 'NEVER PRINTED'}; this file reserved ${port})\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`),
+        new Error(`serve never printed ${waitFor} (child-reported bound port: ${boundPort(out + err) ?? 'NEVER PRINTED'})\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`),
       );
     }, 150_000);
 
     const onOutput = () => {
       if (settled) return;
-      // ⭐ #12526: the child is the authority on which port it bound, so read it
-      // back before handing this boot to assertions that will use `port`.
+      // ⭐ #12526: the child is the authority on which port it bound — a
+      // kernel-assigned one (#24342) — so read it back before handing this boot
+      // to assertions that will use it. Port 0 is the REQUEST announced back.
       const bound = boundPort(out + err);
-      if (bound !== null && bound !== port) {
+      if (bound === '0') {
         settled = true;
         clearTimeout(timer);
-        rejectBoot(portDriftError(port, bound, out, err));
+        rejectBoot(new Error(`serve announced port 0, the request rather than the port it bound\n--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`));
         return;
       }
       // `bound !== null` is part of the gate, not an optimisation: resolving on
       // `waitFor` alone would let a boot through before the child had said which
-      // port it took, and the drift check would then be a no-op on an already
-      // settled promise. Every marker below arrives with or before the banner.
+      // port it took, so no request could be addressed to it. Every marker
+      // below arrives with or before the banner.
       if (bound !== null && waitFor.test(out + err)) {
         settled = true;
         clearTimeout(timer);
-        resolveBoot({ child, stdout: () => out, stderr: () => err });
+        resolveBoot({ child, port: bound, stdout: () => out, stderr: () => err });
       }
     };
 
@@ -297,30 +299,14 @@ function boot(
 }
 
 /**
- * The port the CHILD says it bound — read out of the child's OWN output, never
- * out of what this file reserved (#12526, and #12441 ruling 2 before it).
+ * The port the CHILD says it bound — read out of the child's OWN output (#12526).
  *
- * ## Why this file needs it at all
- *
- * The spawn below passes `--dev`, and `serve.ts` reads
- * `portAutoShiftAllowed = flags.dev || NODE_ENV === 'development'` — `flags.dev`
- * ALONE opens the auto-select branch, whatever `NODE_ENV` is. So a port taken
- * between `randomPort()`'s bind probe and this spawn does NOT fail the boot the
- * way it does in `serve-node-env-production-default.e2e.test.ts` (no `--dev`
- * there, so unset `NODE_ENV` defaults to production and a taken port is a hard
- * `exit 1` that `portContentionError()` can name). Here `getAvailablePort()`
- * silently hops the child onto the next free port and it reports itself READY.
- *
- * That is the strictly worse direction: a GREEN boot on the wrong port. Every
- * request this file makes afterwards goes to `port` — the port it reserved and
- * no longer owns — so it measures whatever else took it. Measured on this tree
- * with a neighbour holding the reserved port: reserved 34259, child bound
- * 34260, boot green, and the file's own next request was answered
- * `{"iAm":"A NEIGHBOURING AGENT DEV SERVER, not os serve"}`.
- *
- * ⚠️ The `--dev` responsible has been on this spawn line since `83e6016fa` — it
- * long predates #11707/#12459, which changed `NODE_ENV` and never touched it.
- * This was never read, not newly introduced.
+ * The spawn asks for `KERNEL_ASSIGNED_PORT` (#24342), so this is the only way
+ * this file learns its port: nothing is drawn before the spawn, so nothing can
+ * be taken between a pick and the child's bind. That race used to cost more
+ * here than anywhere: `--dev` alone opens `serve`'s auto-shift branch, so a
+ * lost race was a GREEN boot on another port, and this file's requests then
+ * reached whatever held the one it had drawn.
  *
  * Two patterns because either one alone can be absent: the structured log obeys
  * `OS_LOG_LEVEL`, and the banner line is what survives when it does not.
@@ -329,28 +315,6 @@ function boundPort(output: string): string | null {
   const match = /HTTP server started successfully[^\n]*?"port":\s*(\d+)/.exec(output)
     ?? /API:\s+http:\/\/localhost:(\d+)/.exec(output);
   return match ? match[1] : null;
-}
-
-/**
- * A lost port race, said out loud — the failure this file used to hide behind a
- * green boot (#12526).
- */
-function portDriftError(reserved: string, bound: string, out: string, err: string): Error {
-  return new Error(
-    `PORT DRIFT: this file reserved port ${reserved}, but the child bound ${bound}.\n`
-    + `\`os serve -p ${reserved} --dev\` passes \`--dev\`, so \`serve.ts\`'s `
-    + `\`portAutoShiftAllowed = flags.dev || NODE_ENV === 'development'\` opened the auto-select `
-    + `branch and \`getAvailablePort()\` hopped the child off the port that was asked for. The `
-    + `boot SUCCEEDED — on the wrong port.\n`
-    + `⛔ Something else took ${reserved} between \`randomPort()\`'s bind probe and the spawn. That `
-    + `is a HOST race (several agents share one container), not a verdict about the code under `
-    + `test — but it is NOT harmless here: every assertion below talks to ${reserved}, which is `
-    + `now that other process, so continuing would measure a stranger rather than this boot.\n`
-    + `⛔ Do not "fix" this by following the child to ${bound}: the point is that the port this `
-    + `file uses and the port the child bound must be the SAME port. Re-run this file in `
-    + `isolation; if it reproduces there, the port is genuinely held.\n`
-    + `--- stdout ---\n${out.slice(-4000)}\n--- stderr ---\n${err.slice(-4000)}`,
-  );
 }
 
 async function stop(child: ChildProcessWithoutNullStreams): Promise<void> {
@@ -389,12 +353,11 @@ describe('#7645: the stdio MCP transport answers over a spawned CLI process', ()
       JSON.stringify({ name: 'mcp-stdio-e2e-fixture', private: true, type: 'module' }, null, 2),
       'utf8',
     );
-    port = randomPort();
 
     // Boot 1 — mint a real key through the product route, against a FILE db so
     // boot 2 sees the same row (`:memory:` would not survive the restart).
     const first = await boot({ OS_DATABASE_URL: join(dir, 'probe.db') }, /Server is ready/);
-    const base = `http://localhost:${port}/api/v1`;
+    const base = `http://localhost:${first.port}/api/v1`;
 
     // ⭐ #15653. `boot()`'s `child.on('exit')` handler feeds the READINESS promise
     // ONLY — it returns early once `settled` — so a death AFTER readiness is
@@ -414,7 +377,7 @@ describe('#7645: the stdio MCP transport answers over a spawned CLI process', ()
           child: first.child,
           transcript,
           label: 'serve-mcp-stdio-answers',
-          what: `${what} on port ${port}`,
+          what: `${what} on port ${first.port}`,
         },
         request,
       );

@@ -46,21 +46,25 @@
  *
  * Seams 1 and 2 read the two STATIC signals: the deployment posture and the
  * object's own metadata. The engine's decision to scope is neither. It is
- * `Engine.buildDriverOptions`:
+ * `Engine.buildDriverOptions`, and it is made per CALL: a read, update or
+ * delete is scoped by the organization wall's verdict (ADR-0131 D8 — none
+ * under `single`), and an insert or upsert carries the caller's active
+ * organization as its write target in EVERY posture, unless the object opts
+ * OUT of tenancy.
  *
- * ```ts
- * const hasTenant =
- *   execCtx?.tenantId !== undefined && !isTenancyDisabled(objectSchema) && !isFederated;
- * ```
+ * Seam 2 refuses only an explicit opt-IN. An object that OMITS the `tenancy`
+ * block falls between them: the engine hands it the write target, seam 2 never
+ * sees it, and seam 1 passes because the posture really is `single`. A `single`
+ * posture constrains the WALL, not the number of organizations, so rows still
+ * carry whichever `organization_id` they were written with — and this driver
+ * used to discard the scope it was handed and answer as if it had applied it.
+ * That is the silent non-isolation this whole guard exists to remove,
+ * reappearing on the DEFAULT case.
  *
- * — the engine scopes unless the object opts OUT, while seam 2 refuses only an
- * explicit opt-IN. An object that OMITS the `tenancy` block falls between them:
- * the engine scopes it, seam 2 never sees it, and seam 1 passes because the
- * posture really is `single`. A `single` posture constrains the WALL, not the
- * number of organizations, so rows still carry whichever `organization_id` they
- * were written with — and this driver used to discard the scope and answer with
- * EVERY organization's rows. That is the silent non-isolation this whole guard
- * exists to remove, reappearing on the DEFAULT case.
+ * (Before ADR-0131 D8 the engine also derived a READ scope under `single` from
+ * the context's organization alone; it no longer does, because the wall it would
+ * mirror is inert there. The seam still judges whatever scope arrives, so it is
+ * unchanged by that: what no longer arrives is no longer refused.)
  *
  * Why the gap cannot be closed at seam 1 or 2 — measured, not assumed:
  * `execCtx?.tenantId !== undefined` is a property of the REQUEST, and at
@@ -183,8 +187,9 @@ export interface TenancyAwareSchema {
  * (twelve seeded by the app, one minted by the platform for the admin), with
  * rows carrying whichever `organization_id` they were written with. And the
  * omission it describes is not the absence of a tenant signal but its default
- * PRESENCE — `Engine.buildDriverOptions` scopes an object unless it opts out,
- * so "omits the block" is precisely the SCOPED case, not the exempt one.
+ * PRESENCE — `Engine.buildDriverOptions` hands an object a write target (and,
+ * under a wall, a read scope) unless it opts out, so "omits the block" is
+ * precisely the SCOPED case, not the exempt one.
  *
  * The sentence is recorded rather than deleted because it is what justified
  * this predicate being an opt-IN test, and anyone re-reading that decision needs

@@ -86,6 +86,12 @@ const packaged = (name: string, lock: Lock, extra: Record<string, unknown> = {})
  * that keeps nothing (the `_lock` gate records its denial through it). No
  * write verbs beyond that — an admitted write is read off the gate itself.
  */
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 function harness(environmentId: string | undefined, rows: StoredRow[] = [], artifacts: Artifacts = {}) {
     const registry = {
         getArtifactItem(type: string, name: string) {
@@ -109,7 +115,7 @@ function harness(environmentId: string | undefined, rows: StoredRow[] = [], arti
             if (k.startsWith('$')) throw new Error(`[test double] unsupported WHERE combinator '${k}'`);
         }
         return rows.filter((r) =>
-            Object.entries(where).every(([k, v]) => v === undefined || (r as unknown as Record<string, unknown>)[k] === v),
+            Object.entries(where).every(([k, v]) => v === undefined || whereValueMatches((r as unknown as Record<string, unknown>)[k], v)),
         );
     };
     const engine: any = {

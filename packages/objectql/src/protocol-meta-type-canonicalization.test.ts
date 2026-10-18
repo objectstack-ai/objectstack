@@ -37,6 +37,12 @@ const OVERLAY_ROW = {
     metadata: JSON.stringify({ name: 'rc1_probe', label: 'Probe' }),
 };
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 describe('#4432 — canonical `/meta` type segment', () => {
     let registry: SchemaRegistry;
     let engine: any;
@@ -56,7 +62,7 @@ describe('#4432 — canonical `/meta` type segment', () => {
             find: vi.fn(async (_table: string, opts: any) => {
                 const w = opts?.where ?? {};
                 return rows.filter((r) =>
-                    (w.type === undefined || r.type === w.type)
+                    (w.type === undefined || whereValueMatches(r.type, w.type))
                     && (w.name === undefined || r.name === w.name)
                     && (w.state === undefined || r.state === w.state)
                     && (w.organization_id === undefined || r.organization_id === w.organization_id));

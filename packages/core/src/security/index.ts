@@ -73,6 +73,14 @@ export {
   type RefusedEntitlementKey,
 } from './deployment-org-scoping-entitlement.js';
 
+// [ADR-0131 D8] The ONE tenant read predicate — the Layer 0 verdict that
+// plugin-security projects onto its `where` wall and the engine projects onto
+// the driver's native scope (`DriverOptions.tenantId` / `tenantIds`).
+export {
+  computeTenantLayer0Verdict,
+  type TenantLayer0Input,
+} from './tenant-layer0-verdict.js';
+
 // `PluginConfigValidator` / `createPluginConfigValidator` were RETIRED here on
 // 2026-08-27 (#11982, ADR-0049 enforce-or-remove; recorded in ADR-0025 §3.7).
 // The kernel never received a plugin's config to validate — factories close

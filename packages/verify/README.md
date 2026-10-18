@@ -38,7 +38,8 @@ derived from your own metadata:
   master.
 - **Dashboard date windows** (opt-in) — *every widget a dashboard's `dateRange`
   binds counts, under each preset of the picker, the rows that window selects*:
-  per bound widget and count measure, fixture rows are written on known days
+  per bound widget and measure (a count, a sum, or a derived measure over
+  those), fixture rows are written on known days
   around every preset's edges, and the widget is asked through the dataset door
   with no window and under each of the 13 presets, before and after the
   fixtures. Each difference must equal the fixture rows the window selects; a
@@ -502,18 +503,19 @@ compute one, so it is not read as "no grant anywhere". `summary.hardFailures` is
 `contradicted + failed` objects plus personas that could not be provisioned.
 
 **Dashboard date windows** (`runDashboardWindowProofs`), per widget a
-dashboard's `dateRange` binds. Probes per count measure: the widget with no
+dashboard's `dateRange` binds. Probes per measure that is a count, a sum or
+derived over those: the widget with no
 window, then each of the 13 presets, each counted before and after the
 fixture rows:
 
 | status | meaning |
 | --- | --- |
 | `proven` | under every preset the window counted exactly the fixture rows it selects |
-| `contradicted` | under some preset the widget showed nothing where the window selects fixture rows (`blank`), or counted another number of them; a window that answers what no window answers under every preset is also named `inert` **(failure)** |
+| `contradicted` | under some preset the widget showed nothing where the window selects fixture rows (`blank`), or counted another number of them, or a derived measure showed another value than the server's evaluator makes of its operands; a window that answers what no window answers under every preset is also named `inert` **(failure)** |
 | `failed` | the door refused or faulted on a windowed query while the widget's own query answered **(failure)** |
 | `inconclusive` | a fixture row could not be written or did not read back as written (an app hook rewrote it, or the read omits the column), the widget with no window did not count every fixture row (its own selection does not meet the fixtures), its own query is refused, the UTC day turned after the run started, or the caller's reference timezone is not UTC |
 | `unbound` | the widget opts out of the window (`filterBindings: { dateRange: false }`) |
-| `excluded` | the family cannot compare it: no count measure, a filter the ground truth cannot model, a window on a field that is missing or is not `date` / `datetime`, a dataset or dashboard that is undeclared or does not parse, or an object the app does not declare or the CRUD derivation cannot synthesize (`excludedKind` names which) |
+| `excluded` | the family cannot compare it: no measure it can compare (an `avg`, `min`, `max` or `count_distinct` is not additive), a filter the ground truth cannot model, a window on a field that is missing or is not `date` / `datetime`, a dataset or dashboard that is undeclared or does not parse, or an object the app does not declare or the CRUD derivation cannot synthesize (`excludedKind` names which) |
 
 `member-visible` everywhere usually means the app is single-tenant; pass
 `--multi-tenant` (or `{ multiTenant: true }`) to register org-scoping so tenant

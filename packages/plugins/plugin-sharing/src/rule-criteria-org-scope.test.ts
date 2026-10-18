@@ -30,8 +30,10 @@
  *
  * The scope is a DRIVER decision: `SqlDriver.applyTenantScope` turns
  * `DriverOptions.tenantId` into `(organization_id = ? OR organization_id IS
- * NULL)`, and the engine only threads it when `execCtx.tenantId` is set on a
- * non-federated, tenancy-enabled object (`ObjectQLEngine.buildDriverOptions`).
+ * NULL)`, and the engine threads it as the projection of the tenant wall's
+ * verdict (ADR-0131 D8, `ObjectQLEngine.buildDriverOptions`) — so only under
+ * a walled posture: the org-stamped cases boot `isolated`, and under `single`
+ * there is no organization scope for a sweep to keep.
  * A hand-written engine double proves none of that chain — it would report
  * green on a `tenantId` the real stack never applies. So these cases run a real
  * `SqlDriver` on better-sqlite3 `:memory:` behind a real `ObjectQL`, the way
@@ -169,7 +171,7 @@ const open: SqlDriver[] = [];
  *                                    equality probe, no longer as a claim that
  *                                    NULL means platform-wide — see the header.
  */
-async function boot(): Promise<Booted> {
+async function boot(posture?: 'single' | 'isolated' | 'group'): Promise<Booted> {
   const driver = new SqlDriver({
     client: 'better-sqlite3',
     connection: { filename: ':memory:' },
@@ -180,6 +182,7 @@ async function boot(): Promise<Booted> {
   const ql = new ObjectQL();
   ql.registerDriver(driver as never, true);
   await ql.init();
+  if (posture) ql.setTenancyPostureProvider(() => posture);
   ql.registerObject({
     name: OBJECT,
     label: 'Deal',
@@ -237,7 +240,10 @@ const WON = { stage: 'won' };
 describe('[#10119] sharing-rule criteria sweep is scoped to the rule\'s organization', () => {
   describe('findMatchingRecords — the whole-rule evaluation pass', () => {
     it('an ORG-STAMPED rule materialises NO grant on another organization\'s records', async () => {
-      const { rules, sharedRecordIds } = await boot();
+      // [ADR-0131 D8] An organization wall is what scopes the sweep: the
+      // driver's read scope is the wall's verdict, and under `single` (the
+      // env default) there is none — one tenant, one sweep.
+      const { rules, sharedRecordIds } = await boot('isolated');
 
       const rule = await rules.defineRule(
         {
@@ -303,7 +309,8 @@ describe('[#10119] sharing-rule criteria sweep is scoped to the rule\'s organiza
 
   describe('recordMatches — the per-record write-hook pass', () => {
     it('an ORG-STAMPED rule does not match another organization\'s record', async () => {
-      const { rules, sharedRecordIds } = await boot();
+      // [ADR-0131 D8] Under a wall — see the whole-rule pass above.
+      const { rules, sharedRecordIds } = await boot('isolated');
 
       await rules.defineRule(
         {

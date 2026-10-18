@@ -131,7 +131,8 @@ function makeStubEngine() {
         },
         async find(table: string, opts: { where: Record<string, unknown> }) {
             return Array.from(tableOf(table).values()).filter((r) => {
-                if (opts.where.type && r.type !== opts.where.type) return false;
+                if (opts.where.type && !whereValueMatches(r.type, opts.where.type)) return false;
+                if (opts.where.name !== undefined && r.name !== opts.where.name) return false;
                 if (opts.where.organization_id !== undefined
                     && r.organization_id !== opts.where.organization_id) return false;
                 if (opts.where.state && r.state !== opts.where.state) return false;
@@ -205,6 +206,12 @@ const flowRows = (rows: Map<string, Row>) =>
 
 const save = (protocol: any, item: unknown, extra: Record<string, unknown> = {}) =>
     protocol.saveMetaItem({ type: 'flow', name: 'leave_approval', item, ...extra });
+
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
 
 describe('runtime authoring gate on saveMetaItem (#4463)', () => {
     let warn: ReturnType<typeof vi.spyOn>;

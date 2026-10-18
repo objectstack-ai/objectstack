@@ -2805,6 +2805,19 @@ function servedOverlayRowCandidates(address: {
 }
 
 /**
+ * [#24371] Whether a stored row read by
+ * {@link ObjectStackProtocolImplementation.readItemActiveRows} is one the
+ * store would answer for `where`, an equality `where` of the shape the
+ * by-name read's selections send ({@link servedOverlayRowCandidates}'
+ * candidates, the package-less binding and the lock's scope): every key equal,
+ * and `null` matching an absent value as the store's IS NULL does.
+ */
+function rowMatchesOverlayWhere(row: object, where: Readonly<Record<string, unknown>>): boolean {
+    const stored = row as Readonly<Record<string, unknown>>;
+    return Object.entries(where).every(([key, value]) => (stored[key] ?? null) === value);
+}
+
+/**
  * [#21967, ADR-0048] The package dimension of
  * {@link servedOverlayRowCandidates}, in its order: with a package, that
  * package (`packageId`) and then the package-less rows (`null`); with none,
@@ -11005,6 +11018,11 @@ export class ObjectStackProtocolImplementation implements
      * The reads keep the at-rest tolerance they have always had: a row stored
      * under the type's other spelling (pre-#4432 residue) is the last resort.
      *
+     * [#24371] `activeRows`, when given, is the item's ACTIVE rows under both
+     * spellings as {@link readItemActiveRows} read them: the candidates are then
+     * selected from those rows, each by the `where` it would have sent the
+     * store ({@link rowMatchesOverlayWhere}), instead of one `findOne` each.
+     *
      * Returns `undefined` when no row is found. A failed read propagates: each
      * caller owns its #5532 discrimination.
      */
@@ -11016,7 +11034,7 @@ export class ObjectStackProtocolImplementation implements
         packageId?: string | null;
         /** [#22877] The bundle member a by-name door's selector named; omitted, the canonical one. */
         member?: string;
-    }): Promise<{ row: any } | undefined> {
+    }, activeRows?: readonly StoredOverlayRow[]): Promise<{ row: any } | undefined> {
         // [#21804] The order is {@link servedOverlayRowCandidates}, the one
         // the list's merge takes over the rows it read: the canonical
         // spelling then the other, and within each, the package's
@@ -11040,7 +11058,9 @@ export class ObjectStackProtocolImplementation implements
             // already authorized the caller, and the protocol scopes the row
             // itself ({@link findEnvironmentRow}: the environment's rows only).
             // It no longer reaches the data engine as a principal-less context.
-            const row = await this.findEnvironmentRow('sys_metadata', { where, context: { isSystem: true } });
+            const row = activeRows !== undefined && args.state === 'active'
+                ? activeRows.find((stored) => rowMatchesOverlayWhere(stored, where))
+                : await this.findEnvironmentRow('sys_metadata', { where, context: { isSystem: true } });
             if (row) return { row };
         }
         return undefined;
@@ -11067,21 +11087,56 @@ export class ObjectStackProtocolImplementation implements
      * is what #4432 refused. So the two agree on every row stored under the
      * canonical spelling, which is every row a live write can mint.
      *
+     * [#24371] `activeRows`, when given, is the item's ACTIVE rows under both
+     * spellings as {@link readItemActiveRows} read them, and each spelling's
+     * rows are taken from them instead of read again.
+     *
      * A failed read propagates: each caller owns its #5532 / #5706
      * discrimination.
      */
-    private overlayLockLayerAt(address: ItemAddress, options: { readonly otherSpelling: boolean }): Promise<unknown> {
+    private overlayLockLayerAt(
+        address: ItemAddress,
+        options: { readonly otherSpelling: boolean },
+        activeRows?: readonly StoredOverlayRow[],
+    ): Promise<unknown> {
         const other = PLURAL_TO_SINGULAR[address.type] ?? SINGULAR_TO_PLURAL[address.type];
         return resolveOverlayLockLayer(address, async (spelling) => {
             const type = spelling === 'canonical' ? address.type : other;
             if (type === undefined) return [];
+            const where = { type, name: address.name, state: 'active' };
+            if (activeRows !== undefined) return activeRows.filter((row) => rowMatchesOverlayWhere(row, where));
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
             const rows: StoredOverlayRow[] | null | undefined = await this.findEnvironmentRows('sys_metadata', {
-                where: { type, name: address.name, state: 'active' },
+                where,
                 context: { isSystem: true },
             });
             return rows ?? [];
         }, options);
+    }
+
+    /**
+     * [#24371, ADR-0131 D6] The item's stored ACTIVE rows under BOTH spellings
+     * of its type, in ONE store read: every row any of the by-name read's
+     * active-row selections consults ({@link packagelessAddress}'s binding,
+     * {@link findServedOverlayRow}'s candidates and {@link overlayLockLayerAt}'s
+     * scope), each of which then selects from these rows by the `where` it
+     * would have sent the store. Before, {@link getMetaItem} sent those
+     * selections to the store one by one, five serial reads of the same rows
+     * on every `/data` request (the API-exposure gate reads the object by
+     * name), and every read is a round trip to a hosted database.
+     *
+     * Read per call, never kept: a save is seen by the next read, as before.
+     * The environment's rows only ({@link findEnvironmentRows}). A failed read
+     * propagates: the caller owns its #5532 discrimination.
+     */
+    private async readItemActiveRows(type: string, name: string): Promise<StoredOverlayRow[]> {
+        const other = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
+        // [#21911] The explicit system opt-in — see findServedOverlayRow.
+        const rows: StoredOverlayRow[] | null | undefined = await this.findEnvironmentRows('sys_metadata', {
+            where: { type: other === undefined ? type : { $in: [type, other] }, name, state: 'active' },
+            context: { isSystem: true },
+        });
+        return rows ?? [];
     }
 
     /**
@@ -11331,8 +11386,31 @@ export class ObjectStackProtocolImplementation implements
         const draftContentAddress = !request.packageId && (readState === 'draft' || request.previewDrafts)
             ? await this.strictDraftReadAddress(request.type, request.name, member)
             : undefined;
-        const contentPackageId = request.packageId
-            || (readState === 'draft' ? undefined : await this.packagelessReadAddress(request.type, request.name, member));
+        // [#24371] The item's ACTIVE rows, both spellings, read ONCE
+        // ({@link readItemActiveRows}): the package-less binding, the served
+        // row and the lock below each select from them by the `where` it would
+        // have sent the store. They were five serial reads of the same rows,
+        // on every `/data` request. Read for this call only, never kept.
+        let activeRows: StoredOverlayRow[] | undefined;
+        if (readState === 'active') {
+            try {
+                activeRows = await this.readItemActiveRows(request.type, request.name);
+            } catch (error) {
+                // [#5532] Only an unprovisioned store holds no row; any other
+                // failure is a read that did not happen, never "no row".
+                this.rethrowUnlessMetadataStoreUnprovisioned(error, 'sys_metadata');
+                activeRows = [];
+            }
+        }
+        // The package-less binding ({@link packagelessReadAddress}'s), selected
+        // from those rows; the `version` below ({@link readVersionToken})
+        // takes the same binding instead of reading it again.
+        const packagelessBinding = readState === 'active' && !request.packageId
+            ? (await this.packagelessAddress(
+                PLURAL_TO_SINGULAR[request.type] ?? request.type, request.name, member, 'active', activeRows,
+            )).packageId
+            : undefined;
+        const contentPackageId = request.packageId || (packagelessBinding ?? undefined);
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -11408,7 +11486,7 @@ export class ObjectStackProtocolImplementation implements
                     ? { packageId: draftContentAddress.packageId }
                     : contentPackageId ? { packageId: contentPackageId } : {}),
                 ...memberOption(member),
-            }))?.row;
+            }, activeRows))?.row;
             // [#23715] Two or more packages and no package-unbound draft: the
             // best-effort first match ADR-0048 §3.3 states, as before, served
             // with `version: null` (no row at the address the save naming none
@@ -11479,7 +11557,7 @@ export class ObjectStackProtocolImplementation implements
                 type: request.type,
                 name: request.name,
                 packageId: request.packageId,
-            }, { otherSpelling: true });
+            }, { otherSpelling: true }, activeRows);
         } catch (error) {
             // [#5532] The same rule as the row read above: a lock read that did
             // not happen is not an unlocked item.
@@ -11759,7 +11837,11 @@ export class ObjectStackProtocolImplementation implements
             // editor reads `state: 'draft'` or the plain read.
             ...(request.previewDrafts
                 ? {}
-                : { version: storedRowServed ? await this.readVersionToken({ ...request, member }, 'active') : null }),
+                : {
+                    version: storedRowServed
+                        ? await this.readVersionToken({ ...request, member }, 'active', packagelessBinding)
+                        : null,
+                }),
             ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
         };
     }
@@ -19472,6 +19554,12 @@ export class ObjectStackProtocolImplementation implements
         /** [#22877] `member` — the bundle member the read addressed; omitted, the canonical one. */
         request: { type: string; name: string; packageId?: string; member?: string },
         state: 'active' | 'draft',
+        /**
+         * [#24371] The item's package-less binding ({@link packagelessAddress}
+         * at `active`) when the caller has already resolved it; omitted, it is
+         * read here.
+         */
+        packagelessPackageId?: string | null,
     ): Promise<string | null> {
         const repo = this.getOverlayRepo();
         const ref = {
@@ -19480,7 +19568,9 @@ export class ObjectStackProtocolImplementation implements
             org: 'env',
         } as Parameters<typeof repo.headAt>[0];
         const packageId = request.packageId == null && state === 'active'
-            ? (await this.packagelessAddress(ref.type, ref.name, request.member)).packageId
+            ? packagelessPackageId !== undefined
+                ? packagelessPackageId
+                : (await this.packagelessAddress(ref.type, ref.name, request.member)).packageId
             : request.packageId ?? null;
         const stored = await this.storedHeadAt(repo, ref, state, packageId, request.member);
         return stored === null ? null : this.receiptVersion(stored);
@@ -19592,14 +19682,16 @@ export class ObjectStackProtocolImplementation implements
         /** [#22877] The bundle member the write addresses (a save's body's, a delete's selector); omitted, the canonical one. */
         member?: string,
         state: 'active' | 'draft' = 'active',
+        /** [#24371] The item's active rows as {@link readItemActiveRows} read them: selected from, not read again. */
+        activeRows?: readonly StoredOverlayRow[],
     ): Promise<{ packageId: string | null; candidates: readonly string[]; unbound: boolean }> {
         let rows: Array<{ package_id?: unknown }> | null | undefined;
+        const where = { type, name, state, ...overlayMemberWhere(type, member) };
         try {
             // [#21911] The explicit system opt-in — see findServedOverlayRow.
-            rows = await this.findEnvironmentRows('sys_metadata', {
-                where: { type, name, state, ...overlayMemberWhere(type, member) },
-                context: { isSystem: true },
-            });
+            rows = activeRows !== undefined && state === 'active'
+                ? activeRows.filter((row) => rowMatchesOverlayWhere(row, where))
+                : await this.findEnvironmentRows('sys_metadata', { where, context: { isSystem: true } });
         } catch (error) {
             // [#5532] An unprovisioned store holds no row, so no binding; any
             // other failure is a read that did not happen, never "no binding".
