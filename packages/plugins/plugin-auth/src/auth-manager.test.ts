@@ -38,7 +38,6 @@ import { betterAuth } from 'better-auth';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit';
 import { ADMIN_FULL_ACCESS, ADMIN_FULL_ACCESS_CAPABILITIES } from '@objectstack/spec';
 import { AuthzStoreUnavailableError } from '@objectstack/core';
-import { PermissionDeniedError } from '@objectstack/plugin-security';
 
 describe('AuthManager', () => {
   let consoleSpy: ReturnType<typeof vi.spyOn>;
@@ -1021,10 +1020,19 @@ describe('AuthManager', () => {
     };
 
     it('issuance: a refused placement REJECTS the whole invitation (no row is created)', async () => {
-      // The gate's own refusal, as `invitation-placement.ts` throws it: the
-      // real `PermissionDeniedError`, so the pin follows the class's code.
+      // The gate's own refusal, in the shape `invitation-placement.ts` throws
+      // it: plugin-security's `PermissionDeniedError`, read by its ADR-0112
+      // code. A structural stand-in, because importing plugin-security here
+      // measured roughly 1–2 s more import time on this file; the real class
+      // reaches this catch on the wire in the dogfood `delegated-admin-invite`
+      // file.
       const assertIssuable = vi.fn(async () => {
-        throw new PermissionDeniedError("business unit 'bu_plant_b' is outside the delegated subtree");
+        throw Object.assign(new Error("business unit 'bu_plant_b' is outside the delegated subtree"), {
+          name: 'PermissionDeniedError',
+          code: 'PERMISSION_DENIED',
+          status: 403,
+          statusCode: 403,
+        });
       });
       const { hooks, warnSpy } = await bootWithPlacement({ assertIssuable, apply: vi.fn() });
       warnSpy.mockRestore();
