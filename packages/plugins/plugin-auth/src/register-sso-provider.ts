@@ -382,7 +382,7 @@ type DomainVerificationBridgeResult = RegisterSsoFormResult & { body: RegisterSs
 
 /** The feature is off on this environment — one answer for both routes (#10859). */
 function domainVerificationDisabled(): DomainVerificationBridgeResult {
-  return { status: 400, body: { success: false, error: { code: 'DOMAIN_VERIFICATION_DISABLED', message: 'Domain verification is not enabled for this environment (set OS_SSO_DOMAIN_VERIFICATION).' } } };
+  return { status: 400, body: { success: false, error: { code: 'DOMAIN_VERIFICATION_DISABLED', message: 'Domain verification is not enabled (set OS_SSO_DOMAIN_VERIFICATION).' } } };
 }
 
 /**

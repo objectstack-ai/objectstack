@@ -20,7 +20,7 @@ export const zhCN: PlatformTranslationData = {
       title: '邮件投递',
       description: 'SMTP 与事务性邮件服务商配置。',
       groups: {
-        provider: { title: '服务商', description: '选择此环境如何发送邮件。' },
+        provider: { title: '服务商', description: '选择本系统如何发送邮件。' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'API 密钥' },
         from_address: { title: '发件地址' },
@@ -60,7 +60,7 @@ export const zhCN: PlatformTranslationData = {
       title: '短信投递',
       description: '用于 OTP 登录、邀请与通知的短信服务商配置。',
       groups: {
-        provider: { title: '服务商', description: '选择此环境如何发送外发短信。' },
+        provider: { title: '服务商', description: '选择本系统如何发送外发短信。' },
         aliyun: { title: '阿里云短信' },
         twilio: { title: 'Twilio' },
         limits: { title: '发送额度', description: '限制本部署的外发短信量。短信是付费通道,每一条都产生真实费用。' },
@@ -234,7 +234,7 @@ export const zhCN: PlatformTranslationData = {
         },
         audience: {
           title: '注册受众',
-          description: '谁可以成为本环境应用的用户。「邮箱域名」口径始终强制开启邮箱验证。「开放」口径也会强制开启，除非部署方关闭它；在此控制台保存的值无法关闭。邀请、管理员创建、SCIM 开通和企业 SSO 在任何口径下都可进入。',
+          description: '谁可以成为本系统应用的用户。「邮箱域名」口径始终强制开启邮箱验证。「开放」口径也会强制开启，除非部署方关闭它；在此控制台保存的值无法关闭。邀请、管理员创建、SCIM 开通和企业 SSO 在任何口径下都可进入。',
         },
         password_policy: {
           title: '密码策略',

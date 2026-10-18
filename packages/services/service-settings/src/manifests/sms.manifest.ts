@@ -19,7 +19,7 @@ const manifest = {
   order: 11,
   specifiers: [
     { type: 'group', id: 'provider', label: 'Provider', required: false,
-      description: 'Choose how this environment sends outbound SMS.' },
+      description: 'Choose how this system sends outbound SMS.' },
 
     // ⚠️ This options table is a CONTRACT, not a menu of aspirations: every
     // value here must be one `@objectstack/service-sms` can actually build a
