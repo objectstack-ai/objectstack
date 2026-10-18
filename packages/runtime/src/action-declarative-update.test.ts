@@ -87,6 +87,15 @@ const TRIAGE_CASE = {
     ai: { exposed: true, description: 'Triage this case.' },
 };
 
+/** `params` only, no `patch` — the shape whose empty bag is point 7's "nothing to write". */
+const NOTE_CASE = {
+    name: 'note_case',
+    label: 'Note',
+    operation: 'update',
+    params: [{ name: 'note', type: 'text' }],
+    ai: { exposed: true, description: 'Write a note on this case.' },
+};
+
 /** The REVERSE pin's subject: a handler-less `type: 'script'` action with NO `operation`. */
 const HANDLER_ONLY = {
     name: 'nudge_case',
@@ -103,7 +112,7 @@ const OBJECT_DEF = {
         priority: { type: 'text' },
         note: { type: 'text' },
     },
-    actions: [CLOSE_CASE, TRIAGE_CASE, HANDLER_ONLY],
+    actions: [CLOSE_CASE, TRIAGE_CASE, NOTE_CASE, HANDLER_ONLY],
 };
 
 /** The acting principal, as `resolveExecutionContext` builds one. */
@@ -609,6 +618,33 @@ describe('#15079 point 7 — no current record is a located refusal, not a silen
         expect(res.body.error.code).toBe('VALIDATION_ERROR');
         expect(res.body.error.message).toMatch(/nothing to write/);
         expect(rig.updates).toHaveLength(0);
+    });
+
+    // [#24268] The MCP door renders a thrown refusal through `@objectstack/mcp`'s
+    // `thrownRefusalEnvelope`, which reads a string `code` and a numeric
+    // `status` off the throw — a throw with no `code` reaches the agent as a
+    // bare sentence. Measured over the real `/mcp` bridge before the fix: both
+    // refusals below answered message-only. So the pin is on the two members
+    // that renderer reads, and on "nothing was written".
+    it('the MCP door answers the same two refusals with `code` + `status`, and writes nothing', async () => {
+        const noRecord = makeRig();
+        const missing: any = await dispatchMcp(OWNER, noRecord, 'close_case', {})
+            .then(() => undefined, (e: unknown) => e);
+        expect(missing).toBeInstanceOf(Error);
+        expect(missing.code).toBe('VALIDATION_ERROR');
+        expect(missing.status).toBe(400);
+        expect(String(missing.message)).toMatch(/recordId/);
+        expect(noRecord.updates).toHaveLength(0);
+
+        const empty = makeRig();
+        const nothing: any = await dispatchMcp(OWNER, empty, 'note_case', { recordId: RECORD_ID, params: {} })
+            .then(() => undefined, (e: unknown) => e);
+        expect(nothing).toBeInstanceOf(Error);
+        expect(nothing.code).toBe('VALIDATION_ERROR');
+        expect(nothing.status).toBe(400);
+        expect(String(nothing.message)).toMatch(/nothing to write/);
+        expect(empty.updates).toHaveLength(0);
+        expect(empty.row).toEqual(freshRow());
     });
 });
 

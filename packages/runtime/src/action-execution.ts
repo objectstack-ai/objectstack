@@ -2219,15 +2219,22 @@ export function declarativeUpdateWrite(action: any, params: Record<string, unkno
 
 /** A refusal from the declarative-update executor, carrying the ADR-0112 envelope. */
 function declarativeUpdateRefusal(message: string, status: number): Error {
-    // ⛔ No `code` literal is stamped here, deliberately. `resolveThrownHttpError`
-    // derives the STANDARD catalog member from the status
-    // (`standardErrorCodeForHttpStatus`: 400 → `VALIDATION_ERROR`), which is
-    // what ADR-0112 asks for when the condition is a generic one — and the
-    // ledger's own registration rule says so in as many words ("If the
-    // condition is generic … use the standard catalog instead of registering a
-    // synonym"). Both doors resolve the throw through that one function, so
-    // the REST envelope and the MCP bridge's tool-error agree by construction.
-    return Object.assign(new Error(message), { status });
+    // The code is the STANDARD catalog member DERIVED from the status
+    // (`standardErrorCodeForHttpStatus`: 400 → `VALIDATION_ERROR`), never a
+    // spelled literal — what ADR-0112 asks for when the condition is a generic
+    // one, and the ledger's own registration rule says so in as many words ("If
+    // the condition is generic … use the standard catalog instead of
+    // registering a synonym").
+    //
+    // [#24268] It is STAMPED on the throw, not left for each door to derive.
+    // The REST door's `resolveThrownHttpError` would derive the same member
+    // from `status` alone, but the MCP tool renderer (`@objectstack/mcp`'s
+    // `thrownRefusalEnvelope`) reads a string `code` and renders a code-less
+    // throw as its bare message — measured over the real `/mcp` bridge, where
+    // this function's refusals answered message-only while the D2 refusal one
+    // gate earlier answered `{ code, message, status }`. The two doors only
+    // agree because the code rides the throw.
+    return Object.assign(new Error(message), { code: standardErrorCodeForHttpStatus(status), status });
 }
 
 /**
