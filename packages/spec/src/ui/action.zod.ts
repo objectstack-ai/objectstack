@@ -247,8 +247,13 @@ export const ActionParamSchema = lazySchema(() => strictObject(
    * guessed at here, and #5016 answered it **per key, on measurement**:
    *
    * - **`visibleWhen` — opened.** The reader is on this exact path and it works
-   *   today. An inline param's `options` are lowered VERBATIM (objectui
-   *   `resolveActionParam`'s inline branch does `options: param.options`;
+   *   today. An inline param's `options` are lowered VERBATIM (at the console
+   *   pin, `.objectui-sha` `5e15928b4631`, objectui `resolveActionParam`'s
+   *   inline branch does `options: authoredOptions`, and `authoredOptions` is
+   *   `resolveOptionLabels(param.options, ctx.locale)`, which returns the
+   *   authored array itself when every `label` is already a string and
+   *   otherwise re-spreads only the entries whose `label` is an inline
+   *   per-locale map, resolving that `label`;
    *   `ActionParamDialog` re-spreads each entry to localise `label`;
    *   `paramToField` passes the array straight into the widget's field
    *   metadata), and `SelectField` / `MultiSelectField` / `RadioField` /
