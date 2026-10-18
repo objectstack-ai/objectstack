@@ -2389,6 +2389,20 @@ describe('ADR-0131 D10 --apply — a single-posture database that holds no organ
     });
   });
 
+  it('control — no row falls to it: nothing is created and nothing is warned; the boot creates it once the guard lets it start', async () => {
+    await withDatabase(`${NO_ORGANIZATION} UPDATE crm_event SET organization_id = 'org_elsewhere';`, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ organizations: 0, defaultOrganizationCreatedByApply: false });
+      expect(plan.warnings.some((w) => /creates the Default Organization/.test(w))).toBe(false);
+      const port = defaultOrganizationPort();
+      const report = await apply(catalog(), ledger(), { defaultOrganization: port });
+
+      expect(port.calls).toBe(0);
+      expect([report.complete, report.blocking]).toEqual([true, 0]);
+      expect(rows('SELECT COUNT(*) AS n FROM sys_organization')).toEqual([{ n: 0 }]);
+    });
+  });
+
   it('control — under a wall nothing is created: the rows are reported, never assigned', async () => {
     await withDatabase(NO_ORGANIZATION, async () => {
       const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'isolated', database: file });

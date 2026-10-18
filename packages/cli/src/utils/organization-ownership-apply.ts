@@ -520,7 +520,8 @@ export interface ApplyOptions {
   ledger: CeremonyLedgerPort;
   /**
    * Creates the Default Organization when the plan says `--apply` does (`single`,
-   * no organization at all — `OrganizationOwnershipPlan.defaultOrganizationCreatedByApply`).
+   * no organization at all, and rows that fall to it —
+   * `OrganizationOwnershipPlan.defaultOrganizationCreatedByApply`).
    * Absent, such a run blocks at attribution instead of attributing nothing.
    */
   defaultOrganization?: DefaultOrganizationPort;
@@ -723,9 +724,9 @@ const rowsToAttribute = (plan: OrganizationOwnershipPlan): number =>
 
 /**
  * [ADR-0131 D3, D10 fate 3] Under `single`, on a database that holds no
- * organization at all, create the Default Organization before the first
- * attribution write: it owns every row no anchor names, and it exists before
- * the first write that needs an owner. The plan the operator reviewed said so
+ * organization at all and rows no anchor names, create the Default
+ * Organization before the first attribution write: it owns those rows, and it
+ * exists before the first write that needs an owner. The plan the operator reviewed said so
  * (`defaultOrganizationCreatedByApply`, and its warning). `null` when it now
  * exists; the blocker, in the operator's terms, when it could not be created.
  */
@@ -2776,7 +2777,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     // Default Organization now existing where an earlier run found none — is
     // attributed instead of standing as a post-check discrepancy no re-run
     // could clear.
-    if (done && step === 'attribution' && (rowsToAttribute(before) > 0 || before.defaultOrganizationCreatedByApply)) {
+    if (done && step === 'attribution' && rowsToAttribute(before) > 0) {
       const again = await RUNNERS[step](run);
       steps.push(again);
       if (again.status !== 'done') {

@@ -444,10 +444,10 @@ export interface OrganizationOwnershipPlan {
   posture: string;
   defaultOrganization: { id: string; slug: 'default' } | null;
   /**
-   * `true` under `single` on a database that holds no organization at all:
-   * `--apply` creates the Default Organization before attribution, and the
-   * rows no anchor names are counted as attributed to it (ADR-0131 D3, D10
-   * fate 3). One of the plan's {@link warnings} says so.
+   * `true` under `single` on a database that holds no organization at all and
+   * rows no anchor names: `--apply` creates the Default Organization before
+   * attribution, and those rows are counted as attributed to it (ADR-0131 D3,
+   * D10 fate 3). One of the plan's {@link warnings} says so.
    */
   defaultOrganizationCreatedByApply: boolean;
   organizations: number;
@@ -751,10 +751,11 @@ interface PlanContext {
   defaultOrganizationId: string | null;
   /**
    * Under `single` with no organization at all: `--apply` creates the Default
-   * Organization before attribution ({@link OrganizationOwnershipPlan.defaultOrganizationCreatedByApply}),
-   * so the rows that fall to it are counted as attributed, never reported.
+   * Organization before attribution when a row falls to it
+   * ({@link OrganizationOwnershipPlan.defaultOrganizationCreatedByApply}), so
+   * those rows are counted as attributed, never reported.
    */
-  defaultOrganizationCreatedByApply: boolean;
+  defaultOrganizationCreatable: boolean;
   onAttribution?: AttributionSink;
 }
 
@@ -1183,7 +1184,7 @@ async function walkNullRows(
         if (pending.length === 0) break;
         pending = await applyAnchor(ctx, anchor, pending, derived, assigned);
       }
-      if (pending.length > 0 && ctx.posture === 'single' && (ctx.defaultOrganizationId !== null || ctx.defaultOrganizationCreatedByApply)) {
+      if (pending.length > 0 && ctx.posture === 'single' && (ctx.defaultOrganizationId !== null || ctx.defaultOrganizationCreatable)) {
         derived['default-organization'] = (derived['default-organization'] ?? 0) + pending.length;
         // The plan's own run counts the rows the Default Organization `--apply`
         // creates will take; the apply's walk runs only once it exists.
@@ -1307,12 +1308,14 @@ export async function buildOrganizationOwnershipPlan(opts: {
   // an owner. A 17.x database that holds NO organization (its seed ran before
   // any was created) has none for attribution to name, and the boot that
   // would have created it is the one the v18 guard refuses before any plugin
-  // writes. So `--apply` creates it first, through the boot invariant's own
-  // producer, and the plan counts the rows it will take as attributed, never
-  // as unattributable — the ceremony decides that on the operator's behalf,
-  // so it is a warning too. A database that holds organizations, none of them
-  // the Default Organization, is not this case: nothing is created there.
-  const defaultOrganizationCreatedByApply =
+  // writes. So when a row falls to it, `--apply` creates it first, through the
+  // boot invariant's own producer, and the plan counts the rows it will take
+  // as attributed, never as unattributable — the ceremony decides that on the
+  // operator's behalf, so it is a warning too. With no such row nothing needs
+  // an owner, and the boot creates it once the guard lets it start. A
+  // database that holds organizations, none of them the Default
+  // Organization, is not this case: nothing is created there.
+  const defaultOrganizationCreatable =
     opts.posture === 'single' && hasOrganizations && organizations === 0 &&
     catalog.columns.get('sys_organization')?.has('slug') === true;
 
@@ -1329,7 +1332,7 @@ export async function buildOrganizationOwnershipPlan(opts: {
       homeOf,
       posture: opts.posture,
       defaultOrganizationId,
-      defaultOrganizationCreatedByApply,
+      defaultOrganizationCreatable,
       ...(opts.onAttribution ? { onAttribution: opts.onAttribution } : {}),
     };
     for (const [base, physical] of [...db.catalog.bases].sort(([a], [b]) => a.localeCompare(b))) {
@@ -1381,8 +1384,11 @@ export async function buildOrganizationOwnershipPlan(opts: {
   staleCopies.sort((a, b) => a.object.localeCompare(b.object));
 
   const warnings: string[] = [];
+  const taking = defaultOrganizationCreatable
+    ? tables.reduce((n, t) => n + (t.attribution?.['default-organization'] ?? 0), 0)
+    : 0;
+  const defaultOrganizationCreatedByApply = taking > 0;
   if (defaultOrganizationCreatedByApply) {
-    const taking = tables.reduce((n, t) => n + (t.attribution?.['default-organization'] ?? 0), 0);
     warnings.push(
       'This database holds no organization, and the tenancy posture is single: --apply creates the Default ' +
         `Organization (slug '${DEFAULT_ORGANIZATION_SLUG}') before its first write and gives it the ${taking} ` +
