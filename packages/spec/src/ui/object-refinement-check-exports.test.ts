@@ -65,6 +65,7 @@ import {
   checkPageSlotPair,
   checkPageDefaultPlacement,
   checkPageRegionPlacement,
+  checkPageRecordBindingPlacement,
 } from './page.zod';
 import {
   GlobalFilterSchema,
@@ -333,6 +334,16 @@ const pageRegionPlacementFixtures: Fixture[] = [
   { label: 'an unplaced name on a `slotted` page — it renders its slots, not its regions', value: { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted', regions: [region('left_sidebar')] }, refusesAt: [] },
 ];
 
+const ORG_ROW = { object: 'sys_organization', sort: [{ field: 'created_at', order: 'asc' }] } as const;
+const pageRecordBindingPlacementFixtures: Fixture[] = [
+  { label: 'a `record` binding on an `app` page', value: { ...PAGE_BASE, type: 'app', record: ORG_ROW }, refusesAt: [] },
+  { label: 'an `app` page with no `record` binding', value: { ...PAGE_BASE, type: 'app' }, refusesAt: [] },
+  { label: 'a `record` binding on a `home` page', value: { ...PAGE_BASE, record: ORG_ROW }, refusesAt: ['record'] },
+  { label: 'a `record` binding on a record page — its row is the record it opens', value: { ...PAGE_BASE, type: 'record', object: 'account', record: ORG_ROW }, refusesAt: ['record'] },
+  { label: 'a `record` binding on a page with no `type` (the `record` default)', value: { name: 'untyped_page', label: 'Untyped', record: ORG_ROW }, refusesAt: ['record'] },
+  { label: 'a `record` binding on a `list` page', value: { ...PAGE_BASE, type: 'list', record: ORG_ROW }, refusesAt: ['record'] },
+];
+
 const DATE_FILTER = { field: 'created_at', type: 'date' } as const;
 
 const dateDefaultFixtures: Fixture[] = [
@@ -550,6 +561,7 @@ const MIRRORED: MirroredSchema[] = [
       { name: 'checkPageSlotPair', check: checkPageSlotPair, fixtures: pageSlotPairFixtures },
       { name: 'checkPageDefaultPlacement', check: checkPageDefaultPlacement, fixtures: pageDefaultPlacementFixtures },
       { name: 'checkPageRegionPlacement', check: checkPageRegionPlacement, fixtures: pageRegionPlacementFixtures },
+      { name: 'checkPageRecordBindingPlacement', check: checkPageRecordBindingPlacement, fixtures: pageRecordBindingPlacementFixtures },
     ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
@@ -704,9 +716,9 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares all six exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all seven exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageDefaultPlacement', 'checkPageRegionPlacement']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageDefaultPlacement', 'checkPageRegionPlacement', 'checkPageRecordBindingPlacement']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
@@ -749,6 +761,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     ['checkPageSlotPair', checkPageSlotPair],
     ['checkPageDefaultPlacement', checkPageDefaultPlacement],
     ['checkPageRegionPlacement', checkPageRegionPlacement],
+    ['checkPageRecordBindingPlacement', checkPageRecordBindingPlacement],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);

@@ -2,27 +2,27 @@
 
 import type { Plugin, PluginContext } from '@objectstack/core';
 import {
-  resolveAuthzContext,
+  // [ruling record 6227928430, letter A] The ONE request-to-ExecutionContext
+  // composition: the session read under the in-process rule, the tenancy
+  // posture's classification, `resolveAuthzContext` with the auth service's
+  // per-user posture source (ADR-0069 · #23287) and its API-key lifecycle
+  // policy (#23367), and the assembly. This door states its differences as the
+  // function's named parameters and keeps only its own facts.
+  resolveRequestExecutionContext,
   isAuthzStoreUnavailableError,
-  // [ADR-0069 · #23287] The auth service's per-user posture computation,
-  // bound for the shared key-admission seam; the posture the resolver decides
-  // is what this resolver puts on the context (`SettingsContext.authGate`).
-  userAuthGateSourceOf,
-  // [#23367] The API-key lifecycle policy source, bound beside it, and the
-  // brand of the refusal it can produce.
-  apiKeyLifecyclePolicySourceOf,
+  // [#23367] The brand of the refusal an API key's own lifecycle produces.
   isApiKeyLifecycleRefusalError,
   // [#16013] The posture derivation, in ONE call. It reads the posture IN
   // FORCE off the `tenancy` service (never the REQUESTED one an env var asks
   // for) and carries decision-1-option-A's classification (#13906) for every
-  // admission seam at once -- see `resolveAdmissionTenancyPosture` below for
-  // the half that stays this seam's own.
+  // admission seam at once -- see `tenancyServiceResolver` below for the half
+  // that stays this seam's own.
   classifyAdmissionTenancyPosture,
   type TenancyPostureSource,
+  type TenancyServiceResolver,
 } from '@objectstack/core';
 import type { TenancyPosture } from '@objectstack/spec/security';
 import type { IHttpServer, IDataEngine, IHttpRequest, IAuthService } from '@objectstack/spec/contracts';
-import { inProcessSessionReadInput } from '@objectstack/types';
 import type { SettingsContext } from './settings-service.types.js';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
@@ -288,10 +288,10 @@ export class SettingsServicePlugin implements Plugin {
       }
       // [Finding-1] Derive the caller's identity + capabilities from the
       // platform's VERIFIED resolution (session cookie / API key / OAuth), NOT
-      // from spoofable `x-user-id` / `x-permissions` headers. `resolveAuthzContext`
-      // returns real, server-verified capabilities; `enforced: true` makes the
-      // service apply the manifest read/write permission gates. An unresolvable
-      // request fails CLOSED (anonymous + enforced → denied).
+      // from spoofable `x-user-id` / `x-permissions` headers. The shared
+      // composition returns real, server-verified capabilities; `enforced:
+      // true` makes the service apply the manifest read/write permission gates.
+      // An unresolvable request fails CLOSED (anonymous + enforced → denied).
       const verifiedContextFromRequest = async (req: IHttpRequest): Promise<SettingsContext> => {
         try {
           const ql: any = ctx.getService('objectql');
@@ -300,64 +300,69 @@ export class SettingsServicePlugin implements Plugin {
             if (v == null) continue;
             headers.set(String(k), Array.isArray(v) ? v.join(',') : String(v));
           }
-          const getSession = async (h: any) => {
-            try {
-              const authService: any = ctx.getService('auth');
-              let api: any = authService?.api;
-              if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
-              return await api?.getSession?.(inProcessSessionReadInput(h));
-            } catch {
-              return undefined;
-            }
-          };
-          // [#15351] The tenancy posture is an authorization INPUT, resolved for
-          // THIS door before the shared resolver runs. Omitting it is what left
-          // both posture-conditional API-key refusals unreachable here — and
-          // this seam does not merely admit the principal, it hands
-          // `authz.tenantId` onward as the resolved settings tenant, so an
-          // unvetted claim became a verdict a consumer acts on.
-          const tenancyPosture = await this.resolveAdmissionTenancyPosture(ctx);
-          // [#23287, ruling C′ item 3] The auth service's per-user posture
-          // computation, for the shared key-admission seam.
+          // [#23287, ruling C′ item 3] The auth service: its session read, its
+          // per-user posture computation for the shared key-admission seam, and
+          // its API-key lifecycle policy (#23367). A lookup that throws is no
+          // auth service, so the API-key door still admits.
           let authService: IAuthService | undefined;
           try {
             authService = ctx.getService<IAuthService>('auth');
           } catch {
             authService = undefined;
           }
-          const authz = await resolveAuthzContext({
-            ql,
-            headers,
-            getSession,
-            tenancyPosture,
-            userAuthGates: userAuthGateSourceOf(authService),
-            // [#23367] The API-key lifecycle policy, from the same service.
-            apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
-          });
-          // [ADR-0069 · #23287] The posture the shared resolver decided for
-          // whichever credential admitted the caller (`authz.authGate`): a held
-          // session's own, or an API key owner's account-scope posture. Read
-          // by the family's door (`registerSettingsRoutes`), which refuses a
-          // context carrying it with the gate's `403`. Absent for every healthy
-          // caller, and for a key whose owner holds only a `credential`-scope
-          // posture.
+          // [ruling record 6227928430, letter A item 3] This door's differences,
+          // each a named parameter of the one composition:
           //
-          // No second read and no outage arm: the posture comes off the same
-          // read that resolved the caller, so a read that fails resolved no
-          // caller either, and the anonymous floor refuses it. The `503` REST
-          // and storage answer belongs to a SEPARATE gate re-read that fails
-          // after the caller was resolved, a state this resolver never enters
-          // for a session. For an API key the owner's posture is asked inside
-          // the resolver, and a computation that rejects raises the branded
-          // outage the `catch` below re-raises.
-          const authGate = authz.authGate;
+          //  - `anonymous: 'fail-closed'`: a request that resolves no principal
+          //    yields no context, and the door answers its anonymous floor.
+          //  - `authGate: 'resolved'` (ADR-0069 · #23287): the posture the shared
+          //    resolver decided for whichever credential admitted the caller, a
+          //    held session's own or an API key owner's account-scope posture,
+          //    read by the family's door (`registerSettingsRoutes`), which
+          //    refuses a context carrying it with the gate's `403`. Absent for
+          //    every healthy caller, and for a key whose owner holds only a
+          //    `credential`-scope posture. No second
+          //    read and no outage arm: the posture comes off the same read that
+          //    resolved the caller, so a read that fails resolved no caller
+          //    either, and the anonymous floor refuses it. The `503` REST and
+          //    storage answer belongs to a SEPARATE gate re-read that fails
+          //    after the caller was resolved, a state this door never enters
+          //    for a session. For an API key the owner's posture is asked inside
+          //    the resolver, and a computation that rejects raises the branded
+          //    outage the `catch` below re-raises.
+          //  - `sessionApi: 'optional'`: with no session read, an API key still
+          //    admits its owner.
+          //  - [#15351] `tenancy`: the posture is an authorization INPUT. Without
+          //    it both posture-conditional API-key refusals were unreachable
+          //    here, and this seam hands the vetted `tenantId` onward as the
+          //    resolved settings tenant.
+          //  - `localization`, `requestLocale`, `accessToken`: withheld. The
+          //    settings context carries no locale, no time zone and no bearer.
+          const context = await resolveRequestExecutionContext({
+            headers,
+            ql,
+            authService,
+            tenancy: this.tenancyServiceResolver(ctx),
+            anonymous: 'fail-closed',
+            authGate: 'resolved',
+            credentials: 'api-key-and-session',
+            sessionApi: 'optional',
+            session: 'request',
+            localization: 'withhold',
+            requestLocale: undefined,
+            accessToken: 'withhold',
+            oauth: undefined,
+            onAdmission: undefined,
+          });
+          if (!context) return { enforced: true }; // fail closed
+          const authGate = context.authGate;
           return {
-            userId: authz.userId,
-            tenantId: authz.tenantId,
+            userId: context.userId,
+            tenantId: context.tenantId,
             // Manifest read/write permissions are system CAPABILITIES
             // (setup.access / setup.write / manage_platform_settings) — union
             // both aggregates so either kind of declared gate resolves.
-            permissions: [...(authz.systemPermissions ?? []), ...(authz.permissions ?? [])],
+            permissions: [...(context.systemPermissions ?? []), ...(context.permissions ?? [])],
             enforced: true,
             ...(authGate ? { authGate } : {}),
           };
@@ -386,12 +391,13 @@ export class SettingsServicePlugin implements Plugin {
   }
 
   /**
-   * [#15351] Derive the tenancy posture IN FORCE for this door, so
-   * `resolveAuthzContext` can run its two posture-conditional API-key
-   * refusals: `organization_required` (an organization-less key under a wall)
-   * and `organization_membership_ended` (a key stamped with an organization
-   * its owner has left). Both are gated on a posture the CALLER supplies, and
-   * this caller supplied none.
+   * [#15351] How this door reaches the `tenancy` service, so the posture IN
+   * FORCE reaches `resolveAuthzContext` (through the shared composition,
+   * `resolveRequestExecutionContext`) and its two posture-conditional API-key
+   * refusals run: `organization_required` (an organization-less key under a
+   * wall) and `organization_membership_ended` (a key stamped with an
+   * organization its owner has left). Both are gated on a posture the CALLER
+   * supplies, and this caller once supplied none.
    *
    * ## ⛔ Not the requested posture
    *
@@ -405,7 +411,9 @@ export class SettingsServicePlugin implements Plugin {
    * ## The classification, decision 1 option A (#13906) — no longer written here
    *
    * [#16013] `classifyAdmissionTenancyPosture` (`@objectstack/core`) owns it
-   * for every admission seam: never registered ⇒ branded ⇒ quiet `undefined`;
+   * for every admission seam, called on this resolver by the shared composition
+   * for the door and by {@link resolveAdmissionTenancyPosture} for the service:
+   * never registered ⇒ branded ⇒ quiet `undefined`;
    * every other rejection ⇒ `AuthzStoreUnavailableError` (ADR-0112
    * `SERVICE_UNAVAILABLE` / 503), because admission was never DECIDED and must
    * not be answered. ⛔ A `try { … } catch { undefined }` at any seam
@@ -432,21 +440,33 @@ export class SettingsServicePlugin implements Plugin {
    * so absence is the only fault it could report anyway. It keeps the quiet
    * answer, unchanged.
    *
-   * ⛔ That argument is exactly why the RESOLUTION above did NOT move when the
-   * classification did (#16013): the shared helper is handed a decided way to
-   * reach the service; whether this host shape may be asked at all is a fact
-   * only this seam holds.
+   * ⛔ That argument is exactly why the RESOLUTION here did NOT move when the
+   * classification did (#16013), nor when the composition did (ruling record
+   * 6227928430): the shared helpers are handed a decided way to reach the
+   * service; whether this host shape may be asked at all is a fact only this
+   * seam holds.
+   *
+   * @returns `undefined` for a host shape with no async registry (no posture
+   *   is read), else the read.
    */
-  private async resolveAdmissionTenancyPosture(
-    ctx: PluginContext,
-  ): Promise<TenancyPosture | undefined> {
+  private tenancyServiceResolver(ctx: PluginContext): TenancyServiceResolver | undefined {
     const kernel = ctx.getKernel?.() as
       | { getServiceAsync?: <T>(name: string, scopeId?: string) => Promise<T> }
       | undefined;
     if (!kernel || typeof kernel.getServiceAsync !== 'function') return undefined;
-    return classifyAdmissionTenancyPosture(() =>
-      kernel.getServiceAsync!<TenancyPostureSource>('tenancy'),
-    );
+    return () => kernel.getServiceAsync!<TenancyPostureSource>('tenancy');
+  }
+
+  /**
+   * The posture IN FORCE, read the way this plugin's HTTP door reads it
+   * ({@link tenancyServiceResolver}, then the shared classification), for the
+   * settings service's own `tenancyPosture` option.
+   */
+  private async resolveAdmissionTenancyPosture(
+    ctx: PluginContext,
+  ): Promise<TenancyPosture | undefined> {
+    const tenancy = this.tenancyServiceResolver(ctx);
+    return tenancy ? classifyAdmissionTenancyPosture(tenancy) : undefined;
   }
 
   /**

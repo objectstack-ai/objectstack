@@ -241,10 +241,11 @@ function walkFilterValues(
           : suggestion
           ? `Did you mean "{${suggestion}}"? Context tokens are {${KNOWN_LIST}}; ` +
             `time-based values use date macros such as {today} or {30_days_ago}.`
-          : `Resolvable placeholders are the context tokens {${KNOWN_LIST}} and the ` +
-            `date macros (e.g. {today}, {week_start}, {30_days_ago}). To filter on a ` +
-            `literal value that happens to look like a placeholder, this is not supported — ` +
-            `rename the value.`,
+          // [#22161] One remedy line; the two vocabularies in full, and why a
+          // literal shaped like a placeholder cannot be filtered on, are
+          // `os explain filter-token-unknown`.
+          : `Use a context token ({${KNOWN_LIST}}) or a date macro such as {today} or ` +
+            `{30_days_ago}; a literal value that looks like a placeholder must be renamed.`,
       });
     }
     return;

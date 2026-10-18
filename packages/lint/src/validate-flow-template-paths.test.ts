@@ -3,11 +3,24 @@
 import { describe, it, expect } from 'vitest';
 import { flowNodeValueTemplateRefusals } from '@objectstack/spec/automation';
 import {
-  validateFlowTemplatePaths,
+  validateFlowTemplatePaths as validateFlowTemplatePathsUnrecorded,
   FLOW_TEMPLATE_UNKNOWN_FIELD,
   FLOW_TEMPLATE_LOOKUP_TRAVERSAL,
   FLOW_TEMPLATE_FIELD_UNPROVISIONED,
 } from './validate-flow-template-paths.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Slice 21: every finding of the two ids whose `fix:` line slice 21
+// shortened is recorded, and the block at the foot of the file holds each
+// recorded `fix:` line to one line of at most 200 characters.
+const firedSlice21: Array<{ rule: string; hint: string }> = [];
+const validateFlowTemplatePaths: typeof validateFlowTemplatePathsUnrecorded = (...args) => {
+  const findings = validateFlowTemplatePathsUnrecorded(...args);
+  for (const f of findings) {
+    if (f.rule === FLOW_TEMPLATE_LOOKUP_TRAVERSAL || f.rule === FLOW_TEMPLATE_FIELD_UNPROVISIONED) firedSlice21.push(f);
+  }
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -681,7 +694,9 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     expect(findings[0].message).toContain("'owner_id'");
     expect(findings[0].hint).toContain('{{ caseRecord.owner_id }}');
     // config.expand is the START node's opt-in and must not be prescribed here.
-    expect(findings[0].hint).toContain("START node's opt-in");
+    // [#22161] Slice 21: the line no longer says why; `os explain` does.
+    expect(findings[0].hint).not.toContain('config.expand');
+    expect(explainRule(FLOW_TEMPLATE_LOOKUP_TRAVERSAL)!.paragraphs.join('\n')).toContain("start node's opt-in");
   });
 
   it('flags a typo off a get_record output', () => {
@@ -822,7 +837,10 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
     expect(warned).toHaveLength(1);
     expect(warned[0].rule).toBe(FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
     expect(warned[0].severity).toBe('warning');
-    expect(warned[0].hint).toContain("config.expand and the engine re-reads it as the run's identity");
+    // [#22161] Slice 21: the trigger root's line prescribes the opt-in; what it
+    // does (a re-read as the run's identity) is `os explain`'s.
+    expect(warned[0].hint).toContain("to the start node's config.expand");
+    expect(explainRule(FLOW_TEMPLATE_LOOKUP_TRAVERSAL)!.paragraphs.join('\n')).toContain("as the run's identity");
 
     // [#19939] A CRUD filter operand is a value slot: no longer scanned, at any root.
     expect(validateFlowTemplatePaths(
@@ -1044,5 +1062,64 @@ describe('validateFlowTemplatePaths — variable roots (#17305)', () => {
       ],
     });
     expect(findings.filter((f) => f.rule === FLOW_TEMPLATE_FIELD_UNPROVISIONED)).toHaveLength(0);
+  });
+});
+
+// [#22161] Slice 21: the `fix:` line of `flow-template-lookup-traversal` and
+// `flow-template-field-unprovisioned`. One remedy line per root: the trigger
+// root's names the start node's `config.expand` opt-in, a variable root's never
+// does, and the anchor id prints the shared one-line anchor fix. What the
+// opt-in does, why a variable root cannot use it, and how to vouch for or opt
+// out of an anchor are each id's `os explain` entry.
+describe('[#22161] one-line fix — the flow template ids whose `fix:` line slice 21 shortened', () => {
+  it('the trigger root prints the one remedy line', () => {
+    const findings = validateFlowTemplatePaths(flowWith({ title: 'From {{ record.crm_account.name }}', body: 'x' }));
+    expect(findings.map((f) => f.hint)).toEqual([
+      "Add 'crm_account' to the start node's config.expand, or write '{{ record.crm_account }}' (the id) or a " +
+        "formula field on 'crm_lead' instead.",
+    ]);
+  });
+
+  it('the anchor id prints the shared one-line anchor fix', () => {
+    const findings = validateFlowTemplatePaths({
+      objects: [{ name: 'ext_customer', external: { remoteName: 'customers' }, fields: { email: { name: 'email', type: 'text' } } }],
+      flows: [{
+        name: 'ext_flow',
+        type: 'record_change',
+        nodes: [
+          { id: 'start', type: 'start', config: { objectName: 'ext_customer', triggerType: 'record-after-create' } },
+          { id: 'n1', type: 'notify', config: { title: 'Owned by {{ record.owner_id }}' } },
+        ],
+      }],
+    });
+    expect(findings.filter((f) => f.rule === FLOW_TEMPLATE_FIELD_UNPROVISIONED).map((f) => f.hint)).toEqual([
+      "If the remote table carries 'owner_id', declare it in ext_customer's own fields (mapped through " +
+        'columnMap); otherwise drop the reference or opt the object out of the injection',
+    ]);
+  });
+
+  it('every `fix:` line the cases in this file fired for those ids is one line of at most 200 characters', () => {
+    expect([...new Set(firedSlice21.map((f) => f.rule))].sort()).toEqual(
+      [FLOW_TEMPLATE_FIELD_UNPROVISIONED, FLOW_TEMPLATE_LOOKUP_TRAVERSAL].sort(),
+    );
+    // Coverage control: both roots of the traversal id fired.
+    const traversal = firedSlice21.filter((f) => f.rule === FLOW_TEMPLATE_LOOKUP_TRAVERSAL);
+    expect(traversal.some((f) => f.hint.startsWith('Add '))).toBe(true);
+    expect(traversal.some((f) => f.hint.startsWith('Write '))).toBe(true);
+    for (const f of firedSlice21) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, f.rule).not.toContain("run's identity");
+      expect(f.hint, f.rule).not.toContain('vouch for');
+    }
+  });
+
+  const MOVED_FROM_HINT: Record<string, readonly string[]> = {
+    [FLOW_TEMPLATE_LOOKUP_TRAVERSAL]: ["as the run's identity", "start node's opt-in", 'covers the trigger record alone'],
+    [FLOW_TEMPLATE_FIELD_UNPROVISIONED]: ['columnMap', "`ownership: 'none'`", '`systemFields: { audit: false }`'],
+  };
+  it.each(Object.keys(MOVED_FROM_HINT))('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explainRule(rule)!.paragraphs.join('\n');
+    for (const fact of MOVED_FROM_HINT[rule]!) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

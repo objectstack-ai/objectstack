@@ -1,7 +1,7 @@
 ---
 title: Page schema — UI Protocol property reference
 navTitle: Page
-description: "Page schemas of the ObjectStack UI Protocol: ElementApiDataSource, ElementDataSource and 9 more — each property with its type, default and a TypeScript example."
+description: "Page schemas of the ObjectStack UI Protocol: ElementApiDataSource and 11 more — each property with its type, default and a TypeScript example."
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -13,8 +13,8 @@ description: "Page schemas of the ObjectStack UI Protocol: ElementApiDataSource,
 ## TypeScript Usage
 
 ```typescript
-import { ElementApiDataSourceSchema, ElementDataSourceSchema, InterfacePageConfigSchema, PageSchema, PageComponentSchema, PageComponentType, PagePrintSchema, PageRegionSchema, PageTemplateSchema, PageTypeSchema, PageVariableSchema } from '@objectstack/spec/ui';
-import type { ElementApiDataSource, ElementDataSource, InterfacePageConfig, Page, PageComponent, PageComponentType, PagePrint, PageRegion, PageTemplate, PageType, PageVariable } from '@objectstack/spec/ui';
+import { ElementApiDataSourceSchema, ElementDataSourceSchema, InterfacePageConfigSchema, PageSchema, PageComponentSchema, PageComponentType, PagePrintSchema, PageRecordBindingSchema, PageRegionSchema, PageTemplateSchema, PageTypeSchema, PageVariableSchema } from '@objectstack/spec/ui';
+import type { ElementApiDataSource, ElementDataSource, InterfacePageConfig, Page, PageComponent, PageComponentType, PagePrint, PageRecordBinding, PageRegion, PageTemplate, PageType, PageVariable } from '@objectstack/spec/ui';
 
 // Validate data
 const result = ElementApiDataSourceSchema.parse(data);
@@ -207,6 +207,7 @@ View filter rule
 | **type** | `Enum<'record' \| 'home' \| 'app' \| 'utility' \| 'list'>` | optional (default: `"record"`) | Page type |
 | **variables** | `{ name: string; type?: Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array' \| 'record_id'>; defaultValue?: any; source?: string }[]` | optional | Local page state, exposed to expressions as `page.<name>` and writable by interactive elements via `source` (master/detail, filtered dashboards). |
 | **object** | `string` | optional | Bound object (for Record pages) |
+| **record** | `{ object: string; view?: string; filter?: object[]; sort?: object[] }` | optional | The row an app page is about — a one-row query `{ object, view?, filter?, sort? }` whose FIRST row (by `sort`, read under the caller's identity) the page's components read as `record` in `visibleWhen`. A count or a plan is a field on that row: a `summary` roll-up (`record.environment_count > 1`) or the object's own field (`record.plan != 'free'`). No row, no `record`: the predicate faults and the component renders. Only on `type: 'app'` — refused on every other page type (a record page's row is the record it opens). Planned in the renderer: until the console mounts it, `record` stays unbound on an app page. |
 | **template** | `Enum<'default' \| 'header-sidebar-main' \| 'three-column' \| 'dashboard'>` | optional (default: `"default"`) | Layout template — 'default', 'header-sidebar-main', 'three-column' or 'dashboard'. Each places its own regions (PAGE_TEMPLATE_SLOTS); a region the template does not place, or a second region filling the same slot, is refused at the region's name. |
 | **regions** | `{ name: string; width?: Enum<'small' \| 'medium' \| 'large' \| 'full'>; components: object[] }[]` | optional | Layout regions (header, main, sidebar, footer) with their components. Optional — list pages use interfaceConfig, slotted pages use slots, and an empty full page falls back to the synthesized default layout. |
 | **isDefault** | `boolean` | optional (default: `false`) | Whether this record page is the default record page of its `object` — the page the record view opens. At most one `isDefault: true` record page may exist for an object in a deployment: a second is refused (by defineStack / os validate, at package registration and at metadata save), naming both pages. Saving a page under the existing default's own name is that page, not a second default. Refused on any other page — a page that is not a record page bound to an object: nothing reads it there. An app opens on its first navigation item, and the root landing follows the app's own isDefault. |
@@ -234,6 +235,15 @@ View filter rule
 | **type** | `Enum<'string' \| 'number' \| 'boolean' \| 'object' \| 'array' \| 'record_id'>` | optional (default: `"string"`) |  |
 | **defaultValue** | `any` | optional | Initial value. Defaults to a type-appropriate empty value when omitted. |
 | **source** | `string` | optional | Component id that writes this variable (e.g. an element:record_picker whose `id` matches). |
+
+### Nested Shape: `Page.record`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the page row is read from |
+| **view** | `string` | optional | Named view to apply |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the filter of the named view |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order — the page row is the FIRST row of the bound set under it |
 
 ### Nested Shape: `Page.regions[number]`
 
@@ -301,7 +311,7 @@ View filter rule
 | **style** | `Record<string, string>` | optional | Inline styles or utility classes |
 | **className** | `string` | optional | CSS class names |
 | **responsiveStyles** | `{ large?: Record<string, string \| number>; medium?: Record<string, string \| number>; small?: Record<string, string \| number>; xsmall?: Record<string, string \| number> }` | optional | Per-breakpoint scoped style maps (ADR-0065) |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record`. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. "page.selectedProjectId != ''" |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record` — the record a record page opens, or the row an app page's `record` binding reads (none without one; a block's own `dataSource` binds no `record` for its siblings). A count or a plan is a field on that row (a `summary` roll-up: `record.environment_count > 1`; `record.plan != 'free'`), never `features.*`, which are the deployment's public auth flags, the same for every organisation. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. "page.selectedProjectId != ''" |
 | **visibility** | `never` | optional | [REMOVED] `page.components[].visibility` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the page component's deprecated spelling of the conditional-visibility predicate, which the parse folded into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate) is unchanged. Where a component writes both, `visibleWhen` is the one that was in effect: delete `visibility`. |
 | **dataSource** | `{ object: string; view?: string; filter?: object[]; sort?: object[]; … } \| { provider: 'api'; read: object; path?: string }` | optional | Per-element data binding: an object binding `{ object, view?, filter?, sort?, limit? }` that overrides the page object, or an API binding `{ provider: 'api', read: { url }, path? }` that reads one same-origin endpoint |
 | **responsive** | `never` | optional | [REMOVED] `page.components[].responsive` was removed in @objectstack/spec 17 (ADR-0049 D2) — no renderer ever read it, so per-breakpoint layout overrides (columns/order/visibility) parsed, validated, and then did nothing. Delete the key. For breakpoint behaviour that IS applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render, e.g. `responsiveStyles: { xsmall: { display: 'none' } }` to hide a component on the narrowest screens. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |
@@ -418,6 +428,39 @@ Print declaration: paper size, orientation, margins, the running header and foot
 
 ---
 
+## PageRecordBinding
+
+### Properties
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **object** | `string` | ✅ | Object the page row is read from |
+| **view** | `string` | optional | Named view to apply |
+| **filter** | `{ field: string; operator: Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>; value?: string \| number \| boolean \| null \| (string \| number)[] }[]` | optional | Filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the filter of the named view |
+| **sort** | `{ field: string; order: Enum<'asc' \| 'desc'> }[]` | optional | Sort order — the page row is the FIRST row of the bound set under it |
+
+### Nested Shape: `PageRecordBinding.filter[number]`
+
+View filter rule
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to filter on |
+| **operator** | `Enum<'equals' \| 'not_equals' \| 'contains' \| 'not_contains' \| 'icontains' \| …>` | ✅ | Filter operator |
+| **value** | `string \| number \| boolean \| null \| (string \| number)[]` | optional | Filter value. The accepted SHAPE depends on the operator: `in` / `not_in` take an array (any length, including []), `between` takes exactly [min, max], every other operator takes a scalar. The unary operators (is_empty / is_not_empty / is_null / is_not_null) take their direction from the operator name and ignore this key. One operator bounds the VALUE as well as the shape: `icontains` takes a NON-EMPTY STRING, the comparand the Filter Protocol conformance table declares for it — an empty comparand constrains nothing and a non-string one would answer a query nobody wrote, and both are refused at the query path too. |
+
+### Nested Shape: `PageRecordBinding.sort[number]`
+
+Sort field and direction pair
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **field** | `string` | ✅ | Field name to sort by |
+| **order** | `Enum<'asc' \| 'desc'>` | ✅ | Sort direction |
+
+
+---
+
 ## PageRegion
 
 ### Properties
@@ -440,7 +483,7 @@ Print declaration: paper size, orientation, margins, the running header and foot
 | **style** | `Record<string, string>` | optional | Inline styles or utility classes |
 | **className** | `string` | optional | CSS class names |
 | **responsiveStyles** | `{ large?: Record<string, string \| number>; medium?: Record<string, string \| number>; small?: Record<string, string \| number>; xsmall?: Record<string, string \| number> }` | optional | Per-breakpoint scoped style maps (ADR-0065) |
-| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record`. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. "page.selectedProjectId != ''" |
+| **visibleWhen** | `string \| { dialect: Enum<'cel' \| 'cron' \| 'template'>; source: string; ast?: any; meta?: object }` | optional | Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record` — the record a record page opens, or the row an app page's `record` binding reads (none without one; a block's own `dataSource` binds no `record` for its siblings). A count or a plan is a field on that row (a `summary` roll-up: `record.environment_count > 1`; `record.plan != 'free'`), never `features.*`, which are the deployment's public auth flags, the same for every organisation. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. "page.selectedProjectId != ''" |
 | **visibility** | `never` | optional | [REMOVED] `page.components[].visibility` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the page component's deprecated spelling of the conditional-visibility predicate, which the parse folded into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate) is unchanged. Where a component writes both, `visibleWhen` is the one that was in effect: delete `visibility`. |
 | **dataSource** | `{ object: string; view?: string; filter?: object[]; sort?: object[]; … } \| { provider: 'api'; read: object; path?: string }` | optional | Per-element data binding: an object binding `{ object, view?, filter?, sort?, limit? }` that overrides the page object, or an API binding `{ provider: 'api', read: { url }, path? }` that reads one same-origin endpoint |
 | **responsive** | `never` | optional | [REMOVED] `page.components[].responsive` was removed in @objectstack/spec 17 (ADR-0049 D2) — no renderer ever read it, so per-breakpoint layout overrides (columns/order/visibility) parsed, validated, and then did nothing. Delete the key. For breakpoint behaviour that IS applied, use the sibling `responsiveStyles` (ADR-0065) — per-breakpoint CSS maps compiled to id-scoped CSS at render, e.g. `responsiveStyles: { xsmall: { display: 'none' } }` to hide a component on the narrowest screens. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. |

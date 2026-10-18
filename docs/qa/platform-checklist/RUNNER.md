@@ -457,9 +457,16 @@ contradicts it, and correct it here when it does.
 
 ## Run records — the GitHub issue is the report
 
-Every completed run — **pass or fail alike** — files **one GitHub issue** as its durable
-record, labeled `qa-run` and nothing else (extraction obligation below). **Nothing lands
-in the repo** — not the JSON, not screenshots; `runs/` is git-ignored except its README.
+Every completed sweep run (a release candidate, an area or `all` run, or a maintainer-named
+target) — **pass or fail alike** — files **one GitHub issue** as its durable record, labeled
+`qa-run` and nothing else (extraction obligation below). **A verification re-run files
+none** — a run whose trigger is the same PR's ledger edit of that item. Its per-item verdict
+table goes in the PR body and the item's `history` row carries the PR as its `ref`; a
+`partial` or `blocked` gap goes in the PR body and the item's `fixtures.knownGaps`; a
+product-defect `fail` is still extracted as its own card, pointing at the PR; a stale clause
+is fixed in the same diff (`.claude/skills/checklist-test/SKILL.md` §5, 「验证重测」).
+**Nothing lands in the repo** — not the JSON, not screenshots; `runs/` is git-ignored except
+its README.
 
 **The issue is text only.** Screenshots and DOM dumps are oracles you consult *live* to
 reach a verdict — never report artifacts. What the report carries for a defect is the

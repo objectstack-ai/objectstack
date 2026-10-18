@@ -14461,9 +14461,21 @@ const pageAssignedProfilesRemoved: MetadataConversion = {
  * `master_detail` under this sharing model into `required: true`
  * (`forceCbpMasterDetailRequired`, `data/object.zod.ts`), so the converted row
  * is exactly the object the builder would have produced from the same source.
- * The relation it resolves is the one the second tier resolved, and the write
- * the row could not legally take (an insert without its master, an update
- * nulling it) was refused before as well, by the security gate.
+ * The relation it resolves is the one the second tier resolved. Of the two
+ * writes the row could not legally take, the insert without its master was
+ * refused before as well, by the security gate: on an insert
+ * `packages/plugins/plugin-security/src/security-plugin.ts#assertControlledByParentWrite`
+ * reads the master FK from the incoming body. The update nulling it was not.
+ * On a by-id update that gate reads the STORED row's FK, never the incoming
+ * value, so the write was accepted and left a detail row with a null master
+ * FK, which the `controlled_by_parent` read filter
+ * (`masterFK IN (accessible master ids)`) never matches. The refusal for that
+ * update is the record validator's ADR-0113 check, a PATCH may not null out a
+ * required field (the update branch of
+ * `packages/objectql/src/validation/record-validator.ts#validateRecordInScope`),
+ * and only `required: true` arms it. So the converted row loses no write the
+ * contract allows: it gains the refusal the builder's force already gives an
+ * authored object.
  *
  * **Deliberately narrow — exactly one shape, nothing else.**
  * - An explicit `required: false` is NOT converted. The builder refuses it

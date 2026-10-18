@@ -447,12 +447,13 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           where,
           path: at,
           // [#22161] `hint` is the CLI's `fix:` line, so it states the fix; the
-          // verdict's consequence rides the message.
+          // verdict's consequence rides the message. One remedy line: where the
+          // props schema lives and what correcting it means are
+          // `os explain component-props-invalid`.
           message: `${subject} — refused, so this stack does not pass until the props are ones the schema accepts`,
           hint:
-            `Give \`${type}\` props its schema accepts (ComponentPropsMap, @objectstack/spec/ui) — the ` +
-            'rejection above names what it expects — or, if the component really does honour what is ' +
-            'written, correct the schema so the declaration and the renderer agree.',
+            `Give \`${type}\` a value its props schema accepts (the verdict names what it expects), or ` +
+            'correct the schema if the component really honours what is written.',
         });
       }
     }
