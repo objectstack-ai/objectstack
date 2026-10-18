@@ -3568,10 +3568,12 @@ const hasOwnKey = (record: object, key: string): boolean => Object.prototype.has
  * - [#20928] an `object-master-detail-form` page block's `details[].columns`,
  *   wherever the block sits on a page ({@link forEachPageComponent}) — a column
  *   names a field of the detail entry's `childObject`;
- * - [#24190] a `record:line_items` page block's `columns`, wherever the block
- *   sits on a page — a column names a field of the child object the panel
- *   lists, resolved the way the renderer resolves it
- *   ({@link lineItemsChildObject}).
+ * - [#24190] a `record:line_items` page block's `columns`, in the positions
+ *   {@link forEachPageComponent} visits — a region's components, a
+ *   container's component children, a slot; a block under a `page:tabs`
+ *   item's `children` is not yet visited, so not yet judged — a column names
+ *   a field of the child object the panel lists, resolved the way the
+ *   renderer resolves it ({@link lineItemsChildObject}).
  *
  * Resolution is against the stack's own `objects`: a `childObject` this stack
  * does not declare, or a column naming no field of it, is not judged here — an

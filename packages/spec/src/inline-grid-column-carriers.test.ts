@@ -814,7 +814,7 @@ describe('defineStack judges an identity-only line-items column by the type it r
     );
   });
 
-  it('refuses it inside a container and under a slot too — wherever the page carries the block', () => {
+  it('refuses it inside a container and under a slot too — the other positions the page walk visits', () => {
     expectHydratedCurrencyRefusal(
       stackWithLineItemColumns([IDENTITY_ONLY_WITH_SCALE], 'nested'),
       "Page 'crm_invoice_record' (regions.0.components.0.properties.children.0) record:line_items columns[0].scale",
