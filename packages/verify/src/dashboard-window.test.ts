@@ -323,11 +323,12 @@ describe('runDashboardWindowProofs — the fixture app', () => {
   it('counts every dashboard, widget, measure and window', () => {
     expect(report.summary).toEqual({
       dashboards: { declared: 3, windowed: 2, notWindowed: 1, excluded: 0 },
-      widgets: { total: 19, unbound: 1, excluded: 8, probed: 10, proven: 10, contradicted: 0, failed: 0, inconclusive: 0 },
-      excludedBy: { 'no-count-measure': 2, 'filter-unmodelled': 3, 'field-type': 1, 'field-missing': 1, 'object-undeclared': 1 },
-      measures: { probed: 10, excluded: 1, excludedBy: { 'not-a-count': 1 } },
-      probes: 10 * DATE_RANGE_PRESETS.length,
-      held: 10 * DATE_RANGE_PRESETS.length,
+      widgets: { total: 27, unbound: 1, excluded: 10, probed: 16, proven: 16, contradicted: 0, failed: 0, inconclusive: 0 },
+      excludedBy: { 'no-count-measure': 4, 'filter-unmodelled': 3, 'field-type': 1, 'field-missing': 1, 'object-undeclared': 1 },
+      // 11 counts, 3 sums (one beside a count), 3 derived (a ratio and a difference of counts, a ratio over a sum).
+      measures: { probed: 17, excluded: 1, excludedBy: { 'not-a-count': 1 } },
+      probes: 17 * DATE_RANGE_PRESETS.length,
+      held: 17 * DATE_RANGE_PRESETS.length,
       blank: 0,
       contradictions: 0,
       faults: 0,
