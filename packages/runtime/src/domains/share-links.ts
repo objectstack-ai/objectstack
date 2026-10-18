@@ -174,7 +174,7 @@ async function handleShareLinksRequestBody(
     // is not configured for this environment" on an environment where it is.
     const svc = await deps.resolveService(context, SHARE_LINK_SERVICE, context.environmentId);
     if (!svc) {
-        return { handled: true, response: deps.error('Sharing is not configured for this environment', 501) };
+        return { handled: true, response: deps.error('Sharing is not configured', 501) };
     }
 
     const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
