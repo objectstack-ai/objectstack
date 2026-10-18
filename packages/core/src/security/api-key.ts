@@ -28,6 +28,7 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 
 import { accountScopeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
+import { isMissingTableError } from '@objectstack/types';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 
 /** Default visible prefix for generated keys (helps users identify a key). */
@@ -587,10 +588,12 @@ export function effectiveTenancyPosture(
  * the verdict of {@link resolveApiKeyAdmission}, collapsed to a principal.
  *
  * Fail-closed: returns `undefined` for a missing key, an unusable data engine,
- * a lookup error, a key that is unknown / owner-less, a key its own lifecycle
+ * a key that is unknown / owner-less, a key its own lifecycle
  * refuses (revoked / expired / inactive — `lifecycle`), a key the tenancy
  * posture refuses, and a key whose OWNER holds an `account`-scope ADR-0069
- * posture (`held`).
+ * posture (`held`). A `sys_api_key` read that THROWS is no answer at all: it
+ * raises the branded `AuthzStoreUnavailableError` (#24299), as an unreadable
+ * lifecycle-policy or posture source already does.
  *
  * ⚠️ The collapse is lossy by construction: a principal-or-nothing answer cannot
  * carry the posture's code, so a host that admits keys through this function
@@ -696,8 +699,22 @@ export async function resolveApiKeyAdmission(
       limit: 1,
       context: { isSystem: true },
     });
-  } catch {
-    return { outcome: 'none' };
+  } catch (err) {
+    // [#24299] A read that was ISSUED and THREW is the branded store outage,
+    // never "no key". `none` here sent a key holder the anonymous floor's
+    // `401` where a session caller got `503`, and let the request fall on to
+    // the session arm, so a cookie sent beside the key answered for a
+    // credential the caller did not lead with (measured: served as the
+    // cookie's user on the REST data door and the runtime dispatcher).
+    //
+    // The one read failure that IS a true "no key" is a `sys_api_key` table
+    // that was never provisioned: no key can exist there, so nothing was
+    // withheld. That is the boundary the 2026-08-30 ruling (option A) draws
+    // for `resolveAuthzContext`'s `tryFind`, asked through the same
+    // `isMissingTableError` predicate — ⛔ never a second classifier here;
+    // its signed-off false-positive risk is written beside `tryFind`.
+    if (isMissingTableError(err, 'sys_api_key')) return { outcome: 'none' };
+    throw new AuthzStoreUnavailableError('sys_api_key', err);
   }
   if (rows && (rows as any).value) rows = (rows as any).value;
   const row = Array.isArray(rows) ? rows[0] : undefined;
