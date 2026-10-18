@@ -345,27 +345,42 @@ interface Ran {
   seconds: number;
 }
 
-/** Execute a step's script the way GitHub does: `bash -e <file>`. */
-function runBlock(h: Harness, script: string): Ran {
+/**
+ * Execute a step's script the way GitHub does: `bash -e <file>`.
+ *
+ * Awaited, never `execFileSync`: a block's wall is its own waits — the loop's
+ * `sleep 2`, the stub's boot delay — spent in child processes, so this worker
+ * stays free while one block waits and the cases below run concurrently. The
+ * answer is the synchronous one's: the exit status (`-1` when a signal ended
+ * it, the timeout's included), stdout alone on success, stdout then stderr on
+ * failure.
+ */
+function runBlock(h: Harness, script: string): Promise<Ran> {
   const file = path.join(h.dir, 'step.sh');
   fs.writeFileSync(file, script);
   const started = Date.now();
-  try {
-    const out = execFileSync('bash', ['-e', file], {
+  return new Promise((resolve) => {
+    const child = spawn('bash', ['-e', file], {
       env: h.env,
       cwd: h.dir,
-      encoding: 'utf8',
       timeout: 240_000,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    return { status: 0, out, seconds: (Date.now() - started) / 1000 };
-  } catch (err: any) {
-    return {
-      status: typeof err.status === 'number' ? err.status : -1,
-      out: `${err.stdout ?? ''}${err.stderr ?? ''}`,
-      seconds: (Date.now() - started) / 1000,
-    };
-  }
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      stdout += chunk;
+    });
+    child.stderr.setEncoding('utf8').on('data', (chunk: string) => {
+      stderr += chunk;
+    });
+    const settle = (status: number, out: string) =>
+      resolve({ status, out, seconds: (Date.now() - started) / 1000 });
+    child.once('error', () => settle(-1, `${stdout}${stderr}`));
+    child.once('close', (code) =>
+      code === 0 ? settle(0, stdout) : settle(typeof code === 'number' ? code : -1, `${stdout}${stderr}`),
+    );
+  });
 }
 
 /**
@@ -387,12 +402,13 @@ function said(r: Ran): string {
  * A neighbouring run's healthy server, answering everything with 200.
  *
  * A CHILD PROCESS, not an in-process `http.createServer`, and that is not a
- * style choice: `runBlock` below uses `execFileSync`, which blocks this worker's
- * event loop for the whole run. An in-process neighbour would accept the TCP
- * connection (the kernel backlog does that) and then never write a response, so
- * the block's `curl` — which carries no `--max-time`, exactly as the workflow
- * spells it — would hang until the harness timeout. Measured while writing this
- * file: every case sat at its 240s ceiling.
+ * style choice: `runBlock` used `execFileSync`, which blocked this worker's
+ * event loop for the whole run, and `curlBody` still does for its probe. An
+ * in-process neighbour would accept the TCP connection (the kernel backlog does
+ * that) and then never write a response, so a `curl` — which carries no
+ * `--max-time`, exactly as the workflow spells it — would hang until the
+ * harness timeout. Measured while writing this file: every case sat at its
+ * 240s ceiling.
  *
  * ## Why this waits on the child's own word instead of on a clock (commit c27e16059)
  *
@@ -670,7 +686,16 @@ const OS_START_STEPS: Array<[string, string]> = [
   ['registry-canary', 'Boot and probe health (blank only)'],
 ];
 
-describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks assert on their OWN server', () => {
+/**
+ * Concurrent, both suites: each case's wall is the waits of its own child
+ * processes (the loop's `sleep 2`, the stub's boot delay, a backstop), and the
+ * cases share nothing — each gets its own kernel-assigned port, harness
+ * directory and stub state. Run one after another, those waits summed to the
+ * file's wall; run together, they overlap. Nothing waited on is shortened.
+ */
+const CASES_RUN_TOGETHER = { concurrent: true } as const;
+
+describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks assert on their OWN server', CASES_RUN_TOGETHER, () => {
   for (const [job, step] of OS_START_STEPS) {
     describe(`${job} / ${step}`, () => {
       it('refuses a neighbour already answering the URL its loop accepts as proof', async () => {
@@ -684,7 +709,7 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
           // Vacuity guard: the neighbour must really be reachable at the exact
           // spelling the loop probes, or "refused" below proves nothing.
           expect(curlBody(`http://localhost:${port}/api/v1/health`)).toContain('NEIGHBOUR');
-          const r = runBlock(harness(), script);
+          const r = await runBlock(harness(), script);
           expect(r.status, said(r)).not.toBe(0);
           expect(r.out).toContain('already serving');
           // The whole card: it must NOT have gone on to assert /api/v1/ready
@@ -713,7 +738,7 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
           expect(occupier.message).toContain('its listener refused to bind: EADDRINUSE');
 
           const script = stepScript(step).replaceAll('8080', String(port));
-          const r = runBlock(harness({ STUB_PORT_HOLDER_PID: String(held.pid) }), script);
+          const r = await runBlock(harness({ STUB_PORT_HOLDER_PID: String(held.pid) }), script);
           expect(r.status, said(r)).toBe(0);
           // `curl -fsS .../api/v1/ready` echoes the body, so the run says out loud
           // whose app it asserted on. This is the guard that keeps the case above
@@ -730,7 +755,7 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
         const held = await portHolder();
         try {
           const script = stepScript(step).replaceAll('8080', String(held.port));
-          const r = runBlock(
+          const r = await runBlock(
             harness({ OS_STUB_DIE_ON_BOOT: '1', STUB_PORT_HOLDER_PID: String(held.pid) }),
             script,
           );
@@ -754,7 +779,7 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
       const held = await portHolder();
       try {
         const script = stepScript(step).replaceAll('18080', String(held.port));
-        const r = runBlock(
+        const r = await runBlock(
           harness({ STUB_CONTAINER_DIE_MS: '1500', STUB_PORT_HOLDER_PID: String(held.pid) }),
           script,
         );
@@ -773,7 +798,7 @@ describe.skipIf(!RUNNABLE)('[#9779] scaffold-e2e.yml boot-and-probe blocks asser
       const held = await portHolder();
       try {
         const script = stepScript(step).replaceAll('18080', String(held.port));
-        const r = runBlock(harness({ STUB_PORT_HOLDER_PID: String(held.pid) }), script);
+        const r = await runBlock(harness({ STUB_PORT_HOLDER_PID: String(held.pid) }), script);
         expect(r.status, said(r)).toBe(0);
       } finally {
         held.stop();
@@ -826,7 +851,7 @@ async function failedNeighbour(
  * harness these pin is reached only where that suite runs, so pinning it
  * elsewhere would pin an instrument nothing uses.
  */
-describe.skipIf(!RUNNABLE)('[#19424] the neighbour harness says WHY it did not come up', () => {
+describe.skipIf(!RUNNABLE)('[#19424] the neighbour harness says WHY it did not come up', CASES_RUN_TOGETHER, () => {
   it('reports the port it really bound, and answers there', async () => {
     const n = await neighbour();
     try {
