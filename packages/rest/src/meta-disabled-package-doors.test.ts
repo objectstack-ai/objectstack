@@ -122,7 +122,7 @@ function makeRes() {
     return res;
 }
 
-function setup() {
+function setup(objectQLProvider?: () => Promise<unknown>) {
     const h = makeHarness();
     const snapshot = {
         getPublished: vi.fn(async (type: string, name: string) =>
@@ -137,7 +137,7 @@ function setup() {
     const rest = new RestServer(server as any, h.protocol as any, { api: { requireAuth: false } } as any);
     (rest as any).resolveExecCtx = async () => ({ userId: 'u1' });
     (rest as any).metadataServiceProvider = async () => snapshot;
-    (rest as any).objectQLProvider = async () => ({ registry: h.registry });
+    (rest as any).objectQLProvider = objectQLProvider ?? (async () => ({ registry: h.registry }));
     rest.registerRoutes();
     const get = async (pattern: string, path: string, params: Record<string, string>, query: Record<string, string> = {}) => {
         const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === `${META}${pattern}`);
@@ -204,5 +204,23 @@ describe('[#24210] RestServer: /published and /state of a disabled package\'s it
 
         host.registry.enablePackage(PKG);
         expect(await host.state('demo_gadget')).toEqual(served);
+    }, 60_000);
+
+    // The objectQLProvider slot's consumer census (`objectql-slot-consumer-census.test.ts`)
+    // cites this case: the `/published` consumer keeps a failed engine and an
+    // absent one apart, as every consumer of the slot must.
+    it('/published reads the objectQLProvider slot through wiredEngineOrLoud: a rejecting engine is loud, an absent one serves as before', async () => {
+        const rejecting = setup(async () => { throw new Error('driver handshake failed'); });
+        await seed(rejecting.protocol, rejecting.registry);
+        const failed = await rejecting.published('dashboard', 'demo_dash');
+        expect({ status: failed.status, code: failed.body?.code ?? failed.body?.error?.code })
+            .toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+        expect(JSON.stringify(failed.body)).not.toContain('demo board');
+
+        const absent = setup(async () => undefined);
+        await seed(absent.protocol, absent.registry);
+        absent.registry.disablePackage(PKG);
+        // No engine to ask, so nothing is withheld: the door's answer before #24210.
+        expect(await absent.published('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { label: 'demo board' } });
     }, 60_000);
 });
