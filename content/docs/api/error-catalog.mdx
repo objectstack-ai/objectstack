@@ -159,6 +159,10 @@ aggregation's own `filter`), a sort, a `groupBy`, an `aggregations[].field`, a
 `searchFields` entry, or an `expand` entry's own filter or sort at any depth. Such a
 field is never returned on a generic read, so it cannot be queried by either — the
 refusal names the object that declares it. Query by another field.
+A non-blank `search` is refused (`param: 'search'`), not answered with every row,
+when the object's resolved search set is empty: no `searchableFields` entry names a
+stored field, and the default search scans none (`internal: true` fields never
+count). Declare one that does, or mirror a composed title onto a stored text field.
 Off the request path the same code answers `backfillSummaryNulls`'s
 `recomputeUndefinedOnEmpty` (`os migrate summary-nulls
 --recompute-undefined-on-empty object.field`) when an entry is not a roll-up
