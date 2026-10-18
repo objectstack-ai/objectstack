@@ -751,8 +751,10 @@ export const ACTIVATION_LEDGER_STANDING_KEYS = ['metadata_type', 'name', 'active
  * platform standing under `single` (`slug = 'default'`, else the only
  * organization). Re-slugging it while several organizations exist moves the
  * anchor off its grant; a delete is judged on every row, like the other tables'.
+ * Module-private: the guard tests payloads against the map's entry
+ * ({@link STANDING_KEYS_BY_TABLE}), so the list the gate reads is the list used.
  */
-export const ORGANIZATION_STANDING_KEYS = ['slug'] as const;
+const ORGANIZATION_STANDING_KEYS = ['slug'] as const;
 
 /**
  * [commit f8eb73601] The three lists above, keyed by the table each one judges — the shape
@@ -1767,7 +1769,7 @@ export function registerLastAdminGuard(
     const ctx = ctxOf(rawCtx);
     if (ctx.object !== SystemObjectName.ORGANIZATION) return;
     const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
-    if (!touchesAny(data, ORGANIZATION_STANDING_KEYS)) return;
+    if (!touchesAny(data, STANDING_KEYS_BY_TABLE[SystemObjectName.ORGANIZATION]!)) return;
     await enforceStanding('organization-update', SystemObjectName.ORGANIZATION, ctx.input, data);
   };
 

@@ -52,7 +52,6 @@ import {
   GRANT_STANDING_KEYS,
   MEMBER_STANDING_KEYS,
   ACTIVATION_LEDGER_STANDING_KEYS,
-  ORGANIZATION_STANDING_KEYS,
   STANDING_KEYS_BY_TABLE,
   STANDING_KEY_EXCLUSIONS,
 } from './last-admin-guard.js';
@@ -132,6 +131,7 @@ describe('[#8734] standing-key lists correspond to what resolveAuthzContext read
     // no longer from the `sys_permission_set` row, which the guard no longer judges.
     expect(STANDING_KEYS_BY_TABLE.sys_metadata_activation).toBe(ACTIVATION_LEDGER_STANDING_KEYS);
     // [ADR-0131 D5] The organization whose grant anchors standing under `single`.
-    expect(STANDING_KEYS_BY_TABLE.sys_organization).toBe(ORGANIZATION_STANDING_KEYS);
+    // The guard reads this entry of the map itself, so only its content is pinned.
+    expect(STANDING_KEYS_BY_TABLE.sys_organization).toEqual(['slug']);
   });
 });
