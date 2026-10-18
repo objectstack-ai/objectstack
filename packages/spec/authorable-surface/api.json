@@ -1592,6 +1592,7 @@
     "api/SaveMetaItemRequest:name",
     "api/SaveMetaItemRequest:packageId",
     "api/SaveMetaItemRequest:parentVersion",
+    "api/SaveMetaItemRequest:surface",
     "api/SaveMetaItemRequest:type",
     "api/SaveMetaItemRequest:writeFace",
     "api/SaveMetaItemResponse:advisories",

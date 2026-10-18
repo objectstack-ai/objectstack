@@ -3076,6 +3076,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Metadatos",
         help: "Payload de metadatos serializado en JSON."
       },
+      draft_changes: {
+        label: "Cambios del borrador",
+        help: "Procedencia por clave de un borrador pendiente (JSON serializado): qué superficie (copilot, studio, api), qué actor y cuándo cambió por última vez cada ruta de clave. Nulo en las filas activas."
+      },
       extends: {
         label: "Extiende"
       },
