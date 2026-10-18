@@ -160,7 +160,7 @@ export function misplacedDefaultPages(manifest: unknown): MisplacedDefaultPage[]
 export function describeDefaultRecordPageHolder(holder: DefaultRecordPageHolder): string {
   return holder.kind === 'package'
     ? `page "${holder.page}" of package "${holder.packageId}"`
-    : `page "${holder.page}", authored in this environment`;
+    : `page "${holder.page}", authored in this system`;
 }
 
 /** A stable identity for de-duplicating holders. */

@@ -102,7 +102,7 @@ function expectRefusal(err: Refusal | undefined, object: string, incoming: Holde
   expect(err!.incoming).toEqual(incoming);
   expect(err!.existing).toEqual(existing);
   const name = (h: Holder) =>
-    h.kind === 'package' ? `page "${h.page}" of package "${h.packageId}"` : `page "${h.page}", authored in this environment`;
+    h.kind === 'package' ? `page "${h.page}" of package "${h.packageId}"` : `page "${h.page}", authored in this system`;
   expect(err!.message.split('. ')[0]).toBe(
     `Default record page conflict: ${name(incoming)} cannot be the default record page of object "${object}": ${name(existing)} already is`,
   );

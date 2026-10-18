@@ -208,7 +208,7 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         const { save, storedPages } = await boot(topology);
         expect((await save('env_task_a', recordPage('env_task_a', 'acme_task'))).ok).toBe(true);
         const outcome = await save('env_task_b', recordPage('env_task_b', 'acme_task'));
-        expectRefusal(outcome, 'env_task_b', 'acme_task', "page 'env_task_a', authored in this environment");
+        expectRefusal(outcome, 'env_task_b', 'acme_task', "page 'env_task_a', authored in this system");
         expect(String((outcome as { error?: any }).error?.message)).toContain(
             "Save 'env_task_b' with `isDefault: false`, or first save 'env_task_a' with `isDefault: false` to make "
             + "'env_task_b' the default instead.",
@@ -232,7 +232,7 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         expect({ code: err?.code, status: err?.status }).toEqual({ code: 'DEFAULT_RECORD_PAGE_CONFLICT', status: 422 });
         expect(String(err.message).split('. ')[0]).toBe(
             "Default record page conflict: page 'env_task_a' cannot be published as the default record page of object "
-            + "'acme_task': page 'env_task_b', authored in this environment already is",
+            + "'acme_task': page 'env_task_b', authored in this system already is",
         );
     });
 
