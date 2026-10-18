@@ -134,9 +134,19 @@ export class AppPlugin implements Plugin {
      * the same invariant, so it is ordered ahead for the same reason.
      * Order-if-present: a composition with neither registers no organization
      * object, and its seeds keep today's unstamped branch.
+     *
+     * The v18 boot guard (ADR-0131 D10 item 5; the name is the guard module's
+     * `ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME`, spelled as a literal
+     * because `check:init-service-contract` reads this array as string literals
+     * only): on a kernel that composes it (`os serve`), the guard judges the
+     * database in its own
+     * `start()`, and a database it refuses must be left as it found it — so this
+     * plugin's `start()`, which loads the inline seed, runs only after the guard
+     * has judged. Order-if-present: every other kernel is unchanged.
      */
     optionalDependencies = [
         'com.objectstack.engine.objectql',
+        'com.objectstack.organization-ownership-boot-guard',
         'com.objectstack.auth',
         'com.objectstack.auth.identity-objects',
     ];

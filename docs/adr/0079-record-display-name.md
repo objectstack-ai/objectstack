@@ -7,6 +7,7 @@
 - **Builds on**: [ADR-0078](./0078-no-silently-inert-metadata.md) (author-time completeness must not be cloud-only), [ADR-0061](./0061-record-search-architecture.md) (`$search` field resolution reads the display field)
 - **Precedent for**: [ADR-0085](./0085-object-semantic-roles-over-surface-hint-blocks.md) (`compactLayout` → `highlightFields` follows this ADR's alias mechanics "exactly"), [ADR-0098](./0098-pinyin-search-companion-column.md) (the search companion column is fed by this ADR's resolved display field)
 - **Consumers**: `@objectstack/spec` (`data/display-name.ts`, `data/object.zod.ts`, `data/search-fields.ts`, `ai/solution-blueprint.zod.ts`), `@objectstack/objectql` (registry materialization seam, `$search` expansion, search companion), `@objectstack/metadata-protocol` (REST `$searchFields` ingress gate), `@objectstack/lint` (`validate-record-title`, `data-model-rules` R9), `@objectstack/platform-objects` and the first-party plugins/services (41 explicit `nameField:` designations), the `objectstack-data` / `objectstack-formula` skills
+- **Addenda**: [2026-10-18 (#24197) — a formula title reads one hop through a reference, and is not sortable or searchable](#addendum-2026-10-18-24197--a-formula-title-reads-one-hop-through-a-reference-and-is-not-sortable-or-searchable)
 
 ---
 
@@ -335,3 +336,79 @@ the 2026-06-28 discussion.
   gate and a query engine disagreeing about what is searchable.
 - **Accept `primaryField` as an additional tolerated alias.** Rejected
   explicitly by the maintainer in #6326 (D9).
+
+---
+
+## Addendum (2026-10-18, #24197) — a formula title reads one hop through a reference, and is not sortable or searchable
+
+Records ruling 6245544505 (letter A, direction (a), on `objectstack-ai/cloud#2925`),
+shipped by #24274 (`d537a318b`) and #24307 (`1bf5f6e17c`). It states what is on
+`main` after those two changes and decides nothing more; no section above is edited.
+The ruling, verbatim:
+
+> The formula read path preloads one hop of the referenced fields a formula
+> names (page-batched, as validation rules do); lint admits one hop and refuses
+> two; a title formula over lookups sorts and searches by its stored value or is
+> declared unsortable — written as an ADR-0079 note.
+
+**The read path** (`find`, `findOne`, and the insert and update responses;
+`packages/objectql/src/engine.ts`):
+
+1. A formula field reads ONE hop through a reference field (`lookup`,
+   `master_detail`, `user`, `tree`), as `record.FIELD.RELATED`. The read path
+   preloads the related fields the formula names once per page, with one batched
+   read per reference field and never one per row, under the reader's own
+   permissions.
+2. A related record that is missing, or that the reader may not read, leaves the
+   formula `null` with a reported reason, never a computed fallback; the reason
+   does not say which of the two held. An empty reference is not a missing
+   record: the formula is evaluated over the empty value.
+3. A second hop, and a reference read both through and as a plain value, are
+   refused by the lint (`traversal-multi-hop`, `traversal-bare-and-traversed`)
+   and read `null` with the same reason at run time. A related object's own
+   formula that reads a hop of its own reads `null` when it is itself read as a
+   hop.
+4. Field-level security on the carrying object's own reference column does not
+   stop the hop: formulas are computed before the field mask is applied to the
+   result, as for any own column a formula reads. The control for a related name
+   a reader may not see is field-level security on the formula field itself.
+
+**Hook bodies** (`packages/runtime/src/sandbox/body-runner.ts`, the hook face):
+
+5. `ctx.title()` evaluates the object's title formula over the in-flight record
+   state the hook fires on, and serves its one hop the way a read does: one
+   batched read per reference field, on the body's own `ctx.api` channel. That
+   is the channel's identity (SYSTEM under `runAs: 'system'`) and its open
+   transaction's connection. So a title over lookups names the related records
+   the in-flight foreign keys point at, and a related record that channel may
+   not read, a missing one, or a second hop leaves the title `null`, as the REST
+   read of the same record shows no title.
+6. A channel that cannot read (a `runAs: 'user'` hook whose trigger resolved no
+   user) serves no hop: a title over the record's own columns resolves, and a
+   title over a reference answers `null`.
+7. Field-level security on the title field itself is not applied to
+   `ctx.title()`.
+8. `ctx.title('FIELD')` answers the related record's title exactly as its
+   `findOne` served it, that record's own one-hop title included.
+
+**Sort and search — the ruling's "declared unsortable" arm:**
+
+9. A formula value, a composite title over lookups included, is stored nowhere;
+   it is computed on each read. A sort by it is refused (`400 INVALID_SORT`). A
+   search cannot reach it: a request's `searchFields` naming it is refused
+   (`400 INVALID_FIELD`), a `searchableFields` entry naming it is dropped, and
+   the auto-default search set never includes it. An object that needs to sort
+   or search by its composite title must store the value in a field of its own,
+   written when its sources change.
+
+**What this qualifies above, without editing it:**
+
+- The first bullet of [Alternatives considered](#alternatives-considered) says a
+  text formula `nameField` is something the server *can* return and query. For
+  a title formula over lookups, the server returns it (items 1 and 5) but cannot
+  sort or search by it (item 9).
+- D1 lists a text `formula` among the "real STORED" title fields. It is a
+  declared field of the object, but no column holds its value (item 9).
+- The surfaces this addendum describes are the engine read path and the
+  hook-body title accessor. It makes no statement about any other consumer of
+  a record's title.
