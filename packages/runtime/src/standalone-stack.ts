@@ -62,9 +62,8 @@
  * builds it like postgres.
  */
 
-import { dirname, resolve as resolvePath } from 'node:path';
+import { resolve as resolvePath } from 'node:path';
 import { existsSync } from 'node:fs';
-import { mkdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { z } from 'zod';
 import { stampSearchPinyinEnabled } from '@objectstack/types';
@@ -77,6 +76,7 @@ import {
 } from '@objectstack/spec/data';
 import type { IDatasourceDriverFactory } from '@objectstack/service-datasource';
 import { loadArtifactBundle, isHttpUrl } from './load-artifact-bundle.js';
+import { makeDirectorySync } from './make-directory.js';
 import { loadTursoDriverFactory } from './turso-driver-factory.js';
 import { devAutoMigrateConfig } from './dev-auto-migrate.js';
 import {
@@ -740,40 +740,21 @@ class SqliteDatabaseDirectoryError extends Error {
  * could fire, and the SQL driver's own bounded refusal (#23696) was never
  * reached.
  *
- * The walk below is the one `driver-sql`'s connect runs
- * (`makeDatabaseDirectory` in `sqlite-database-file.ts`, which that package's
- * entry does not export — hence this module-private copy): find the nearest
- * level that exists, then create the missing ones top-down with a
- * NON-recursive `mkdir`. `EEXIST` on a created level is a concurrent creator
- * winning the race and is accepted; any other answer is the refusal, at once.
- * A file holding the nearest existing name answers too: `ENOTDIR` from the
- * first missing level under it, or `EEXIST` from asking for the directory
- * itself.
+ * The walk is this package's {@link makeDirectorySync}: find the nearest level
+ * that exists, then create the missing ones top-down with a NON-recursive
+ * `mkdir`. `EEXIST` on a created level is a concurrent creator winning the
+ * race, accepted only when a directory stands there; any other answer is the
+ * refusal, at once. A file holding the nearest existing name answers too:
+ * `ENOTDIR` from the first missing level under it, or `EEXIST` from asking
+ * for the directory itself. So does a dangling symlink in the path: `EEXIST`
+ * at the link (#24090). Accepting any `EEXIST` let it through to the driver,
+ * and the boot then failed in a plugin's start with an error that named
+ * neither the file nor the directory.
  */
-async function makeSqliteDatabaseDirectory(filename: string): Promise<void> {
+function makeSqliteDatabaseDirectory(filename: string): void {
     const directory = resolvePath(filename, '..');
     try {
-        const missing: string[] = [];
-        let level = directory;
-        for (;;) {
-            try {
-                if (!(await stat(level)).isDirectory() && missing.length === 0) await mkdir(level);
-                break;
-            } catch (e) {
-                if ((e as { code?: unknown } | null)?.code !== 'ENOENT') throw e;
-                missing.push(level);
-                const parent = dirname(level);
-                if (parent === level) break;
-                level = parent;
-            }
-        }
-        for (const each of missing.reverse()) {
-            try {
-                await mkdir(each);
-            } catch (e) {
-                if ((e as { code?: unknown } | null)?.code !== 'EEXIST') throw e;
-            }
-        }
+        makeDirectorySync(directory);
     } catch (e) {
         throw new SqliteDatabaseDirectoryError(filename, directory, e);
     }
@@ -990,7 +971,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         driverId = 'sqlite-wasm';
         const filename = sqliteFilenameFromUrl(dbUrl, 'sqlite-wasm');
         if (filename !== ':memory:') {
-            await makeSqliteDatabaseDirectory(filename);
+            makeSqliteDatabaseDirectory(filename);
         }
         driverConfig = { filename };
     } else if (dbDriver === 'sqlite') {
@@ -1005,7 +986,7 @@ export async function createStandaloneStack(config?: StandaloneStackConfig): Pro
         // does too, so this costs the mode nothing. Bounded, and refused at once
         // when the directory cannot be made (#23737, see the helper).
         if (!(cfg.sqliteAbsentFile === 'empty-in-memory' && !existsSync(filename))) {
-            await makeSqliteDatabaseDirectory(filename);
+            makeSqliteDatabaseDirectory(filename);
         }
         driverConfig = { filename };
     } else {
