@@ -384,7 +384,7 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
                     // Refusing HERE rather than asserting at assembly is
                     // deliberate, and is the reasoning PR #9425 landed one
                     // route over. `auditMetaItem` is a declared OPTIONAL
-                    // member of `MetadataProtocol` (the #11006-pattern
+                    // member of `MetadataProtocol` (the commit-cccbe51bf-pattern
                     // catch-up that retired this door's `(p as any)` casts;
                     // it was an undeclared ADR-0076 D9 server-only
                     // extension before that). A host without the verb is
