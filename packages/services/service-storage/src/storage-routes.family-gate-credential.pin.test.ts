@@ -38,6 +38,7 @@ import { promises as fs } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ObjectKernel, hashApiKey } from '@objectstack/core';
+import { assertEngineFindOnePredicate, assertEngineUpdateDispatch } from '@objectstack/objectql';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
 import { LocalStorageAdapter } from './local-storage-adapter.js';
 import { mountStorageRoutes } from './mount-storage-routes.js';
@@ -115,10 +116,14 @@ function services(sessionReads: { n: number }) {
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     async findOne(object: string, q: any = {}) {
+      assertEngineFindOnePredicate(object, q);
       return (tables[object] ?? []).find((row) => matches(row, q?.where)) ?? null;
     },
     async insert(_object: string, row: any) { return row; },
-    async update(_object: string, row: any) { return row; },
+    async update(_object: string, patch: any, q: any = {}) {
+      assertEngineUpdateDispatch(patch, q);
+      return patch;
+    },
   };
   const sessions: Record<string, Gate | undefined> = { [HELD_USER]: PASSWORD_EXPIRED, [OK_USER]: undefined };
   return {

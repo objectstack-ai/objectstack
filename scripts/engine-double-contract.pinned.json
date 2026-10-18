@@ -4592,6 +4592,16 @@
       "pinned": 1
     },
     {
+      "file": "packages/services/service-storage/src/storage-routes.family-gate-credential.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/storage-routes.family-gate-credential.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/services/service-storage/src/storage-routes.metadata-outage.test.ts",
       "verb": "delete",
       "pinned": 1
