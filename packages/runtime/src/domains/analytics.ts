@@ -22,6 +22,7 @@ import { CoreServiceName } from '@objectstack/spec/system';
 import { AnalyticsQueryRequestSchema } from '@objectstack/spec/api';
 import { isAnalyticsDateRangeRefusalIssue } from '@objectstack/spec/data';
 import { isServiceServeable } from '../service-serveable.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 import { validationFailure, fieldsFromZodIssues } from '../validation-failure.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
@@ -141,6 +142,9 @@ export async function handleAnalyticsRequest(
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
         };
     }
+    // [#24151] The body is read once the floor above has admitted the caller,
+    // never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     const analyticsService = await deps.getService(context, CoreServiceName.enum.analytics);
     // Empty slot — or a slot filled by a self-declared stub (#4000), which is
