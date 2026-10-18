@@ -424,6 +424,9 @@ describe('[#22332] updateSessionProgressIfUnchanged on a wired engine is the eng
 
   it('a row stamped for another organization matches nothing — the write misses, it does not land there', async () => {
     const { store } = backend;
+    // [ADR-0131 D8] Under a wall: the update's organization scope is the
+    // wall's verdict, and under `single` (the env default) there is none.
+    backend.engine.setTenancyPostureProvider(() => 'isolated');
     await store.createSession(sessionRec('s1'), { organizationId: 'org_B' });
     const seen = (await store.getSession('s1'))!;
 
