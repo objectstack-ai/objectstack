@@ -206,8 +206,8 @@ describe('HttpDispatcher.handleMcp', () => {
       const { kernel } = makeKernel({ withMcp: true });
       const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
       const res = await d.handleMcp({}, makeContext({ executionContext: undefined }));
-      expect(res.response.status).toBe(401);
-      expect(res.response.body.error.code).toBe('UNAUTHENTICATED');
+      expect(res.response!.status).toBe(401);
+      expect(res.response!.body.error.code).toBe('UNAUTHENTICATED');
     });
 
     it('anonymous → 401 UNAUTHENTICATED with no mcp service, not 501', async () => {
@@ -215,8 +215,8 @@ describe('HttpDispatcher.handleMcp', () => {
       const { kernel } = makeKernel({ withMcp: false });
       const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
       const res = await d.handleMcp({}, makeContext({ executionContext: undefined }));
-      expect(res.response.status).toBe(401);
-      expect(res.response.body.error.code).toBe('UNAUTHENTICATED');
+      expect(res.response!.status).toBe(401);
+      expect(res.response!.body.error.code).toBe('UNAUTHENTICATED');
     });
 
     it('a system principal is still admitted: the switch-off 404 answers it', async () => {
@@ -224,8 +224,8 @@ describe('HttpDispatcher.handleMcp', () => {
       const { kernel } = makeKernel({ withMcp: true });
       const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
       const res = await d.handleMcp({}, makeContext({ executionContext: SYSTEM }));
-      expect(res.response.status).toBe(404);
-      expect(res.response.body.error.code).toBe('RESOURCE_NOT_FOUND');
+      expect(res.response!.status).toBe(404);
+      expect(res.response!.body.error.code).toBe('RESOURCE_NOT_FOUND');
     });
 
     it('a system principal is still admitted: the no-service 501 answers it', async () => {
@@ -233,8 +233,8 @@ describe('HttpDispatcher.handleMcp', () => {
       const { kernel } = makeKernel({ withMcp: false });
       const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
       const res = await d.handleMcp({}, makeContext({ executionContext: SYSTEM }));
-      expect(res.response.status).toBe(501);
-      expect(res.response.body.error.code).toBe('NOT_IMPLEMENTED');
+      expect(res.response!.status).toBe(501);
+      expect(res.response!.body.error.code).toBe('NOT_IMPLEMENTED');
     });
 
     it('a system principal is still admitted: MCP on and installed reaches the transport', async () => {
@@ -242,7 +242,7 @@ describe('HttpDispatcher.handleMcp', () => {
       const { kernel, mcpService } = makeKernel({ withMcp: true });
       const d = new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false });
       const res = await d.handleMcp({ jsonrpc: '2.0', id: 1, method: 'tools/list' }, makeContext({ executionContext: SYSTEM }));
-      expect(res.response.status).toBe(200);
+      expect(res.response!.status).toBe(200);
       expect(mcpService.lastOpts).toBeDefined();
     });
   });
