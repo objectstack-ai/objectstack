@@ -303,6 +303,24 @@ export interface TraversalConflict {
 }
 
 /**
+ * [#24197] What the expression being judged IS, because the two seams that
+ * serve one hop fail differently and the prescription must name the seam's own
+ * consequence and repair:
+ *
+ *  - `predicate` — an object validation rule's condition (`checkPredicate`). It
+ *    is fail-CLOSED: an unservable traversal REJECTS THE WRITE, and the repairs
+ *    are rule-shaped (a `conditional` guard, `required: true`).
+ *  - `formula` — a formula field's `expression`, evaluated on every read (and
+ *    on a write's response). An unservable traversal makes the field READ NULL
+ *    on every record, and the repairs are expression-shaped: the optional read
+ *    `.?<field>.orValue(…)` gives an empty reference a value.
+ *
+ * Both seams resolve exactly ONE hop, through a reference field, and judge the
+ * same two shapes; only the sentences differ.
+ */
+export type TraversalSubject = 'predicate' | 'formula';
+
+/**
  * The conflicts in an analysis, judged against the caller's knowledge of which
  * fields are reference-typed.
  *
@@ -317,7 +335,9 @@ export function findTraversalConflicts(
   analysis: RelationshipTraversalAnalysis,
   isReferenceField: (field: string) => boolean,
   root: string = DEFAULT_TRAVERSAL_ROOT,
+  subject: TraversalSubject = 'predicate',
 ): TraversalConflict[] {
+  if (subject === 'formula') return findFormulaTraversalConflicts(analysis, isReferenceField, root);
   const conflicts: TraversalConflict[] = [];
 
   for (const field of analysis.traversals.keys()) {
@@ -363,5 +383,58 @@ export function findTraversalConflicts(
     });
   }
 
+  return conflicts;
+}
+
+/**
+ * [#24197] {@link findTraversalConflicts} for a formula field's `expression` —
+ * the same two shapes, judged by the same predicate, worded for the seam that
+ * serves them: the engine's formula read path, which preloads ONE hop through a
+ * reference field before it computes the formula and reads `null` (reporting
+ * the fault) where it cannot.
+ *
+ * ⛔ No "guard the rule" repair here: a formula has no `conditional` to hide
+ * behind and no write to refuse. The repair for an EMPTY reference is the
+ * optional read, `root.<field>.?<related field>.orValue(…)` — measured on the
+ * platform's CEL front end to yield the fallback when the reference is empty
+ * and the related value when it is set — and it is itself a one-hop read, so
+ * it never re-enters the bare-and-traversed shape this refuses.
+ */
+function findFormulaTraversalConflicts(
+  analysis: RelationshipTraversalAnalysis,
+  isReferenceField: (field: string) => boolean,
+  root: string,
+): TraversalConflict[] {
+  const conflicts: TraversalConflict[] = [];
+  for (const field of analysis.traversals.keys()) {
+    if (!isReferenceField(field)) continue;
+    if (!analysis.bareFields.has(field)) continue;
+    conflicts.push({
+      field,
+      kind: 'bare-and-traversed',
+      message:
+        `\`${root}.${field}\` is read BOTH through the relationship `
+        + `(\`${root}.${field}.<related field>\`) and as a plain value `
+        + `(\`${root}.${field}\`) in the same formula. A formula that reads through `
+        + `\`${field}\` sees the related RECORD at \`${root}.${field}\`, not the stored id, `
+        + `so the plain-value use would stop meaning what it says. For the id, write `
+        + `\`${root}.${field}.id\`. To give the formula a value while \`${field}\` is empty, `
+        + `write the optional read \`${root}.${field}.?<related field>.orValue('…')\` instead `
+        + `of testing \`${root}.${field}\` for null.`,
+    });
+  }
+  for (const field of analysis.multiHopFields) {
+    if (!isReferenceField(field)) continue;
+    conflicts.push({
+      field,
+      kind: 'multi-hop',
+      message:
+        `\`${root}.${field}\` is read through more than one relationship hop. `
+        + `A formula resolves ONE hop (\`${root}.${field}.<related field>\`, loaded `
+        + `before the formula is computed); a second hop is not loaded, so the formula `
+        + `would read null on every record. Store the value you need on \`${field}\`'s `
+        + `object as a field of its own and read it one hop away, or compute it in a hook.`,
+    });
+  }
   return conflicts;
 }
