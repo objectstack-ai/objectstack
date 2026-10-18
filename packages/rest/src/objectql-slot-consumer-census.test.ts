@@ -29,6 +29,14 @@
  * from the source text and pins the count, so a FOURTH consumer arriving
  * unexamined turns this red instead of being absorbed into a sentence.
  *
+ * [#24210] ⭐ And a FOURTH, examined on arrival rather than absorbed: `GET
+ * /meta/:type/:name/published` asks the engine registry whether a non-object
+ * item's owning package is disabled. It reaches the slot through
+ * `wiredEngineOrLoud`, so it passes the decidable test: a rejecting provider is
+ * a loud `503`, never the served answer an absent engine gets (no registry to
+ * ask, so nothing is withheld). Its behavioural pin is
+ * `meta-disabled-package-doors.test.ts`, cited in §3.
+ *
  * ## What is asserted about the answers
  *
  * §2 drives the third consumer on the wiring where it decides anything, and
@@ -182,17 +190,18 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         expect(invocationSites(SOURCE, 'objectQLProvider').some((s) => s.text.startsWith('//'))).toBe(false);
     });
 
-    it('⭐ THREE consumers, not two — the count the two prose censuses got wrong', () => {
+    it('⭐ FOUR consumers: three, not two, was the count the two prose censuses got wrong, and #24210 adds /published', () => {
         // [#23050 slice 2] 3 UNCHANGED, over two files: 2 in `rest-server.ts`
-        // and the batch door's 1 in `batch-routes.ts`.
+        // and the batch door's 1 in `batch-routes.ts`. [#24210] 4: `/published`'s
+        // disabled-owner check joins `rest-server.ts`.
         const sites = censusInvocationSites('objectQLProvider');
         // The message carries the sites, so a failure here hands the next
         // reader the new census instead of a bare number.
         expect(sites.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBeTruthy();
-        expect(sites).toHaveLength(3);
+        expect(sites).toHaveLength(4);
     });
 
-    it('⭐ [#18559] ALL THREE consumers now reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
+    it('⭐ [#18559] ALL FOUR consumers reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
         const sites = censusInvocationSites('objectQLProvider');
         const viaSeam = sites.filter((s) => {
             // The helper is named on the line that OPENS the call, two lines up
@@ -205,7 +214,7 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // the site rather than a bare number.
         expect(direct.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBe('');
         expect(direct).toHaveLength(0);
-        expect(viaSeam).toHaveLength(3);
+        expect(viaSeam).toHaveLength(4);
 
         // ⭐ CONTROL for the window predicate itself, on BOTH axes. It reads a
         // WINDOW of source text, so "3 of 3" is only a reading if the same
@@ -516,13 +525,14 @@ describe('[#18559] §2b the batch door answers ONE thing for one fact, on both w
 });
 
 // ---------------------------------------------------------------------------
-// §3 — the other two consumers are covered elsewhere, by name
+// §3 — the other consumers are covered elsewhere, by name
 // ---------------------------------------------------------------------------
 
-describe('[#18546] §3 the census names where the other two consumers are pinned', () => {
+describe('[#18546] §3 the census names where the other consumers are pinned', () => {
     it.each([
         ['execctx-authz-input-seam-reachability.test.ts', 'the computeExecCtx authorization-input seam'],
         ['meta-state-route-engine-outage.test.ts', 'GET /meta/object/:name/state/:field'],
+        ['meta-disabled-package-doors.test.ts', '[#24210] GET /meta/:type/:name/published'],
     ])('%s still exists and still names this slot (%s)', (file) => {
         const path = resolve(HERE, file);
         expect(existsSync(path)).toBe(true);

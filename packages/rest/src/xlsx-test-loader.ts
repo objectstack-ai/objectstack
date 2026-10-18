@@ -64,7 +64,7 @@
  */
 
 import ExcelJS from 'exceljs';
-import type { Workbook, Xlsx } from 'exceljs';
+import type { Workbook, Xlsx, XlsxReadOptions } from 'exceljs';
 
 /**
  * The parameter type `Xlsx.load` actually declares, read off the dependency's
@@ -80,9 +80,13 @@ type XlsxLoadInput = Parameters<Xlsx['load']>[0];
  * The single site in this package where the exceljs declaration defect above is
  * asserted away. Callers pass the Node `Buffer` their fixture produced and get
  * back a workbook; no call site needs to know about any of this.
+ *
+ * `options` is exceljs's own read options, handed through unchanged — for a
+ * caller that reads cell values only and skips a node it never asserts on
+ * (`ignoreNodes`). Omitted, the workbook is read in full.
  */
-export async function loadXlsxWorkbook(bytes: Buffer): Promise<Workbook> {
+export async function loadXlsxWorkbook(bytes: Buffer, options?: Partial<XlsxReadOptions>): Promise<Workbook> {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(bytes as unknown as XlsxLoadInput);
+    await wb.xlsx.load(bytes as unknown as XlsxLoadInput, options);
     return wb;
 }

@@ -83,6 +83,7 @@ import {
 } from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 
 /**
  * [ADR-0126 §8 item 2] The reserved first segment of the activation door,
@@ -449,6 +450,9 @@ export async function handleActionsRequest(deps: DomainHandlerDeps, path: string
             };
         }
     }
+    // [#24151] The body is read once the baseline above has admitted the
+    // caller, never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
     if (method.toUpperCase() !== 'POST') {
         // RFC 9110 §15.5.6: a 405 MUST carry an `Allow` header naming the
         // target resource's supported methods. Hand-rolled rather than

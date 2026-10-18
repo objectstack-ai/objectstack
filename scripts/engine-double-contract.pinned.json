@@ -3792,6 +3792,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-object-extension-agreement.test.ts",
       "verb": "findOne",
       "pinned": 1

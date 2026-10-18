@@ -68,6 +68,7 @@ import {
 } from '../flow-clone.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 // [#20552] The per-type credential redaction every metadata read exit applies,
 // and its write-path inverse — reused, never restated, for the definitions this
 // domain serves and overwrites.
@@ -2513,6 +2514,11 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
         const hook = matchInboundHookRoute(routePath, method);
         if (hook) return handleInboundHookRequest(deps, context, hook);
     }
+    // [#24151] The body is read once the floor above has admitted the caller,
+    // never ahead of it (`../deferred-request-body.ts`) — and after the inbound
+    // hook is handed off, because that route verifies the raw bytes and never
+    // reads a parsed body.
+    body = readDispatchedBody(body);
     const m = method.toUpperCase();
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
