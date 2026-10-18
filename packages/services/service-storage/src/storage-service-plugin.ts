@@ -1287,8 +1287,11 @@ function buildAuthGateSessionReader(
         await resolveAdmissionTenancyPosture(registry),
         userAuthGateSourceOf(auth),
         // [#23367] The API-key lifecycle policy, from the same service. A key
-        // its own lifecycle refuses (`lifecycle`) carries no posture; the
-        // route that would serve it fails it closed.
+        // its own lifecycle refuses (`lifecycle`) carries no posture. The
+        // parent-governed download, whose composition reads keys, refuses it
+        // with its own code; the session-serving routes (uploads, the
+        // unclaimed-file download) never read a key and answer by the session
+        // alone; the raw-transfer routes answer by their capability token.
         apiKeyLifecyclePolicySourceOf(auth),
       );
       if (admission.outcome === 'held') return { authGate: admission.gate };
