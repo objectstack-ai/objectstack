@@ -305,7 +305,9 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      * (the shared-option-list reference), a declared key, not a derivation change;
      * `object` moved 43 → 44 the same way when it gained `imageField` (the
      * record's picture, beside `nameField`). `page` moved 24 → 25 the same way
-     * when it gained `print` (#22158, the print-page declaration). `object`
+     * when it gained `print` (#22158, the print-page declaration), and
+     * 25 → 26 when it gained `record` (#24265, the row an app page binds as
+     * `record`). `object`
      * moved 44 → 45 the same way when it gained `attachedOnRead` (#22386, the
      * blocks a service attaches per caller on read). `field` moved 75 → 77 the
      * same way when it gained `dueLike` and `settledWhen` (#22227, a date's
@@ -322,7 +324,7 @@ describe('#17501 — /meta/types serves a real schema for `action`, and moves no
      */
     const CARD_PROPERTY_COUNTS: Record<string, number> = {
         agent: 26, app: 30, dashboard: 22, dataset: 16, field: 80, flow: 23,
-        hook: 22, object: 45, page: 25, position: 13, report: 21, skill: 17, tool: 14,
+        hook: 22, object: 45, page: 26, position: 13, report: 21, skill: 17, tool: 14,
     };
 
     it.each(Object.entries(CARD_PROPERTY_COUNTS))(

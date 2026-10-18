@@ -217,6 +217,8 @@
     "PageNavItemSchema": "ui/PageNavItem",
     "PagePrint": "ui/PagePrint",
     "PagePrintSchema": "ui/PagePrint",
+    "PageRecordBinding": "ui/PageRecordBinding",
+    "PageRecordBindingSchema": "ui/PageRecordBinding",
     "PageRegion": "ui/PageRegion",
     "PageRegionSchema": "ui/PageRegion",
     "PageSchema": "ui/Page",
