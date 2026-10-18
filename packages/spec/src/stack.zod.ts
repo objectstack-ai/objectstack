@@ -37,6 +37,7 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
 import { InlineGridColumnSchema } from './data/field.zod';
+import { pageComponentSlotPositions } from './ui/component.zod';
 import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
@@ -2392,7 +2393,7 @@ const isComponentNode = (value: unknown): value is Record<string, unknown> =>
  * `visit` receives the node and its `properties` record; a node without one is
  * not visited, since every check here reads under `properties`.
  *
- * Two traversal facts make this a walk rather than a loop:
+ * Three traversal facts make this a walk rather than a loop:
  *
  * - **Roots are plural.** Components hang off `regions[].components[]` AND off
  *   `slots.<name>`, where each slot is one component *or* an array of them.
@@ -2401,12 +2402,28 @@ const isComponentNode = (value: unknown): value is Record<string, unknown> =>
  *   children as `z.array(z.unknown())` (`children`, plus a card's `footer`), so
  *   a button nested inside a container survives parse as raw data. We recurse
  *   into any array under `properties` whose entries are component-shaped, which
- *   reaches every container spelling without this walk enumerating them.
+ *   reaches a child list directly under `properties` without this walk naming
+ *   its key.
+ * - **Panels nest one record deeper.** A `page:tabs` or `page:accordion` node
+ *   carries its components as `properties.items[].children`, and each item is
+ *   a panel record (`{ label, value?, children }`), not a component, so the
+ *   shape rule above stops at it. Where panels hang is not this walk's to
+ *   list: it descends the panel positions of `pageComponentSlotPositions`
+ *   (`ui/component.zod.ts`), the one list the component rows derive and the
+ *   other page walks read (the exported `walkAddressedPageComponents`, the
+ *   ADR-0087 conversion walker, lint's `walkPageComponents`), authorable
+ *   spellings only, matched by shape on every component as they match it. A
+ *   record under a key no row declares a panel list is not descended, nor is
+ *   a key of a panel record no row declares: the renderer draws nothing from
+ *   either, so nothing there is a component of the page.
  */
 function forEachPageComponent(
   page: Record<string, unknown>,
   visit: (node: Record<string, unknown>, props: Record<string, unknown>, path: string) => void,
 ): void {
+  const panelPositions = pageComponentSlotPositions().flatMap(({ key, panelKey, retired }) =>
+    panelKey !== undefined && !retired ? [{ key, panelKey }] : []);
+
   const visitComponent = (node: unknown, path: string): void => {
     if (!isComponentNode(node)) return;
     const props = isRecord(node.properties) ? node.properties : undefined;
@@ -2418,6 +2435,20 @@ function forEachPageComponent(
       if (!Array.isArray(value)) continue;
       value.forEach((child, index) => {
         if (isComponentNode(child)) visitComponent(child, `${path}.properties.${key}.${index}`);
+      });
+    }
+
+    // A panel list: only each panel's child list is descended, never the
+    // panel record itself.
+    for (const { key, panelKey } of panelPositions) {
+      const panels = props[key];
+      if (!Array.isArray(panels)) continue;
+      panels.forEach((panel, index) => {
+        const children = isRecord(panel) ? panel[panelKey] : undefined;
+        if (!Array.isArray(children)) return;
+        children.forEach((child, childIndex) => {
+          visitComponent(child, `${path}.properties.${key}.${index}.${panelKey}.${childIndex}`);
+        });
       });
     }
   };
@@ -2456,7 +2487,8 @@ function forEachPageComponent(
  * with its behaviour written right there — so it is the surface that most needs
  * authoring-time rejection.
  *
- * The traversal is {@link forEachPageComponent}'s: every root, every nesting.
+ * The traversal is {@link forEachPageComponent}'s: every root, every nesting,
+ * a `page:tabs` or `page:accordion` item's `children` included.
  *
  * Candidates are normalized by parsing with `InlineActionSchema` rather than
  * read key-by-key: that schema's preprocess is what canonicalizes the legacy
@@ -3568,12 +3600,12 @@ const hasOwnKey = (record: object, key: string): boolean => Object.prototype.has
  * - [#20928] an `object-master-detail-form` page block's `details[].columns`,
  *   wherever the block sits on a page ({@link forEachPageComponent}) — a column
  *   names a field of the detail entry's `childObject`;
- * - [#24190] a `record:line_items` page block's `columns`, in the positions
- *   {@link forEachPageComponent} visits — a region's components, a
- *   container's component children, a slot; a block under a `page:tabs`
- *   item's `children` is not yet visited, so not yet judged — a column names
- *   a field of the child object the panel lists, resolved the way the
- *   renderer resolves it ({@link lineItemsChildObject}).
+ * - [#24190] a `record:line_items` page block's `columns`, wherever the block
+ *   sits on a page ({@link forEachPageComponent}) — a region's components, a
+ *   container's component children, a `page:tabs` or `page:accordion` item's
+ *   `children`, a slot — a column names a field of the child object the panel
+ *   lists, resolved the way the renderer resolves it
+ *   ({@link lineItemsChildObject}).
  *
  * Resolution is against the stack's own `objects`: a `childObject` this stack
  * does not declare, or a column naming no field of it, is not judged here — an
