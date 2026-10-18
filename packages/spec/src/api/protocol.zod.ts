@@ -570,7 +570,13 @@ const MetadataProtectionEnvelopeFields = {
  *   contain dots (a permission set's `fields` map is keyed `object.field`), so
  *   a dotted string would be ambiguous; and an index (`columns[3]`) moves when
  *   a column is inserted or reordered, so the path stops at `columns` — the
- *   granularity the ruling names, "a field or a view setting".
+ *   granularity the ruling names, "a field or a view setting". The ruled
+ *   properties artboard also marks ELEMENTS of an array setting: a kanban
+ *   card's two copilot-added fields, under the line
+ *   「读者」「应还日期」两项由 AI 副驾在 2 分钟前作为草稿加入. The reader finds
+ *   which elements by comparing the draft's array with the published body's,
+ *   and the array's entry says who last changed it and when. Attribution is
+ *   per array, never per element.
  * - **Optional, never defaulted to `[]`.** Absent means "not recorded" (a
  *   server with no writer, or a draft row saved before one); an empty-array
  *   default would answer "nothing changed" for exactly those rows.
@@ -629,6 +635,8 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
       + 'is the key exactly as stored, dots included (a permission set\'s `fields` map is keyed '
       + '`object.field`), so a path is never one dotted string. An array is one value: its path ends at '
       + 'its key (`["columns"]`) and never carries an index, which an insert or a reorder would shift. '
+      + 'Which elements of an array the draft added or dropped is read by comparing it with the '
+      + 'published body\'s array; the entry answers only who last changed the array as a whole. '
       + '`[]` is the whole body: the write that created the draft of an item with no published body.',
     ),
     by: z.enum(['copilot', 'studio', 'api']).describe(
