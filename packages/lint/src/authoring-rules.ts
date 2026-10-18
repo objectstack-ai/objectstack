@@ -914,9 +914,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       'saves, a rollout decision over stored tenant rows the in-repo corpus does not measure.',
     run: (stack) => validateDashboardWidgetOptions(stack),
   },
-  // #3574 — a filter value like `{current_user}` resolves in no vocabulary,
-  // reaches the data engine as a literal and matches nothing. The surface
-  // renders empty with no error, and a silent zero is indistinguishable from a
+  // #3574 — a filter value like `{current_user}` resolves in no vocabulary. The
+  // data engine refuses a query carrying it (`FILTER_TOKEN_UNKNOWN`, 400). When
+  // #3574 was filed it reached the engine as a literal and matched nothing: the
+  // surface rendered empty with no error, a silent zero indistinguishable from a
   // genuine one at review time.
   {
     name: 'validateFilterTokens',

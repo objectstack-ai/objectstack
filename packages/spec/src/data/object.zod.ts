@@ -3480,10 +3480,14 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * master FK, the row lands with a null FK, the derived read filter
  * `masterFK IN (accessible master ids)` can never match null — the row is
  * invisible to everyone — and every later by-id write answers
- * `422 MISSING_REQUIRED_FIELD`. Today only the security gate
- * (`assertControlledByParentWrite`) closes that shape, and commit 75b7c240a records that
- * the declaration and the enforcement disagree. This makes the unsafe shape
- * impossible to NEWLY declare:
+ * `422 MISSING_REQUIRED_FIELD`. Before commit 75b7c240a only the security
+ * gate (`assertControlledByParentWrite`) closed that shape, by refusing the
+ * insert at runtime, and that commit records that the declaration and the
+ * enforcement disagreed. Since protocol 18 the parse refuses the declaration
+ * itself: {@link refuseControlledByParentWithoutOneMaster} refuses a
+ * `controlled_by_parent` object none of whose `master_detail` fields declares
+ * `required: true`. The builder makes the unsafe shape impossible to NEWLY
+ * declare:
  *
  * - omitted `required` → forced to `true` (the lint rule
  *   `relationship/master-detail-required` already computes exactly this fix);
