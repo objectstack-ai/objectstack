@@ -25,7 +25,18 @@
  * and an `os start` whose `serve` child inherits that value — is in the
  * development column, where `serve` auto-shifts instead of exiting. So the
  * population is read off the entry, not off the spawn line: any file whose
- * CODE holds a string ending in `bin/run.js` (a comment naming it is not code).
+ * CODE spells `bin/run.js` (a comment naming it is not code), in either of the
+ * two spellings this directory uses —
+ *
+ *   - one string that ends with it: `resolve(HERE, '../bin/run.js')`;
+ *   - path SEGMENTS in one call: `join(PACKAGE_ROOT, 'bin', 'run.js')`. A
+ *     call's string-literal arguments are split on `/` and read in order, and
+ *     the entry's segments must all appear among them, in order; a non-literal
+ *     argument contributes nothing. Both segments must sit in ONE call, so a
+ *     file holding `'bin'` and `'run.js'` in unrelated expressions is not
+ *     admitted, while the first spelling is the one-argument case of the same
+ *     reading.
+ *
  * That over-approximates on purpose — a file that names the built entry may
  * spawn it in development posture too (`--dev`, `os dev`) — and those files
  * sit in {@link OUTSIDE_THE_PRODUCTION_COLUMN} with their reason and their
@@ -38,8 +49,9 @@
  *      there is a drift that `portDriftError()` turns into a red. That race is
  *      real and unclosed; it is outside this pin by its population.
  *   2. A production-capable entry spelled some other way — a packed tarball's
- *      bin, `dist/` run directly. Add its suffix to
- *      {@link PRODUCTION_CAPABLE_ENTRIES} the day a test spawns one.
+ *      bin, `dist/` run directly — or its directory held in a variable before
+ *      the file name is joined on (`join(BIN_DIR, 'run.js')`). Add the suffix
+ *      to {@link PRODUCTION_CAPABLE_ENTRIES} the day a test spawns one.
  *   3. A released draw written by hand (`listen(0)`, read, close) instead of
  *      calling the helper. The census counts calls of the two helpers only.
  *
@@ -57,6 +69,9 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
 
 /** The suffixes of the entries that can produce a production-posture child. */
 const PRODUCTION_CAPABLE_ENTRIES = ['bin/run.js'] as const;
+
+/** The same entries as the path segments a `join()` spells them in. */
+const ENTRY_SEGMENTS: readonly (readonly string[])[] = PRODUCTION_CAPABLE_ENTRIES.map((entry) => entry.split('/'));
 
 /** The released-port draws `helpers/serve-process.ts` exports. */
 const RELEASED_PORT_DRAWS: ReadonlySet<string> = new Set(['reservePort', 'randomPort']);
@@ -91,10 +106,28 @@ const OUTSIDE_THE_PRODUCTION_COLUMN: Readonly<Record<string, { draws: number; wh
 };
 
 interface Census {
-  /** Some string in CODE ends with a production-capable entry. */
+  /** CODE spells a production-capable entry: one string, or one call's segments. */
   namesProductionEntry: boolean;
   /** The 1-based line of every released-port draw call. */
   drawLines: number[];
+}
+
+/**
+ * Do this call's string-literal arguments, read as path segments in order,
+ * spell a production-capable entry — `join(PACKAGE_ROOT, 'bin', 'run.js')`?
+ */
+function spellsEntryInSegments(call: ts.CallExpression): boolean {
+  const segments = call.arguments
+    .filter((arg): arg is ts.StringLiteral | ts.NoSubstitutionTemplateLiteral => ts.isStringLiteralLike(arg))
+    .flatMap((arg) => arg.text.split('/'))
+    .filter((segment) => segment !== '' && segment !== '.');
+  return ENTRY_SEGMENTS.some((entry) => {
+    let matched = 0;
+    for (const segment of segments) {
+      if (matched < entry.length && segment === entry[matched]) matched += 1;
+    }
+    return matched === entry.length;
+  });
 }
 
 /** The enclosing function declaration's name, if any. */
@@ -132,6 +165,7 @@ function censusOf(fileName: string, source: string): Census {
     ) {
       namesProductionEntry = true;
     }
+    if (ts.isCallExpression(node) && spellsEntryInSegments(node)) namesProductionEntry = true;
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       const isDraw = ts.isIdentifier(callee)
@@ -180,6 +214,9 @@ const Q = "'";
 const BUILT = `${Q}../bin/run.js${Q}`;
 const SOURCE = `${Q}../bin/run-dev.js${Q}`;
 const FROM_HARNESS = `from ${Q}./helpers/serve-process.js${Q};`;
+const BIN_SEGMENT = `${Q}bin${Q}`;
+const RUN_SEGMENT = `${Q}run.js${Q}`;
+const RUN_DEV_SEGMENT = `${Q}run-dev.js${Q}`;
 
 const FIXTURES: Array<{ name: string; source: string; population: boolean; draws: number }> = [
   {
@@ -221,6 +258,27 @@ const FIXTURES: Array<{ name: string; source: string; population: boolean; draws
     draws: 1,
   },
   {
+    name: 'the built entry spelled in path segments',
+    source: `import { randomPort } ${FROM_HARNESS}\nconst RUN_JS = join(PACKAGE_ROOT, ${BIN_SEGMENT}, ${RUN_SEGMENT});\n`
+      + `const port = randomPort();\n`,
+    population: true,
+    draws: 1,
+  },
+  {
+    name: 'the source entry spelled in path segments',
+    source: `import { randomPort } ${FROM_HARNESS}\nconst CLI = join(PACKAGE_ROOT, ${BIN_SEGMENT}, ${RUN_DEV_SEGMENT});\n`
+      + `const port = randomPort();\n`,
+    population: false,
+    draws: 1,
+  },
+  {
+    name: 'the two segments in two different calls (a variable-held directory, named in the header)',
+    source: `import { randomPort } ${FROM_HARNESS}\nconst BIN_DIR = join(PACKAGE_ROOT, ${BIN_SEGMENT});\n`
+      + `const RUN_JS = join(BIN_DIR, ${RUN_SEGMENT});\nconst port = randomPort();\n`,
+    population: false,
+    draws: 1,
+  },
+  {
     name: 'the helper\'s own definitions',
     source: 'export function reservePort(): number { return 1; }\n'
       + 'export function randomPort(): string { return String(reservePort()); }\n',
@@ -245,6 +303,14 @@ describe('#24295: no file that can spawn a production-posture child draws a rele
     // The file whose red filed #24295 spawns the built entry…
     expect(population.has('start-mcp-stdio-early-initialize.integration.test.ts'), 'the red site is not in the population')
       .toBe(true);
+    // …and the two files that spell it in path segments are read as naming it too.
+    for (const segmented of [
+      'published-entry-stderr-error-listener.test.ts',
+      'published-entry-stderr-nonblocking.e2e.test.ts',
+    ]) {
+      expect(population.has(segmented), `${segmented} spells bin/run.js in segments but is not in the population`)
+        .toBe(true);
+    }
     // …and the instrument that measures the draw itself still draws, outside the population.
     const instrument = tree.get('serve-port-bind-probe.test.ts');
     expect(instrument?.drawLines.length ?? 0, 'the draw census finds no draw in the bind-probe instrument').toBeGreaterThan(0);
