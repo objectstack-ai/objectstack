@@ -64,12 +64,14 @@ describe('showcase: business-unit hierarchy sharing rule (ADR-0057 D6 / #2077)',
     const contribId = await uid('bu-contrib@verify.test');
 
     // [ADR-0131 D3/D9] The showcase boots `single`, so the Default Organization
-    // exists before the first sign-up and owns every row this fixture seeds. A
-    // refused read is an answer, never "no organization": it is not swallowed,
-    // and no stand-in organization is minted beside the real one.
-    const org = await ql.findOne('sys_organization', { where: {}, context: SYS });
-    if (!org?.id) throw new Error('fixture: the showcase boot has no Default Organization to own the business units');
-    const orgId = String(org.id);
+    // exists before the first sign-up and owns every row this fixture seeds —
+    // asked of the `tenancy` service, the one reading of it. (This used to be a
+    // `findOne` with an empty `where`, which the engine refuses as an arbitrary
+    // pick; the refusal was swallowed and a stand-in organization minted beside
+    // the real one.)
+    const tenancy = await stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy');
+    const orgId = await tenancy.defaultOrgId();
+    if (!orgId) throw new Error('fixture: the showcase boot has no Default Organization to own the business units');
 
     // parent ⊃ child
     await sys('sys_business_unit', { id: 'bu_h_parent', name: 'Region', kind: 'division', organization_id: orgId, active: true });
