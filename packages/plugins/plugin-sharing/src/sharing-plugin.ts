@@ -69,44 +69,59 @@ import { normalizeTenancyPosture, postureEnforcesWall, type TenancyPosture } fro
 import { inProcessSessionReadInput } from '@objectstack/types';
 
 /**
- * How many organizations one boot enumerates to serve declared sharing rules
- * in. Bounded for the same reason plugin-security bounds its own: this runs
- * during plugin start. An organization past the bound is covered by the
- * organization-creation hook and by the next boot.
+ * One page of the boot's organization enumeration. A PAGE size, not a cap: the
+ * walk reads until a short page, so every organization is served — an
+ * organization left out of the scopes would not only go unserved, the boot's
+ * orphaned-grant sweep would revoke its declared rules' grants.
  */
-const DECLARED_RULE_ORGANIZATION_SCAN_LIMIT = 500;
+const DECLARED_RULE_ORGANIZATION_PAGE = 500;
 
 /**
  * [ADR-0131 D2] The scopes declared sharing rules are served in
  * (`SharingRuleService.setDeclaredRuleScopes`): exactly one organization-less
- * scope under `single`, one per organization under a wall, and NONE when the
- * organization enumeration failed — an unreadable `sys_organization` means "we
- * do not know", never "there are no tenants", and serving organization-less on
- * that reading would grant a walled deployment's rules across every tenant.
- * These are the passes the retired seeder made, as reads (#10103).
+ * scope under `single`, and under a wall EVERY organization, read by a keyset
+ * walk on `id` until a short page. These are the passes the retired seeder
+ * made, as reads (#10103).
+ *
+ * `null` when the enumeration failed at any page: an unreadable
+ * `sys_organization` means "we do not know", never "there are no tenants" —
+ * and never a partial list, because the scopes decide which name-keyed grants
+ * the boot sweep keeps. The caller marks the scopes UNKNOWN
+ * (`SharingRuleService.setDeclaredRuleScopesUnknown`): no declared rule is
+ * served, and no declared rule's grant is revoked.
  */
-async function resolveDeclaredRuleScopes(
+export async function resolveDeclaredRuleScopes(
   engine: any,
   posture: TenancyPosture,
   logger?: { warn?: (m: string, meta?: any) => void },
-): Promise<Array<string | null>> {
+): Promise<Array<string | null> | null> {
   if (!postureEnforcesWall(posture)) return [null];
-  let rows: any;
-  try {
-    rows = await engine.find('sys_organization', {
-      fields: ['id'],
-      limit: DECLARED_RULE_ORGANIZATION_SCAN_LIMIT,
-      context: { isSystem: true },
-    });
-  } catch (e: any) {
-    logger?.warn?.('SharingServicePlugin: could not enumerate organizations — declared sharing rules ' +
-      'are NOT served in any organization until the next boot (an organization created meanwhile is ' +
-      'served from its creation)', { error: e?.message });
-    return [];
+  const ids: string[] = [];
+  let after: string | undefined;
+  for (;;) {
+    let rows: any;
+    try {
+      rows = await engine.find('sys_organization', {
+        ...(after === undefined ? {} : { where: { id: { $gt: after } } }),
+        fields: ['id'],
+        orderBy: [{ field: 'id', order: 'asc' }],
+        limit: DECLARED_RULE_ORGANIZATION_PAGE,
+        context: { isSystem: true },
+      });
+    } catch (e: any) {
+      logger?.warn?.('SharingServicePlugin: could not enumerate organizations — declared sharing rules ' +
+        'are served in NO organization until the next boot, and no declared rule\'s grant is revoked ' +
+        'meanwhile (the standing grants keep answering). Remedy: restore read access to sys_organization ' +
+        'and restart.', { error: e?.message, read: ids.length });
+      return null;
+    }
+    const page = (Array.isArray(rows) ? rows : [])
+      .map((r: any) => r?.id)
+      .filter((id: unknown): id is string => typeof id === 'string' && id !== '');
+    ids.push(...page);
+    if (page.length < DECLARED_RULE_ORGANIZATION_PAGE) return ids;
+    after = page[page.length - 1];
   }
-  return (Array.isArray(rows) ? rows : [])
-    .map((r: any) => r?.id)
-    .filter((id: unknown): id is string => typeof id === 'string' && id !== '');
 }
 
 /**
@@ -781,9 +796,9 @@ export class SharingServicePlugin implements Plugin {
             } catch { /* absent — fall through to the walled default */ }
             return 'isolated';
           };
-          this.ruleService.setDeclaredRuleScopes(
-            await resolveDeclaredRuleScopes(engine, sharingPosture(), ctx.logger as any),
-          );
+          const declaredScopes = await resolveDeclaredRuleScopes(engine, sharingPosture(), ctx.logger as any);
+          if (declaredScopes) this.ruleService.setDeclaredRuleScopes(declaredScopes);
+          else this.ruleService.setDeclaredRuleScopesUnknown();
 
           // Serve a NEWLY CREATED organization's declared rules too, not only
           // the ones present at boot. Without it a tenant created after

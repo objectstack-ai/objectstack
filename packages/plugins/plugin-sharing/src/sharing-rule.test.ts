@@ -16,6 +16,7 @@ import { PositionGraphService } from './position-graph.js';
 import { celToFilter, celToFilterOutcome, createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { isMatchAllCriteria } from './rule-criteria.js';
 import { bindRuleCriteriaGuard } from './rule-hooks.js';
+import { resolveDeclaredRuleScopes } from './sharing-plugin.js';
 
 interface Row { [k: string]: any }
 
@@ -2215,12 +2216,36 @@ describe('[ADR-0131 D2] declared sharing rules are read from the registry, never
       expect(h.grants()).toEqual([]);
     });
 
-    it('an org-scoped sharing admin reads the platform-global projection, and cannot delete it', async () => {
-      const admin = { userId: 'admin', organizationId: 'org_default', systemPermissions: ['manage_sharing'] } as any;
-      expect((await h.rules.getRule(DECLARED.name, admin))?.id).toBe(DECLARED.name);
-      await expect(h.rules.deleteRule(DECLARED.name, admin)).rejects.toThrow(/^PERMISSION_DENIED: .*declared in the application's code/);
-      // System contexts are refused alike: there is no row, and code is changed in code.
-      await expect(h.rules.deleteRule(DECLARED.name, BOOT)).rejects.toThrow(/^PERMISSION_DENIED/);
+    /** The refusal's ADR-0112 code TOKEN — the prefix the REST door maps — never a substring of the message. */
+    const refusalCodeOf = async (call: Promise<unknown>): Promise<string> => {
+      try {
+        await call;
+      } catch (err: any) {
+        return String(err?.message ?? err ?? '').split(':')[0].trim();
+      }
+      throw new Error('expected the call to be REFUSED, but it resolved successfully');
+    };
+
+    it.each([
+      ['an org-scoped sharing admin', { userId: 'admin', organizationId: 'org_default', systemPermissions: ['manage_sharing'] }],
+      ['a system context', BOOT],
+    ])('%s reads the declared rule but cannot delete it — 403 PERMISSION_DENIED, its grants left standing', async (_who, ctx) => {
+      await h.rules.evaluateRule(DECLARED.name, BOOT);
+      const before = h.grants().map((g) => g.id).sort();
+      expect(before).toHaveLength(1);
+      expect((await h.rules.getRule(DECLARED.name, ctx as any))?.id).toBe(DECLARED.name);
+
+      const code = await refusalCodeOf(h.rules.deleteRule(DECLARED.name, ctx as any));
+      // `code`: the exact ADR-0112 token the sharing-rule routes map, not a substring.
+      expect(code).toBe('PERMISSION_DENIED');
+      // `status`: sourced from the platform's own code↔status pairing, not restated.
+      expect(HttpStatusErrorCodeMap[403]).toBe(code);
+      // …and not 404-shaped, in either spelling: the rule exists, the same caller just read it.
+      expect(code).not.toBe(HttpStatusErrorCodeMap[404]);
+      expect(code).not.toBe('RULE_NOT_FOUND');
+      // The refusal precedes every write: the declaration's grants still stand, and it still serves.
+      expect(h.grants().map((g) => g.id).sort()).toEqual(before);
+      expect((await h.rules.listRules({}, BOOT)).map((r) => r.id)).toEqual([DECLARED.name]);
     });
   });
 
@@ -2275,6 +2300,36 @@ describe('[ADR-0131 D2] declared sharing rules are read from the registry, never
       expect(h.grants().map((g) => g.organization_id)).toEqual(['org_a']);
     });
 
+    it('UNKNOWN scopes (a failed organization enumeration) serve no declared rule and revoke none of its grants', async () => {
+      await h.rules.evaluateRule(DECLARED.name, BOOT);
+      expect(h.grants()).toHaveLength(2);
+      // A true orphan beside them — a grant whose rule ROW is gone — is still swept.
+      h.engine._tables.sys_record_share.push({
+        id: 'share_orphan', organization_id: 'org_a', object_name: 'project', record_id: 'a_red',
+        recipient_type: 'user', recipient_id: 'ghost', access_level: 'read', source: 'rule', source_id: 'srule_deleted',
+      });
+      const warns: Array<[string, unknown]> = [];
+      (h.rules as any).logger = { warn: (m: string, meta?: unknown) => warns.push([m, meta]) };
+      h.rules.setDeclaredRuleScopesUnknown();
+      // Unknown, not "none": one organization created meanwhile does not make the set known.
+      h.rules.addDeclaredRuleScope('org_c');
+
+      expect(await h.rules.listRules({}, BOOT)).toEqual([]);
+      expect(await h.rules.sweepOrphanedRuleGrants()).toBe(1);
+      expect(h.grants().map((g) => g.id).sort()).not.toContain('share_orphan');
+      expect(h.grants().filter((g) => g.source_id === DECLARED.name).map((g) => g.organization_id).sort()).toEqual(['org_a', 'org_b']);
+      expect(warns.filter(([m]) => m.includes('could not be enumerated'))).toHaveLength(1);
+      // Said once per process, not on every sweep.
+      await h.rules.sweepOrphanedRuleGrants();
+      expect(warns.filter(([m]) => m.includes('could not be enumerated'))).toHaveLength(1);
+    });
+
+    it('CONTROL: KNOWN scopes that leave an organization out do revoke its declared grants — the sweep is live', async () => {
+      await h.rules.evaluateRule(DECLARED.name, BOOT);
+      h.rules.setDeclaredRuleScopes(['org_a']);
+      expect(await h.rules.sweepOrphanedRuleGrants()).toBe(1);
+    });
+
     it('an organization created after boot is served from its creation on; unknown organizations serve nothing', async () => {
       h.rules.setDeclaredRuleScopes([]);
       expect(await h.rules.listRules({}, BOOT)).toEqual([]);
@@ -2283,3 +2338,88 @@ describe('[ADR-0131 D2] declared sharing rules are read from the registry, never
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────
+// [ADR-0131 D2] The boot's organization enumeration for declared-rule scopes
+// reads EVERY organization (a keyset walk, no cap), and a read that fails at
+// any page is UNKNOWN — never a partial list, because the scopes decide which
+// name-keyed grants the boot sweep keeps.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[ADR-0131 D2] resolveDeclaredRuleScopes', () => {
+  /** A `sys_organization` reader honouring the walk's `id > after` seek, `id` order and page size. */
+  function organizations(count: number, failOnCall?: number) {
+    const ids = Array.from({ length: count }, (_, i) => `org_${String(i + 1).padStart(4, '0')}`);
+    let calls = 0;
+    return {
+      calls: () => calls,
+      async find(object: string, opts: any) {
+        calls += 1;
+        if (object !== 'sys_organization') throw new Error(`unexpected read of ${object}`);
+        if (calls === failOnCall) throw new Error('connection reset');
+        const after = opts?.where?.id?.$gt;
+        expect(opts?.orderBy).toEqual([{ field: 'id', order: 'asc' }]);
+        return ids.filter((id) => after === undefined || id > after).slice(0, opts.limit).map((id) => ({ id }));
+      },
+    };
+  }
+
+  it('reads every organization past the former 500-row cap, in pages', async () => {
+    const engine = organizations(1201);
+    const scopes = await resolveDeclaredRuleScopes(engine, 'isolated');
+    expect(scopes).toHaveLength(1201);
+    expect(scopes?.at(-1)).toBe('org_1201');
+    expect(engine.calls()).toBe(3);
+  });
+
+  it('a page boundary that lands exactly on the last organization still ends the walk', async () => {
+    const engine = organizations(1000);
+    expect(await resolveDeclaredRuleScopes(engine, 'isolated')).toHaveLength(1000);
+    expect(engine.calls()).toBe(3);
+  });
+
+  it('a read that fails on a LATER page answers unknown (null), never the partial list, and says so', async () => {
+    const warns: string[] = [];
+    const scopes = await resolveDeclaredRuleScopes(organizations(1201, 2), 'isolated', { warn: (m) => warns.push(m) });
+    expect(scopes).toBeNull();
+    expect(warns).toEqual([expect.stringMatching(/could not enumerate organizations — .*no declared rule's grant is revoked/)]);
+  });
+
+  it('`single` reads nothing and serves the one organization-less scope', async () => {
+    const engine = organizations(3);
+    expect(await resolveDeclaredRuleScopes(engine, 'single')).toEqual([null]);
+    expect(engine.calls()).toBe(0);
+  });
+
+  it('an organization past the former cap keeps its declared rule\'s grant through the boot sweep', async () => {
+    const engine: any = makeEngine();
+    const orgs = organizations(600);
+    const ids = (await resolveDeclaredRuleScopes(orgs, 'isolated'))!;
+    engine._tables.project = [{ id: 'p_late', status: 'red', organization_id: 'org_0600' }];
+    // The driver's tenant scope on the record read, as the harness above gives it.
+    const find = engine.find.bind(engine);
+    engine.find = async (o: string, opts?: any) => {
+      const rows = await find(o, opts);
+      const tenant = opts?.context?.tenantId;
+      return o === 'project' && tenant ? rows.filter((r: Row) => r.organization_id == null || r.organization_id === tenant) : rows;
+    };
+    engine.registry = {
+      listItems: (type: string) => (type === 'sharing_rule'
+        ? [{ name: 'share_red', object: 'project', condition: 'record.status == "red"', sharedWith: { type: 'user', value: 'exec' } }]
+        : []),
+    };
+    const rules = new SharingRuleService({
+      engine,
+      sharing: new SharingService({ engine }),
+      declaredRules: createDeclaredSharingRuleSource({ engine }),
+    });
+    rules.setDeclaredRuleScopes(ids);
+    await rules.evaluateAllForRecord('project', 'p_late', BOOT_CTX);
+    expect((engine._tables.sys_record_share ?? []).map((g: Row) => [g.record_id, g.source_id, g.organization_id]))
+      .toContainEqual(['p_late', 'share_red', 'org_0600']);
+    expect(await rules.sweepOrphanedRuleGrants()).toBe(0);
+    expect((engine._tables.sys_record_share ?? []).filter((g: Row) => g.organization_id === 'org_0600')).toHaveLength(1);
+  });
+});
+
+const BOOT_CTX = { isSystem: true, positions: [], permissions: [] } as any;

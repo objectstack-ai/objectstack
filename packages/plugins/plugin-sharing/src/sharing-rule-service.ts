@@ -334,11 +334,18 @@ export class SharingRuleService implements ISharingRuleService {
   /**
    * [ADR-0131 D2] The scopes a declared rule is served in: `[null]` under
    * `single` (one organization-less projection, the platform-global class),
-   * one entry per organization under a wall, `[]` when the organizations could
-   * not be read — "we do not know", never "serve organization-less". Set by
-   * the plugin from the posture ({@link setDeclaredRuleScopes}).
+   * every organization under a wall. Set by the plugin from the posture
+   * ({@link setDeclaredRuleScopes}).
+   *
+   * `null` is UNKNOWN — the organizations could not be read
+   * ({@link setDeclaredRuleScopesUnknown}). It is a state of its own, never an
+   * empty list: an empty list would read as "no organization serves this
+   * rule", and the orphaned-grant sweep would revoke every declared rule's
+   * grants on that reading. Unknown serves no declared rule and revokes none.
    */
-  private declaredScopes: ReadonlyArray<string | null> = [null];
+  private declaredScopes: ReadonlyArray<string | null> | null = [null];
+  /** [ADR-0131 D2] The held-back sweep under unknown scopes says so once per process. */
+  private unknownScopesSweepWarned = false;
 
   constructor(opts: SharingRuleServiceOptions) {
     this.engine = opts.engine;
@@ -357,10 +364,27 @@ export class SharingRuleService implements ISharingRuleService {
     this.declaredScopes = [...new Set(scopes)];
   }
 
-  /** [ADR-0131 D2] An organization created after boot is served from its creation on. */
+  /**
+   * [ADR-0131 D2] The scopes are UNKNOWN — the organizations could not be
+   * enumerated. No declared rule is served anywhere (an incomplete scope set
+   * would grant in some organizations and not others), and
+   * {@link sweepOrphanedRuleGrants} revokes no declared rule's grant: a read
+   * that failed is never a revocation. The next boot that reads the
+   * organizations serves them again.
+   */
+  setDeclaredRuleScopesUnknown(): void {
+    this.declaredScopes = null;
+  }
+
+  /**
+   * [ADR-0131 D2] An organization created after boot is served from its
+   * creation on. Under unknown scopes it stays unknown: one organization known
+   * is not the set.
+   */
   addDeclaredRuleScope(organizationId: string): void {
-    if (!organizationId || this.declaredScopes.includes(null) || this.declaredScopes.includes(organizationId)) return;
-    this.declaredScopes = [...this.declaredScopes, organizationId];
+    const scopes = this.declaredScopes;
+    if (!organizationId || scopes === null || scopes.includes(null) || scopes.includes(organizationId)) return;
+    this.declaredScopes = [...scopes, organizationId];
   }
 
   /**
@@ -851,7 +875,7 @@ export class SharingRuleService implements ISharingRuleService {
     const scopes = this.declaredScopesFor(context);
     if (rules.length === 0 || scopes.length === 0) return [];
 
-    const single = this.declaredScopes.includes(null);
+    const single = this.declaredScopes?.includes(null) === true;
     const holders = await this.engine.find('sys_sharing_rule', {
       where: { name: { $in: rules.map((r) => r.name) } },
       fields: ['name', 'organization_id'],
@@ -880,10 +904,12 @@ export class SharingRuleService implements ISharingRuleService {
    * or a platform operator.
    */
   private declaredScopesFor(context: ExecutionContext): ReadonlyArray<string | null> {
-    if (this.declaredScopes.includes(null)) return [null];
+    const scopes = this.declaredScopes;
+    if (scopes === null) return []; // unknown: served nowhere
+    if (scopes.includes(null)) return [null];
     const orgId = this.callerOrgId(context);
-    if (!orgId) return this.declaredScopes;
-    return this.declaredScopes.includes(orgId) ? [orgId] : [];
+    if (!orgId) return scopes;
+    return scopes.includes(orgId) ? [orgId] : [];
   }
 
   async getRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleRow | null> {
@@ -1096,6 +1122,23 @@ export class SharingRuleService implements ISharingRuleService {
     for (const rule of await this.declaredRules(SYSTEM_CTX, {})) {
       if (rule.organization_id == null) live.add(rule.id);
       else liveDeclared.add(`${rule.id}::${rule.organization_id}`);
+    }
+    // Unknown scopes: where a declared rule is served is not known, so none of
+    // its name-keyed grants can be judged orphaned — every declared name is
+    // held live. A grant revoked on a failed read is lost access; one held back
+    // is re-judged by the next boot that reads the organizations.
+    if (this.declaredScopes === null && this.declaredSource) {
+      const declaredNames = (await this.declaredSource.list()).map((r) => r.name);
+      for (const name of declaredNames) live.add(name);
+      if (declaredNames.length > 0 && !this.unknownScopesSweepWarned) {
+        this.unknownScopesSweepWarned = true;
+        this.logger?.warn?.(
+          '[sharing-rule] the organizations could not be enumerated, so no declared sharing rule is served and ' +
+            'none of their grants is revoked by the orphaned-grant sweep; the standing grants keep answering. ' +
+            'Remedy: restore read access to sys_organization and restart.',
+          { declaredRules: declaredNames.length },
+        );
+      }
     }
 
     const grants = await this.engine.find('sys_record_share', {
