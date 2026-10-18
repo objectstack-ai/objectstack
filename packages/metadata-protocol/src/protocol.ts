@@ -158,6 +158,10 @@ import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribable
 // [#23183] The app item read's package-id key — the one spelling of the arm
 // `GetMetaItemRequestSchema.name` declares ({@link resolveAppPackageIdKey}).
 import { isAppPackageIdKey } from '@objectstack/spec/api';
+// [#24395] The save's authoring surface, and the draft row's per-key
+// provenance read back for the strict draft read.
+import { MetadataAuthoringSurfaceSchema, type MetadataAuthoringSurface } from '@objectstack/spec/api';
+import { storedDraftChanges } from './draft-changes.js';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -11477,6 +11481,9 @@ export class ObjectStackProtocolImplementation implements
         // [#21899] Whether a stored row was found — the fact the origin-gated
         // repair's `deletable` reads ({@link servedLockState}).
         let storedRowServed = false;
+        // [#24395] The served draft row's per-key provenance — read off the
+        // row this read serves, so it can never describe another body.
+        let draftChanges: ReturnType<typeof storedDraftChanges>;
         try {
             let record = (await this.findServedOverlayRow({
                 type: request.type,
@@ -11512,6 +11519,7 @@ export class ObjectStackProtocolImplementation implements
                 if (recPkg && item && typeof item === 'object' && (item as any)._packageId === undefined) {
                     (item as any)._packageId = recPkg;
                 }
+                if (readState === 'draft') draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
             }
         } catch (error) {
             // [#5532] THE site this issue was raised on. Falling through to the
@@ -11540,6 +11548,10 @@ export class ObjectStackProtocolImplementation implements
                 // [#22877] The member's own row's, as a save of that member's
                 // body addresses it.
                 version: await this.readVersionToken({ ...request, member }, 'draft'),
+                // [#24395] `GetMetaItemResponseSchema.draftChanges`: present
+                // only when the draft row's saves recorded at least one entry
+                // — ⛔ never `[]` for a row that recorded none.
+                ...(draftChanges ? { draftChanges } : {}),
             };
         }
 
@@ -22688,7 +22700,7 @@ export class ObjectStackProtocolImplementation implements
     // STORED content hash itself (`migrateStoredMetadata`): it reaches the
     // repository as given. ⛔ No transport sets it — every door builds its
     // request field by field from named inputs, never by spreading a body.
-    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
+    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface }) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -22732,6 +22744,21 @@ export class ObjectStackProtocolImplementation implements
                 `saveMetaItem requires an 'item' body for '${request.type}/${request.name}'. `
                 + `Send the metadata document as the request body, or wrap it as {"item": {...}} / {"metadata": {...}}. `
                 + `An explicitly null item is refused rather than persisted as an empty document.`,
+            );
+            err.code = 'INVALID_REQUEST';
+            err.status = 400;
+            throw err;
+        }
+        // [#24395] The authoring surface the draft save stamps on every key
+        // path it changes: a value outside the closed set is refused here,
+        // before any read or write, with the request-envelope refusal above —
+        // never stamped as `api`, which would record a caller's mistake as
+        // a fact about who wrote the draft. The HTTP doors never send
+        // `copilot` (`metaSaveRequestOptions`); an in-process tool may.
+        if (request.surface !== undefined && !MetadataAuthoringSurfaceSchema.safeParse(request.surface).success) {
+            const err: any = new Error(
+                `saveMetaItem 'surface' must be one of copilot, studio or api for '${request.type}/${request.name}'; `
+                + `got ${JSON.stringify(request.surface)}. Omit it for a save that is neither the copilot nor Studio (recorded as api).`,
             );
             err.code = 'INVALID_REQUEST';
             err.status = 400;
@@ -24002,6 +24029,13 @@ export class ObjectStackProtocolImplementation implements
                 intent,
                 state: mode === 'draft' ? 'draft' : 'active',
                 ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+                // [#24395] An authoring draft save records which surface
+                // changed which key path (`api` when it names none). A
+                // server-stated rewrite — `migrate-stored`, the only caller
+                // that states a `source` — is not authoring and records none.
+                ...(mode === 'draft' && request.source === undefined
+                    ? { draftChangesBy: request.surface ?? 'api' }
+                    : {}),
             });
             // Persistence succeeded — NOW it's safe to mutate the
             // in-memory registry. If put() had thrown, the registry
