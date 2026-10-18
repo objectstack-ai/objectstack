@@ -342,8 +342,8 @@ the 2026-06-28 discussion.
 ## Addendum (2026-10-18, #24197) — a formula title reads one hop through a reference, and is not sortable or searchable
 
 Records ruling 6245544505 (letter A, direction (a), on `objectstack-ai/cloud#2925`),
-shipped by #24274 (`d537a318b`) and #24307 (`1bf5f6e17c`). It states what those
-two changes put on `main` and decides nothing more; no section above is edited.
+shipped by #24274 (`d537a318b`) and #24307 (`1bf5f6e17c`). It states what is on
+`main` after those two changes and decides nothing more; no section above is edited.
 The ruling, verbatim:
 
 > The formula read path preloads one hop of the referenced fields a formula
@@ -373,7 +373,7 @@ The ruling, verbatim:
    result, as for any own column a formula reads. The control for a related name
    a reader may not see is field-level security on the formula field itself.
 
-**Hook and action bodies** (`packages/runtime/src/sandbox/body-runner.ts`):
+**Hook bodies** (`packages/runtime/src/sandbox/body-runner.ts`, the hook face):
 
 5. `ctx.title()` evaluates the object's title formula over the in-flight record
    state the hook fires on, and serves its one hop the way a read does: one
