@@ -19,7 +19,12 @@
  *  - `/meta/:type/:name/published` of a non-object item reads the stored
  *    overlay row or the snapshot, neither of which knows a disable: a disabled
  *    package's item is absent there too, byte for byte the missing name's
- *    answer (the owner is the plain read's kept envelope `packageId`).
+ *    answer (the owner is the plain read's kept envelope `packageId`);
+ *  - the layered view, `/meta/:type/:name/layers` and the deprecated
+ *    `?layers=true`, of a non-object item: the shared layered chain's owner
+ *    step answers a disabled package's item as the missing name, byte for
+ *    byte, asking the plain read's envelope under the request's `?package=`
+ *    scope; the object row stays the protocol's own refusal.
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -49,8 +54,17 @@ const refusal = (object: string) => Object.assign(
  * stored overlay row, `*_snap` only in the code/package snapshot.
  */
 const OWNERS: Record<string, string> = {
-    demo_page: DISABLED_PKG, demo_snap: DISABLED_PKG,
-    healthy_page: HEALTHY_PKG, healthy_snap: HEALTHY_PKG,
+    demo_page: DISABLED_PKG, demo_snap: DISABLED_PKG, demo_code: DISABLED_PKG,
+    healthy_page: HEALTHY_PKG, healthy_snap: HEALTHY_PKG, healthy_code: HEALTHY_PKG,
+};
+/**
+ * [#24210] Code-shipped pages: the layered read answers a code layer and no
+ * overlay. `twin_page` is stored in BOTH packages, so its owner is the one the
+ * request's `?package=` names (unscoped, the disabled package's).
+ */
+const CODE_ROWS: Record<string, any> = {
+    demo_code: { name: 'demo_code', label: 'Demo (shipped)' },
+    healthy_code: { name: 'healthy_code', label: 'Healthy (shipped)' },
 };
 const PUBLISHED_ROWS: Record<string, any> = {
     demo_page: { name: 'demo_page', label: 'Demo (published row)' },
@@ -65,19 +79,21 @@ const SERVICE_ITEMS: Record<string, any> = {
 
 function boot(opts: { getMetaTypes?: boolean } = {}) {
     const disabled = { on: true };
-    const getMetaItem = vi.fn(async ({ type, name }: any) => {
+    const getMetaItem = vi.fn(async ({ type, name, packageId }: any) => {
         if (type === 'object' && name === DISABLED) throw refusal(name);
         if (type === 'object' && name === HEALTHY) return { type, name, item: schema(name) };
         // The protocol answers the disabled package's page as absent (#24210),
         // and holds no copy of the healthy one: the service fallback serves it.
+        const owner = name === 'twin_page' ? (packageId ?? DISABLED_PKG) : OWNERS[name];
         return {
             type, name, item: undefined, lock: 'none', editable: true,
-            ...(OWNERS[name] ? { packageId: OWNERS[name] } : {}),
+            ...(owner ? { packageId: owner } : {}),
         };
     });
     const getMetaItemLayered = vi.fn(async ({ type, name }: any) => {
         if (type === 'object' && name === DISABLED) throw refusal(name);
-        const row = PUBLISHED_ROWS[name] ?? null;
+        if (CODE_ROWS[name]) return { type, name, code: CODE_ROWS[name], overlay: null, effective: CODE_ROWS[name] };
+        const row = name === 'twin_page' ? { name, label: 'Twin' } : PUBLISHED_ROWS[name] ?? null;
         return { type, name, code: null, overlay: row, effective: row };
     });
     const protocol: Record<string, unknown> = {
@@ -118,6 +134,7 @@ function boot(opts: { getMetaTypes?: boolean } = {}) {
         registry,
         metadata,
         disabled,
+        getMetaItem,
         getMetaItemLayered,
     };
 }
@@ -229,5 +246,82 @@ describe('#24210 — /published of a disabled package\'s non-object item', () =>
         const stack = boot();
         expect((await published(stack, 'healthy_page')).response?.body?.data).toEqual(PUBLISHED_ROWS.healthy_page);
         expect((await published(stack, 'healthy_snap')).response?.body?.data).toEqual({ name: 'healthy_snap', label: 'healthy_snap (snapshot)' });
+    });
+});
+
+describe('#24210 — the layered view of a disabled package\'s non-object item, both spellings', () => {
+    const layers = (stack: ReturnType<typeof boot>, name: string, query: Record<string, string> = {}) =>
+        stack.dispatcher.dispatch('GET', `/meta/page/${name}/layers`, {}, query, SESSION());
+    const flag = (stack: ReturnType<typeof boot>, name: string, query: Record<string, string> = {}) =>
+        stack.dispatcher.dispatch('GET', `/meta/page/${name}`, {}, { ...query, layers: 'true' }, SESSION());
+    const SPECIMENS = ['demo_page', 'demo_code']; // an overlay-only and a code-shipped page
+
+    it('served while enabled, then the missing name\'s answer, then served again', async () => {
+        const stack = boot();
+        stack.disabled.on = false;
+        const before = new Map<string, unknown>();
+        for (const name of SPECIMENS) {
+            const viaLayers = await layers(stack, name);
+            const viaFlag = await flag(stack, name);
+            expect(viaLayers.response?.status, name).toBe(200);
+            expect(viaLayers.response?.body?.data?.effective?.name, name).toBe(name);
+            expect(viaFlag.response?.body?.data, name).toEqual(viaLayers.response?.body?.data);
+            expect(viaFlag.response?.headers?.Deprecation, name).toBe('true');
+            before.set(name, JSON.stringify([viaLayers.response, viaFlag.response]));
+        }
+
+        stack.disabled.on = true;
+        const missingLayers = await layers(stack, 'no_such_page');
+        const missingFlag = await flag(stack, 'no_such_page');
+        expect(missingLayers.response?.status).toBe(404);
+        // The missing name's answer is the plain read's own absence.
+        const missingPlain = await stack.dispatcher.dispatch('GET', '/meta/page/no_such_page', {}, {}, SESSION());
+        expect(JSON.stringify(missingLayers.response?.body)).toBe(JSON.stringify(missingPlain.response?.body));
+        for (const name of SPECIMENS) {
+            // Status, body and headers, byte for byte the missing name's.
+            expect(JSON.stringify((await layers(stack, name)).response), name).toBe(JSON.stringify(missingLayers.response));
+            expect(JSON.stringify((await flag(stack, name)).response), name).toBe(JSON.stringify(missingFlag.response));
+        }
+        // Control: another package's pages, both spellings, still served.
+        for (const name of ['healthy_page', 'healthy_code']) {
+            expect((await layers(stack, name)).response?.body?.data?.effective?.name, name).toBe(name);
+            expect((await flag(stack, name)).response?.body?.data?.effective?.name, name).toBe(name);
+        }
+
+        stack.disabled.on = false;
+        for (const name of SPECIMENS) {
+            expect(JSON.stringify([(await layers(stack, name)).response, (await flag(stack, name)).response]), name)
+                .toBe(before.get(name));
+        }
+    });
+
+    it('?package= is the scope the owner is read under: the healthy package\'s copy is served', async () => {
+        const stack = boot();
+        const missing = await layers(stack, 'no_such_page');
+        expect((await layers(stack, 'twin_page', { package: HEALTHY_PKG })).response?.body?.data?.effective?.label).toBe('Twin');
+        expect((await flag(stack, 'twin_page', { package: HEALTHY_PKG })).response?.body?.data?.effective?.label).toBe('Twin');
+        expect(stack.getMetaItem).toHaveBeenCalledWith({ type: 'page', name: 'twin_page', packageId: HEALTHY_PKG });
+        expect(JSON.stringify((await layers(stack, 'twin_page', { package: DISABLED_PKG })).response))
+            .toBe(JSON.stringify(missing.response));
+        expect(JSON.stringify((await layers(stack, 'twin_page')).response)).toBe(JSON.stringify(missing.response));
+    });
+
+    it('an object keeps the layered read\'s own 404 OBJECT_PACKAGE_DISABLED, on both spellings', async () => {
+        const stack = boot();
+        expectObjectRefusal(await stack.dispatcher.dispatch('GET', `/meta/object/${DISABLED}/layers`, {}, {}, SESSION()));
+        expectObjectRefusal(await stack.dispatcher.dispatch('GET', `/meta/object/${DISABLED}`, {}, { layers: 'true' }, SESSION()));
+    });
+
+    it('a plain read that rejects is that fault, never the layered view; a registry that cannot answer withholds nothing', async () => {
+        const stack = boot();
+        stack.getMetaItem.mockImplementationOnce(async () => {
+            throw Object.assign(new Error('metadata store unavailable'), { code: 'SERVICE_UNAVAILABLE', status: 503 });
+        });
+        const failed = await layers(stack, 'demo_page');
+        expect(failed.response?.status).toBe(503);
+        expect(JSON.stringify(failed.response?.body)).not.toContain('published row');
+
+        (stack.registry as { isPackageDisabled?: unknown }).isPackageDisabled = undefined;
+        expect((await layers(stack, 'demo_page')).response?.body?.data?.effective?.name).toBe('demo_page');
     });
 });

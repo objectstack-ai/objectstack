@@ -420,6 +420,27 @@ const READERS: Array<{
     },
   },
   {
+    reader: 'getMetaItemLayered({ type: "app", name }) — the producer under GET /meta/app/:name/layers and ?layers=true',
+    enforces: false,
+    why: '[#24210] the doors answer the absence (the shared layered chain\'s owner step, pinned per transport in @objectstack/rest and @objectstack/runtime); the producer keeps serving its resolution readers',
+    serves: async ({ protocol }) =>
+      (await protocol.getMetaItemLayered({ type: 'app', name: 'demo_app' }))?.effective != null,
+  },
+  {
+    reader: 'getMetaItemLayered({ type: "permission", name }) — the security catalog echo and the packaged-permission-set lock gate',
+    enforces: false,
+    why: '[#24210] plugin-security reads the layers directly, not through a door: a disabled package\'s permission set still echoes and stays locked',
+    serves: async ({ protocol }) =>
+      (await protocol.getMetaItemLayered({ type: 'permission', name: shippedName('permission', PKG) }))?.effective != null,
+  },
+  {
+    reader: 'getMetaItem(…).packageId — the owner the layered doors\' step and readServedPackageBinding read',
+    enforces: false,
+    why: '[#24210] the by-name read withholds the item but its kept envelope still names the owner, which is how the layered doors and the echo learn it',
+    serves: async ({ protocol }) =>
+      (await protocol.getMetaItem({ type: 'app', name: 'demo_app' }))?.packageId === PKG,
+  },
+  {
     reader: 'assertObjectRegistered — the data plane (findData / getData funnel here)',
     enforces: true,
     why: 'the symptom itself: 200 with all rows for a disabled package',
