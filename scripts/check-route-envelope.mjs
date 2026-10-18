@@ -826,8 +826,8 @@ const MODULES = {
   // out of `rest-server.ts` on exactly slice 1's terms above: a MOVE, no wire
   // answer changed, so it inherits `dialectOnly` and the two dialect facts, and no
   // write-site count. Both counts were measured on the moved file at 0 (each door's
-  // 403 and 501 bodies are the nested `{ error: { code, message } }`, and its 400
-  // the same) and `rest-server.ts` keeps its 7 / 3, so each sum is unchanged. Both
+  // 403 and 501 bodies, and the save's 400, are the nested `{ error: { code,
+  // message } }`) and `rest-server.ts` keeps its 7 / 3, so each sum is unchanged. Both
   // only ever tick down. Discovered by the `*-routes.ts` convention and declared in
   // the same PR that created the module, so the gap never exists.
   'packages/rest/src/meta-item-write-routes.ts': {
