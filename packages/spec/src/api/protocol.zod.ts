@@ -492,7 +492,7 @@ export const MetadataAuthoringSurfaceSchema = z.enum(['copilot', 'studio', 'api'
   + 'caller of the save door. It names the surface, not the person: a copilot write and a Studio write of '
   + 'the same user carry the same `actor`.',
 );
-export type MetadataAuthoringSurface = z.infer<typeof MetadataAuthoringSurfaceSchema>;
+export type MetadataAuthoringSurface = z.input<typeof MetadataAuthoringSurfaceSchema>;
 
 /**
  * Get Metadata Item Response
