@@ -1084,6 +1084,40 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 },
             }) as IHttpServer;
 
+            // ── Paths whose domain decides EVERY verb (#24228) ──────────
+            // `IHttpServer` can register five verbs. A request under any other
+            // verb — `OPTIONS` when the transport's CORS is off, `TRACE`, an
+            // extension method — and under any of the five a path does not
+            // mount, matches no route, and the transport answers it itself:
+            // `405`, with an `Allow` built from the verbs REGISTERED on the
+            // path. That answer is wrong twice for a path whose domain decides
+            // every verb (ADR-0138 D2: the anonymous decision is the domain's
+            // first statement, taken once per domain; RFC 9110 §15.5.6: `Allow`
+            // names the SUPPORTED methods):
+            //   1. an anonymous caller is told the route's shape instead of 401,
+            //      because the domain never ran (`/actions` mounts `POST` only);
+            //   2. a verb mounted only so the domain could refuse it is listed as
+            //      supported (`/keys` answered `OPTIONS` with
+            //      `Allow: DELETE, GET, HEAD, PATCH, POST, PUT`; it serves `POST`).
+            // So such a path is declared here, by the route that serves it, and
+            // the fallback seam below hands every request the router could not
+            // route on it to `dispatch()` — the domain answers, exactly as it
+            // does on a `createHonoApp` host, whose catch-all hands it every
+            // verb. Refusal-only MOUNTS are not the answer for `/actions`: each
+            // one would be one more verb the transport lists in `Allow`.
+            //
+            // A declaration is the serving route's verb and its pattern, spelled
+            // as it was registered. The fallback asks the transport's own router
+            // which registered route a path resolves to (`resolveMountedRoute`),
+            // so whether a path belongs to a declared route is the router's
+            // verdict, never a second matcher written here.
+            const domainDecidedRoutes = new Map<'GET' | 'POST', Set<string>>();
+            const domainDecidesEveryVerb = (method: 'GET' | 'POST', pattern: string): void => {
+                const patterns = domainDecidedRoutes.get(method) ?? new Set<string>();
+                patterns.add(pattern);
+                domainDecidedRoutes.set(method, patterns);
+            };
+
             // ── Discovery (.well-known) ─────────────────────────────────
             server.get('/.well-known/objectstack', async (_req: any, res: any) => {
                 if (securityHeaders) {
@@ -1334,6 +1368,10 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             mountMcpSkill('GET');
             mountMcpSkill('POST');
             mountMcpSkill('DELETE');
+            // [#24228] `PUT`, `PATCH` and every verb the transport cannot route
+            // reach the same branch through the fallback seam, so the only
+            // `Allow` this path answers is the domain's `GET`.
+            domainDecidesEveryVerb('GET', `${prefix}/mcp/skill`);
 
             // [#23909] `/keys` is mounted for EVERY verb, though `POST` (mint)
             // is the only one it serves. The published v18 text is "`/keys`:
@@ -1378,6 +1416,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             mountKeys('PUT');
             mountKeys('PATCH');
             mountKeys('DELETE');
+            // [#24228] And every verb `IHttpServer` cannot register (`OPTIONS`
+            // with CORS off, `TRACE`, …) reaches the domain through the fallback
+            // seam, rather than the transport's `405` listing the four
+            // refusal-only mounts above as supported.
+            domainDecidesEveryVerb('POST', `${prefix}/keys`);
 
             // ── In-app notifications (ADR-0030) ─────────────────────────
             // The inbox list + receipt mark-read surface backed by the
@@ -1464,6 +1507,11 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     mountNotificationsVerb(subPath, method);
                 }
             }
+            // [#24228] Every verb `IHttpServer` cannot register reaches the
+            // domain through the fallback seam, as on `/keys` above.
+            domainDecidesEveryVerb('GET', `${prefix}/notifications`);
+            domainDecidesEveryVerb('POST', `${prefix}/notifications/read`);
+            domainDecidesEveryVerb('POST', `${prefix}/notifications/read/all`);
 
             // ── Packages ────────────────────────────────────────────────
             // Single pipeline (ADR-0076 D11 / OQ#9): every package route flows
@@ -1917,6 +1965,18 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         errorResponse(err, res);
                     }
                 });
+                // [#24228] `POST` is the one verb these paths serve, and the only
+                // one mounted. Every other verb reaches the domain through the
+                // fallback seam, so its anonymous baseline — the FIRST statement
+                // of `handleActionsRequest` (ADR-0138 D2) — answers `401`, and a
+                // signed-in caller gets the domain's own `405` + `Allow: POST`.
+                // Before this, the transport answered both `405` itself.
+                // ⛔ Not refusal-only `GET`/`PUT`/`PATCH`/`DELETE` mounts (the
+                // `/keys` shape): the transport would list each one in the
+                // `Allow` it builds for the verbs left over.
+                domainDecidesEveryVerb('POST', `${base}/actions//:action`);
+                domainDecidesEveryVerb('POST', `${base}/actions/:object/:action`);
+                domainDecidesEveryVerb('POST', `${base}/actions/:object/:action/:recordId`);
             };
 
             // ── Security catalog activation (ADR-0126 §3 regime C, ADR-0131 D3/D6) ──
@@ -2045,9 +2105,63 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                     logger: ctx.logger,
                 });
 
+                // ── [#24228] Does an unrouted request belong to a domain that
+                // decides every verb? The router's own verdict: the path belongs
+                // to a declared route when the transport resolves it, under that
+                // route's verb, to that route's pattern — one router match per
+                // declared verb. Read per request, never cached: the declarations
+                // are made during this same `start()`. Optional on `IHttpServer`,
+                // so feature-detected; without it the transport's own answer
+                // stands, and the boot says so below.
+                const resolveMountedRoute = typeof rawServer.resolveMountedRoute === 'function'
+                    ? rawServer.resolveMountedRoute.bind(rawServer)
+                    : undefined;
+                const isDomainDecidedPath = (path: string): boolean => {
+                    if (!resolveMountedRoute || !path.startsWith(prefix)) return false;
+                    for (const [verb, patterns] of domainDecidedRoutes) {
+                        const route = resolveMountedRoute(verb, path);
+                        if (route && route.method === verb && patterns.has(route.pattern)) return true;
+                    }
+                    return false;
+                };
+                if (!resolveMountedRoute) {
+                    ctx.logger.warn(
+                        '[dispatcher] http.server exposes no `resolveMountedRoute`: on /actions, /keys, '
+                        + '/notifications and /mcp/skill a verb the transport cannot route is answered by the '
+                        + 'transport\'s own 405, not by the domain — an anonymous caller is told the route\'s '
+                        + 'shape instead of 401, and `Allow` names verbs mounted only to be refused. '
+                        + 'Fix: compose an HTTP adapter that implements `resolveMountedRoute` '
+                        + '(e.g. `@objectstack/plugin-hono-server`).',
+                        { domainDecidedRoutes: [...domainDecidedRoutes].map(([verb, p]) => `${verb}: ${[...p].join(', ')}`) },
+                    );
+                }
+
                 rawServer.setFallbackHandler(async (req: any, res: any) => {
                     try {
                         const path: string = req.path ?? '';
+                        // ── [#24228] A path whose domain decides every verb ─────
+                        // The router found no route for this verb, but the path is
+                        // one a declared route serves: the domain answers, so its
+                        // anonymous baseline runs first and its `405` carries its
+                        // own `Allow` (see `domainDecidesEveryVerb`). Handed on as
+                        // `createHonoApp`'s catch-all hands it: the whole sub-path
+                        // after the prefix, `/environments/:id` included — an
+                        // unrouted request has no route params, so `dispatch()`
+                        // reads the environment off the path itself. No body: no
+                        // domain reads one for a verb it refuses, and reading
+                        // `req.body` would let the transport's `400` for a body it
+                        // cannot parse answer ahead of the floor's `401`.
+                        if (isDomainDecidedPath(path)) {
+                            const result = await dispatcher.dispatch(
+                                req.method,
+                                path.substring(prefix.length),
+                                undefined,
+                                req.query,
+                                { request: req },
+                            );
+                            sendResult(result, res);
+                            return;
+                        }
                         // ── Scoping test FIRST, before any resolution ────────
                         // Everything below costs something (a kernel resolve, a
                         // session lookup), and an unmatched request that is not
@@ -2248,7 +2362,9 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 //   remedy — compose an adapter that implements the seam.
                 ctx.logger.warn(
                     '[dispatcher] http.server exposes no `setFallbackHandler`: every metadata-declared '
-                    + '`apis:` endpoint is UNREACHABLE on this transport and will answer a bare 404. '
+                    + '`apis:` endpoint is UNREACHABLE on this transport and will answer a bare 404, and on '
+                    + '/actions, /keys, /notifications and /mcp/skill a verb the transport cannot route is '
+                    + 'answered by the transport, not by the domain. '
                     + 'Fix: compose an HTTP adapter that implements `setFallbackHandler` '
                     + '(e.g. `@objectstack/plugin-hono-server`).',
                     { mount: appEndpointMountPrefix(prefix), declarativeEndpoints: 'unreachable' },
