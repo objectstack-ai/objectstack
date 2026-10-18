@@ -9,8 +9,9 @@
  *
  *  - `ApprovalService.openNodeRequest` writes `process_label` /
  *    `current_step_label` with it at open;
- *  - `rowFromRequest` serves `process_label` / `step_label` with it on the
- *    approvals door;
+ *  - `rowFromRequest` serves `process_label` and the step's label with it on
+ *    the approvals door, the step's under two names of one value: `step_label`
+ *    and the column's own `current_step_label`;
  *  - the boot backfill (`display-label-backfill.ts`) fills the two columns
  *    with it on a row written before they existed, and the action's
  *    `step_label` from the filled request.

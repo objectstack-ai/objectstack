@@ -147,7 +147,7 @@
       ],
       "acceptance": [
         {
-          "clause": "the opted-out boot answers 404 'MCP server is not enabled for this environment' on BOTH /mcp and /mcp/skill — a deliberate un-advertised surface, NOT the 501 (which means route mounted but MCP plugin missing: 'MCP server is not available')",
+          "clause": "the opted-out boot answers 404 'MCP server is not enabled' on /mcp/skill to any caller (the skill is public) and on /mcp to a signed-in or system caller, while an anonymous /mcp caller is refused 401 UNAUTHENTICATED before the switch is read (ADR-0138 D2) — a deliberate un-advertised surface, NOT the 501 (which means route mounted but MCP plugin missing: 'MCP server is not available')",
           "oracle": "api",
           "verify": "status + body of both routes on the disabled boot match packages/runtime/src/domains/mcp.ts (isMcpServerEnabled → 404; unresolvable mcp service → 501); record WHICH of the two refusals was observed",
           "evidence": "the two responses"

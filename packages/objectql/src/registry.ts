@@ -6,6 +6,7 @@ import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolve
 // package `objectql` and `metadata-protocol` both depend on.
 import {
   AUDIT_FIELD_GOVERNANCE,
+  applyAuditFieldGovernance,
   AUDIT_FIELD_DEFS,
   TENANT_SCOPE_FIELD_DEF,
   OWNER_FIELD_DEF,
@@ -3085,10 +3086,26 @@ export class SchemaRegistry {
     // the registered schema (driver syncSchema, REST projector, hooks)
     // sees the same canonical shape. Author-declared fields win — see
     // applySystemFields().
-    schema = applySystemFields(schema, {
-      multiTenant: this.multiTenant,
-      platformGlobalObjects: this.deploymentPlatformGlobalObjects,
-    });
+    //
+    // [#24314] A BASE layer only (`own` / `overlay`). An `extend` body is a
+    // bag of fields for an object someone else declares, so it is never
+    // planned on its own: it carries none of the declarations the plan reads
+    // (`managedBy`, `systemFields`, `tenancy`, `ownership`), and planning it
+    // as an ordinary object injected the full column set onto targets whose
+    // own declaration withholds it. Measured on a walled boot: an extension of
+    // `sys_organization` (`managedBy: 'better-auth'`) added `organization_id`,
+    // NULL on every row, and the wall then hid the organisation from its own
+    // members; the same on `sys_user`. The fold also let the injected
+    // definition REPLACE a column the owner declares itself: plugin-auth's
+    // own `sys_sso_provider` extension swapped the authored `organization_id`
+    // for the platform's lookup. So the extended object's system columns are
+    // exactly its base layer's plan, whichever order the layers register in.
+    if (ownership !== 'extend') {
+      schema = applySystemFields(schema, {
+        multiTenant: this.multiTenant,
+        platformGlobalObjects: this.deploymentPlatformGlobalObjects,
+      });
+    }
 
     // [ADR-0092 / #1591] Reconcile generic-write `apiMethods` against the CRUD
     // affordances a better-auth-managed object actually grants — strip verbs
@@ -3322,10 +3339,16 @@ export class SchemaRegistry {
     // scalar look "authored" to the next extender and silently invert
     // extender-vs-extender precedence (D9.3: declared numbers order peers).
     const tenantAuthored = this.tenantAuthoredScalars(contributors, baseDefinition);
+    // [#24314] An `extend` body is not planned at registration, so an audit
+    // field it declares is governed HERE, by the base layer's plan: where the
+    // base carries the audit family, a `created_at` an extender declares cannot
+    // replace the platform's read-only definition with a writable one (#4447).
+    const governAudit = resolveInjectedSystemColumns(baseDefinition).audit;
     let merged = { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
-        merged = mergeObjectDefinitions(merged, contrib.definition, tenantAuthored);
+        const extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
+        merged = mergeObjectDefinitions(merged, extension, tenantAuthored);
       }
     }
     // A picklist-bound field is served with its list's options resolved onto
@@ -3805,8 +3828,8 @@ export class SchemaRegistry {
    * answers for an object registered after it: on every base layer the
    * platform's tenant index entry and the platform's own `organization_id`
    * come off and `systemFields.tenant: false` is recorded
-   * ({@link applyDeploymentTenancy}); an `extend` layer loses the platform's
-   * own `organization_id` and tenant index. A column the AUTHOR declared is the author's — it
+   * ({@link applyDeploymentTenancy}); an `extend` layer carries neither, since
+   * it is never planned on its own (#24314). A column the AUTHOR declared is the author's — it
    * stays, the object stays walled on it, and its name is returned in
    * `keptAuthoredColumn` for the caller to report.
    *
@@ -3838,15 +3861,14 @@ export class SchemaRegistry {
           keptAuthoredColumn.add(name);
           continue;
         }
+        // [#24314] An `extend` layer has nothing to re-plan: `registerObject`
+        // plans base layers only, so it carries no platform column or index.
+        if (contributor.ownership === 'extend') continue;
         // The tenant index comes off FIRST, while the body is still in the
         // state it was stamped in (the strip re-stamps to prove the entry is
-        // the platform's own); an `extend` layer carried both too, because
-        // `applySystemFields` runs on every contributor.
+        // the platform's own).
         const unindexed = this.stripProvisionedTenantIndexFrom(before);
-        const after =
-          contributor.ownership === 'extend'
-            ? withoutField(unindexed, 'organization_id')
-            : this.applyDeploymentTenancy(unindexed);
+        const after = this.applyDeploymentTenancy(unindexed);
         if (after !== before) {
           contributor.definition = after;
           replanned.add(name);
