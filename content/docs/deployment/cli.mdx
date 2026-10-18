@@ -210,8 +210,9 @@ SQLite file:
    beside the copy.
 3. It prints the ceremony's warnings and starts the server again.
 
-If a step blocks, `os dev` stops and prints the blocker, where the copy is, and
-the command that resumes the run. It tries once per session. A database that is
+If a step blocks, or the post-check still holds rows (a row whose owner cannot
+be derived, named per table with its remedy), `os dev` stops and prints what
+holds it, where the copy is, and the command that resumes the run. It tries once per session. A database that is
 not a local SQLite file (PostgreSQL, a remote libSQL, `:memory:`) is not
 upgraded in place: run the ceremony yourself. `os serve` and `os start` never run
 it; they refuse and name the command.
@@ -1487,6 +1488,18 @@ os migrate organization-ownership --dev …                    # boot as `os ser
 - **`--apply` runs only the plan you reviewed**, and only after you confirm a
   backup (`--backup-taken`, or the prompt). The platform takes no backup. The run
   is resumable: re-running it continues from its recorded checkpoint.
+- **A row whose owner cannot be derived blocks certification.** That covers a
+  reported row, and a row whose anchor is missing under a wall (for example an
+  upload session whose file is gone). The ceremony never guesses an owner
+  for such a row and never deletes it. The post-check names each table, its
+  row count and the remedy: give each row its organization (write its
+  `organization_id`, or repair the anchor its reason names), or delete it by
+  hand, then re-run `--apply`. Until then the run exits `1`, the marker stays
+  unverified, and a v18 server does not start on the database. A verified
+  marker therefore means no organization-less row on any table. The one
+  exception is a table whose `organization_id` is not the tenancy anchor
+  (`sys_sso_provider`, and the retired `sys_scim_provider`): a row there
+  bound to no organization is legitimate, is reported, and does not block.
 - **Warnings come before the first write.** The plan prints what the ceremony
   decides on your behalf, and `--apply` prints the same warnings again before
   it writes. An example: the shipped permission sets an install created before

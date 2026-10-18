@@ -86,8 +86,7 @@ const RELEASED_DRAW_LEDGER: Readonly<Record<string, { draws: number; why: string
   'serve-port-drift-notice.e2e.test.ts': {
     draws: 1,
     why: 'the NEGATIVE arm is a boot that binds exactly the non-zero port it asked for and says '
-      + 'nothing about ports; `--port 0` asks for no port, and that boot prints plugin-hono-server\'s '
-      + '"Port 0 is in use, using port N instead" (#24387)',
+      + 'nothing about ports; a non-zero request is its subject, which `--port 0` cannot ask',
   },
   'serve-publishes-bound-port.e2e.test.ts': {
     draws: 2,

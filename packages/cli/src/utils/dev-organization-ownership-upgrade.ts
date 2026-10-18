@@ -33,8 +33,11 @@ import { resolveTelemetryDbPath } from './telemetry-datasource.js';
  *    libSQL, `:memory:`) is not copied by a file copy, so it is not upgraded
  *    here: the operator runs the ceremony, as in production.
  *  - **The ceremony's own verdict.** The server boots again only when every
- *    step finished (`report.complete`). A blocked step is printed, with where
- *    the copy and the report are; nothing is guessed around it.
+ *    step finished and the post-check found nothing left (`report.complete`
+ *    and `report.blocking === 0` — the marker the boot guard reads). A blocked
+ *    step is printed, and so is each table the post-check holds (a row whose
+ *    owner cannot be derived among them, with its remedy), with where the copy
+ *    and the report are; nothing is guessed around it.
  *  - **Once per session.** A boot refused again after a finished upgrade ends
  *    `os dev`, naming the refusal; it never loops.
  *  - **The warnings.** What the ceremony decided on the developer's behalf
@@ -160,10 +163,32 @@ export function upgradeDevelopmentDatabase(input: DevelopmentUpgradeInput): Deve
   }
   const report = JSON.parse(readFileSync(applyFile, 'utf8')) as {
     complete?: boolean;
+    blocking?: number;
     warnings?: string[];
     steps?: Array<{ step: string; status: string; blockers?: string[] }>;
+    tables?: Array<{ object: string; remaining?: number; held?: { rows: number; remedy: string } }>;
   };
   const warnings = report.warnings ?? [];
+  const again = `\`os migrate organization-ownership --dev --apply --plan-file ${planFile} --backup-taken\``;
+  if (report.complete && report.blocking !== 0) {
+    // Every step finished and the post-check still holds rows: the marker is
+    // not verified, so the guard would refuse the boot again.
+    const holds = (report.tables ?? []).filter((t) => (t.remaining ?? 0) > 0);
+    return {
+      ok: false,
+      backupDir,
+      warnings,
+      lines: [
+        ...holds.map((t) =>
+          t.held
+            ? `${t.object}: ${t.held.rows} row(s) whose owner cannot be derived — ${t.held.remedy}`
+            : `${t.object}: ${t.remaining} row(s) remaining (the report names each)`,
+        ),
+        `Every step finished, and the post-check found ${report.blocking ?? 'some'} row(s) left (above), so the ` +
+          `database is not certified. ${kept} Resolve them, then run ${again} — or restore the copy.`,
+      ],
+    };
+  }
   if (report.complete) {
     return {
       ok: true,
@@ -180,7 +205,7 @@ export function upgradeDevelopmentDatabase(input: DevelopmentUpgradeInput): Deve
     lines: [
       ...blocked.flatMap((s) => (s.blockers ?? []).map((b) => `${s.step}: ${b}`)),
       `The upgrade stopped at a blocker (above); every finished step is checkpointed. ${kept} Resolve it, then run ` +
-        `\`os migrate organization-ownership --dev --apply --plan-file ${planFile} --backup-taken\` — or restore the copy.`,
+        `${again} — or restore the copy.`,
     ],
   };
 }

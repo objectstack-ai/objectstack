@@ -12,8 +12,9 @@ import type { Page } from '@objectstack/spec/ui';
  * The page is `kind: 'slotted'` and overrides only the `tabs` slot —
  * header, actions, highlights, details and discussion fall through to
  * the synthesized default, so the organization's own fields and the
- * existing record-header actions (Set Active, Edit, Delete, Leave) are
- * preserved.
+ * object's `record_header` actions (Invite User, Set Active and Rename
+ * Organization inline, Change Slug and Leave Organization in the overflow —
+ * Edit and Delete are row actions only) are preserved.
  *
  * Each tab is a `record:related_list` over a child object that already
  * has `organization_id` as a `Field.lookup('sys_organization')` — the

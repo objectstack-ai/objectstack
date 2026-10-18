@@ -241,6 +241,8 @@ describe('os migrate organization-ownership on a database whose packages declare
     const unattributable = report.tables.reduce((n: number, t: { unattributable: unknown[] }) => n + t.unattributable.length, 0);
     const blockers = report.steps.flatMap((s: { blockers: string[] }) => s.blockers);
     expect([apply.exitCode, report.complete, report.blocking, report.advisory], blockers.join('\n')).toEqual([0, true, 0, unattributable]);
+    // Ruling C: a certified database holds no unattributable row a table holds against it.
+    expect(report.tables.filter((t: { held?: unknown }) => t.held)).toEqual([]);
     expect(report.tables.find((t: { object: string }) => t.object === 'sys_sharing_rule')).toMatchObject({
       remaining: 0,
       deleted: MIRRORS,

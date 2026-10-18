@@ -585,9 +585,11 @@ describe('feature-gate lowering matrix (#2874)', () => {
 
   const rows: Array<[string, { actions?: readonly { name?: string; visible?: unknown; params?: readonly unknown[] }[] }, string, string]> = [
     ['SysOrganization', SysOrganization, 'create_organization', MULTI_ORG],
-    ['SysOrganization', SysOrganization, 'update_organization', MULTI_ORG],
-    ['SysOrganization', SysOrganization, 'rename_organization', MULTI_ORG],
-    ['SysOrganization', SysOrganization, 'delete_organization', MULTI_ORG],
+    // Their doors are better-auth's `organization/update` (owner, admin) and
+    // `organization/delete` (owner), so the grade term leads the feature gate.
+    ['SysOrganization', SysOrganization, 'update_organization', `${ADMINS} && ${MULTI_ORG}`],
+    ['SysOrganization', SysOrganization, 'rename_organization', `${ADMINS} && ${MULTI_ORG}`],
+    ['SysOrganization', SysOrganization, 'delete_organization', `(${OWNER}) && ${MULTI_ORG}`],
     ['SysOrganization', SysOrganization, 'set_active_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'change_slug', MULTI_ORG],

@@ -43,6 +43,8 @@ import {
   checkpointFromDetails,
   MetadataChoiceRefusal,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+  judgeDeclaredSharingRules,
+  UNATTRIBUTABLE_REMEDY,
   ReviewedPlanRefusal,
   reviewedPlanFromFile,
   TemplateChoiceRefusal,
@@ -262,7 +264,10 @@ class ReportFileReservation {
  * the ceremony's marker: `applied_at` once every step has finished,
  * `verified_at` when the post-check also reads zero discrepancies (a departure
  * this release cannot perform — the declared sharing-rule mirrors its own boot
- * keeps seeding — is reported as advisory, not as a discrepancy). A report
+ * keeps seeding — is reported as advisory, not as a discrepancy; a row whose
+ * owner cannot be derived is one, named per table with its count and the
+ * remedy — assign it an organization or delete it by hand — so a database that
+ * keeps one does not certify and the v18 boot does not serve it). A report
  * file is written beside the plan's, never over an existing one: it is reserved
  * (created exclusively) before the boot, so an `--out` that cannot be written
  * is refused before anything executes (`apply_refused`), and a report that
@@ -617,7 +622,12 @@ export default class MigrateOrganizationOwnership extends Command {
         `${summary.notNull.willReceive.length} will receive NOT NULL, ${summary.notNull.willNotReceive.length} will not.`,
     );
     if (summary.unattributableRows > 0) {
-      printWarning(`${summary.unattributableRows} row(s) whose owner cannot be derived are listed by id in the plan file.`);
+      printWarning(
+        `${summary.unattributableRows} row(s) whose owner cannot be derived are listed by id, with why, in the plan ` +
+          'file. The ceremony neither guesses their owner nor deletes them, and --apply does not certify the database ' +
+          'while one stays NULL (but on a table whose column is not the tenancy anchor): assign each its ' +
+          'organization, or delete it by hand, before or after --apply, and re-run it.',
+      );
     }
     // The occupancy probe answered `not_applicable` for a target that is no
     // SQLite file (PostgreSQL, MySQL, `:memory:`): no file header to switch.
@@ -801,12 +811,10 @@ export default class MigrateOrganizationOwnership extends Command {
         catalog,
         declaredSharingRules: {
           // [ADR-0131 C3 stage 9] What plugin-sharing's enforcement reads: the
-          // registry's declared rules, else the metadata service's.
-          names: async () => {
-            const nameOf = (item: unknown): string | undefined => {
-              const name = (item as { name?: unknown } | null)?.name;
-              return typeof name === 'string' && name !== '' ? name : undefined;
-            };
+          // registry's declared rules, else the metadata service's — each
+          // judged by the plugin's own translation, so a name it refuses to
+          // serve is never one a mirror's grants are renamed onto.
+          rules: async () => {
             const registry = engine.registry as { listItems?(type: string): unknown[] | undefined } | undefined;
             let items: unknown[] = registry?.listItems?.('sharing_rule') ?? [];
             if (items.length === 0) {
@@ -814,7 +822,7 @@ export default class MigrateOrganizationOwnership extends Command {
               const listed = await metadata?.list?.('sharing_rule');
               items = Array.isArray(listed) ? listed : [];
             }
-            return items.map(nameOf).filter((name): name is string => name !== undefined);
+            return judgeDeclaredSharingRules(items);
           },
         },
         door: {
@@ -1020,6 +1028,12 @@ export default class MigrateOrganizationOwnership extends Command {
           `${table.unattributable.length ? chalk.yellow(`reported ${table.unattributable.length}  `) : ''}` +
           `${table.remaining ? chalk.red(`remaining ${table.remaining}`) : ''}`,
       );
+      if (table.held) {
+        console.log(chalk.red(
+          `      ${table.held.rows} row(s) whose owner cannot be derived hold certification (listed by id, with why, in ` +
+            `the report file) — ${table.held.remedy}`,
+        ));
+      }
       for (const departure of table.departures) {
         console.log(chalk.yellow(
           departure.advisory
@@ -1036,11 +1050,24 @@ export default class MigrateOrganizationOwnership extends Command {
       }
     }
     console.log('');
-    // `advisory` counts two populations; each is said in its own terms.
-    const unattributable = report.tables.reduce((n, t) => n + t.unattributable.length, 0);
+    // Unattributable rows hold certification (ruling C on ADR-0131 D10 fate
+    // 4) but on a table whose column is not the tenancy anchor; `advisory`
+    // counts those and the advisory departures, each said in its own terms.
+    const unattributableHeld = report.tables.reduce((n, t) => n + (t.held?.rows ?? 0), 0);
+    const unattributableReported = report.tables.reduce((n, t) => n + t.unattributable.length, 0) - unattributableHeld;
     const held = report.tables.reduce((n, t) => n + t.departures.reduce((m, d) => m + (d.advisory ? d.rows : 0), 0), 0);
-    if (unattributable > 0) {
-      printWarning(`${unattributable} row(s) whose owner cannot be derived stay NULL; they are listed by id in the report file.`);
+    if (unattributableHeld > 0) {
+      printError(
+        `${unattributableHeld} row(s) whose owner cannot be derived stay NULL and hold certification, on ` +
+          `${report.tables.filter((t) => t.held).map((t) => `${t.object} (${t.held!.rows})`).join(', ')}: ` +
+          `${UNATTRIBUTABLE_REMEDY}.`,
+      );
+    }
+    if (unattributableReported > 0) {
+      printWarning(
+        `${unattributableReported} row(s) whose owner cannot be derived stay NULL on a table whose column is not the ` +
+          'tenancy anchor; they are listed by id in the report file and do not hold certification.',
+      );
     }
     if (held > 0) {
       printWarning(

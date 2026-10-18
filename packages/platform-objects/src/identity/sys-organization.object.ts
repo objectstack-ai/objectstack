@@ -97,8 +97,10 @@ export const SysOrganization = ObjectSchema.create({
       bodyShape: { wrap: 'data' },
       // Org-admin actions are multi-org-only; hide them in single-org for
       // consistency with `create_organization` (the org list is empty there,
-      // but this also guards direct record-URL access).
+      // but this also guards direct record-URL access). The grades that reach
+      // `organization/update` are owner and admin (ADR-0108 D1).
       requiresFeature: 'multiOrgEnabled',
+      requiresMembershipReach: 'update_organization',
       successMessage: 'Organization updated',
       refreshAfter: true,
       params: [
@@ -118,6 +120,8 @@ export const SysOrganization = ObjectSchema.create({
       target: '/api/v1/auth/organization/delete',
       recordIdParam: 'organizationId',
       requiresFeature: 'multiOrgEnabled',
+      // `organization/delete` admits the owner alone (ADR-0108 D1).
+      requiresMembershipReach: 'delete_organization',
       confirmText: 'Delete this organization? All members will lose access immediately. This cannot be undone.',
       successMessage: 'Organization deleted',
       refreshAfter: true,
@@ -200,7 +204,7 @@ export const SysOrganization = ObjectSchema.create({
       // one folds into the `⋯` overflow's destructive band (objectui's
       // page:header split, default `maxVisible` 3), with `change_slug` in the
       // overflow above it. Without it, registration order kept it inline as
-      // the third button.
+      // the third button. Ungated by grade: every grade may leave.
       order: 1,
       mode: 'custom',
       locations: ['list_item', 'record_header'],
@@ -242,6 +246,8 @@ export const SysOrganization = ObjectSchema.create({
       recordIdParam: 'organizationId',
       bodyShape: { wrap: 'data' },
       requiresFeature: 'multiOrgEnabled',
+      // The same door as `update_organization`, so the same grades.
+      requiresMembershipReach: 'update_organization',
       successMessage: 'Organization renamed',
       refreshAfter: true,
       params: [
