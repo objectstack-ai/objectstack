@@ -62,9 +62,10 @@
  * number. The port the child must WIN with is a kernel-assigned request
  * (`KERNEL_ASSIGNED_PORT`, `0`); a port the child must LOSE to is HELD by this
  * file for the whole boot, so a child that wrongly took it could not bind it,
- * and a held port is never the one the kernel assigns. Both legs therefore
- * compare the bound port against the losing channel's value, and against
- * {@link SERVE_DEFAULT_PORT} — what a child that honoured neither channel binds.
+ * and a held port is never the one the kernel assigns. So the flag leg compares
+ * the bound port against the held, losing value, and both legs compare it
+ * against {@link SERVE_DEFAULT_PORT} — what a child that honoured no channel
+ * binds.
  */
 
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';

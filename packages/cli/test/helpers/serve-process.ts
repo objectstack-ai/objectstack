@@ -221,8 +221,10 @@ function probeBind(want: number): number | null {
  * is now CLOSED rather than narrowed: such a spawn passes
  * {@link KERNEL_ASSIGNED_PORT} and reads the port back with
  * {@link readKernelAssignedPort}, so no number crosses a gap at all.
- * `released-port-production-spawn.pin.test.ts` holds it: no file that names the
- * production-capable entry (`bin/run.js`) may call this or `randomPort()`.
+ * `released-port-production-spawn.pin.test.ts` holds it: a file that names the
+ * production-capable entry (`bin/run.js`) may call this or `randomPort()` only
+ * as often as its ledger entry there allows — zero without one, and an entry is
+ * a file whose every spawn of that entry is development posture.
  *
  * What may still call it, each with the race still real and unclosed there:
  *
@@ -327,10 +329,11 @@ export function randomPort(): string {
  * `0` is a legal request, not an error (`utils/port-contract.ts` declares
  * `MIN_PORT = 0` from a measurement), and both doors honour it in production
  * posture: `os serve` on `--port 0`, `OS_PORT=0` and `PORT=0`, and `os start`
- * on `--port 0`. Measured on the built CLI for #24295 — every leg printed a banner whose
- * `API:` row named a non-zero port, and `GET /api/v1/health` on that port
- * answered `200`; the same two doors on a port this harness HELD exited 1 on
- * `Port <n> is already in use`, which is the lost race forced on purpose.
+ * on `--port 0`. Measured on the built CLI for #24295: every leg printed a
+ * banner whose `API:` row named a non-zero port, and `GET /api/v1/health` on
+ * that port answered `200`; the same two doors on a port this harness HELD
+ * exited 1 on `Port <n> is already in use`, which is the lost race forced on
+ * purpose.
  *
  * The price is that the caller learns the port only AFTER the boot: read it with
  * {@link readKernelAssignedPort} once the banner tail has printed. A site that
@@ -550,7 +553,8 @@ export type BannerPortReadback =
  * ("the ONLY file") went stale as `bin/run.js` spawners were added. The loud row
  * can only be reached through `bin/run.js`, so
  * `released-port-production-spawn.pin.test.ts` enumerates every file that names
- * it, and holds each of them to {@link KERNEL_ASSIGNED_PORT} (#24295).
+ * it, and holds each of them to {@link KERNEL_ASSIGNED_PORT} unless its ledger
+ * entry there says why not (#24295).
  *
  * And the port `runServe()` hands over is an opaque element of an argv list, so
  * until this read-back the harness never learned the child's real one. A test
