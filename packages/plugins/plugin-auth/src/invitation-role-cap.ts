@@ -59,8 +59,29 @@ import {
   INVITATION_ROLE_ANY_ISSUER,
   invitationRoleGrantors,
 } from '@objectstack/spec/identity';
+import type { RegisteredErrorCode } from '@objectstack/spec/api';
 
 export { MEMBERSHIP_ROLE_OWNER, MEMBERSHIP_ROLE_ADMIN, MEMBERSHIP_ROLE_MEMBER };
+
+// [#23945, ADR-0112] The cap's three refusal codes, one per branch, so a client
+// (the console's Invite User dialog among them) can tell the refusals apart
+// without reading their prose. Registered under `@objectstack/plugin-auth` in
+// the error-code ledger; typed `RegisteredErrorCode` so a removed or misspelled
+// ledger row fails `tsc` here instead of shipping a code `ApiErrorSchema`
+// rejects.
+
+/** The requested role grades above the issuer's own. */
+export const INVITE_ROLE_ABOVE_ISSUER_CODE: RegisteredErrorCode = 'INVITE_ROLE_ABOVE_ISSUER';
+/** An issuer below admin grade asked for a role other than a plain `member`. */
+export const INVITE_ISSUER_MEMBER_ONLY_CODE: RegisteredErrorCode = 'INVITE_ISSUER_MEMBER_ONLY';
+/** The issuer's membership role was not established (fail-closed floor). */
+export const INVITE_ISSUER_UNVERIFIED_CODE: RegisteredErrorCode = 'INVITE_ISSUER_UNVERIFIED';
+
+/** A refusal the cap answers: the code a client branches on, and the prose an operator reads. */
+export interface InvitationRoleCapRefusal {
+  readonly code: RegisteredErrorCode;
+  readonly message: string;
+}
 
 /** Grade ladder. Anything unrecognized — `member`, `delegated_admin`, an
  *  app-registered role — grades as an ordinary member; only better-auth's two
@@ -149,8 +170,10 @@ function grantTableAdmits(requested: readonly string[], issuerRole: unknown): bo
 }
 
 /**
- * The cap itself. Returns a human-readable refusal reason, or `null` when the
- * invitation is within the issuer's grade.
+ * The cap itself. Returns the refusal — its ADR-0112 `code` and a
+ * human-readable reason — or `null` when the invitation is within the issuer's
+ * grade. Each refusal branch answers its own code; the verdicts themselves
+ * (which invitations are admitted) do not depend on the codes.
  *
  * @param requestedRole the role(s) the invitation would confer on acceptance
  * @param issuerRole    the issuer's own `sys_member.role`; `null`/absent when it
@@ -159,7 +182,7 @@ function grantTableAdmits(requested: readonly string[], issuerRole: unknown): bo
 export function invitationRoleCapFailure(
   requestedRole: unknown,
   issuerRole: unknown,
-): string | null {
+): InvitationRoleCapRefusal | null {
   const requested = parseOrgRoles(requestedRole);
   // No role at all: better-auth's body schema requires one, so this is not a
   // reachable invitation shape. Nothing to cap — the route rejects it upstream.
@@ -173,28 +196,34 @@ export function invitationRoleCapFailure(
   // chasing a refusal reads a grade comparison against a role that was never
   // established.
   if (issuerGrade === GRADE_UNRESOLVED) {
-    return (
-      `[Security] Access denied: your organization membership could not be verified, so this ` +
-      `invitation may confer no role beyond '${MEMBERSHIP_ROLE_MEMBER}' ` +
-      `(ADR-0090 D12: an unverifiable issuer confers nothing).`
-    );
+    return {
+      code: INVITE_ISSUER_UNVERIFIED_CODE,
+      message:
+        `[Security] Access denied: your organization membership could not be verified, so this ` +
+        `invitation may confer no role beyond '${MEMBERSHIP_ROLE_MEMBER}' ` +
+        `(ADR-0090 D12: an unverifiable issuer confers nothing).`,
+    };
   }
 
   if (grantTableAdmits(requested, issuerRole)) return null;
 
   // Refused — name the reason by the ladder.
   if (orgRoleGrade(requestedRole) > issuerGrade) {
-    return (
-      `[Security] Access denied: you may not invite a member as '${requested.join(', ')}' — ` +
-      `an invitation can never confer a role above the issuer's own ` +
-      `(ADR-0090 D12: administration is a scoped capability).`
-    );
+    return {
+      code: INVITE_ROLE_ABOVE_ISSUER_CODE,
+      message:
+        `[Security] Access denied: you may not invite a member as '${requested.join(', ')}' — ` +
+        `an invitation can never confer a role above the issuer's own ` +
+        `(ADR-0090 D12: administration is a scoped capability).`,
+    };
   }
 
-  return (
-    `[Security] Access denied: a delegated issuer may invite only as ` +
-    `'${MEMBERSHIP_ROLE_MEMBER}' — '${requested.join(', ')}' is an organization role that can ` +
-    `carry capability of its own. Grant capability through the invitation's placement ` +
-    `(business unit + positions), which is authorized against your adminScope.`
-  );
+  return {
+    code: INVITE_ISSUER_MEMBER_ONLY_CODE,
+    message:
+      `[Security] Access denied: a delegated issuer may invite only as ` +
+      `'${MEMBERSHIP_ROLE_MEMBER}' — '${requested.join(', ')}' is an organization role that can ` +
+      `carry capability of its own. Grant capability through the invitation's placement ` +
+      `(business unit + positions), which is authorized against your adminScope.`,
+  };
 }

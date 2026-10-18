@@ -268,7 +268,11 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // per-type list's `?preview=draft`. A key names its route, never its file,
         // so no ledger row changed:
         // 8 = 3 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3, length 13 → 14.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(14);
+        // [#23050 slice 13b] The per-item reads moved to `meta-item-read-routes.ts`
+        // with two more: the item read's `?state=draft` and `?preview=draft`. Keys
+        // name the route, so again no ledger row changed:
+        // 8 = 1 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3 + 2, length 14 → 15.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(15);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });

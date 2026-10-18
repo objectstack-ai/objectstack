@@ -540,16 +540,18 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'module on the registrar list (`packages/rest/src/rest-server-registrar-files.ts`) — ' +
       '`data-action-routes.ts`, `batch-routes.ts`, `approvals-routes.ts`, `sharing-routes.ts`, ' +
       '`analytics-routes.ts`, `security-routes.ts`, `discovery-routes.ts`, `email-routes.ts`, ' +
-      '`search-routes.ts`, `ui-routes.ts`, `form-routes.ts`, `crud-routes.ts` and `meta-collection-routes.ts`, ' +
+      '`search-routes.ts`, `ui-routes.ts`, `form-routes.ts`, `crud-routes.ts`, `meta-collection-routes.ts` and ' +
+      '`meta-item-read-routes.ts`, ' +
       'the modules the bodies of ' +
       '`registerDataActionEndpoints`, `registerBatchEndpoints`, `registerApprovalsEndpoints`, ' +
       '`registerSharingEndpoints`, `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, ' +
       '`registerSecurityExplainEndpoints`, `registerSecurityEndpoints`, `registerDiscoveryEndpoints`, ' +
       '`registerOpenApiEndpoints`, `registerEmailEndpoints`, `registerSearchEndpoints`, ' +
-      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints`, and the first three `/meta` ' +
+      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints`, and the first four `/meta` ' +
       'groups of `registerMetadataEndpointsInner`, moved to; ' +
       'reachable = those inside registerMetadataEndpoints, PLUS every site in the registrar list\'s named `/meta` ' +
-      'subset (`REST_SERVER_META_ROUTE_FILES`: `meta-collection-routes.ts`), whose registrations the inner method ' +
+      'subset (`REST_SERVER_META_ROUTE_FILES`: `meta-collection-routes.ts` and `meta-item-read-routes.ts`), whose ' +
+      'registrations the inner method ' +
       'runs inside the umbrella\'s swap',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
@@ -849,10 +851,25 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `private register*Endpoints(` stays 16, `registerPerItemRoute(` stays 8 and
     // `enforceAuth` stays 112: the moved groups spell neither term, and the seam
     // spells neither (the umbrella's wrapper is what gates them).
+    // [#23050 slice 13b] 70 / 19 / 51 UNCHANGED, and `reachable` holds by the rule
+    // 13a taught, with no rule change: the fourth `/meta` group, the per-item reads
+    // (four direct registration sites: `/references`, `/layers`, the book tree and
+    // the item read, all REACHABLE through the same umbrella key), moved to
+    // `meta-item-read-routes.ts`, which joins the list (length 14 -> 15) and the
+    // named `/meta` subset (1 -> 2) with its own control. The inner method builds
+    // its host literal inside the umbrella's swap and calls the module at the
+    // group's old position, so the subset's length and the module calls inside the
+    // inner method move together (both 2). Measured at the move commit, before the
+    // list learned the module: population 66 and `this.routeManager.register(` 59
+    // over fourteen files, the four sites out of reach. `this.routeManager.register(` stays 63
+    // over the fifteen files (2 here + 9 + 5 + 7 + 8 + 1 + 6 + 4 + 1 + 1 + 1 + 2 +
+    // 6 + 6 + 4), `private register*Endpoints(` stays 16, `registerPerItemRoute(`
+    // stays 8 and `enforceAuth` stays 112: the moved group spells neither term,
+    // and neither does the seam.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
-      'registrar list length': 14,
+      'registrar list length': 15,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
       'approvals-routes.ts: this.routeManager.register(': 7,
@@ -866,6 +883,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'form-routes.ts: this.routeManager.register(': 2,
       'crud-routes.ts: this.routeManager.register(': 6,
       'meta-collection-routes.ts: this.routeManager.register(': 6,
+      'meta-item-read-routes.ts: this.routeManager.register(': 4,
       // [#23050 slice 13a] Recorded AS the subset's length, not as a literal: the
       // measured side is the module calls inside the inner method, so the two
       // can only move together.

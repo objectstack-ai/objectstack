@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { request as httpRequest } from 'node:http';
 import { LiteKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
@@ -40,6 +41,12 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
 const KEYS_PATH = '/api/v1/keys';
 const SESSION_HEADER = 'x-test-session';
 const NON_POST_VERBS = ['GET', 'PUT', 'PATCH', 'DELETE'] as const;
+/**
+ * [#24228] Verbs `IHttpServer` cannot register, so no `/keys` mount takes them:
+ * `OPTIONS` (CORS is off in this boot; with it on, CORS answers it) and `TRACE`
+ * (the transport routes it whatever CORS says).
+ */
+const UNREGISTRABLE_VERBS = ['OPTIONS', 'TRACE'] as const;
 
 function fakeAuthPlugin(): Plugin {
     return {
@@ -120,6 +127,63 @@ describe('every /api/v1/keys verb reaches the keys domain (integration, #23909)'
             expect(body.success).toBe(false);
             expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
             // The door: the domain fills `httpStatus`; the adapter fills `details`.
+            expect(body.error.httpStatus).toBe(405);
+            expect(body.error).not.toHaveProperty('details');
+        });
+    }
+
+    // ── [#24228] a verb no mount takes reaches the domain too ──
+    // The transport used to answer these itself: `405` with an `Allow` built
+    // from the verbs REGISTERED on the path, `DELETE, GET, HEAD, PATCH, POST,
+    // PUT`, listing the four refusal-only mounts above as supported. The
+    // dispatcher's fallback seam now hands them to the domain, whose `Allow`
+    // names the one verb it serves. Raw `node:http`: `fetch` refuses `TRACE`.
+    function rawCall(method: string, signedIn: boolean): Promise<{ status: number; allow: string | null; body: Record<string, any> }> {
+        const { hostname, port } = new URL(baseUrl);
+        return new Promise((resolve, reject) => {
+            const req = httpRequest({
+                host: hostname,
+                port,
+                method,
+                path: KEYS_PATH,
+                headers: signedIn ? { [SESSION_HEADER]: '1' } : {},
+            }, (res) => {
+                let text = '';
+                res.setEncoding('utf8');
+                res.on('data', (chunk) => { text += chunk; });
+                res.on('end', () => {
+                    const allow = res.headers.allow;
+                    resolve({
+                        status: res.statusCode ?? 0,
+                        allow: typeof allow === 'string' ? allow : null,
+                        body: JSON.parse(text) as Record<string, any>,
+                    });
+                });
+            });
+            req.on('error', reject);
+            req.end();
+        });
+    }
+
+    for (const method of UNREGISTRABLE_VERBS) {
+        it(`anonymous ${method} → 401 UNAUTHENTICATED, no Allow — not the transport's 405 (#24228)`, async () => {
+            const { status, allow, body } = await rawCall(method, false);
+
+            expect(status).toBe(401);
+            expect(allow).toBeNull();
+            expect(body.error.code).toBe('UNAUTHENTICATED');
+            expect(body.error.httpStatus).toBe(401);
+            expect(body.error).not.toHaveProperty('details');
+        });
+
+        it(`signed-in ${method} → the domain's 405, whose \`Allow\` names POST alone (#24228)`, async () => {
+            const { status, allow, body } = await rawCall(method, true);
+
+            expect(status).toBe(405);
+            // Not `DELETE, GET, HEAD, PATCH, POST, PUT`: the four mounts above
+            // exist only to refuse, and `Allow` names supported methods.
+            expect(allow).toBe('POST');
+            expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
             expect(body.error.httpStatus).toBe(405);
             expect(body.error).not.toHaveProperty('details');
         });

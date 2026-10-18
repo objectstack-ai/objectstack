@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { request as httpRequest } from 'node:http';
 import { LiteKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
@@ -48,6 +49,14 @@ const SERVED: Record<(typeof FACES)[number], string> = {
 const VERBS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 const UNSERVED: Array<[string, string]> = FACES.flatMap((face) =>
     VERBS.filter((verb) => verb !== SERVED[face]).map((verb): [string, string] => [verb, face]),
+);
+/**
+ * [#24228] Verbs `IHttpServer` cannot register, so no face's mount takes them:
+ * `OPTIONS` (CORS is off in this boot; with it on, CORS answers it) and `TRACE`
+ * (the transport routes it whatever CORS says).
+ */
+const UNREGISTRABLE: Array<[string, string]> = FACES.flatMap((face) =>
+    (['OPTIONS', 'TRACE'] as const).map((verb): [string, string] => [verb, face]),
 );
 
 function fakeAuthAndInboxPlugin(): Plugin {
@@ -151,6 +160,61 @@ describe('every /api/v1/notifications verb reaches the notifications domain (int
             expect(body.error.httpStatus).toBe(404);
             expect(body.error).not.toHaveProperty('details');
             expect(res.headers.get('allow')).toBeNull();
+        });
+    }
+
+    // ── [#24228] a verb no mount takes reaches the domain too ──
+    // The transport used to answer these itself: `405` with an `Allow` built
+    // from the verbs REGISTERED on the face, `DELETE, GET, HEAD, PATCH, POST,
+    // PUT`, listing the refusal-only mounts as supported. The dispatcher's
+    // fallback seam now hands them to the domain, which answers them as it
+    // answers every verb no face serves. Raw `node:http`: `fetch` refuses `TRACE`.
+    function rawCall(method: string, face: string, signedIn: boolean): Promise<{ status: number; allow: string | null; body: Record<string, any> }> {
+        const { hostname, port } = new URL(baseUrl);
+        return new Promise((resolve, reject) => {
+            const req = httpRequest({
+                host: hostname,
+                port,
+                method,
+                path: `/api/v1${face}`,
+                headers: signedIn ? { [SESSION_HEADER]: '1' } : {},
+            }, (res) => {
+                let text = '';
+                res.setEncoding('utf8');
+                res.on('data', (chunk) => { text += chunk; });
+                res.on('end', () => {
+                    const allow = res.headers.allow;
+                    resolve({
+                        status: res.statusCode ?? 0,
+                        allow: typeof allow === 'string' ? allow : null,
+                        body: JSON.parse(text) as Record<string, any>,
+                    });
+                });
+            });
+            req.on('error', reject);
+            req.end();
+        });
+    }
+
+    for (const [method, face] of UNREGISTRABLE) {
+        it(`anonymous ${method} ${face} → 401 UNAUTHENTICATED, no Allow — not the transport's 405 (#24228)`, async () => {
+            const { status, allow, body } = await rawCall(method, face, false);
+
+            expect(status).toBe(401);
+            expect(allow).toBeNull();
+            expect(body.error.code).toBe('UNAUTHENTICATED');
+            expect(body.error.httpStatus).toBe(401);
+            expect(body.error).not.toHaveProperty('details');
+        });
+
+        it(`signed-in ${method} ${face} → the dispatcher's 404, no Allow listing refusal-only mounts (#24228)`, async () => {
+            const { status, allow, body } = await rawCall(method, face, true);
+
+            expect(status).toBe(404);
+            expect(allow).toBeNull();
+            expect(body.error.code).toBe('ROUTE_NOT_FOUND');
+            expect(body.error.httpStatus).toBe(404);
+            expect(body.error).not.toHaveProperty('details');
         });
     }
 

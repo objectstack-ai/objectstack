@@ -509,9 +509,13 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REST_SERVER_SOURCE = resolve(HERE, '../../../rest/src/rest-server.ts');
 // [#23050 slice 13a] `RestServer`'s `GET ${metaPath}/:type` handler moved, with the
 // type list and the whole-store family, from `registerMetadataEndpointsInner` to
-// `meta-collection-routes.ts`; the list derivation reads it there. The item, tree
-// and layers handlers are still in `rest-server.ts`.
+// `meta-collection-routes.ts`; the list derivation reads it there.
 const META_COLLECTION_ROUTES_SOURCE = resolve(HERE, '../../../rest/src/meta-collection-routes.ts');
+// [#23050 slice 13b] …and its item, tree and layers handlers moved, with the
+// reference sweep, to `meta-item-read-routes.ts`; the route derivation reads them
+// there. The private helper both layered spellings call (`serveMetaItemLayered`)
+// is still a `RestServer` method, read in `rest-server.ts`.
+const META_ITEM_READ_ROUTES_SOURCE = resolve(HERE, '../../../rest/src/meta-item-read-routes.ts');
 const SHARED_CHAIN_SOURCE = resolve(HERE, '../../../rest/src/meta-item-read-gate.ts');
 
 interface Derived { params: Set<string>; types: Set<string>; found: boolean }
@@ -878,23 +882,25 @@ const LAYERED_METHODS = ['serveMetaItemLayered'];
 
 function deriveRouteReads(routePath: string, sharedFunctions: readonly string[], methods: readonly string[] = []): Derived {
     const derived: Derived = { params: new Set(), types: new Set(), found: false };
-    const rest = parse(REST_SERVER_SOURCE);
-    const visit = (n: ts.Node): void => {
-        if (ts.isObjectLiteralExpression(n)) {
-            const method = propertyInitializer(rest, n, 'method');
-            const path = propertyInitializer(rest, n, 'path');
-            const handler = propertyInitializer(rest, n, 'handler');
-            if (method?.getText(rest) === "'GET'" && path?.getText(rest) === routePath && handler) {
-                derived.found = true;
-                readsUnder(rest, handler, derived);
+    // [#23050 slice 13b] The handler is found in the module, the helper method in the class.
+    for (const rest of [parse(META_ITEM_READ_ROUTES_SOURCE), parse(REST_SERVER_SOURCE)]) {
+        const visit = (n: ts.Node): void => {
+            if (ts.isObjectLiteralExpression(n)) {
+                const method = propertyInitializer(rest, n, 'method');
+                const path = propertyInitializer(rest, n, 'path');
+                const handler = propertyInitializer(rest, n, 'handler');
+                if (method?.getText(rest) === "'GET'" && path?.getText(rest) === routePath && handler) {
+                    derived.found = true;
+                    readsUnder(rest, handler, derived);
+                }
             }
-        }
-        // [#20478] A private helper the handler delegates to reads its own
-        // parameters a frame down (`serveMetaItemLayered` reads `?package=`).
-        if (ts.isMethodDeclaration(n) && ts.isIdentifier(n.name) && methods.includes(n.name.text)) readsUnder(rest, n, derived);
-        ts.forEachChild(n, visit);
-    };
-    visit(rest);
+            // [#20478] A private helper the handler delegates to reads its own
+            // parameters a frame down (`serveMetaItemLayered` reads `?package=`).
+            if (ts.isMethodDeclaration(n) && ts.isIdentifier(n.name) && methods.includes(n.name.text)) readsUnder(rest, n, derived);
+            ts.forEachChild(n, visit);
+        };
+        visit(rest);
+    }
     const chain = parse(SHARED_CHAIN_SOURCE);
     for (const s of chain.statements) {
         if (ts.isFunctionDeclaration(s) && s.name && sharedFunctions.includes(s.name.text)) readsUnder(chain, s, derived);
@@ -908,9 +914,9 @@ describe('[#20408] the item and book-tree census axes cover every read of RestSe
     const layers = deriveRouteReads('`${metaPath}/:type/:name/layers`', SHARED_LAYERS_FUNCTIONS, LAYERED_METHODS);
 
     it('every handler is found where the census looks for it', () => {
-        expect(item.found, `GET \${metaPath}/:type/:name in ${REST_SERVER_SOURCE}`).toBe(true);
-        expect(tree.found, `GET \${metaPath}/book/:name/tree in ${REST_SERVER_SOURCE}`).toBe(true);
-        expect(layers.found, `GET \${metaPath}/:type/:name/layers in ${REST_SERVER_SOURCE}`).toBe(true);
+        expect(item.found, `GET \${metaPath}/:type/:name in ${META_ITEM_READ_ROUTES_SOURCE}`).toBe(true);
+        expect(tree.found, `GET \${metaPath}/book/:name/tree in ${META_ITEM_READ_ROUTES_SOURCE}`).toBe(true);
+        expect(layers.found, `GET \${metaPath}/:type/:name/layers in ${META_ITEM_READ_ROUTES_SOURCE}`).toBe(true);
     });
 
     it('every query parameter the item read reads is a census cell — [#20478] `?layers=` included, with no exclusion left', () => {

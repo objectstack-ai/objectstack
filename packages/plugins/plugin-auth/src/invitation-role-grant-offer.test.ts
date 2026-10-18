@@ -90,33 +90,41 @@ function oracleGrade(raw: unknown): number {
   return grade;
 }
 
-function oracleCap(requestedRole: unknown, issuerRole: unknown): string | null {
+// [#23945] Each refusal branch answers its own code; the oracle spells them as
+// literals, so the parity grid below pins the branch → code mapping as well.
+function oracleCap(requestedRole: unknown, issuerRole: unknown): { code: string; message: string } | null {
   const requested = oracleParse(requestedRole);
   if (requested.length === 0) return null;
   if (requested.length === 1 && requested[0] === 'member') return null;
   const issuerGrade = oracleGrade(issuerRole);
   const requestedGrade = oracleGrade(requestedRole);
   if (issuerGrade === 0) {
-    return (
-      `[Security] Access denied: your organization membership could not be verified, so this ` +
-      `invitation may confer no role beyond 'member' ` +
-      `(ADR-0090 D12: an unverifiable issuer confers nothing).`
-    );
+    return {
+      code: 'INVITE_ISSUER_UNVERIFIED',
+      message:
+        `[Security] Access denied: your organization membership could not be verified, so this ` +
+        `invitation may confer no role beyond 'member' ` +
+        `(ADR-0090 D12: an unverifiable issuer confers nothing).`,
+    };
   }
   if (requestedGrade > issuerGrade) {
-    return (
-      `[Security] Access denied: you may not invite a member as '${requested.join(', ')}' — ` +
-      `an invitation can never confer a role above the issuer's own ` +
-      `(ADR-0090 D12: administration is a scoped capability).`
-    );
+    return {
+      code: 'INVITE_ROLE_ABOVE_ISSUER',
+      message:
+        `[Security] Access denied: you may not invite a member as '${requested.join(', ')}' — ` +
+        `an invitation can never confer a role above the issuer's own ` +
+        `(ADR-0090 D12: administration is a scoped capability).`,
+    };
   }
   if (issuerGrade < 2) {
-    return (
-      `[Security] Access denied: a delegated issuer may invite only as ` +
-      `'member' — '${requested.join(', ')}' is an organization role that can ` +
-      `carry capability of its own. Grant capability through the invitation's placement ` +
-      `(business unit + positions), which is authorized against your adminScope.`
-    );
+    return {
+      code: 'INVITE_ISSUER_MEMBER_ONLY',
+      message:
+        `[Security] Access denied: a delegated issuer may invite only as ` +
+        `'member' — '${requested.join(', ')}' is an organization role that can ` +
+        `carry capability of its own. Grant capability through the invitation's placement ` +
+        `(business unit + positions), which is authorized against your adminScope.`,
+    };
   }
   return null;
 }
@@ -145,7 +153,7 @@ describe('invitationRoleCapFailure — unchanged by reading the grant table', ()
         expect(
           invitationRoleCapFailure(requested, issuer),
           `requested ${JSON.stringify(requested)} by issuer ${JSON.stringify(issuer)}`,
-        ).toBe(expected);
+        ).toEqual(expected);
       }
     }
     // The grid exercises refusals and admissions both, so agreement is not

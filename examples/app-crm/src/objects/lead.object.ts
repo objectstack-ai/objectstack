@@ -41,9 +41,11 @@ export const Lead = ObjectSchema.create({
     status: Field.select({
       label: 'Status',
       required: true,
-      // Write-path default so minimal creates (e.g. the public Web-to-Lead form,
-      // which doesn't expose status) satisfy `required` — the option `default`
-      // below is only a UI preselect.
+      // The write-path default: a create that omits `status` (e.g. the public
+      // Web-to-Lead form, which doesn't collect it) is stored as 'new', so it
+      // satisfies `required`. A declared `defaultValue` takes precedence over
+      // the option marked `default: true` below, which the engine falls back to
+      // on write only for a select that declares no `defaultValue`.
       defaultValue: 'new',
       options: [
         { label: 'New',            value: 'new',            default: true, color: '#94A3B8' },

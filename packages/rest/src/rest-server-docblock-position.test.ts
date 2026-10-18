@@ -200,6 +200,14 @@ describe('rest-server.ts docblock position', () => {
  * function's. `ui-routes.ts` therefore gives up that block (4 → 3). The moved
  * `/meta` groups held no TSDoc block of their own, so `rest-server.ts` keeps
  * every block it had (163).
+ *
+ * [#23050 slice 13b] `meta-item-read-routes.ts` carries five: the module
+ * header, the host interface's block, the function's, and the blocks of the two
+ * module-level helpers only the per-item reads called, which moved with them
+ * (the reference sweep's declared-refusal re-dresser and the intake reasons'
+ * ETag dimension). The moved `/meta` group held no TSDoc block of its own, so
+ * `rest-server.ts` gives up exactly those two (163 → 161), still far above its
+ * floor.
  */
 const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
     'data-action-routes.ts': 4,
@@ -215,6 +223,7 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     'form-routes.ts': 3,
     'crud-routes.ts': 3,
     'meta-collection-routes.ts': 5,
+    'meta-item-read-routes.ts': 5,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -253,9 +262,11 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // [#23050 slice 12] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 + 3 + 3 = 50 over twelve, length 12 → 13.
         // [#23050 slice 13a] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 = 54 over
         // thirteen, length 13 → 14 (`ui-routes.ts` 4 → 3: the alias's block moved on).
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(14);
+        // [#23050 slice 13b] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 = 59 over
+        // fourteen, length 14 → 15.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(15);
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(54);
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(59);
     });
 });

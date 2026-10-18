@@ -186,7 +186,7 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
-import type { IAuthService, IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, IAuthService, IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type {
     DeletePackageRequest,
     UninstallCleanupOutcome,
@@ -201,6 +201,9 @@ import type {
 // this environment's own metadata), and the client-facing sentence rule.
 import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
+
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -3360,8 +3363,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             if (!api?.getSession) return null;
             // [#22258] A request carrying a session cookie reads without
             // renewal: this route's response never carries a renewed cookie.
-            const session = await api.getSession(inProcessSessionReadInput(c.req.raw.headers));
-            const direct = session?.session?.activeOrganizationId ?? session?.activeOrganizationId ?? null;
+            // [#24222] Typed as `AuthSessionApi` declares the answer, and read
+            // where it declares the active organization. No top-level
+            // `activeOrganizationId` operand: no in-process producer answers one.
+            const session: SessionRead | null = await api.getSession(inProcessSessionReadInput(c.req.raw.headers));
+            const direct = session?.session?.activeOrganizationId ?? null;
             if (direct) return String(direct);
         } catch { /* ignore */ }
         return null;
@@ -3521,7 +3527,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // The better-auth session bridge — resolved lazily and defensively,
             // exactly as the previous implementation did, then handed to the
             // shared resolver instead of being trusted on its own.
-            const getSession = async (h: any) => {
+            // [#24222] Answers as `AuthSessionApi` declares the read, not `any`.
+            const getSession = async (h: any): Promise<SessionRead | null> => {
                 try {
                     const authService: any = ctx.getService('auth');
                     let api: any = authService?.api;
