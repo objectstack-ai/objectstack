@@ -149,6 +149,15 @@ export interface AuditWriterOptions {
    * comes first. Absent → summaries stay English (status quo).
    */
   getLocale?(tenantId?: string, userId?: string): Promise<string | undefined>;
+  /**
+   * [ADR-0131 D9] The organization an activity row carries when neither its
+   * record nor the acting session names one: the Default Organization under
+   * `single` (the only organization there is), `null` under a wall — the
+   * `tenancy` service's `defaultOrgId()`. Asked only for such a row, never
+   * for one whose organization is already known. Absent, or an answer that
+   * throws → the row names none, as before.
+   */
+  getDefaultOrganizationId?(): Promise<string | null | undefined>;
 }
 
 /**
@@ -1445,6 +1454,14 @@ export function installAuditWriters(
   // `resolveRecordOrganizationField` there for the precedence and for why the
   // answer comes from the schema rather than a literal.
   const recordOrgResolver = createRecordOrganizationResolver(engine);
+  const derivableActivityOrganization = async (): Promise<string | undefined> => {
+    if (!opts.getDefaultOrganizationId) return undefined;
+    try {
+      return (await opts.getDefaultOrganizationId()) ?? undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
   // Display label for an object under a given translate fn: translated label
   // → authored def label → API name. Shared by activity summaries and the
@@ -2204,8 +2221,14 @@ export function installAuditWriters(
     // Same rationale as auditRow: stamp the tenant column so RLS matches the
     // recipient's organization on read — but only when the (auto-injected)
     // column actually exists, so single-tenant activity writes don't fail.
+    //
+    // [ADR-0131 D9] A record with no organization of its own (a `sys_user`, a
+    // platform setting), written with no session organization (a sign-up),
+    // takes the derivable one: the Default Organization under `single`. Only
+    // the activity row: the ledger's `tenant_id` above is an attribution of
+    // what the row is ABOUT (D7) and stays the record's.
     if (objectHasField('sys_activity', 'organization_id')) {
-      activityRow.organization_id = tenantId ?? null;
+      activityRow.organization_id = tenantId ?? (await derivableActivityOrganization()) ?? null;
     }
 
     const activityRowToWrite = mirrorsActivity ? activityRow : undefined;

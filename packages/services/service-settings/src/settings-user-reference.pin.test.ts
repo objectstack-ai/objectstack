@@ -139,18 +139,21 @@ describe('[#21913] the setting-audit writer keeps the dangling actor_id refusal'
     }).then(() => null, (e) => e);
     expect(before?.code).toBe('VALIDATION_FAILED');
 
-    const warned: string[] = [];
-    await buildSettingAuditWriter(engine as any, { warn: (m) => warned.push(m) }).write(entry(GHOST) as any);
-    expect(warned).toEqual([`SettingsServicePlugin: setting-audit write failed: ${before.message}`]);
+    // A lost history row is a durability loss, reported at `error` (AGENTS.md,
+    // degradation log levels), naming the engine's own refusal.
+    const reported: string[] = [];
+    await buildSettingAuditWriter(engine as any, { error: (m) => reported.push(m) }).write(entry(GHOST) as any);
+    expect(reported).toHaveLength(1);
+    expect(reported[0].startsWith(`SettingsServicePlugin: setting-audit write failed: ${before.message}`)).toBe(true);
     expect(rowsOf('sys_setting_audit').size).toBe(0);
   });
 
   it('a known actor is written, and an entry naming no actor is unchanged', async () => {
-    const warned: string[] = [];
-    const writer = buildSettingAuditWriter(engine as any, { warn: (m) => warned.push(m) });
+    const reported: string[] = [];
+    const writer = buildSettingAuditWriter(engine as any, { error: (m) => reported.push(m) });
     await writer.write(entry(userId) as any);
     await writer.write(entry() as any);
-    expect(warned).toEqual([]);
+    expect(reported).toEqual([]);
     expect([...rowsOf('sys_setting_audit').values()].map((r) => r.actor_id ?? null).sort()).toEqual([null, userId].sort());
   });
 });

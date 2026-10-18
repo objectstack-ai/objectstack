@@ -63,15 +63,19 @@ describe('showcase: business-unit hierarchy sharing rule (ADR-0057 D6 / #2077)',
     const mgrId = await uid('bu-mgr@verify.test');
     const contribId = await uid('bu-contrib@verify.test');
 
-    let org = await ql.findOne('sys_organization', { where: {}, context: SYS }).catch(() => null);
-    const orgId = org?.id ?? 'org_bu';
-    if (!org) await sys('sys_organization', { id: orgId, name: 'BU Org', slug: 'bu_org' }).catch(() => {});
+    // [ADR-0131 D3/D9] The showcase boots `single`, so the Default Organization
+    // exists before the first sign-up and owns every row this fixture seeds. A
+    // refused read is an answer, never "no organization": it is not swallowed,
+    // and no stand-in organization is minted beside the real one.
+    const org = await ql.findOne('sys_organization', { where: {}, context: SYS });
+    if (!org?.id) throw new Error('fixture: the showcase boot has no Default Organization to own the business units');
+    const orgId = String(org.id);
 
     // parent ⊃ child
     await sys('sys_business_unit', { id: 'bu_h_parent', name: 'Region', kind: 'division', organization_id: orgId, active: true });
     await sys('sys_business_unit', { id: 'bu_h_child', name: 'Team', kind: 'department', parent_business_unit_id: 'bu_h_parent', organization_id: orgId, active: true });
-    await sys('sys_business_unit_member', { id: 'bm_mgr', business_unit_id: 'bu_h_parent', user_id: mgrId });
-    await sys('sys_business_unit_member', { id: 'bm_contrib', business_unit_id: 'bu_h_child', user_id: contribId });
+    await sys('sys_business_unit_member', { id: 'bm_mgr', business_unit_id: 'bu_h_parent', user_id: mgrId, organization_id: orgId });
+    await sys('sys_business_unit_member', { id: 'bm_contrib', business_unit_id: 'bu_h_child', user_id: contribId, organization_id: orgId });
 
     // owner creates a PRIVATE note — only the owner can see it by default.
     const c = await stack.apiAs(ownerTok, 'POST', OBJ, { title: 'BU-shared note' });

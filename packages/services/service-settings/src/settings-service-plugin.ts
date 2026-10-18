@@ -568,9 +568,12 @@ export class SettingsServicePlugin implements Plugin {
  */
 export function buildSettingAuditWriter(
   engine: IDataEngine,
-  logger?: { warn?: (message: string) => void },
+  logger?: { error?: (message: string) => void },
 ): SettingsAuditWriter {
   const eng: any = engine;
+  // The consequence and the fix ride the first failure only (AGENTS.md,
+  // degradation log levels); every later lost row is still named, briefly.
+  let reportedDurabilityLoss = false;
   return {
     write: async (entry) => {
       try {
@@ -599,6 +602,9 @@ export function buildSettingAuditWriter(
           request_id: entry.requestId ?? null,
           reason: entry.reason ?? null,
           created_at: new Date().toISOString(),
+          // [ADR-0131 D3/D9] The organization whose value changed — the
+          // settings row's own owner. A global value names none.
+          ...(entry.organizationId ? { organization_id: entry.organizationId } : {}),
           // The explicit system opt-in, as the settings row write carries:
           // `sys_setting_audit` is the platform's own ledger, written after
           // the settings door already authorized the change, and not a
@@ -606,7 +612,21 @@ export function buildSettingAuditWriter(
           // middleware's principal-less hand-off (ADR-0096 D5).
         }, { bypassTenantAudit: true, context: { isSystem: true } });
       } catch (err: any) {
-        logger?.warn?.('SettingsServicePlugin: setting-audit write failed: ' + (err?.message ?? err));
+        // A durability loss, not a functional one: the settings write already
+        // landed and everything keeps looking normal, while the per-key
+        // history row it claims is gone — so `error`, never `warn`.
+        const cause = 'SettingsServicePlugin: setting-audit write failed: ' + (err?.message ?? err);
+        if (reportedDurabilityLoss) {
+          logger?.error?.(cause);
+        } else {
+          reportedDurabilityLoss = true;
+          logger?.error?.(
+            cause +
+              ' — settings writes keep succeeding, but their sys_setting_audit history rows are NOT persisted ' +
+              'and nothing retries them. Fix the cause named here (the actor must be a sys_user; the row must ' +
+              'carry the organization its setting belongs to).',
+          );
+        }
       }
     },
   };

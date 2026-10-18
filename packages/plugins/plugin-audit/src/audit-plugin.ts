@@ -386,7 +386,20 @@ export class AuditPlugin implements Plugin {
         const { locale } = await resolveLocalizationContext({ ql: engine, settings, tenantId, userId });
         return locale;
       };
-      installAuditWriters(engine as any, this.name, { getMessaging, getI18n, getLocale });
+      // [ADR-0131 D9] The organization an activity row about an org-less record
+      // derives: the `tenancy` service's Default Organization under `single`,
+      // none under a wall. Resolved at write time — AuthPlugin registers the
+      // service, and the answer is memoized there.
+      const getDefaultOrganizationId = async (): Promise<string | null | undefined> => {
+        let tenancy: { defaultOrgId?: () => Promise<string | null> } | undefined;
+        try {
+          tenancy = ctx.getService<{ defaultOrgId?: () => Promise<string | null> }>('tenancy');
+        } catch {
+          return undefined;
+        }
+        return typeof tenancy?.defaultOrgId === 'function' ? tenancy.defaultOrgId() : undefined;
+      };
+      installAuditWriters(engine as any, this.name, { getMessaging, getI18n, getLocale, getDefaultOrganizationId });
       ctx.logger.info('AuditPlugin: audit + activity writers installed');
 
       // [#8992] Record-view auditing — the `read` half of the ledger. Installed

@@ -1916,6 +1916,7 @@ export class AuthManager {
           // the user's mail carries only the deployment default. Best-effort;
           // `undefined` leaves the #14319 ladder exactly as it was.
           const storedLocale = await this.storedRecipientLocale({ id: user.id });
+          const mailOrganization = await this.authMailOrganizationArg();
           const result = await email.sendTemplate(invitation
             ? {
               // Exactly the variables `auth.account_invitation` declares —
@@ -1935,6 +1936,7 @@ export class AuthManager {
               },
               relatedObject: 'sys_user',
               relatedId: user.id,
+              ...mailOrganization,
             }
             : {
               template: 'auth.password_reset',
@@ -1949,6 +1951,7 @@ export class AuthManager {
               },
               relatedObject: 'sys_user',
               relatedId: user.id,
+              ...mailOrganization,
             });
           if (result?.status === 'failed') {
             throw new Error(
@@ -2011,6 +2014,9 @@ export class AuthManager {
               },
               relatedObject: 'sys_user',
               relatedId: user.id,
+              // [ADR-0131 D9] The mail is about a user, who belongs to no
+              // organization yet: the derivable owner, as for the grant.
+              ...(await this.authMailOrganizationArg()),
             });
             if (result?.status === 'failed') {
               throw new Error(
@@ -4012,6 +4018,7 @@ export class AuthManager {
                 expiresInMinutes: 10,
                 appName: this.getAppName(),
               },
+              ...(await this.authMailOrganizationArg()),
             });
           } catch (err: any) {
             console.error(`[AuthManager] sendMagicLink failed: ${err?.message ?? err}`);
@@ -5517,11 +5524,40 @@ export class AuthManager {
   }
 
   /**
+   * [ADR-0131 D9] The organization a write this manager makes on a
+   * tenant-column object carries when nothing on the write names one: the
+   * Default Organization under `single` — the only organization there is —
+   * and none under a wall, where `tenancy.defaultOrgId()` answers `null`. One
+   * reading for every such producer here (the self-registration grant and the
+   * auth mails that are about a user rather than an organization), so they
+   * cannot disagree about it. `undefined` when no tenancy service is wired or
+   * it cannot answer: the producer then names nothing, as before.
+   */
+  private async derivableWriteOrganizationId(): Promise<string | undefined> {
+    try {
+      const tenancy = this.config.getTenancy?.();
+      const organizationId = tenancy ? await tenancy.defaultOrgId() : null;
+      return organizationId ?? undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** The `organizationId` argument of an auth mail that is about a user, not an organization. */
+  private async authMailOrganizationArg(): Promise<{ organizationId?: string }> {
+    const organizationId = await this.derivableWriteOrganizationId();
+    return organizationId ? { organizationId } : {};
+  }
+
+  /**
    * Land the staged self-registration grant for a freshly created user — the
    * `user.create.after` half of an admitted self-registration. Idempotent
-   * (existing `(user, set)` pair wins), org-scoped to the same target org the
-   * membership reconciler resolves (falls back to an unscoped row only when
-   * no org is resolvable — multi-org self-registration binds no org either).
+   * (existing `(user, set)` pair wins), owned by the organization
+   * {@link derivableWriteOrganizationId} derives — the same target org the
+   * membership reconciler resolves. Under a wall none is derivable when the
+   * registrant is created (multi-org self-registration binds no org either),
+   * so the row is written without one and its fate is the engine's (ADR-0131
+   * D9).
    *
    * A failure here is reported at the DURABILITY level (`error` when the sink
    * carries it): the system keeps looking normal from the outside while a
@@ -5545,13 +5581,7 @@ export class AuthManager {
         return;
       }
       const sys = withSystemReadContext(engine) as any;
-      let organizationId: string | null = null;
-      try {
-        const tenancy = this.config.getTenancy?.();
-        organizationId = tenancy ? await tenancy.defaultOrgId() : null;
-      } catch {
-        organizationId = null;
-      }
+      const organizationId = await this.derivableWriteOrganizationId();
       // [ADR-0131 D3/D4] The grant names the declared set BY NAME — the name
       // admission asked the security catalog and the activation ledger about —
       // so no `sys_permission_set` row is read to write it, and none needs to
@@ -5573,7 +5603,7 @@ export class AuthManager {
       this.config.logger?.info?.('[audience] granted the declared self-registration permission set', {
         userId,
         permissionSet: staged.setName,
-        organizationId: organizationId ?? undefined,
+        organizationId,
       });
     } catch (error) {
       this.reportUngrantedSelfRegistrant(
@@ -5692,6 +5722,7 @@ export class AuthManager {
         },
         relatedObject: 'sys_user',
         ...(from.id ? { relatedId: from.id } : {}),
+        ...(await this.authMailOrganizationArg()),
       });
     } catch (err) {
       // Best-effort by design — see the ⛔ above. Logged so an operator can see
