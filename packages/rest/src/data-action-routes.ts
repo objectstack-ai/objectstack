@@ -66,11 +66,15 @@ import {
     exportContentDisposition,
     type ExportFieldMeta,
 } from './export-format.js';
-import { prepareImportRequest } from './import-prepare.js';
+import { importControlOptOutRefusal, prepareImportRequest } from './import-prepare.js';
 import { readTemplateMode, templateFieldDefs } from './import-template.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { handleRouteError } from './error-response.js';
+// [#24348] The shared ADR-0112 nested envelope for the import doors' control
+// opt-out refusal — the flat sibling-`code` dialect the doors' older answers
+// use is ratcheted down by `check:route-envelope`.
+import { sendError as sendEnvelopeError } from '@objectstack/types';
 import { logError } from './log.js';
 import {
     DATA_EXPORT_PARAMS,
@@ -281,6 +285,19 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return;
                 const body = req.body ?? {};
 
+                // [#24348] Who may take the object's declared controls off this
+                // import (`runAutomations: false`, `treatAsHistorical: true`):
+                // the system principal only. Asked after the object-exposure
+                // gate (a hidden object keeps its 404) and before the body is
+                // parsed, so a refused request writes no row — dry run included.
+                const optOutRefusal = importControlOptOutRefusal(body, context);
+                if (optOutRefusal) {
+                    sendEnvelopeError(res, optOutRefusal.status, optOutRefusal.code, optOutRefusal.message, {
+                        details: { object: objectName, refused: optOutRefusal.refused },
+                    });
+                    return;
+                }
+
                 // Parse + validate the payload (shared with the async job route).
                 // The synchronous path caps at 5k rows; larger files must use the
                 // async import-job endpoint.
@@ -386,6 +403,17 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     return;
                 }
                 if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return;
+
+                // [#24348] The synchronous door's control opt-out gate, asked at
+                // the same point: before the body is parsed and before a job row
+                // exists, so a refused request creates no job and writes no row.
+                const optOutRefusal = importControlOptOutRefusal(req.body ?? {}, context);
+                if (optOutRefusal) {
+                    sendEnvelopeError(res, optOutRefusal.status, optOutRefusal.code, optOutRefusal.message, {
+                        details: { object: objectName, refused: optOutRefusal.refused },
+                    });
+                    return;
+                }
 
                 const prep = await prepareImportRequest(req.body ?? {}, {
                     p, objectName, environmentId, maxRows: IMPORT_JOB_MAX_ROWS,
