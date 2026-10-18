@@ -22,6 +22,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { SINGULAR_TO_PLURAL } from '@objectstack/spec/shared';
+import { assertEngineFindOnePredicate } from '@objectstack/metadata-core';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 
 type Row = Record<string, unknown>;
@@ -47,8 +48,10 @@ function protocolOver(rows: readonly Row[]): any {
             const hits = rows.filter((r) => matches(r, q.where));
             return typeof q.limit === 'number' ? hits.slice(0, q.limit) : hits;
         },
-        findOne: async (table: string, q: { where?: Row } = {}) =>
-            table === 'sys_metadata' ? rows.find((r) => matches(r, q.where)) ?? null : null,
+        findOne: async (table: string, q: { where?: Row } = {}) => {
+            assertEngineFindOnePredicate(table, q as never);
+            return table === 'sys_metadata' ? rows.find((r) => matches(r, q.where)) ?? null : null;
+        },
     };
     return new ObjectStackProtocolImplementation(engine as never, () => new Map());
 }
