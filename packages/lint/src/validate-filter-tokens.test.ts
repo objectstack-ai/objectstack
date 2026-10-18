@@ -56,6 +56,18 @@ describe('validateFilterTokens', () => {
     expect(findings[0].hint).toContain('{current_user_id}');
   });
 
+  // [#24293] The message states the runtime's answer: the data engine refuses a
+  // query carrying the value (`UnknownFilterTokenError` in `@objectstack/core`,
+  // `FILTER_TOKEN_UNKNOWN` / 400). Held as that code, the named subject, not as
+  // the prose around it.
+  it('names the code the data engine refuses the query with, near miss or not', () => {
+    const findings = validateFilterTokens({
+      dashboards: [{ name: 'd', widgets: [{ id: 'w', filter: { a: '{current_user}', b: '{whoever_is_watching}' } }] }],
+    });
+    expect(findings.map((f) => f.path)).toEqual(['dashboards[0].widgets[0].filter.a', 'dashboards[0].widgets[0].filter.b']);
+    for (const f of findings) expect(f.message, f.path).toContain('`FILTER_TOKEN_UNKNOWN`');
+  });
+
   it('accepts the correct spelling alongside date macros', () => {
     expect(
       validateFilterTokens({

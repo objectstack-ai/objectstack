@@ -52,6 +52,12 @@ import { fileURLToPath } from 'node:url';
 
 import { EXIT_FINDINGS, EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
 import { isEntrypoint } from '../invoked-as.mjs';
+// The `Blocked-by:` reader the half-state patrol's H19 discovers targets with.
+// IMPORTED, never restated: the refresh and the patrol must never disagree
+// about what a marker is (see "A STALE `pm:blocked`" below).
+// `directiveValues` is the same file's shared line reader, used here for the
+// `Unlock-action:` key exactly as the patrol reads it.
+import { blockerTargetsFor, directiveValues, h19BlockOutlivedBlocker, labelNames } from '../pm/check-half-states.mjs';
 
 // The workflows that carry the hourly full run. Spelled as quoted repo-relative
 // literals: the dispatch derivation reads a gate's path literals as the
@@ -326,25 +332,279 @@ export async function findExistingCard({ identity, listPage, perPage = 100, maxP
   return found.sort((a, b) => a.number - b.number)[0] ?? null;
 }
 
+// The callbacks `fileOrRefreshCard` is wired with. Checked on EVERY call, both
+// paths: a workflow that drops one fails on its next red, whichever path that
+// red takes, instead of only on the rare refresh of a `pm:blocked` card.
+const CARD_CALLBACKS = Object.freeze([
+  'listPage',
+  'createIssue',
+  'updateIssue',
+  'listComments',
+  'getIssue',
+  'addLabels',
+  'removeLabel',
+]);
+
 // The whole decision, so that "one red run files one card, the next refreshes
 // it" is a property something can DRIVE rather than a sentence in a workflow
-// comment. The caller supplies three thin callbacks over the API and nothing
-// else; every branch of the judgement is here.
+// comment. The caller supplies thin callbacks over the API and nothing else;
+// every branch of the judgement is here.
 //
 // ⛔ `create` is reached ONLY through `findExistingCard`, which throws on a
 // scan it could not complete. An exception here therefore files nothing, which
 // is the correct direction: a missed refresh costs one stale body, and a
 // spurious create costs a duplicate card every hour until somebody notices.
-export async function fileOrRefreshCard({ identity, body, listPage, createIssue, updateIssue, perPage, maxPages }) {
+export async function fileOrRefreshCard({
+  identity,
+  body,
+  listPage,
+  createIssue,
+  updateIssue,
+  listComments,
+  getIssue,
+  addLabels,
+  removeLabel,
+  ownerRepo,
+  perPage,
+  maxPages,
+}) {
+  const wired = { listPage, createIssue, updateIssue, listComments, getIssue, addLabels, removeLabel };
+  const missing = CARD_CALLBACKS.filter((name) => typeof wired[name] !== 'function');
+  if (missing.length > 0) {
+    throw new Error(`fileOrRefreshCard: not wired with ${missing.join(', ')} -- nothing was read or written`);
+  }
+  if (!/^[^/\s]+\/[^/\s]+$/.test(String(ownerRepo ?? ''))) {
+    throw new Error(
+      `fileOrRefreshCard: ownerRepo '${ownerRepo}' is not owner/name -- a bare \`#N\` blocker is resolved against it`
+    );
+  }
   const existing = await findExistingCard({ identity, listPage, perPage, maxPages });
   if (existing) {
-    // Rewritten in place, never a comment per run. ⛔ Labels are NOT rewritten:
-    // grading is the devx seat's and a refresh must not undo it.
-    await updateIssue({ number: existing.number, body });
-    return { action: 'refreshed', number: existing.number };
+    // Rewritten in place, never a comment per run. ⛔ No GRADE is ever written
+    // here (priority, lane, type): grading is the devx seat's and a refresh
+    // must not undo it. The one label a refresh may move is a STATE, and only
+    // the stale-block swap below moves it.
+    const block = await judgeCardBlock({ issue: existing, ownerRepo, listComments, getIssue });
+    if (block.verdict === 'expired') {
+      // Labels FIRST, the body after, so the body never says "moved" about a
+      // move that did not happen. Additive POST, then ONE remove by name --
+      // ⛔ never a whole-set write (`check:whole-set-label-write`). The add
+      // goes first, as `scripts/pm/label-write.mjs` orders it: a remove that
+      // then fails leaves two state labels (the patrol's ONE-OF rows name
+      // that), never a card with none. A failed write THROWS before the body
+      // is touched -- the card stays exactly as the previous run left it and
+      // the run summary reports it NOT WRITTEN, the same posture as a scan
+      // that could not complete.
+      await addLabels({ number: existing.number, labels: [QUEUE_LABEL] });
+      try {
+        await removeLabel({ number: existing.number, name: BLOCKED_LABEL });
+      } catch (error) {
+        // Already gone (a seat moved it between the listing and this write):
+        // the state this write wanted is the state the card is in.
+        if (error?.status !== 404) throw error;
+      }
+    }
+    const note = renderBlockNote(block);
+    await updateIssue({ number: existing.number, body: note ? withBlockNote(body, note) : body });
+    return { action: 'refreshed', number: existing.number, block: block.verdict, blockSummary: summariseBlock(block) };
   }
   const created = await createIssue({ title: identity.title, body, labels: identity.labels });
   return { action: 'filed', number: created.number };
+}
+
+// ---------------------------------------------------------------------------
+// A STALE `pm:blocked` on the card a refresh rewrites
+// ---------------------------------------------------------------------------
+//
+// THE DEFECT, measured on #23885 (2026-10-16 .. 10-18). The triage seat graded
+// the CI card `pm:blocked` on #23908 and parked the `Blocked-by:` line in a
+// COMMENT, because this filer rewrites the body. #23908 closed the same day.
+// Two days later the hourly run went red on a NEW failure; the refresh rewrote
+// the body and, labels being create-only, left `pm:blocked` -- the label that
+// tells every seat "not yours". The red sat in nobody's queue until the next
+// triage round re-queued it by hand.
+//
+// THE RULE. On a refresh of a card carrying `pm:blocked`, every `Blocked-by:`
+// target the card names -- body AND comments, line-initial, read by the
+// patrol's own reader -- is resolved. When EVERY one is a LOCAL card that has
+// closed, no `Unlock-action:` line names another unlock, and the card has no
+// assignee, the refresh swaps `pm:blocked` for `pm:queue` and says so in the
+// refreshed body. Anything else changes no label:
+//
+//   not pm:blocked        nothing read at all
+//   no target named       H4's row (a block with no line), not this refresh's
+//   any target OPEN       the block still holds: the hourly reds are expected
+//   any target UNREAD     unread is not closed (#4690) -- never released on it
+//   a CROSS-REPO target   closed upstream means merged THERE, not consumable
+//     that is CLOSED      HERE: 「跨仓解锁判据是消费方可安装,⛔ 不是上游已合并」
+//                         (pm-dispatch SKILL.md, the state model), and a fix
+//                         not yet installable goes to `pm:on-hold` with a
+//                         consumer-side `Restart-when:`, 「⛔ 不回 `pm:queue`」.
+//                         objectstack consumes objectui through the
+//                         `.objectui-sha` pin, so the next hourly red is the
+//                         SAME failure until the pin moves -- never released
+//   an `Unlock-action:`   the card names an unlock other than closure
+//     line (any channel)  (`references/state-machine.md`, `pm:blocked`), so
+//                         closure is not its exit -- never released. Any value
+//                         withholds, a spelling the patrol does not recognise
+//                         included: stricter than the patrol's silent fallback,
+//                         in the one direction that cannot release a card
+//   comments unread       an OPEN blocker could be in them -- never released
+//   assigned              the move to `pm:queue` is the holder's release act
+//                         (clear the assignee + `Release:` line, one write);
+//                         `pm:queue` with an assignee is the patrol's H24
+//
+// WHY THIS IS NOT A REFLEXIVE RELEASE. The state model forbids releasing a
+// block just because its upstream closed (「上游已关 ⇒ 先重新推导是否有新阻塞并
+// 改写该行,⛔ 不反射式放行」). The trigger here is not the upstream closing --
+// that happened, here, two days earlier and moved nothing. It is a NEW red,
+// which is the re-derivation: an undiagnosed failure that arrived after every
+// named blocker closed is new work, and it can have no recorded blocker yet
+// (a seat that knew one would have named it, and an OPEN target holds the
+// card). That is the condition the triage seat itself wrote on #23885 when it
+// parked the card: "If the next hourly run names a second failing job, that
+// job is new work, and this label comes off." It holds only for a LOCAL
+// target, whose closure means its fix landed on this `main`; a closed
+// cross-repo target says nothing about this tree, which is why it holds the
+// card (the table above).
+//
+// WHY THE UNION OF BOTH CHANNELS. The patrol's H19 FOUNDS an expiry on the
+// body's set whenever the body states one, because a body is the canonical
+// home. This card's body is generated, so for it the comment thread is the
+// only place a line survives; and requiring EVERY target in EITHER channel to
+// be closed is strictly the more withholding rule: whenever this swaps, H19
+// reads the same card as a full discharge (the self-test pins that).
+//
+// ⛔ Never a grade (priority, lane, type) and never any other label. ⛔ Never
+// the assignee. ⛔ No comment: the record is the refreshed body, the label
+// events on the timeline, and this run's log.
+
+export const BLOCKED_LABEL = 'pm:blocked';
+export const QUEUE_LABEL = 'pm:queue';
+
+// The pure verdict over resolved targets. `resolutions` are
+// `blockerTargetsFor`'s targets, each carrying `local` and `state`
+// ('open' | 'closed' | 'unresolved') -- the shape H19 judges.
+// `unlockActions` are the card's `Unlock-action:` values, both channels.
+export function staleBlockVerdict({ issue, resolutions, unlockActions = [] }) {
+  if (!labelNames(issue ?? {}).includes(BLOCKED_LABEL)) return { verdict: 'not-blocked' };
+  const rows = resolutions ?? [];
+  if (rows.length === 0) return { verdict: 'no-target' };
+  const open = rows.filter((r) => r.state === 'open');
+  const unread = rows.filter((r) => r.state !== 'open' && r.state !== 'closed');
+  // Closed THERE is not consumable HERE: a closed cross-repo target withholds.
+  const upstream = rows.filter((r) => r.state === 'closed' && r.local !== true);
+  const declared = [...(unlockActions ?? [])];
+  if (open.length > 0 || unread.length > 0 || upstream.length > 0 || declared.length > 0) {
+    return { verdict: 'held', open, unread, upstream, unlockActions: declared };
+  }
+  const assignees = (issue?.assignees ?? []).map((a) => String(a?.login ?? a));
+  if (assignees.length > 0) return { verdict: 'assigned', assignees };
+  return { verdict: 'expired' };
+}
+
+// Every comment on the card, bounded like the open-issue scan and for the same
+// reason: a read that stops at its bound has not established that no OPEN
+// `Blocked-by:` line sits on a page it never read, so it THROWS rather than
+// hand a partial thread to a judgement that could release on it.
+async function readCardComments({ number, listComments, perPage, maxPages }) {
+  const bodies = [];
+  for (let page = 1; page <= maxPages; page += 1) {
+    const batch = (await listComments({ number, page, perPage })) ?? [];
+    for (const comment of batch) bodies.push(typeof comment === 'string' ? comment : String(comment?.body ?? ''));
+    if (batch.length < perPage) return bodies;
+  }
+  throw new Error(`the comment read hit its ${maxPages}-page bound without completing`);
+}
+
+// Read what the verdict needs -- nothing at all for a card that is not
+// `pm:blocked` -- and judge it. A read that fails is a verdict (`unjudged`, or
+// an `unresolved` target), never an exception: the body refresh is this
+// filer's product and a label it cannot judge must not cost it.
+export async function judgeCardBlock({ issue, ownerRepo, listComments, getIssue, perPage = 100, maxPages = 10 }) {
+  if (!labelNames(issue ?? {}).includes(BLOCKED_LABEL)) return { verdict: 'not-blocked', resolutions: [] };
+  let comments;
+  try {
+    comments = await readCardComments({ number: issue.number, listComments, perPage, maxPages });
+  } catch (error) {
+    return { verdict: 'unjudged', detail: `the card's comments could not be read (${error.message})`, resolutions: [] };
+  }
+  const resolutions = [];
+  for (const target of blockerTargetsFor(issue, comments, ownerRepo)) {
+    try {
+      const got = await getIssue({ repo: target.repo, number: target.number });
+      const state = got?.state === 'closed' || got?.state === 'open' ? got.state : 'unresolved';
+      resolutions.push({
+        ...target,
+        state,
+        closedAt: got?.closed_at ?? null,
+        detail: state === 'unresolved' ? `answered state '${got?.state}'` : null,
+      });
+    } catch (error) {
+      resolutions.push({ ...target, state: 'unresolved', closedAt: null, detail: String(error?.message ?? error) });
+    }
+  }
+  const unlockActions = [issue?.body, ...comments].flatMap((text) => directiveValues(text, 'Unlock-action'));
+  return { ...staleBlockVerdict({ issue, resolutions, unlockActions }), resolutions };
+}
+
+const targetName = (r) => (r.local ? `#${r.number}` : r.key);
+
+// What each target reads as on the summary row. A closed cross-repo target is
+// NAMED as the reason it holds, never shown as a bare `closed`.
+const targetReading = (r) =>
+  r.state === 'closed' && r.local !== true
+    ? `${targetName(r)} closed upstream (not an unlock criterion for this consumer)`
+    : `${targetName(r)} ${r.state}`;
+
+// One line for the run log: the verdict and what it was read from.
+function summariseBlock(block) {
+  const rows = (block.resolutions ?? []).map(targetReading);
+  const unlocks = (block.unlockActions ?? []).map((v) => `Unlock-action: ${v} (its unlock is not closure)`);
+  return [block.verdict, block.detail, rows.length > 0 ? rows.join(', ') : null, ...unlocks]
+    .filter(Boolean)
+    .join(' -- ');
+}
+
+// What the refreshed body says about the block, or null when it says nothing.
+// ⛔ No line here may START with a directive key: the note would then be read
+// as a body-borne `Blocked-by:` line by the very reader it reports on (the
+// self-test runs the reader over every note).
+export function renderBlockNote(block) {
+  const closed = (block.resolutions ?? [])
+    .map((r) => `${targetName(r)}${r.closedAt ? ` (closed ${r.closedAt})` : ' (closed)'}`)
+    .join(', ');
+  if (block.verdict === 'expired') {
+    return [
+      `## State: \`${BLOCKED_LABEL}\` → \`${QUEUE_LABEL}\`, moved by this refresh`,
+      `This card carried \`${BLOCKED_LABEL}\`, and every \`Blocked-by:\` target it names is closed: ${closed}.`,
+      'A red run that arrives after the last named blocker closed is new work, so this refresh moved the card',
+      `back to \`${QUEUE_LABEL}\` (one additive label write, one remove by name). Priority, lane and every other`,
+      "label are untouched: grading stays the seat's. If this red is still the failure the block was about,",
+      're-block the card with a line-initial `Blocked-by:` in a COMMENT -- this body is rewritten on every red.',
+    ];
+  }
+  if (block.verdict === 'assigned') {
+    return [
+      `## State: \`${BLOCKED_LABEL}\`, and every blocker it names is closed`,
+      `Every \`Blocked-by:\` target this card names is closed (${closed}), so this red is new work -- but the`,
+      `card is assigned (${block.assignees.map((a) => `\`${a}\``).join(', ')}), and moving it to \`${QUEUE_LABEL}\` is`,
+      "the holder's release act (clear the assignee and post the `Release:` line, in one write), never this",
+      "refresh's. No label was changed.",
+    ];
+  }
+  return null;
+}
+
+// The last line `renderBody` writes. The block note goes directly above it.
+export const CARD_FOOTER =
+  '_Filed by `.github/workflows/scheduled-full-run-card.yml`. Generated by [Claude Code](https://claude.ai/code)_';
+
+export function withBlockNote(body, noteLines) {
+  const lines = String(body).split('\n');
+  const at = lines.lastIndexOf(CARD_FOOTER);
+  if (at === -1) return [...lines, ...noteLines].join('\n');
+  return [...lines.slice(0, at), ...noteLines, ...lines.slice(at)].join('\n');
 }
 
 // The card body. The run link and the commit range are the whole product: a red
@@ -427,7 +687,7 @@ export function renderBody({
     'the next green run being uneventful, not by editing this one.',
     '',
     ...suspects,
-    '_Filed by `.github/workflows/scheduled-full-run-card.yml`. Generated by [Claude Code](https://claude.ai/code)_',
+    CARD_FOOTER,
   ]
     .filter((line) => line !== '')
     .join('\n');
@@ -688,11 +948,12 @@ async function releaseGate(argv) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'scheduled-full-run concurrency isolation': 20,
   'scheduled-full-run card identity and de-dup': 34,
+  'card refresh: a stale pm:blocked (the measured #23885 sequence)': 22,
   'release gate: the selection rule on the recorded 2026-10-12 listing': 8,
   'release gate: the selection rule on synthetic runs': 17,
   'release gate: release.yml wiring': 6,
 });
-const SELF_TEST_BATTERY_FLOOR = 5;
+const SELF_TEST_BATTERY_FLOOR = 6;
 const UNATTRIBUTED_BATTERY = '(no battery open)';
 
 // Returned by `selfTest()` only after its verdict is printed, so a `return`
@@ -1025,10 +1286,16 @@ async function selfTest() {
   //    night it files its duplicate.
   const board = [];
   let nextNumber = 500;
+  // None of these cards carries `pm:blocked`, so a refresh must read and
+  // write nothing beyond the body: the four block callbacks THROW if reached.
+  const unreachable = (name) => async () => {
+    throw new Error(`sequence: a refresh of a card that is not pm:blocked called ${name}`);
+  };
   const drive = async (identityUnderTest, bodyText) =>
     fileOrRefreshCard({
       identity: identityUnderTest,
       body: bodyText,
+      ownerRepo: 'objectstack-ai/objectstack',
       listPage: async (n) => (n === 1 ? board.slice() : []),
       createIssue: async ({ title, body: b, labels }) => {
         const made = { number: (nextNumber += 1), title, body: b, labels };
@@ -1039,6 +1306,10 @@ async function selfTest() {
         const hit = board.find((i) => i.number === number);
         hit.body = b;
       },
+      listComments: unreachable('listComments'),
+      getIssue: unreachable('getIssue'),
+      addLabels: unreachable('addLabels'),
+      removeLabel: unreachable('removeLabel'),
     });
 
   const firstRun = await drive(ci, 'first body');
@@ -1119,6 +1390,300 @@ async function selfTest() {
     });
     if (!none.includes('No commit range could be named') || !none.includes('HTTP 422')) {
       throw new Error("body: a missing range, or the caller's reason for it, was not reported");
+    }
+  });
+
+  // ── A STALE `pm:blocked` on the card a refresh rewrites ─────────────────
+  battery('card refresh: a stale pm:blocked (the measured #23885 sequence)');
+  const OWNER_REPO = 'objectstack-ai/objectstack';
+  const CARD_LABELS = ['bug', 'priority:p1', 'domain:devx'];
+  // The triage seat's parking comment on #23885 (6215815177), VERBATIM: the
+  // line is DECORATED (a bullet and bold), and the comment also names #23908,
+  // #23784, #6015 and objectstack-ai/objectui#12666 mid-sentence -- prose,
+  // none of them a target.
+  const TRIAGE_PARK = [
+    '## Triage: `pm:blocked` on #23908 · triage seat · `session_01AavokzJ5DndAwitDXvKy4U` · 2026-10-16T12:46Z',
+    '',
+    'Triage seat (objectstack-wide, seat post #6015). ⛔ Not a claim, ⛔ not a dispatch.',
+    '',
+    "- `domain:devx` seat 2's diagnosis `6214926932` reads this red as the Console Pin Gate failing on " +
+      '`checkPageComponentViewData`, which #23784 deleted while objectui still imports it. The fix card is ' +
+      '#23908 (`domain:spec`, p1), and its objectui half is objectstack-ai/objectui#12666.',
+    "- **Blocked-by: #23908.** This line is in a comment because the hourly run rewrites this card's body. " +
+      'The card keeps its p1 and `domain:devx`, and closes on the next green hourly run, as its body says.',
+    '- If the next hourly run names a second failing job, that job is new work, and this label comes off.',
+    '',
+  ].join('\n');
+  const DIAGNOSIS = '## Diagnosis: the Console Pin Gate is red because #23784 deleted an export objectui still imports';
+  const redBody = (sweptAt, headSha) =>
+    renderBody({ identity: ci, runUrl: 'https://example.invalid/run/39102557508', headSha, conclusion: 'failure',
+      sweptAt, previousGreen: { run_id: 39098000000, head_sha: '8eccf519de' + '0'.repeat(30) },
+      commits: [{ sha: headSha, title: 'feat(spec)!: a retirement that edits a cli test' }] });
+  const OLD_BODY = redBody('2026-10-16T11:27:26.000Z', 'a35f7a6764' + '0'.repeat(30));
+  const NEW_BODY = redBody('2026-10-18T06:30:24.000Z', '14a8bd2693' + '0'.repeat(30));
+  const notFound = (message) => Object.assign(new Error(message), { status: 404 });
+  // ONE card on the board, its thread, the state of every other issue, and a
+  // log of every call the refresh makes, in order.
+  const blockBoard = ({
+    labels = [...CARD_LABELS, BLOCKED_LABEL], assignees = [], comments = [], states = {}, cardBody = OLD_BODY,
+    commentPages = null, failComments = null, failAdd = null, failRemove = null,
+  } = {}) => {
+    const card = { number: 23885, title: OPEN_CI_TITLE, body: cardBody,
+      labels: labels.map((name) => ({ name })), assignees: assignees.map((login) => ({ login })) };
+    const calls = [];
+    const callbacks = {
+      ownerRepo: OWNER_REPO,
+      listPage: async (n) => (n === 1 ? [card] : []),
+      createIssue: async () => {
+        throw new Error('a refresh case filed a card');
+      },
+      updateIssue: async ({ number, body: b }) => {
+        calls.push(`updateIssue #${number}`);
+        card.body = b;
+      },
+      listComments: async ({ number, page }) => {
+        calls.push(`listComments #${number} p${page}`);
+        if (failComments) throw failComments;
+        if (commentPages) return commentPages(page);
+        return page === 1 ? comments.map((c) => ({ body: c })) : [];
+      },
+      getIssue: async ({ repo, number }) => {
+        calls.push(`getIssue ${repo}#${number}`);
+        const state = states[`${repo}#${number}`];
+        if (!state) throw notFound('Not Found');
+        return { state, closed_at: state === 'closed' ? '2026-10-16T13:20:00Z' : null };
+      },
+      addLabels: async ({ number, labels: add }) => {
+        calls.push(`addLabels #${number} ${add.join(',')}`);
+        if (failAdd) throw failAdd;
+        for (const name of add) if (!card.labels.some((l) => l.name === name)) card.labels.push({ name });
+      },
+      removeLabel: async ({ number, name }) => {
+        calls.push(`removeLabel #${number} ${name}`);
+        if (failRemove) throw failRemove;
+        const at = card.labels.findIndex((l) => l.name === name);
+        if (at === -1) throw notFound('Label does not exist');
+        card.labels.splice(at, 1);
+      },
+    };
+    return {
+      card,
+      calls,
+      callbacks,
+      names: () => card.labels.map((l) => l.name).sort().join(','),
+      refresh: (bodyText = NEW_BODY) => fileOrRefreshCard({ identity: ci, body: bodyText, ...callbacks }),
+    };
+  };
+  const sorted = (list) => [...list].sort().join(',');
+  const labelCalls = (calls) => calls.filter((c) => c.startsWith('addLabels') || c.startsWith('removeLabel'));
+  const untouched = (b, outcome, verdict) => {
+    if (outcome.action !== 'refreshed' || outcome.block !== verdict) {
+      throw new Error(`expected a refresh judged '${verdict}', got ${outcome.action} '${outcome.block}' (${outcome.blockSummary})`);
+    }
+    if (labelCalls(b.calls).length > 0) throw new Error(`'${verdict}' wrote labels: ${labelCalls(b.calls).join(' | ')}`);
+    if (b.names() !== sorted([...CARD_LABELS, BLOCKED_LABEL]) && verdict !== 'not-blocked') {
+      throw new Error(`'${verdict}' changed the label set to ${b.names()}`);
+    }
+  };
+
+  // THE MEASURED SEQUENCE: blocked on #23908 by a comment, #23908 closed, a
+  // NEW red, then the refresh.
+  const measured = blockBoard({ comments: [DIAGNOSIS, TRIAGE_PARK],
+    states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+  const measuredOutcome = await measured.refresh();
+  await check(() => {
+    if (measuredOutcome.action !== 'refreshed' || measuredOutcome.block !== 'expired') {
+      throw new Error(`measured: expected a refresh judged 'expired', got ${measuredOutcome.action} '${measuredOutcome.block}' (${measuredOutcome.blockSummary})`);
+    }
+    if (measured.names() !== sorted([...CARD_LABELS, QUEUE_LABEL])) {
+      throw new Error(`measured: the card should hold its three grade labels and ${QUEUE_LABEL}, holds ${measured.names()}`);
+    }
+  });
+  await check(() => {
+    // The two write verbs and nothing else, in this order, and BEFORE the body.
+    const writes = measured.calls.filter((c) => !c.startsWith('listComments') && !c.startsWith('getIssue'));
+    const want = [`addLabels #23885 ${QUEUE_LABEL}`, `removeLabel #23885 ${BLOCKED_LABEL}`, 'updateIssue #23885'];
+    if (writes.join(' | ') !== want.join(' | ')) throw new Error(`measured: the writes were ${writes.join(' | ')}`);
+  });
+  await check(() => {
+    // The decorated line is read; the four mid-sentence refs are not.
+    const reads = measured.calls.filter((c) => c.startsWith('getIssue'));
+    if (reads.join(' | ') !== 'getIssue objectstack-ai/objectstack#23908') {
+      throw new Error(`measured: expected exactly the #23908 read, got ${reads.join(' | ') || 'none'}`);
+    }
+  });
+  await check(() => {
+    const lines = measured.card.body.split('\n');
+    if (lines[0] !== OPEN_CI_MARKER_LINE) throw new Error('measured: the refreshed body lost its marker line');
+    if (lines.at(-1) !== CARD_FOOTER) throw new Error('measured: the note was not placed above the footer');
+    for (const line of NEW_BODY.split('\n')) {
+      if (!lines.includes(line)) throw new Error(`measured: the refreshed body dropped '${line}'`);
+    }
+    const note = lines.find((l) => l.startsWith('## State:')) ?? '';
+    if (!note.includes(`\`${BLOCKED_LABEL}\` → \`${QUEUE_LABEL}\``) || !measured.card.body.includes('#23908 (closed')) {
+      throw new Error(`measured: the body does not say the card moved, and why:\n${measured.card.body}`);
+    }
+  });
+  await check(() => {
+    // The note never becomes a marker for the reader it reports on.
+    const read = blockerTargetsFor({ number: 23885, body: measured.card.body }, [], OWNER_REPO);
+    if (read.length > 0) throw new Error(`measured: the refreshed body reads as a Blocked-by line (${read.map((r) => r.key).join(', ')})`);
+  });
+  await check(async () => {
+    // The patrol agrees: on the same card H19 reports the block as outlived.
+    // The refresh never releases a card the patrol would not call expired.
+    const before = blockBoard({ comments: [DIAGNOSIS, TRIAGE_PARK], states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    const judged = await judgeCardBlock({ issue: before.card, ownerRepo: OWNER_REPO, ...before.callbacks });
+    if (judged.verdict !== 'expired') throw new Error(`patrol: the judgement alone said '${judged.verdict}'`);
+    if (h19BlockOutlivedBlocker(before.card, judged.resolutions, OWNER_REPO) === null) {
+      throw new Error('patrol: H19 does not call this block outlived, so the refresh released a card the patrol would hold');
+    }
+  });
+  await check(async () => {
+    // The NEXT red finds a `pm:queue` card: nothing read, no label, no note.
+    const at = measured.calls.length;
+    const next = await measured.refresh(NEW_BODY.replace('06:30:24', '07:30:00'));
+    const after = measured.calls.slice(at);
+    if (next.block !== 'not-blocked' || after.join(' | ') !== 'updateIssue #23885') {
+      throw new Error(`measured: the next refresh did more than rewrite the body (${next.block}: ${after.join(' | ')})`);
+    }
+    if (measured.card.body.includes('## State:')) throw new Error('measured: the next refresh repeated the note');
+  });
+
+  // THE CONTROL: the same card, the blocker still OPEN -- the hourly reds are
+  // the blocked failure itself, and the card stays `pm:blocked`.
+  await check(async () => {
+    const b = blockBoard({ comments: [DIAGNOSIS, TRIAGE_PARK], states: { 'objectstack-ai/objectstack#23908': 'open' } });
+    untouched(b, await b.refresh(), 'held');
+    if (b.card.body !== NEW_BODY) throw new Error('control: a held block wrote a note into the body');
+  });
+  // A mid-sentence mention is prose, never a marker.
+  await check(async () => {
+    const b = blockBoard({
+      comments: [DIAGNOSIS, 'Seats park the `Blocked-by: #23908` line in comments, and the fix card is #23908.'],
+      states: { 'objectstack-ai/objectstack#23908': 'closed' },
+    });
+    untouched(b, await b.refresh(), 'no-target');
+    if (b.calls.some((c) => c.startsWith('getIssue'))) throw new Error('mid-sentence: a prose ref was resolved');
+  });
+  // Two targets, one still open: held, and BOTH were read.
+  await check(async () => {
+    const b = blockBoard({
+      comments: [TRIAGE_PARK, 'Blocked-by: #24295'],
+      states: { 'objectstack-ai/objectstack#23908': 'closed', 'objectstack-ai/objectstack#24295': 'open' },
+    });
+    untouched(b, await b.refresh(), 'held');
+    if (b.calls.filter((c) => c.startsWith('getIssue')).length !== 2) throw new Error('two targets: not both were read');
+  });
+  // A card that is not `pm:blocked`: zero reads, zero label writes.
+  await check(async () => {
+    const b = blockBoard({ labels: [...CARD_LABELS, QUEUE_LABEL], comments: [TRIAGE_PARK],
+      states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    untouched(b, await b.refresh(), 'not-blocked');
+    if (b.calls.join(' | ') !== 'updateIssue #23885') throw new Error(`not blocked: the refresh made ${b.calls.join(' | ')}`);
+    if (b.names() !== sorted([...CARD_LABELS, QUEUE_LABEL])) throw new Error(`not blocked: labels became ${b.names()}`);
+  });
+  // An UNREAD target (cross-repo, 404 to this token) is never read as closed.
+  await check(async () => {
+    const b = blockBoard({ comments: ['Blocked-by: objectstack-ai/objectui#12666'] });
+    untouched(b, await b.refresh(), 'held');
+    if (!b.calls.includes('getIssue objectstack-ai/objectui#12666')) throw new Error('unread: the cross-repo target was not asked of its own repo');
+  });
+  // CONTROL: a cross-repo target read CLOSED holds the card too. Closed THERE
+  // is merged upstream, not consumable HERE through the `.objectui-sha` pin, so
+  // the next hourly red is the same failure -- alone, or beside a closed LOCAL
+  // target, and named on the summary row as the reason.
+  await check(async () => {
+    const b = blockBoard({ comments: ['Blocked-by: objectstack-ai/objectui#12666'],
+      states: { 'objectstack-ai/objectui#12666': 'closed' } });
+    const outcome = await b.refresh();
+    untouched(b, outcome, 'held');
+    if (!outcome.blockSummary.includes('objectstack-ai/objectui#12666 closed upstream (not an unlock criterion for this consumer)')) {
+      throw new Error(`cross-repo: the summary does not name the upstream closure as the reason (${outcome.blockSummary})`);
+    }
+    if (b.card.body !== NEW_BODY) throw new Error('cross-repo: a held block wrote a note into the body');
+    const mixed = blockBoard({ comments: [TRIAGE_PARK, 'Blocked-by: objectstack-ai/objectui#12666'],
+      states: { 'objectstack-ai/objectstack#23908': 'closed', 'objectstack-ai/objectui#12666': 'closed' } });
+    untouched(mixed, await mixed.refresh(), 'held');
+  });
+  // An `Unlock-action:` line names an unlock other than closure: held, even
+  // with every target closed and local.
+  await check(async () => {
+    const b = blockBoard({ comments: [TRIAGE_PARK, '- `Unlock-action: re-check #23908 when label pm:queue present`'],
+      states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    const outcome = await b.refresh();
+    untouched(b, outcome, 'held');
+    if (!outcome.blockSummary.includes('Unlock-action: re-check #23908 when label pm:queue present')) {
+      throw new Error(`unlock-action: the summary does not name the line it held on (${outcome.blockSummary})`);
+    }
+    const inBody = blockBoard({ cardBody: `${OLD_BODY}\nUnlock-action: re-check PR #24305`, comments: [TRIAGE_PARK],
+      states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    untouched(inBody, await inBody.refresh(), 'held');
+  });
+  // A thread that cannot be read could hide an OPEN blocker: unjudged.
+  await check(async () => {
+    const b = blockBoard({ failComments: new Error('HTTP 502'), states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    untouched(b, await b.refresh(), 'unjudged');
+    if (b.card.body !== NEW_BODY) throw new Error('unreadable thread: the body was not refreshed as usual');
+  });
+  // ...and so could a thread longer than the read's bound.
+  await check(async () => {
+    const b = blockBoard({ commentPages: () => Array.from({ length: 100 }, () => ({ body: 'Blocked-by: #23908' })),
+      states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    untouched(b, await b.refresh(), 'unjudged');
+  });
+  // Assigned: the release is the holder's act. No label; the body says why.
+  await check(async () => {
+    const b = blockBoard({ assignees: ['sunhaolin'], comments: [TRIAGE_PARK],
+      states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    untouched(b, await b.refresh(), 'assigned');
+    if (!b.card.body.includes('`sunhaolin`') || b.card.body.includes('moved by this refresh')) {
+      throw new Error(`assigned: the body does not name the holder, or claims a move:\n${b.card.body}`);
+    }
+  });
+  // A line a seat wrote into the OLD body is read too (both channels).
+  await check(async () => {
+    const b = blockBoard({ cardBody: `${OLD_BODY}\nBlocked-by: #23908`,
+      states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    if ((await b.refresh()).block !== 'expired') throw new Error('body channel: a body-borne line was not read');
+  });
+  // A card naming only itself names no blocker.
+  await check(async () => {
+    const b = blockBoard({ comments: ['Blocked-by: #23885'], states: { 'objectstack-ai/objectstack#23885': 'open' } });
+    untouched(b, await b.refresh(), 'no-target');
+  });
+  // `pm:blocked` already gone when the remove lands: the wanted state, no throw.
+  await check(async () => {
+    const b = blockBoard({ comments: [TRIAGE_PARK], states: { 'objectstack-ai/objectstack#23908': 'closed' },
+      failRemove: notFound('Label does not exist') });
+    if ((await b.refresh()).block !== 'expired' || !b.card.body.includes('moved by this refresh')) {
+      throw new Error('remove 404: a label already removed by a seat failed the refresh');
+    }
+  });
+  // A label write that FAILS throws before the body is touched.
+  await check(async () => {
+    const b = blockBoard({ comments: [TRIAGE_PARK], states: { 'objectstack-ai/objectstack#23908': 'closed' },
+      failAdd: Object.assign(new Error('Resource not accessible by integration'), { status: 403 }) });
+    if (!(await threwAsync(() => b.refresh()))) throw new Error('add failure: a failed label write did not throw');
+    if (b.calls.includes('updateIssue #23885') || b.card.body !== OLD_BODY) {
+      throw new Error('add failure: the body said the card moved, after a label write that failed');
+    }
+  });
+  // Wiring: a missing callback or repo refuses before anything is read.
+  await check(async () => {
+    const b = blockBoard();
+    const { listComments: _dropped, ...partial } = b.callbacks;
+    let message = '';
+    try {
+      await fileOrRefreshCard({ identity: ci, body: NEW_BODY, ...partial });
+    } catch (error) {
+      message = error.message;
+    }
+    if (!message.includes('listComments') || b.calls.length > 0) {
+      throw new Error(`wiring: a missing listComments was not refused by name before any call (${message || 'accepted'})`);
+    }
+    if (!(await threwAsync(() => fileOrRefreshCard({ identity: ci, body: NEW_BODY, ...b.callbacks, ownerRepo: undefined })))) {
+      throw new Error('wiring: a missing ownerRepo was accepted');
     }
   });
 
