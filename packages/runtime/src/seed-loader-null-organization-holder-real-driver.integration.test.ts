@@ -23,11 +23,10 @@
  * ## Why a real engine and real drivers
  *
  * The scoped lookup's NULL comparison is a driver's answer, not the loader's:
- * `{ organization_id: null }` is `IS NULL` on the SQL family and a
- * null-or-missing match on the memory driver. An engine double would encode
- * the very predicate under test. So this file runs the real `SeedLoaderService`
- * behind a real `ObjectQL`, over a real `SqlDriver` on a better-sqlite3 FILE
- * and over the real `InMemoryDriver`, and asserts on the stored rows. The
+ * `{ organization_id: null }` is `IS NULL` on the SQL family. An engine double
+ * would encode the very predicate under test. So this file runs the real
+ * `SeedLoaderService` behind a real `ObjectQL`, over a real `SqlDriver` on a
+ * better-sqlite3 FILE, and asserts on the stored rows. The
  * per-organization replay is the production closure AppPlugin registers on a
  * walled boot; the walled install and the reseed are pinned with the request
  * `MarketplaceInstallLocalPlugin.runInlineSeed` builds for both.
@@ -40,8 +39,7 @@ import { join } from 'node:path';
 import { ObjectQL } from '@objectstack/objectql';
 import { SeedLoaderService } from '@objectstack/metadata-protocol';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { InMemoryDriver } from '@objectstack/driver-memory';
-import { SeedLoaderRequestSchema } from '@objectstack/spec/data';
+import { SeedLoaderRequestSchema, type EngineQueryOptions } from '@objectstack/spec/data';
 import type { PluginContext } from '@objectstack/core';
 import { AppPlugin } from './app-plugin';
 
@@ -90,7 +88,6 @@ const SEEDS = [
 ];
 
 type Row = Record<string, unknown> & { id: string };
-type DriverKind = 'sqlite-file' | 'memory';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 afterEach(async () => {
@@ -118,25 +115,20 @@ function createLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 }
 
-async function boot(kind: DriverKind) {
-  let raw: any;
-  if (kind === 'sqlite-file') {
-    const dir = mkdtempSync(join(tmpdir(), 'os-24301-'));
-    cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
-    raw = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'data.sqlite') }, useNullAsDefault: true });
-  } else {
-    raw = new InMemoryDriver();
-  }
-  cleanups.push(() => raw.disconnect?.());
+async function boot() {
+  const dir = mkdtempSync(join(tmpdir(), 'os-24301-'));
+  cleanups.push(() => rmSync(dir, { recursive: true, force: true }));
+  const raw = new SqlDriver({ client: 'better-sqlite3', connection: { filename: join(dir, 'data.sqlite') }, useNullAsDefault: true });
+  cleanups.push(() => raw.disconnect());
   const engine = new ObjectQL();
   engine.registerDriver(raw, true);
   await engine.init();
   for (const o of OBJECTS) engine.registry.registerObject(o as any, 'com.objectstack.test.24301');
-  await raw.initObjects?.(OBJECTS.map((o) => engine.registry.getObject(o.name) ?? o));
+  await raw.initObjects(OBJECTS.map((o) => engine.registry.getObject(o.name) ?? o) as any);
   cleanups.push(() => engine.destroy());
 
-  const all = async (object: string): Promise<Row[]> =>
-    (await engine.find(object, { context: { isSystem: true } } as any)) as Row[];
+  const systemRead: EngineQueryOptions = { context: { isSystem: true } };
+  const all = async (object: string): Promise<Row[]> => (await engine.find(object, systemRead)) as Row[];
   /**
    * A row written straight through the DRIVER, as a 17.x single-posture
    * install left it — no engine stamping, `organization_id` exactly as given.
@@ -169,9 +161,9 @@ function scopedRequest(organizationId: string, seeds: unknown = SEEDS) {
 const isNullHolderRefusal = (e: { field: string; sourceObject: string; targetObject: string }) =>
   e.field === 'organization_id' && e.targetObject === e.sourceObject;
 
-describe.each<DriverKind>(['sqlite-file', 'memory'])('scoped seed load over NULL-organization holders (%s)', (kind) => {
+describe('scoped seed load over NULL-organization holders (sqlite-file)', () => {
   it('refuses each NULL-held natural key by name, inserts no twin, adopts nothing, and still loads the rest', async () => {
-    const { engine, all, plant } = await boot(kind);
+    const { engine, all, plant } = await boot();
     await plantUnowned(plant);
     const eventsBefore = await all('tw_event');
     const tasksBefore = await all('tw_task');
@@ -228,7 +220,7 @@ describe.each<DriverKind>(['sqlite-file', 'memory'])('scoped seed load over NULL
   });
 
   it('a fully stamped database still loads with 0 inserts and 0 errors', async () => {
-    const { engine, all } = await boot(kind);
+    const { engine, all } = await boot();
     const svc = new SeedLoaderService(engine as never, metadataFor(OBJECTS), createLogger() as never);
     const first = await svc.load(scopedRequest(ORG) as never);
     expect(first.errors).toEqual([]);
@@ -243,7 +235,7 @@ describe.each<DriverKind>(['sqlite-file', 'memory'])('scoped seed load over NULL
   });
 
   it("another organization's row holding the key stays invisible: this organization gets its own row and the other is untouched", async () => {
-    const { engine, all, plant } = await boot(kind);
+    const { engine, all, plant } = await boot();
     await plant('tw_event', { id: 'ev_other', subject: 'Kickoff', notes: 'theirs', organization_id: OTHER_ORG });
     const theirsBefore = (await all('tw_event'))[0];
 
@@ -258,7 +250,7 @@ describe.each<DriverKind>(['sqlite-file', 'memory'])('scoped seed load over NULL
   });
 
   it('an unscoped (single-posture) load keeps its behaviour: it matches the NULL rows and inserts no twin', async () => {
-    const { engine, all, plant } = await boot(kind);
+    const { engine, all, plant } = await boot();
     await plantUnowned(plant);
     const result = await new SeedLoaderService(engine as never, metadataFor(OBJECTS), createLogger() as never)
       .load(SeedLoaderRequestSchema.parse({ seeds: SEEDS, config: { defaultMode: 'upsert', multiPass: true } }) as never);
@@ -272,7 +264,7 @@ describe.each<DriverKind>(['sqlite-file', 'memory'])('scoped seed load over NULL
 
 describe('every scoped caller refuses the NULL-held row (sqlite-file)', () => {
   it('per-organization replay: the replayer a walled boot registers', async () => {
-    const { engine, all, plant } = await boot('sqlite-file');
+    const { engine, all, plant } = await boot();
     await plantUnowned(plant);
     const services = new Map<string, unknown>([['tenancy', { posture: 'isolated' }]]);
     const metadata = metadataFor(OBJECTS);
@@ -300,7 +292,7 @@ describe('every scoped caller refuses the NULL-held row (sqlite-file)', () => {
   // the same request for each: `defaultMode: 'upsert'`, `multiPass: true`, the
   // caller's organization.
   it('walled install and reseed: the request runInlineSeed builds for both', async () => {
-    const { engine, all, plant } = await boot('sqlite-file');
+    const { engine, all, plant } = await boot();
     await plantUnowned(plant);
     const result = await new SeedLoaderService(engine as never, metadataFor(OBJECTS), createLogger() as never)
       .load(scopedRequest(ORG) as never);

@@ -3224,10 +3224,11 @@ export class SeedLoaderService implements ISeedLoaderService {
         }
       }
       if (organizationId && unownedHolders) {
-        const unowned = await this.engine.find(objectName, {
+        const unownedRead: EngineQueryOptions = {
           where: { organization_id: null },
           context: { isSystem: true },
-        } as any);
+        };
+        const unowned = await this.engine.find(objectName, unownedRead);
         for (const record of unowned || []) {
           if (record?.organization_id != null) continue;
           const key = this.externalIdKey(record, externalId);
