@@ -1276,34 +1276,37 @@ describe('ApprovalService (node era)', () => {
   // through this get. So the get serves the step label under that name too,
   // with exactly `step_label`'s value, while `current_step` stays the raw id.
   describe('the get serves the step label as current_step_label, beside step_label', () => {
+    /** The id of the request an ordinary open answers (never an auto-outcome here). */
+    const openId = async (input: ReturnType<typeof openInput>): Promise<string> =>
+      ((await svc.openNodeRequest(input, CTX)) as { id: string }).id;
     const stored = (id: string) => engine._tables['sys_approval_request'].find((r) => r.id === id)!;
     const stepFields = (row: any) => ({
-      current_step_label: row.current_step_label,
-      step_label: row.step_label,
-      current_step: row.current_step,
+      current_step_label: row?.current_step_label,
+      step_label: row?.step_label,
+      current_step: row?.current_step,
     });
 
     it('a labelled row serves its stored label', async () => {
-      const req = await svc.openNodeRequest(openInput(['u9'], { nodeLabel: 'Manager Review' }), CTX);
-      expect(stored(req.id).current_step_label).toBe('Manager Review');
-      expect(stepFields(await svc.getRequest(req.id, SYS))).toEqual({
+      const id = await openId(openInput(['u9'], { nodeLabel: 'Manager Review' }));
+      expect(stored(id).current_step_label).toBe('Manager Review');
+      expect(stepFields(await svc.getRequest(id, SYS))).toEqual({
         current_step_label: 'Manager Review', step_label: 'Manager Review', current_step: 'approve_step',
       });
       // The list door builds its rows the same way.
       const [listed] = await svc.listRequests({ status: 'pending' }, SYS);
-      expect(stepFields(listed)).toEqual(stepFields(await svc.getRequest(req.id, SYS)));
+      expect(stepFields(listed)).toEqual(stepFields(await svc.getRequest(id, SYS)));
     });
 
     it('a row opened before the column serves the snapshot label, else the humanized machine id', async () => {
-      const snap = await svc.openNodeRequest(openInput(['u9'], { nodeLabel: 'Manager Review' }), CTX);
-      const bare = await svc.openNodeRequest(openInput(['u9'], { recordId: 'opp2' }), CTX);
+      const snap = await openId(openInput(['u9'], { nodeLabel: 'Manager Review' }));
+      const bare = await openId(openInput(['u9'], { recordId: 'opp2' }));
       // No stored label: the row the boot backfill has not reached.
-      stored(snap.id).current_step_label = null;
-      stored(bare.id).current_step_label = null;
-      expect(stepFields(await svc.getRequest(snap.id, SYS))).toEqual({
+      stored(snap).current_step_label = null;
+      stored(bare).current_step_label = null;
+      expect(stepFields(await svc.getRequest(snap, SYS))).toEqual({
         current_step_label: 'Manager Review', step_label: 'Manager Review', current_step: 'approve_step',
       });
-      expect(stepFields(await svc.getRequest(bare.id, SYS))).toEqual({
+      expect(stepFields(await svc.getRequest(bare, SYS))).toEqual({
         current_step_label: 'Approve Step', step_label: 'Approve Step', current_step: 'approve_step',
       });
     });
