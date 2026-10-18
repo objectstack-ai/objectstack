@@ -93,11 +93,27 @@ describe('[ADR-0131 D3/D9] the sys_setting_audit writer stamps the entry\'s orga
 
   it('writes organization_id when the entry names one, and no organization_id when it does not', async () => {
     const eng = engine();
-    const writer = buildSettingAuditWriter(eng as any, { error: (m) => { throw new Error(m); } });
+    const writer = buildSettingAuditWriter(eng as any, { error: (m) => { throw new Error(m); }, warn: (m) => { throw new Error(m); } });
     await writer.write({ ...entry, organizationId: 'org-1' });
     await writer.write({ ...entry, scope: 'global' });
 
     expect(eng.inserted[0]).toMatchObject({ key: 'token', organization_id: 'org-1' });
     expect('organization_id' in eng.inserted[1]).toBe(false);
+  });
+
+  it('reports a lost history row at error once with the consequence, and on a reduced sink through warn', async () => {
+    const refusing = { async findOne() { return { id: 'usr-1' }; }, async insert() { throw new Error('refused'); } };
+    const errors: string[] = [];
+    const full = buildSettingAuditWriter(refusing as any, { error: (m) => errors.push(m), warn: () => { throw new Error('warn used'); } });
+    await full.write(entry);
+    await full.write(entry);
+    expect(errors).toHaveLength(2);
+    expect(errors[0]).toContain('NOT persisted');
+    expect(errors[1]).not.toContain('NOT persisted');
+
+    const warned: string[] = [];
+    await buildSettingAuditWriter(refusing as any, { warn: (m) => warned.push(m) }).write(entry);
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain('refused');
   });
 });

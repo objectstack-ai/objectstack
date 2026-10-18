@@ -568,9 +568,15 @@ export class SettingsServicePlugin implements Plugin {
  */
 export function buildSettingAuditWriter(
   engine: IDataEngine,
-  logger?: { error?: (message: string) => void },
+  logger?: { error?: (message: string) => void; warn: (message: string) => void },
 ): SettingsAuditWriter {
   const eng: any = engine;
+  // `error` when the host's sink carries it; `warn` is the declared fallback
+  // channel for a reduced sink, so a lost row is never reported to nobody.
+  const report = (message: string): void => {
+    if (logger?.error) logger.error(message);
+    else logger?.warn(message);
+  };
   // The consequence and the fix ride the first failure only (AGENTS.md,
   // degradation log levels); every later lost row is still named, briefly.
   let reportedDurabilityLoss = false;
@@ -617,10 +623,10 @@ export function buildSettingAuditWriter(
         // history row it claims is gone — so `error`, never `warn`.
         const cause = 'SettingsServicePlugin: setting-audit write failed: ' + (err?.message ?? err);
         if (reportedDurabilityLoss) {
-          logger?.error?.(cause);
+          report(cause);
         } else {
           reportedDurabilityLoss = true;
-          logger?.error?.(
+          report(
             cause +
               ' — settings writes keep succeeding, but their sys_setting_audit history rows are NOT persisted ' +
               'and nothing retries them. Fix the cause named here (the actor must be a sys_user; the row must ' +
