@@ -185,7 +185,7 @@ describe('[#24348] the import doors honour a control opt-out only for the system
   let ctx: Awaited<ReturnType<typeof boot>>;
   beforeEach(async () => { ctx = await boot(); });
 
-  const jobRows = () => ctx.engine.find('sys_import_job', { context: { isSystem: true } } as any);
+  const jobRows = () => ctx.engine.find('sys_import_job', { context: { isSystem: true } });
 
   describe('a signed-in caller who is not the system principal', () => {
     for (const kind of ['sync', 'jobs'] as const) {
