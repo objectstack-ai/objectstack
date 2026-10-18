@@ -56,8 +56,6 @@
     "security/DefaultRowScope:name",
     "security/DefaultRowScope:operation",
     "security/DefaultRowScope:positions",
-    "security/DefaultRowScope:priority [RETIRED]",
-    "security/DefaultRowScope:tags [RETIRED]",
     "security/DefaultRowScope:using",
     "security/EffectiveObjectPermission:allowCreate",
     "security/EffectiveObjectPermission:allowDelete",
