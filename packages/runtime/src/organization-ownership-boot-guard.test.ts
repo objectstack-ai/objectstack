@@ -165,6 +165,15 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5)', () => {
     expect(err.message).toMatch(/its marker \(sys_migration 'adr-0131-organization-ownership'\) could not be read/);
   });
 
+  it('a boot with no storage — no driver serves the ledger, and the engine refuses its read — has no database to judge, and boots', async () => {
+    const storageless = {
+      ...engine(),
+      getDriverForObject: () => undefined,
+      findOne: async () => { throw new Error("[ObjectQL] No driver available for object 'sys_migration'"); },
+    };
+    await expect(assertOrganizationOwnershipMigrated(storageless)).resolves.toBeUndefined();
+  });
+
   it('a migrated database with no marker (no ceremony ran on it) boots; so does a composition with no ledger object', async () => {
     migrated();
     await expect(assertOrganizationOwnershipMigrated(engine())).resolves.toBeUndefined();

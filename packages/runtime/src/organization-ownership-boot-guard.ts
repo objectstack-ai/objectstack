@@ -290,13 +290,20 @@ export class OrganizationOwnershipBootGuardPlugin implements Plugin {
 }
 
 /**
- * The ceremony's marker: `absent` (no ledger on this composition, or no row),
- * `verified`, `unverified`, or `unreadable` (the read threw).
+ * The ceremony's marker: `absent` (no ledger on this composition, no store
+ * serving it, or no row), `verified`, `unverified`, or `unreadable` (a store
+ * serves the ledger and its read threw).
  */
 async function readMarker(engine: GuardEngine): Promise<'absent' | 'verified' | 'unverified' | 'unreadable'> {
   if (typeof engine.findOne !== 'function') return 'absent';
   // A composition that registers no ledger object has no marker to hold.
   if (typeof engine.getObject === 'function' && !engine.getObject(DATA_MIGRATION_FLAG_OBJECT)) return 'absent';
+  // A boot with no storage (no driver serves the ledger — `os serve` with no
+  // OS_DATABASE_URL and no driver plugin) has no database to judge, exactly as
+  // the column probe skips an object no driver serves: nothing was ever
+  // migrated there. Only a store that serves the ledger and fails its read is
+  // `unreadable`.
+  if (typeof engine.getDriverForObject === 'function' && !engine.getDriverForObject(DATA_MIGRATION_FLAG_OBJECT)) return 'absent';
   try {
     const row = (await engine.findOne(DATA_MIGRATION_FLAG_OBJECT, {
       where: { id: ORGANIZATION_OWNERSHIP_MIGRATION_ID },
