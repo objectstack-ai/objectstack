@@ -137,7 +137,15 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  * mirrors while a release's own boot still seeded them
  * (`DECLARED_SHARING_RULE_SEEDER_RUNS`, the inventory; `false` since the
  * seeder retired) — is reported as advisory: named and counted, its rows still
- * NULL, never deleted, and not a discrepancy. Every other remaining row is one.
+ * NULL, never deleted, and not a discrepancy. Every other remaining row is one,
+ * and so is every unattributable row (ruling C on the C8 decision: fate 4's
+ * reported rows, and a fate-3 row no anchor names under a wall): named per
+ * table with its count and the remedy — assign it an organization, or delete
+ * it by hand — and held against certification until it is gone, so a verified
+ * marker means zero NULL rows on every table. ⛔ The ceremony neither guesses
+ * its owner nor deletes it (D10 fate 4). The one exception is a fate-4 table
+ * whose column is not the tenancy anchor (`InventoryEntry.notNullExempt`): its
+ * organization-less rows are legitimate, reported, and advisory.
  *
  * ## Idempotent and resumable
  *
@@ -246,11 +254,16 @@ export interface MetadataLockPort {
 /**
  * [ADR-0131 C3 stage 9] The sharing rules the deployment's packages DECLARE,
  * by name — the registry the plugin's enforcement reads them from (the
- * command: the booted engine's registry). A declared-rule mirror is deleted
- * only once its name resolves here.
+ * command: the booted engine's registry) — each with whether that enforcement
+ * SERVES it: `refused` is `null` when plugin-sharing's own translation
+ * (`translateDeclaredSharingRule`) accepts the declaration, else its reason in
+ * the operator's terms. A declared-rule mirror's grants are renamed only onto a
+ * served name: a grant naming a refused one would be revoked by the next
+ * boot's orphan sweep, so such a mirror blocks instead, naming the rule and the
+ * reason.
  */
 export interface DeclaredSharingRulesPort {
-  names(): Promise<readonly string[]>;
+  rules(): Promise<ReadonlyArray<{ name: string; refused: string | null }>>;
 }
 
 /** The `email_template` item the registry serves for one `(name, locale)` bundle member. */
@@ -468,6 +481,12 @@ export interface TableOutcome {
   /** Rows still NULL and listed by id — reported, never guessed. */
   unattributable: UnattributableRow[];
   /**
+   * Present when the {@link unattributable} rows hold certification (every
+   * table but a `notNullExempt` one): their count, which `remaining` includes,
+   * and the remedy in the operator's terms ({@link UNATTRIBUTABLE_REMEDY}).
+   */
+  held?: { rows: number; remedy: string };
+  /**
    * Rows that leave this table by a step this ceremony has not yet performed
    * (a move, or a mirror its own stage removes): each counts as remaining
    * until it is gone, and its label is the remedy. One that carries `advisory`
@@ -478,7 +497,10 @@ export interface TableOutcome {
   departures: Array<{ id: string; label: string; as: 'mirror-deletion' | 'moved'; rows: number; advisory?: string }>;
   /** Templates: each `(name, locale)` whose rows still differ, with every candidate row and its organization. */
   templateConflicts?: TemplateConflict[];
-  /** Post-check: what is left for this table's fate, `0` when the fate is done; advisory departures are not in it. */
+  /**
+   * Post-check: what is left for this table's fate, `0` when the fate is done —
+   * its {@link held} unattributable rows included; advisory departures are not in it.
+   */
   remaining: number;
   notNull: TablePlan['notNull'];
 }
@@ -506,12 +528,16 @@ export interface OrganizationOwnershipApplyReport {
   tables: TableOutcome[];
   /** Every step finished. */
   complete: boolean;
-  /** Blockers (an unfinished ceremony) or post-check discrepancies (a finished one). Zero is the verdict. */
+  /**
+   * Blockers (an unfinished ceremony) or post-check discrepancies (a finished
+   * one), unattributable rows among them (`TableOutcome.held`). Zero is the verdict.
+   */
   blocking: number;
   /**
-   * Rows reported, never guessed and never held against the verdict:
-   * unattributable rows, and the rows of an advisory departure, held for the
-   * release that can remove them (`TableOutcome.departures`).
+   * Rows reported, never guessed and never held against the verdict: the rows
+   * of an advisory departure, held for the release that can remove them
+   * (`TableOutcome.departures`), and the unattributable rows of a table whose
+   * column is not the tenancy anchor (`InventoryEntry.notNullExempt`).
    */
   advisory: number;
 }
@@ -2542,12 +2568,15 @@ async function countRuleGrants(run: Run, tables: readonly string[], sourceId: st
  * copies nothing needs. In the ruled order:
  *
  *  1. Every grant naming a mirror must be able to name its rule instead: the
- *     mirror's name must resolve to a rule a package declares (the registry,
+ *     mirror's name must resolve to a rule a package declares and the plugin
+ *     serves (the registry through the plugin's own translation,
  *     {@link DeclaredSharingRulesPort}). A mirror whose rule no package
- *     declares any more, and that grants still name, blocks — named, with its
+ *     declares any more, or whose declaration the plugin refuses to serve, and
+ *     that grants still name, blocks — named, with the refusal's reason and the
  *     remedy, nothing written: deleting it would withdraw that access on the
- *     operator's behalf. One no grant names is a copy of nothing that grants
- *     nothing, and goes like every fate-2 mirror.
+ *     operator's behalf, and renaming its grants onto a refused rule would have
+ *     the next boot's sweep withdraw it. One no grant names is a copy of
+ *     nothing that grants nothing, and goes like every fate-2 mirror.
  *  2. Item 5 (c): every grant naming a mirror row by id
  *     (`sys_record_share.source_id`, `source = 'rule'`) is renamed to the
  *     rule's NAME — the id a declared rule's grants carry — BEFORE any mirror
@@ -2573,7 +2602,12 @@ async function runDeclaredRuleMirrorDeletion(run: Run): Promise<StepReport> {
         'command against the deployment\'s own composition, then re-run.',
     ]);
   }
-  const declared = new Set(await run.opts.declaredSharingRules.names());
+  const declaredRules = await run.opts.declaredSharingRules.rules();
+  const served = new Set(declaredRules.filter((r) => r.refused === null).map((r) => r.name));
+  const refusedFor = new Map<string, string>();
+  for (const rule of declaredRules) {
+    if (rule.refused !== null && !served.has(rule.name) && !refusedFor.has(rule.name)) refusedFor.set(rule.name, rule.refused);
+  }
 
   const shares = run.plan.tables.find((t) => t.object === RECORD_SHARES);
   const grantTables: string[] = [];
@@ -2583,16 +2617,34 @@ async function runDeclaredRuleMirrorDeletion(run: Run): Promise<StepReport> {
   }
   const grantsOf = new Map<string, number>();
   for (const mirror of mirrors) grantsOf.set(mirror.id, await countRuleGrants(run, grantTables, mirror.id));
-  const unnameable = mirrors.filter((m) => !declared.has(m.name) && grantsOf.get(m.id)! > 0);
+  const unnameable = mirrors.filter((m) => !served.has(m.name) && grantsOf.get(m.id)! > 0);
   if (unnameable.length > 0) {
-    const names = [...new Set(unnameable.map((m) => m.name || '(no name)'))].sort();
-    return blocked([
-      `${unnameable.length} declared-rule mirror(s) on ${SHARING_RULES} name a sharing rule no installed package ` +
-        `declares (${names.join(', ')}; rows ${unnameable.map((m) => m.id).sort().join(', ')}), and ${RECORD_SHARES} ` +
-        'grants still name them. Their grants cannot be renamed to a rule the registry serves, and deleting the ' +
-        'mirrors would withdraw that access, so they stay and nothing was written. Declare the rule in its package ' +
-        `again, or delete each row and the ${RECORD_SHARES} rows whose source_id names it, then re-run.`,
-    ]);
+    const rowsOf = (list: readonly DeclaredRuleMirror[]): string => list.map((m) => m.id).sort().join(', ');
+    const undeclared = unnameable.filter((m) => !refusedFor.has(m.name));
+    const refused = unnameable.filter((m) => refusedFor.has(m.name));
+    const blockers: string[] = [];
+    if (undeclared.length > 0) {
+      const names = [...new Set(undeclared.map((m) => m.name || '(no name)'))].sort();
+      blockers.push(
+        `${undeclared.length} declared-rule mirror(s) on ${SHARING_RULES} name a sharing rule no installed package ` +
+          `declares (${names.join(', ')}; rows ${rowsOf(undeclared)}), and ${RECORD_SHARES} ` +
+          'grants still name them. Their grants cannot be renamed to a rule the registry serves, and deleting the ' +
+          'mirrors would withdraw that access, so they stay and nothing was written. Declare the rule in its package ' +
+          `again, or delete each row and the ${RECORD_SHARES} rows whose source_id names it, then re-run.`,
+      );
+    }
+    for (const name of [...new Set(refused.map((m) => m.name))].sort()) {
+      const of = refused.filter((m) => m.name === name);
+      blockers.push(
+        `${of.length} declared-rule mirror(s) on ${SHARING_RULES} name the sharing rule ${name} (rows ${rowsOf(of)}), ` +
+          `which its package declares but plugin-sharing does not serve: ${refusedFor.get(name)}. ${RECORD_SHARES} ` +
+          'grants still name them; renamed onto the rule, the next boot\'s sweep would withdraw them as grants of a ' +
+          'rule nobody serves, and deleting the mirrors would withdraw them now, so they stay and nothing was ' +
+          `written. Correct the rule's declaration in its package so it is served, or delete each row and the ` +
+          `${RECORD_SHARES} rows whose source_id names it, then re-run.`,
+      );
+    }
+    return blocked(blockers);
   }
 
   // (c) — the grants first.
@@ -2795,14 +2847,32 @@ const departingRows = (table: TablePlan): number => table.departures.reduce((n, 
 /** NULL rows of the table's advisory departures: reported, never held against the verdict. */
 const advisoryRows = (table: TablePlan): number => table.departures.reduce((n, d) => n + (d.advisory ? d.rows : 0), 0);
 
+/**
+ * What the operator does about a row whose owner cannot be derived (ADR-0131
+ * D10 fate 4; ruling C on the C8 decision). The ceremony does neither itself.
+ */
+export const UNATTRIBUTABLE_REMEDY =
+  'assign each row its organization (write its organization_id, or repair the anchor its reason names), or delete ' +
+  'it by hand, then re-run --apply; the ceremony never guesses an owner and never deletes such a row, and the ' +
+  'database does not certify while one stays NULL';
+
+/**
+ * Unattributable rows the post-check holds against certification: every one,
+ * but on a fate-4 table whose column is not the tenancy anchor
+ * (`InventoryEntry.notNullExempt`), where an organization-less row is a
+ * legitimate one and is reported only.
+ */
+const heldUnattributable = (run: Run, table: TablePlan): number =>
+  mirrorEntry(run, table.object)?.notNullExempt ? 0 : table.unattributable.length;
+
 /** What a table still owes its fate, read from the post-check plan. */
 async function remainingFor(run: Run, table: TablePlan, complete: boolean): Promise<number> {
   if (table.physical !== 'present' || !table.rows) return 0;
   switch (table.fate) {
     case 'attribution':
-      return Number(table.fateCounts.rowsToAttribute ?? 0) + departingRows(table);
+      return Number(table.fateCounts.rowsToAttribute ?? 0) + departingRows(table) + heldUnattributable(run, table);
     case 'report':
-      return departingRows(table);
+      return departingRows(table) + heldUnattributable(run, table);
     case 'mirror-deletion': {
       const entry = mirrorEntry(run, table.object);
       if (!entry) return 0;
@@ -3075,6 +3145,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     // (`ref.notNull`) already says so; only a step not yet run overrides it.
     const pending = departures.filter((d) => !d.advisory);
     const waiting = pending.reduce((n, d) => n + d.rows, 0);
+    const held = a ? heldUnattributable(run, a) : 0;
     tables.push({
       object,
       fate: ref.fate,
@@ -3086,6 +3157,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       movedIn: run.movedIn.get(object) ?? 0,
       columnDropped: b?.organizationColumn === 'present' && a?.organizationColumn === 'absent',
       unattributable: a?.unattributable ?? [],
+      ...(held > 0 ? { held: { rows: held, remedy: UNATTRIBUTABLE_REMEDY } } : {}),
       departures,
       ...(a?.templateConflicts?.length ? { templateConflicts: a.templateConflicts } : {}),
       remaining,
@@ -3094,7 +3166,7 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
         : ref.notNull,
     });
   }
-  const advisory = after.summary.unattributableRows + after.tables.reduce((n, t) => n + advisoryRows(t), 0);
+  const advisory = after.tables.reduce((n, t) => n + advisoryRows(t) + t.unattributable.length - heldUnattributable(run, t), 0);
   const blocking = complete ? discrepancies : steps.reduce((n, s) => n + s.blockers.length, 0) || 1;
   await opts.ledger.write(checkpoint, { complete, blocking, advisory });
   return {
