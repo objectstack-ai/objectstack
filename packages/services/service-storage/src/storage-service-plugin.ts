@@ -1248,12 +1248,15 @@ function resolveGateAuthService(registry: StorageGateRegistry): RequestAuthServi
  * KEY's answer, from the shared key-admission seam (`resolveApiKeyAdmission`)
  * with the auth service's per-user posture computation: a key whose owner
  * holds an `account`-scope posture answers that posture, and the door refuses
- * it with the session's `403`; an admitted key answers no posture, and the
- * session is NOT read for it — a cookie beside a key never answers for the
- * key. A key the seam does not recognise (`none`) leaves the session's own
- * gate to answer, exactly as the identity resolution falls through to the
- * session for it. Asked with the door's tenancy posture, so a key the posture
- * refuses is refused before its owner is asked, as on every other face.
+ * it with the session's `403`. Asked with the door's tenancy posture, so a key
+ * the posture refuses is refused before its owner is asked, as on every other
+ * face.
+ *
+ * [#24366] The family gate and the route judge the same credential: the gate
+ * judges every credential a route of this family can serve, so a session the
+ * policy holds is refused on every route whatever else the request carries.
+ * One door fronts every route, so the seam's answer about a key never stands
+ * in for the session's own posture.
  */
 function buildAuthGateSessionReader(
   registry: StorageGateRegistry,
@@ -1284,12 +1287,15 @@ function buildAuthGateSessionReader(
         await resolveAdmissionTenancyPosture(registry),
         userAuthGateSourceOf(auth),
         // [#23367] The API-key lifecycle policy, from the same service. A key
-        // its own lifecycle refuses (`lifecycle`) carries no posture and is
-        // left to the identity resolution below, which fails it closed.
+        // its own lifecycle refuses (`lifecycle`) carries no posture. The
+        // parent-governed download, whose composition reads keys, refuses it
+        // with its own code; the session-serving routes (uploads, the
+        // unclaimed-file download) never read a key and answer by the session
+        // alone; the raw-transfer routes answer by their capability token.
         apiKeyLifecyclePolicySourceOf(auth),
       );
       if (admission.outcome === 'held') return { authGate: admission.gate };
-      if (admission.outcome !== 'none') return undefined;
+      // [#24366] Every other answer falls through to the session's own gate.
     }
     let session: SessionRead | null;
     try {
@@ -1468,11 +1474,12 @@ function buildFileReadAuthorizer(
       //    behind the family's door (`mountFamilyRoute` in
       //    `storage-routes.ts`), whose gate reader
       //    (`buildAuthGateSessionReader`) has already refused a held session
-      //    or a held owner's key on this request with the posture's `403`, and
-      //    both are bound by `composeStorageRoutes` from the same `auth`
-      //    service. The context the door hands on stays truthful (a held
-      //    principal carries the `authGate` decided off the read that admitted
-      //    it) without a second read: `'reread-when-active'` would read the
+      //    or a held owner's key on this request with the posture's `403`,
+      //    whatever else the request carries (#24366), and both are bound by
+      //    `composeStorageRoutes` from the same `auth` service. The context
+      //    the door hands on stays truthful (a held principal carries the
+      //    `authGate` decided off the read that admitted it) without a second
+      //    read: `'reread-when-active'` would read the
       //    session a third time on this request and add an outage arm no
       //    caller of this door ever had.
       //  - `credentials: 'api-key-and-session'`: the headers are the real

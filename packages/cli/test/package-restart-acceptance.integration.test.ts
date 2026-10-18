@@ -62,12 +62,11 @@ import { join } from 'node:path';
 import {
   CLI,
   E2E_SECRET_KEY,
+  KERNEL_ASSIGNED_PORT,
   TSX,
   childEnv,
-  portContentionError,
-  portDriftError,
   probeThroughChild,
-  randomPort,
+  readKernelAssignedPort,
 } from './helpers/serve-process.js';
 
 /** The banner's tail — every row above it has printed. */
@@ -99,6 +98,8 @@ export default {
 
 interface LiveServe {
   child: ChildProcessWithoutNullStreams;
+  /** The port the child bound: kernel-assigned, read back off its own banner (#24342). */
+  port: number;
   /** Everything the child has printed so far, both streams. */
   output: () => string;
 }
@@ -107,9 +108,9 @@ const children: ChildProcessWithoutNullStreams[] = [];
 const dirs: string[] = [];
 
 /** Boot `os serve --dev` on `db` and keep it running until {@link stop}. */
-function bootServe(dir: string, port: string, db: string): Promise<LiveServe> {
+function bootServe(dir: string, db: string): Promise<LiveServe> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', port, '--dev'], {
+    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, never a bare `...process.env` — see its header.
@@ -126,12 +127,12 @@ function bootServe(dir: string, port: string, db: string): Promise<LiveServe> {
     const what = `os serve --dev on ${db}`;
     let out = '';
     let settled = false;
-    const settle = (err: Error | null) => {
+    const settle = (verdict: Error | number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (err) rejectBoot(err);
-      else resolveBoot({ child, output: () => out });
+      if (verdict instanceof Error) rejectBoot(verdict);
+      else resolveBoot({ child, port: verdict, output: () => out });
     };
     const timer = setTimeout(
       () => settle(new Error(`${what} never printed ${READY}\n--- output ---\n${out.slice(-4000)}`)),
@@ -140,15 +141,12 @@ function bootServe(dir: string, port: string, db: string): Promise<LiveServe> {
     const onData = (d: unknown) => {
       out += String(d);
       // The child is the authority on the port it bound.
-      if (READY.test(out)) settle(portDriftError(out, what, port));
+      if (READY.test(out)) settle(readKernelAssignedPort(out, what));
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
     child.on('exit', (code) =>
-      settle(
-        portContentionError(out, what, port)
-          ?? new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`),
-      ),
+      settle(new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
     );
   });
 }
@@ -300,11 +298,10 @@ describe('#17676 ruling A\' item 5: the three probes across a restart of a stock
       'utf8',
     );
     const db = join(dir, 'probe.db');
-    const port = randomPort();
-    const base = `http://localhost:${port}/api/v1`;
 
     // ── boot 1: the card's repro, then the three probes while it serves ──────
-    const first = await bootServe(dir, port, db);
+    const first = await bootServe(dir, db);
+    const base = `http://localhost:${first.port}/api/v1`;
     const auth = await signIn(first, base);
     const install = await request(first, 'step 1 — POST /packages', `${base}/packages`, {
       method: 'POST',
@@ -337,11 +334,12 @@ describe('#17676 ruling A\' item 5: the three probes across a restart of a stock
     before = await threeProbes(first, base, auth.token);
     await stop(first.child);
 
-    // ── boot 2: same database file, same port, then the same three probes ────
-    const second = await bootServe(dir, port, db);
-    const auth2 = await signIn(second, base);
+    // ── boot 2: same database file, its own read-back port, then the same three probes ────
+    const second = await bootServe(dir, db);
+    const base2 = `http://localhost:${second.port}/api/v1`;
+    const auth2 = await signIn(second, base2);
     afterSignIn = auth2.status;
-    after = await threeProbes(second, base, auth2.token);
+    after = await threeProbes(second, base2, auth2.token);
     secondBoot = second.output();
     await stop(second.child);
   }, 420_000);

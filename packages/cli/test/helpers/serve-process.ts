@@ -182,8 +182,8 @@ function probeBind(want: number): number | null {
 
 /**
  * The released-port draw — a real bind probe, not a blind `Math.random()`
- * (#12441) — for the spawns that still take a number. ⛔ NOT for a spawn that
- * can reach production posture: those take {@link KERNEL_ASSIGNED_PORT}.
+ * (#12441) — for the few sites that still take a number. ⛔ NOT for a CLI
+ * spawn, in either posture: those take {@link KERNEL_ASSIGNED_PORT}.
  *
  * Listen on `0.0.0.0:0`, read the port the kernel assigned, close the listener,
  * return the port for the caller to hand to `os serve`.
@@ -224,21 +224,20 @@ function probeBind(want: number): number | null {
  * development-posture child hops instead, and `portDriftError()` reds the hop
  * just as surely, so that column closes the same way: `runServe()` hands its
  * child a kernel-assigned port whenever the caller passes no `--port`, and
- * returns the port the child bound (#24342).
+ * returns the port the child bound; every bespoke spawner reads its own
+ * kernel-assigned port back the same way (#24342).
  * `released-port-production-spawn.pin.test.ts` holds both: a file that spawns
  * the CLI may call this or `randomPort()` only as often as its ledger entry
  * there allows — zero without one.
  *
  * What may still call it, each with the race still real and unclosed there:
  *
- *   • the development-column spawners slice 2 of #24342 has yet to convert —
- *     the files that spawn `CLI` themselves (the `package-install-local-*`
- *     `os start` family among them) and the four `bin/run.js --dev` / `os dev`
- *     files, each ledgered in the pin with its exact count. A lost race there
- *     is a hop to the next port, and `portDriftError()` below turns it into a
- *     red on a correct tree;
  *   • instruments that need a number NOTHING is listening on (a closed-port
- *     probe), or that measure this draw itself (`serve-port-bind-probe`).
+ *     probe), or that measure this draw itself (`serve-port-bind-probe`);
+ *   • a CLI spawn whose SUBJECT is a non-zero request — a boot that must bind
+ *     exactly the port it asked for, which `--port 0` cannot ask. The pin's
+ *     ledger names each such file with its reason and exact count; a lost
+ *     race there is the residual this draw narrows and cannot close.
  *
  * `portContentionError()` below is what makes a residual loss SAY it is a port
  * race instead of `serve exited 1 before "Server is ready"`.
@@ -318,8 +317,8 @@ export function holdPort(): Promise<{ port: number; release: () => Promise<void>
  * ⚠️ The name is kept — and is now a slight misnomer, which is cheaper than the
  * alternative. It is `String(reservePort())` and nothing else; the draw, the
  * guarantees, the residual race and the callers it may still serve
- * (instruments, and the development-column files the pin's ledger names until
- * slice 2 of #24342 converts them — never another CLI spawn) are all
+ * (instruments, and the few CLI spawns the pin's ledger names with their
+ * reason — never another CLI spawn) are all
  * documented on `reservePort()` above, and there is no second mechanism hiding
  * behind this name.
  */
@@ -599,8 +598,9 @@ export function boundPortFromBanner(output: string): BannerPortReadback {
  * the port between this harness's bind probe and the child's `listen()`. The
  * production column would die loudly, which is why it no longer draws (it takes
  * {@link KERNEL_ASSIGNED_PORT}, #24295); the development column drifts and gets
- * this. `runServe()` without a `--port` no longer draws either (#24342); the
- * spawners still ledgered in the pin do, and this is what makes their race a red.
+ * this. `runServe()` without a `--port` no longer draws either, nor does any
+ * bespoke spawner (#24342): what reaches this now is an EXPLICIT port — one held
+ * on purpose to force the drift, or a draw the pin's ledger names.
  *
  * ## Why `unreadable` is an ERROR and not a skip
  *

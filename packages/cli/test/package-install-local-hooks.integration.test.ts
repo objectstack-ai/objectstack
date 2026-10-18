@@ -52,10 +52,9 @@ import {
   CLI,
   childEnv,
   E2E_SECRET_KEY,
-  portContentionError,
-  portDriftError,
+  KERNEL_ASSIGNED_PORT,
   probeThroughChild,
-  randomPort,
+  readKernelAssignedPort,
   TSX,
 } from './helpers/serve-process.js';
 
@@ -213,9 +212,9 @@ interface LiveStart {
   output: () => string;
 }
 
-function bootStart(cwd: string, home: string, port: string, extra: string[] = []): Promise<LiveStart> {
+function bootStart(cwd: string, home: string, extra: string[] = []): Promise<LiveStart> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'start', '-p', port, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
+    const child = spawn(TSX, [CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--home', home, '--auth-secret', E2E_SECRET_KEY, '--no-ui', ...extra], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header. Package
       // scheduled work is OFF by default in every posture (#17396); this
@@ -234,12 +233,12 @@ function bootStart(cwd: string, home: string, port: string, extra: string[] = []
     groups.push(child);
     let out = '';
     let settled = false;
-    const settle = (err: Error | null) => {
+    const settle = (verdict: Error | number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (err) rejectBoot(err);
-      else resolveBoot({ child, base: `http://localhost:${port}`, output: () => out });
+      if (verdict instanceof Error) rejectBoot(verdict);
+      else resolveBoot({ child, base: `http://localhost:${verdict}`, output: () => out });
     };
     const timer = setTimeout(
       () => settle(new Error(`os start never printed ${READY}\n--- output ---\n${out.slice(-4000)}`)),
@@ -247,14 +246,13 @@ function bootStart(cwd: string, home: string, port: string, extra: string[] = []
     );
     const onData = (d: unknown) => {
       out += String(d);
-      // The child is the authority on the port it bound.
-      if (READY.test(out)) settle(portDriftError(out, 'os start', port));
+      // The child is the authority on the port it bound: a kernel-assigned one (#24342).
+      if (READY.test(out)) settle(readKernelAssignedPort(out, 'os start'));
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('exit', (code) =>
-      settle(portContentionError(out, 'os start', port)
-        ?? new Error(`os start exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
+      settle(new Error(`os start exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
     );
   });
 }
@@ -397,10 +395,9 @@ beforeAll(async () => {
   writeFileSync(hostArtifact, JSON.stringify(HOST_ARTIFACT, null, 2), 'utf8');
   writeFileSync(join(runtimeDir, 'runtime.mjs'), HOST_RUNTIME_MODULE, 'utf8');
   const home = join(runtimeDir, 'home');
-  const port = randomPort();
 
   // ── boot 1: the host; hot installs ─────────────────────────────────────
-  const first = await bootStart(runtimeDir, home, port, ['--artifact', hostArtifact]);
+  const first = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
   const token = await authenticate(first);
   readings.handlerInstall = await packageInstall(apps.handler, first);
   readings.bodyInstall = await packageInstall(apps.body, first);
@@ -419,7 +416,7 @@ beforeAll(async () => {
   const ledger = join(runtimeDir, '.objectstack', 'installed-packages');
   mkdirSync(ledger, { recursive: true });
   writeFileSync(join(ledger, `${LEGACY_APP_ID}.json`), JSON.stringify(LEGACY_ENTRY, null, 2), 'utf8');
-  const second = await bootStart(runtimeDir, home, port, ['--artifact', hostArtifact]);
+  const second = await bootStart(runtimeDir, home, ['--artifact', hostArtifact]);
   const token2 = await authenticate(second);
   readings.legacyInsert = await http(second, 'POST', `/api/v1/data/${LEGACY_TASK}`, token2, { name: 'legacy' });
   readings.output.restart = second.output();
