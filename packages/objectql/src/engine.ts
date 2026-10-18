@@ -265,7 +265,7 @@ import { assertGroupByNamesNoJsonStoredField } from './group-by-structured-json-
 import { assertAggregationFieldTypesAccepted } from './aggregate-field-type-door.js';
 import { applyProtection, pluralToSingular, ExternalWriteForbiddenError } from '@objectstack/spec/shared';
 import { SchemaRegistry, computeFQN, type ArtifactInstallScope } from './registry.js';
-import { expandSearchToFilter } from './search-filter.js';
+import { expandSearchToFilter, normalizeSearch, SEARCHABLE_ENUM_TYPES, SEARCHABLE_TEXTUAL_TYPES } from './search-filter.js';
 import { isSearchCompanionRequested, stripSearchCompanion } from './search-companion.js';
 import { ExpressionEngine, toEvalPermissions, type EvalError, type EvalPermissions } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
@@ -2013,6 +2013,42 @@ function assertProjectionHasNoDottedPaths(
   err.fields = dotted;
   err.object = object;
   throw err;
+}
+
+/**
+ * [#24284] The refusal for a non-blank `search` over an object whose RESOLVED
+ * search set is empty — no `searchableFields` entry naming a stored field, and
+ * no field of a type the auto-default scans (the junction shape: lookups plus
+ * a composed formula title). Without it the expansion added no predicate and
+ * the read answered every row.
+ *
+ * `INVALID_FIELD`, the code #4254's explicit-override gate answers on this
+ * same axis (and the one a search naming a formula title gets), not
+ * `INVALID_QUERY`: the request is well-formed, and what cannot be honoured is
+ * a fact about the object's FIELDS. 400 on every door, and the same answer for
+ * every caller — it is derived from the declaration, never from the caller's
+ * permissions (a narrowing by field-level security happens later, in the
+ * predicate guard, and `searchAll` hands the engine only the queryable subset).
+ */
+function emptySearchSetError(object: string, schema: any, internalExcluded: boolean): Error {
+  const declared: unknown[] = Array.isArray(schema?.searchableFields) ? schema.searchableFields : [];
+  const err: any = new Error(
+    `Object '${object}' has no searchable field, so 'search' cannot be honoured on it`
+    + (declared.length > 0
+      ? `: its 'searchableFields' (${declared.join(', ')}) names no stored field`
+      : `: it declares no 'searchableFields', and none of its fields is a type the default `
+        + `search scans (${[...SEARCHABLE_TEXTUAL_TYPES, ...SEARCHABLE_ENUM_TYPES].join(' / ')})`)
+    + (internalExcluded ? " ('internal: true' fields are never searched)" : '')
+    + '. Answering every row instead would read as "everything matched". Declare '
+    + `'searchableFields' on '${object}' naming a stored field, or mirror the composed title `
+    + `onto a stored text field and search that.`,
+  );
+  err.status = 400;
+  err.httpStatus = 400;
+  err.code = 'INVALID_FIELD';
+  err.object = object;
+  err.param = 'search';
+  return err;
 }
 
 /**
@@ -13741,6 +13777,20 @@ export class ObjectQL implements IObjectQLEngine {
       });
       if (searchFilter) {
         ast.where = ast.where ? { $and: [ast.where, searchFilter] } : searchFilter;
+      } else if (normalizeSearch(raw).query.trim()) {
+        // [#24284] A non-blank term that expanded to nothing means the RESOLVED
+        // search set is empty: `expandSearchToFilter` answers `null` for
+        // exactly two reasons, and the other one (a blank term) is excluded
+        // here. Leaving `where` untouched would answer the search with EVERY
+        // row, indistinguishable from "everything matched" — the silent
+        // widening #4254 refuses on the explicit-override axis. Judged on the
+        // set the expansion itself resolved (no second resolver), so it holds
+        // for every verb that reaches here (`find` / `findOne` / `aggregate` /
+        // the count) and every door (REST, dispatcher, SDK, a hook's
+        // `ctx.api`). An explicit override intersected to nothing falls back
+        // to the allowed set inside `resolveSearchFields`, so it reaches this
+        // only when that set is empty too.
+        throw emptySearchSetError(ast.object, schema, internalFields.length > 0);
       }
     }
     delete (ast as any).search;

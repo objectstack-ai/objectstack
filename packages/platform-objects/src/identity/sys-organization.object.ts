@@ -55,7 +55,9 @@ export const SysOrganization = ObjectSchema.create({
 
   // Custom actions — generic create / delete are suppressed (better-auth-
   // managed), and better-auth's own columns (`name`, `slug`, `logo`) are
-  // edited ONLY through `update_organization` below. The generic `update` the
+  // edited ONLY through better-auth's `organization/update`: the
+  // `update_organization` row action (all three) and the name/logo-only
+  // `rename_organization` (record header and row) below. The generic `update` the
   // data door admits since #15873 reaches the platform-owned extension columns
   // alone (see `userActions` above and `enable.apiMethods` at the bottom);
   // admins still need to create new orgs from the Setup app.
@@ -194,10 +196,11 @@ export const SysOrganization = ObjectSchema.create({
       variant: 'danger',
       // Higher than every sibling (unset = 0), so it sorts LAST: with
       // `invite_user` leading, the header's three inline slots go to the
-      // invite, `set_active_organization` and `change_slug`, and this one
-      // folds into the `⋯` overflow's destructive band (objectui's
-      // page:header split, default `maxVisible` 3). Without it, registration
-      // order kept it inline as the third button.
+      // invite, `set_active_organization` and `rename_organization`, and this
+      // one folds into the `⋯` overflow's destructive band (objectui's
+      // page:header split, default `maxVisible` 3), with `change_slug` in the
+      // overflow above it. Without it, registration order kept it inline as
+      // the third button.
       order: 1,
       mode: 'custom',
       locations: ['list_item', 'record_header'],
@@ -209,6 +212,42 @@ export const SysOrganization = ObjectSchema.create({
       confirmText: 'Leave this organization? You will lose access to its environments and members.',
       successMessage: 'You have left the organization',
       refreshAfter: true,
+    },
+    {
+      // Rename the organization: its `name` and `logo`, never its `slug`.
+      // The same better-auth door as `update_organization` above
+      // (`organization/update`, fields nested under `data`), with no `slug`
+      // param, so the body carries no slug and the stored one is kept:
+      // better-auth's slug-taken check and plugin-auth's
+      // `beforeUpdateOrganization` slug guard both run only on a sent slug.
+      //
+      // One door per field. A record page reaches no `list_item` action, so
+      // this one is declared at `record_header` too; where the cloud
+      // orchestrator governs the slug, that page offers this action and
+      // `change_slug`, and nothing on it sends a slug to better-auth.
+      // `update_organization` stays the slug door of a composition without the
+      // orchestrator, because `change_slug`'s target exists only in cloud.
+      //
+      // Declared BEFORE `change_slug`: both sort at `order` 0, so declaration
+      // order breaks the tie, the rename takes the header's third inline slot,
+      // and `change_slug` folds into the `⋯` overflow.
+      name: 'rename_organization',
+      label: 'Rename Organization',
+      icon: 'pencil',
+      variant: 'secondary',
+      mode: 'edit',
+      locations: ['record_header', 'list_item'],
+      type: 'api',
+      target: '/api/v1/auth/organization/update',
+      recordIdParam: 'organizationId',
+      bodyShape: { wrap: 'data' },
+      requiresFeature: 'multiOrgEnabled',
+      successMessage: 'Organization renamed',
+      refreshAfter: true,
+      params: [
+        { field: 'name', required: true, defaultFromRow: true },
+        { field: 'logo', defaultFromRow: true },
+      ],
     },
     {
       // Rename the organization slug (URL prefix). Backed by the cloud
