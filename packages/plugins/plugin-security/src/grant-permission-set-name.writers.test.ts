@@ -21,7 +21,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
-import { SysUser, SysAccount, SysMember } from '@objectstack/platform-objects/identity';
+import { SysUser, SysAccount, SysMember, SysOrganization } from '@objectstack/platform-objects/identity';
 import { bootstrapPlatformAdmin, findExistingPlatformAdmin } from './bootstrap-platform-admin.js';
 import { reconcileOrgAdminGrant } from './auto-org-admin-grant.js';
 import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
@@ -53,9 +53,12 @@ async function boot(): Promise<ObjectQL> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount, SysMember],
+    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount, SysMember, SysOrganization],
   } as any);
   await engine.syncSchemas();
+  // [ADR-0131 D3/D5] The Default Organization a `single` boot creates before any
+  // `kernel:ready` hook runs; it owns the promotion's grant.
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, { context: { isSystem: true } });
   engines.push(engine);
   return engine;
 }
@@ -92,6 +95,8 @@ describe('[ADR-0131 D4] the grant writers in plugin-security write the set by na
     const grants = await grantsOf(engine, 'usr_first');
     expect(grants).toHaveLength(1);
     expectNamedOnly(grants[0], 'admin_full_access');
+    // [ADR-0131 D5] …owned by the Default Organization, never NULL.
+    expect(grants[0]?.organization_id).toBe('org_default');
 
     // [C3 stage 6b-2] The bootstrap wrote no catalog row, and the holder is
     // read by name with none.

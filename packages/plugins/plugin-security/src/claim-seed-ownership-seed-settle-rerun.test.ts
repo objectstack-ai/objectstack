@@ -199,6 +199,8 @@ async function bootPlugin(existing?: Record<string, any[]>) {
     sys_account: [{ id: 'acc_1', user_id: ADMIN, provider_id: 'credential' }],
     sys_user_permission_set: [],
     sys_permission_set: [],
+    // [ADR-0131 D5] The Default Organization, which owns the promotion's grant.
+    sys_organization: [{ id: 'org_default', slug: 'default' }],
     // WINNER: rows the seeder already wrote before the promotion instant.
     crm_account: [seedRow('acc_seed_1'), seedRow('acc_seed_2')],
     // LOSER: the object whose rows the background seed has not reached yet.
