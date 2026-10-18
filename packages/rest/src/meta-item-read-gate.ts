@@ -167,12 +167,14 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
     readonly navPruneLogged: Set<string>;
     /**
      * [#7557, #24210] Does the by-name read withhold this item because its
-     * owning package is disabled? The owner is the one the plain read's kept
-     * protection envelope names (`packageId`, the served item's `_packageId`,
-     * read under the same `?package=` scope), asked of the engine registry's
-     * `isPackageDisabled`: the field and predicate the protocol's list and
-     * by-name reads ask. The layered answer cannot say it itself: a
-     * runtime-saved item's layers carry no owner.
+     * owning package is disabled? Withheld means the plain read, under the
+     * same `?package=` scope, serves no `item` while its kept protection
+     * envelope names an owner (`packageId`, the served item's `_packageId`)
+     * the engine registry's `isPackageDisabled` answers `true` for: the field
+     * and predicate the protocol's list and by-name reads ask, and the
+     * protocol's own decision of which types it hides (`package` never is).
+     * The layered answer cannot say it itself: a runtime-saved item's layers
+     * carry no owner.
      *
      * Read by the layered chain ({@link createMetaLayeredAnswer}) only.
      * Absent, or a registry that cannot answer, is "not withheld": the answer
@@ -3759,15 +3761,16 @@ export type MetaLayeredAnswer =
  *     that difference told a member which unpublished apps exist. The
  *     protocol's `effective` is never null while another layer is present, so
  *     this is the name resolving to nothing at all, for every caller.
- *  1b. [#7557, #24210] A disabled package's item — every type but `object`
- *     and `package` — is that same `absent`: the list read omits it and the
- *     by-name read answers it as a name with nothing behind it, so both
- *     spellings on both transports take the missing name's exit. Asked of
- *     {@link MetaItemReadGateSources.isItemOfDisabledPackage}, BEFORE the
+ *  1b. [#7557, #24210] A disabled package's item — every type the by-name
+ *     read withholds for it — is that same `absent`: the list read omits it
+ *     and the by-name read answers it as a name with nothing behind it, so
+ *     both spellings on both transports take the missing name's exit. Asked
+ *     of {@link MetaItemReadGateSources.isItemOfDisabledPackage}, BEFORE the
  *     gate, so an author who may write the item is not served it whole
  *     either. An object is the protocol's own `OBJECT_PACKAGE_DISABLED`
- *     refusal, thrown by the read before this chain; `package` is never
- *     hidden. The protocol's layered read keeps serving every layer, because
+ *     refusal, thrown by the read before this chain; which other types are
+ *     hidden is the plain read's decision, never restated here. The
+ *     protocol's layered read keeps serving every layer, because
  *     its resolution readers (the security catalog echo, the
  *     packaged-permission-set lock gate) need them: the door answers here.
  *  2. [#20156] THE per-caller gate on EVERY present layer, `effective` first
@@ -3806,7 +3809,7 @@ export function createMetaLayeredAnswer(
 
         // 1b. [#7557, #24210] A disabled package's item is that same absence,
         //     for every caller: before the gate, so no author is served it.
-        if (metaType !== 'object' && metaType !== 'package'
+        if (metaType !== 'object'
             && await sources.isItemOfDisabledPackage?.({ type: metaType, name, ...(packageId ? { packageId } : {}) }) === true) {
             return { kind: 'refuse', refusal: { reason: 'absent' } };
         }

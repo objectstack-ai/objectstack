@@ -500,8 +500,9 @@ const NAV_PRUNE_LOGGED = new Set<string>();
  * the context — the same object serves every other consumer of this request.
  *
  * [#7557, #24210] `isItemOfDisabledPackage`, the layered chain's owner step:
- * the plain read's kept envelope `packageId`, asked of the engine registry
- * ({@link isServiceItemOfDisabledPackage}), as `/published` asks it. A host
+ * the plain read serves no `item` and its kept envelope `packageId` is one the
+ * engine registry disables ({@link isServiceItemOfDisabledPackage}), the owner
+ * `/published` asks about. A host
  * with no registry that can answer withholds nothing, as before; a read that
  * rejects is that fault, never "not withheld".
  */
@@ -530,8 +531,8 @@ function metaItemReadGateSources(
             if (typeof protocol?.getMetaItem !== 'function') return false;
             const registry = (await deps.getObjectQL(context))?.registry;
             if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled !== 'function') return false;
-            const owner = (await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) }))?.packageId;
-            return isServiceItemOfDisabledPackage(registry, { _packageId: owner });
+            const envelope = await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) });
+            return envelope?.item == null && isServiceItemOfDisabledPackage(registry, { _packageId: envelope?.packageId });
         },
     };
 }

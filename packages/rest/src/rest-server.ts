@@ -3507,8 +3507,9 @@ export class RestServer {
      * {@link metaReadAudienceSources}).
      *
      * [#7557, #24210] `isItemOfDisabledPackage`, the layered chain's owner
-     * step: the plain read's kept envelope `packageId`, asked of the engine
-     * registry's `isPackageDisabled`, as `/published` asks it. The engine is
+     * step: the plain read serves no `item` and its kept envelope `packageId`
+     * is one the engine registry's `isPackageDisabled` answers for, the owner
+     * `/published` asks about. The engine is
      * reached through {@link wiredEngineOrLoud}: none wired withholds nothing,
      * as before; one that cannot be resolved is the loud outage, never "not
      * withheld".
@@ -3538,8 +3539,8 @@ export class RestServer {
                     ...(packageId ? { packageId } : {}),
                     ...(environmentId ? { environmentId } : {}),
                 };
-                const envelope = await p.getMetaItem(itemRequest) as { packageId?: unknown } | undefined;
-                return registry.isPackageDisabled(envelope?.packageId) === true;
+                const envelope = await p.getMetaItem(itemRequest) as { item?: unknown; packageId?: unknown } | undefined;
+                return envelope?.item == null && registry.isPackageDisabled(envelope?.packageId) === true;
             },
         };
     }

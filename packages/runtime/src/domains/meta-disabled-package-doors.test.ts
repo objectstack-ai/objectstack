@@ -306,6 +306,16 @@ describe('#24210 — the layered view of a disabled package\'s non-object item, 
         expect(JSON.stringify((await layers(stack, 'twin_page')).response)).toBe(JSON.stringify(missing.response));
     });
 
+    it('the plain read decides which types are hidden: an item it still serves keeps its layered view', async () => {
+        // As the protocol serves a `package` item whatever its owner: the
+        // envelope names the disabled package, and the item is there.
+        const stack = boot();
+        stack.getMetaItem.mockImplementation(async ({ type, name }: any) =>
+            ({ type, name, item: { name, label: 'still served' }, lock: 'none', editable: true, packageId: DISABLED_PKG }));
+        expect((await layers(stack, 'demo_page')).response?.body?.data?.effective?.name).toBe('demo_page');
+        expect((await flag(stack, 'demo_page')).response?.body?.data?.effective?.name).toBe('demo_page');
+    });
+
     it('an object keeps the layered read\'s own 404 OBJECT_PACKAGE_DISABLED, on both spellings', async () => {
         const stack = boot();
         expectObjectRefusal(await stack.dispatcher.dispatch('GET', `/meta/object/${DISABLED}/layers`, {}, {}, SESSION()));
