@@ -324,6 +324,116 @@ describe('#15079 point 4 — the write is `{ ...patch, ...params }`, a param of 
 });
 
 // ───────────────────────────────────────────────────────────────────────────
+// #24268 — the declared write set IS the accept set, also when it is empty
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * [#24268] A declarative update has no handler: its param bag is merged over
+ * `patch` and WRITTEN to the row. So its declared `params` list is its whole
+ * wire write set, and an empty or absent list is an EMPTY accept set — not the
+ * absent contract a param-less HANDLER action has. Before this, `close_case`
+ * (patch `{ status }`, no `params`) wrote any field the caller may write.
+ *
+ * Every refusal here is pinned on the envelope (`code` + `status`) and on "no
+ * write happened" — never on a bare throw, which an unfixed door that failed
+ * for any other reason would satisfy too.
+ */
+describe('#24268 — a param-less declarative update writes EXACTLY its patch, at both doors', () => {
+    /** A key the object declares and the action does not: the widening the card measured. */
+    const WIDENING = { note: 'WIDENED BY AN UNDECLARED PARAM' };
+
+    it('REST: an undeclared key is refused with the ADR-0104 D2 envelope, and the row is unchanged', async () => {
+        const rig = makeRig();
+        const res = await dispatchRest(OWNER, rig, `/${OBJECT}/close_case/${RECORD_ID}`, { params: WIDENING });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        // The named subject: the refusal says WHICH key, so the caller can fix it.
+        expect(res.body.error.message).toContain('"note"');
+        expect(rig.updates).toHaveLength(0);
+        expect(rig.row).toEqual(freshRow());
+    });
+
+    it('REST: a `patch` key sent as a param is undeclared too — the wire never re-states the patch', async () => {
+        // The shape a console vendored before objectui fb501bc894 posts: the
+        // patch keys as `params`. The route applies `patch` from the
+        // declaration, so the copy on the wire is an undeclared param.
+        const rig = makeRig();
+        const res = await dispatchRest(OWNER, rig, `/${OBJECT}/close_case/${RECORD_ID}`, {
+            params: { status: 'reopened' },
+        });
+
+        expect(res.status).toBe(400);
+        expect(res.body.error.code).toBe('VALIDATION_ERROR');
+        expect(rig.updates).toHaveLength(0);
+        expect(rig.row).toEqual(freshRow());
+    });
+
+    it('MCP `run_action`: the same undeclared key is refused with `code` + `status`, before any write', async () => {
+        const rig = makeRig();
+        const err: any = await dispatchMcp(OWNER, rig, 'close_case', { recordId: RECORD_ID, params: WIDENING })
+            .then(() => undefined, (e: unknown) => e);
+
+        expect(err).toBeInstanceOf(Error);
+        // What the MCP tool renderer reads off a throw (`thrownRefusalEnvelope`,
+        // `@objectstack/mcp`): a string `code` and a numeric `status`. The code
+        // is the one the REST door's `deps.error(…, 400)` derives.
+        expect(err.code).toBe('VALIDATION_ERROR');
+        expect(err.status).toBe(400);
+        expect(String(err.message)).toContain('"note"');
+        expect(rig.updates).toHaveLength(0);
+        expect(rig.row).toEqual(freshRow());
+    });
+
+    it('an ABSENT or EMPTY bag still writes the patch — at both doors', async () => {
+        for (const body of [{}, { params: {} }]) {
+            const rig = makeRig();
+            const res = await dispatchRest(OWNER, rig, `/${OBJECT}/close_case/${RECORD_ID}`, body);
+            expect(res.status, JSON.stringify(body)).toBe(200);
+            expect(rig.updates.map((u) => u.data)).toEqual([{ status: 'closed' }]);
+            expect(rig.row.status).toBe('closed');
+        }
+        for (const input of [{ recordId: RECORD_ID }, { recordId: RECORD_ID, params: {} }]) {
+            const rig = makeRig();
+            const out: any = await dispatchMcp(OWNER, rig, 'close_case', input);
+            expect(out.ok, JSON.stringify(input)).toBe(true);
+            expect(rig.updates.map((u) => u.data)).toEqual([{ status: 'closed' }]);
+            expect(rig.row.status).toBe('closed');
+        }
+    });
+
+    it('a DECLARED param still writes and wins over `patch` — at both doors', async () => {
+        const rest = makeRig();
+        const res = await dispatchRest(OWNER, rest, `/${OBJECT}/triage_case/${RECORD_ID}`, {
+            params: { priority: 'urgent' },
+        });
+        expect(res.status).toBe(200);
+        expect(rest.updates.map((u) => u.data)).toEqual([{ status: 'triaged', priority: 'urgent' }]);
+
+        const mcp = makeRig();
+        const out: any = await dispatchMcp(OWNER, mcp, 'triage_case', {
+            recordId: RECORD_ID,
+            params: { priority: 'urgent' },
+        });
+        expect(out.ok).toBe(true);
+        expect(mcp.updates.map((u) => u.data)).toEqual([{ status: 'triaged', priority: 'urgent' }]);
+        expect(mcp.row).toMatchObject({ status: 'triaged', priority: 'urgent' });
+    });
+
+    it('the control: a param-less HANDLER action keeps the pass-through — the bag reaches the registry', async () => {
+        // Not this card's population: a handler is the author's own code
+        // deciding what its bag means. The registry miss (404) is the proof
+        // the param gate let the undeclared key through, as it always did.
+        const rig = makeRig();
+        const res = await dispatchRest(OWNER, rig, `/${OBJECT}/nudge_case/${RECORD_ID}`, { params: WIDENING });
+
+        expect(res.status).toBe(404);
+        expect(rig.ql.executeAction).toHaveBeenCalled();
+        expect(rig.updates).toHaveLength(0);
+    });
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 // Contract point 3 — permissions, hooks and validations, exactly as a user edit
 // ───────────────────────────────────────────────────────────────────────────
 

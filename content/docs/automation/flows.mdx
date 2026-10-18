@@ -1193,7 +1193,8 @@ is consumed: nothing is applied, the run stays parked, and the corrected
 submission still lands.
 
 Three shapes declare no contract and so keep the pass-through — the same way an
-action with no `params` is untouched:
+action with no `params` is untouched, unless it is a declarative
+`operation: 'update'`, whose empty list is an empty accept set:
 
 - an **object-form** screen (`config.objectName`), whose flat `fields` list is
   empty by construction; the client persists the record through the normal write

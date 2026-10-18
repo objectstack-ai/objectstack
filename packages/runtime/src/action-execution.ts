@@ -21,6 +21,7 @@ import { validateActionParams, type ActionSession, type ResolvedActionParam } fr
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
 // retries have to agree on it, and two doors each writing their own 'confirm'
@@ -1655,16 +1656,33 @@ export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: 
  * costs one edited call. (D1's half went the opposite way for the opposite
  * reason — it strands stored rows, which nobody can edit their way out of.)
  *
- * Actions that declare no `params` keep the pass-through — there is nothing to
- * validate against, so existing param-less actions are untouched.
+ * ## Which param-less actions keep the pass-through: those with a HANDLER
+ *
+ * A handler action that declares no `params` keeps the pass-through (ADR-0104
+ * D2's boundary, unchanged for it): its handler is the author's own code
+ * deciding what its bag means, and there is no declaration to judge the bag by.
+ *
+ * A declarative update (`operation: 'update'`, {@link isDeclarativeUpdateAction})
+ * does NOT, and the reason is what its bag is for (#24268). It has no handler:
+ * the bag is merged over `patch` and WRITTEN to the row
+ * ({@link declarativeUpdateWrite}). So its declared `params` list is its whole
+ * wire write set, and an empty or absent list is an EMPTY accept set rather
+ * than an absent contract. Without that reading, an action declaring
+ * `patch: { status }` and nothing else wrote any field the caller may write —
+ * declared one field, enforced none. Its bag is judged here by the same
+ * validator against `[]`, so every key is refused except the dispatcher
+ * built-ins: the same message, the same 400 at the REST door, the same
+ * `OS_ALLOW_LAX_ACTION_PARAMS` escape hatch a declared-params action gets. No
+ * switch of its own.
  */
-export function enforceActionParams(deps: ActionExecutionDeps, 
+export function enforceActionParams(deps: ActionExecutionDeps,
     action: any,
     obj: any,
     bag: Record<string, unknown>,
     where: { objectName?: string; actionName?: string },
 ): string | null {
-    if (!Array.isArray(action?.params) || action.params.length === 0) return null;
+    const declaresParams = Array.isArray(action?.params) && action.params.length > 0;
+    if (!declaresParams && !isDeclarativeUpdateAction(action)) return null;
     const resolved = resolveDeclaredActionParams(deps, action, obj);
     const issues = validateActionParams(resolved, bag);
     if (issues.length === 0) return null;
@@ -2183,7 +2201,11 @@ export interface DeclarativeUpdateResult {
  * Contract point 4, and the precedence is the whole content of it — the static
  * `patch` sits UNDER the values the dialog collected, so a param of the same
  * name WINS. That is the bulk def's own rule (`bulkActionDefs`), mirrored word
- * for word; the spec's `patch` describe states it too. ⛔ Nothing else from the
+ * for word; the spec's `patch` describe states it too. The collected values are
+ * the action's DECLARED params (plus the dispatcher built-ins the D2 validator
+ * allowlists): both doors run {@link enforceActionParams} first, which refuses
+ * every other wire key — on a param-less update too, whose declared accept set
+ * is empty (#24268). ⛔ Nothing else from the
  * action is merged: not `bodyExtra` (refused beside `operation`), not
  * `recordIdField`, not the route's own `objectName`/`recordId` stamps — those
  * are handler plumbing, and a declarative update has no handler.
@@ -2426,7 +2448,8 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // its spelling or its type. It rides at the TOP LEVEL, never inside
     // `params`: that bag is closed against the action author's own declared
     // vocabulary, so a platform member riding there is refused as an unknown
-    // param on any action that declares params, and silently accepted on one
+    // param on any action that declares params (and on a declarative update
+    // that declares none, #24268), and silently accepted on a handler action
     // that declares none — one placement, two opposite behaviours.
     input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
     wiring: {
@@ -2501,8 +2524,16 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // bag, and a rejection is corrective feedback the agent consumes in-loop,
     // which a server-side warning never was. Strict by default (#3438);
     // OS_ALLOW_LAX_ACTION_PARAMS=1 restores the pass-through.
+    //
+    // [#24268] Thrown with `code` + `status` — the 400 and the standard code
+    // the REST door's `deps.error(paramError, 400)` answers — so the MCP tool
+    // surface renders the same ADR-0112 envelope rather than a bare sentence
+    // (`thrownRefusalEnvelope` reads a string `code`). The code is derived
+    // from the status, never spelled, as `declarativeUpdateRefusal` does.
     const paramError = enforceActionParams(deps, action, obj, params, { objectName, actionName: name });
-    if (paramError) throw new Error(paramError);
+    if (paramError) {
+        throw Object.assign(new Error(paramError), { code: standardErrorCodeForHttpStatus(400), status: 400 });
+    }
 
     // [#15942 / #16293] CONFIRMATION GATE — the last pre-dispatch check, and
     // the first one that can refuse a well-formed, fully-entitled request.

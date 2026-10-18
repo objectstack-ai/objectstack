@@ -71,11 +71,46 @@ describe('enforceActionParams — the ADR-0104 D2 gate (#14864)', () => {
         expect(error).toContain('title');
     });
 
-    it('passes an action that declares NO params straight through', () => {
+    it('passes a HANDLER action that declares NO params straight through', () => {
         // The documented compatibility leg: nothing to validate against, so a
-        // param-less action is untouched however odd its bag looks.
+        // param-less handler action is untouched however odd its bag looks.
         expect(enforceActionParams(NO_DEPS, { name: 'ping' }, NO_OBJECT, { anything: 1 }, WHERE)).toBeNull();
         expect(enforceActionParams(NO_DEPS, { name: 'ping', params: [] }, NO_OBJECT, { anything: 1 }, WHERE)).toBeNull();
+    });
+
+    describe('[#24268] a param-less DECLARATIVE UPDATE has an empty accept set, not an absent one', () => {
+        // Its bag is merged over `patch` and written to the row, so what it
+        // declares is its whole wire write set. Both spellings of "declares
+        // none" — the key absent, and an empty list — are the same verdict.
+        const CLOSE = { name: 'close_case', operation: 'update', patch: { status: 'closed' } };
+        const CLOSE_EMPTY_LIST = { ...CLOSE, params: [] };
+
+        it('refuses an undeclared key, naming it — through the same strict path', () => {
+            for (const action of [CLOSE, CLOSE_EMPTY_LIST]) {
+                const error = enforceActionParams(NO_DEPS, action, NO_OBJECT, { subject: 'x' }, WHERE);
+                expect(error).toContain('Invalid action params');
+                expect(error).toContain('"subject"');
+            }
+        });
+
+        it('accepts the empty bag, and the dispatcher built-ins, exactly as the D2 validator allowlists them', () => {
+            // The positive controls for the refusal above: a gate that refused
+            // EVERY bag on an update would pass "refuses an undeclared key".
+            for (const action of [CLOSE, CLOSE_EMPTY_LIST]) {
+                expect(enforceActionParams(NO_DEPS, action, NO_OBJECT, {}, WHERE)).toBeNull();
+                expect(enforceActionParams(NO_DEPS, action, NO_OBJECT, { recordId: 'r1', objectName: 'crm_case' }, WHERE))
+                    .toBeNull();
+            }
+        });
+
+        it('`OS_ALLOW_LAX_ACTION_PARAMS=1` accepts it and warns — the one escape hatch, no switch of its own', () => {
+            const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+            vi.stubEnv('OS_ALLOW_LAX_ACTION_PARAMS', '1');
+            const where = { objectName: 'crm_case', actionName: 'close_case_lax_probe' };
+            expect(enforceActionParams(NO_DEPS, CLOSE, NO_OBJECT, { subject: 'x' }, where)).toBeNull();
+            expect(warn).toHaveBeenCalledTimes(1);
+            expect(String(warn.mock.calls[0]?.[0])).toContain('OS_ALLOW_LAX_ACTION_PARAMS=1');
+        });
     });
 
     it('is STRICT by default — no environment variable needed to reject (#3438)', () => {
