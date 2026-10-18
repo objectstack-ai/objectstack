@@ -209,14 +209,30 @@ describe('#7738 — a federated read carries NO org-scope predicate', () => {
 // how a leak ships green, so these cases are the reason this file exists.
 describe('#7738 non-regression — an ORDINARY object is still org-scoped', () => {
   it.each(READ_DOORS)(
-    '$name: DriverOptions for a managed object still carry tenantId for a non-system caller',
+    '$name: DriverOptions for a managed object still carry tenantId for a non-system caller (isolated)',
     async ({ driverMethod, run }) => {
-      const { engine, observed } = await makeEngine();
+      const { engine, observed } = await makeEngine({ posture: 'isolated' });
       await run(engine, 'showcase_account', MEMBER);
 
       const call = observed.find((c) => c.object === 'showcase_account' && c.method === driverMethod);
       expect(call, `driver.${driverMethod} was never reached`).toBeDefined();
       expect(call!.options?.tenantId).toBe('org_msoroxgurm6423gz');
+    },
+  );
+
+  // [ADR-0131 D8] The driver's read scope is the wall's verdict, and under
+  // `single` the wall is inert — so the managed object's read carries no
+  // tenant scope either. The write target is a different knob (below).
+  it.each(READ_DOORS)(
+    '$name: under `single` the managed object read carries no tenant scope (one predicate)',
+    async ({ driverMethod, run }) => {
+      const { engine, observed } = await makeEngine({ posture: 'single' });
+      await run(engine, 'showcase_account', MEMBER);
+
+      const call = observed.find((c) => c.object === 'showcase_account' && c.method === driverMethod);
+      expect(call, `driver.${driverMethod} was never reached`).toBeDefined();
+      expect(call!.options?.tenantId).toBeUndefined();
+      expect(call!.options?.tenantIds).toBeUndefined();
     },
   );
 

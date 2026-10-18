@@ -6888,7 +6888,7 @@ export class ObjectQL implements IObjectQLEngine {
     const tenantScope = tenantObject
       ? scope.writeTarget
         ? this.driverWriteTarget(execCtx)
-        : this.driverReadScope(objectSchema, execCtx, scope.recordedVerdict)
+        : this.driverReadScope(execCtx, scope.recordedVerdict)
       : undefined;
     const hasTenant = tenantScope !== undefined;
     const hasTz = execCtx?.timezone !== undefined;
@@ -6961,7 +6961,6 @@ export class ObjectQL implements IObjectQLEngine {
    * over its own facts, which carry no admin exemption: fail toward the wall.
    */
   private driverReadScope(
-    objectSchema: any,
     execCtx: ExecutionContext | undefined,
     recordedVerdict: unknown,
   ): { tenantId: string; tenantIds?: string[] } | undefined {
@@ -6976,9 +6975,12 @@ export class ObjectQL implements IObjectQLEngine {
           tenancyPosture: this.resolveEnginePosture(),
           organizationId: activeOrganization,
           accessibleOrgIds: accessibleOrganizationsOf(execCtx),
-          // `undefined` (an object this registry has not resolved) assumes a
-          // tenant object, as Layer 0 does: the driver resolves the column.
-          objectHasOrgIdField: objectSchema ? resolveTenantFieldName(objectSchema) !== null : undefined,
+          // Left to the driver, which resolves the tenant column from the
+          // table it actually built (`resolveTenantField`): an object with no
+          // such column is unscoped there whatever this says. `undefined` is
+          // the verdict's "assume a tenant object", as Layer 0 reads an
+          // unresolved field set.
+          objectHasOrgIdField: undefined,
           tenancyDisabled: false,
           // The engine holds no permission sets: no exemption is ITS to grant.
           posturePermitsCrossTenant: false,

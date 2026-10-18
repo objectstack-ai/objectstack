@@ -149,6 +149,11 @@ describe('findOne executes what it declares and refuses an empty predicate (#441
         two = await engine.insert('crm_account', { name: 'Two', industry: 'Metals', annual_revenue: 200 });
         three = await engine.insert('crm_account', { name: 'Three', industry: 'Mining', annual_revenue: 200 });
         reads.length = 0; // drop insert-path reads; the pins below own this log
+        // [ADR-0131 D8] The `context` proof is that the caller's organization
+        // reaches the driver as its read scope — which it does only under a
+        // wall; under `single` (the env default) the scope is none. Set after
+        // the seed: a walled posture refuses an organization-less insert (D9).
+        engine.setTenancyPostureProvider(() => 'isolated');
     });
 
     const lastRead = () => reads.at(-1)!;
