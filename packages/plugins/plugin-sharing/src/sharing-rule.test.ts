@@ -6,14 +6,14 @@ import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 // assert an HTTP status they SOURCE rather than one they restate.
 import { HttpStatusErrorCodeMap } from '@objectstack/spec/api';
 import { SharingService } from './sharing-service.js';
-import { SharingRuleService } from './sharing-rule-service.js';
+import { SharingRuleService, isDeclaredSharingRule } from './sharing-rule-service.js';
 import { TeamGraphService, expandPrincipal } from './team-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 // [commit 04d03c3a0] The ADDRESSING primitive, imported so the negative half of the
 // ruling can be pinned in the same suite as the positive half: the filter
 // belongs to the sharing CALL SITE, never to the expansion helper.
 import { PositionGraphService } from './position-graph.js';
-import { celToFilter, celToFilterOutcome, bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
+import { celToFilter, celToFilterOutcome, createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { isMatchAllCriteria } from './rule-criteria.js';
 import { bindRuleCriteriaGuard } from './rule-hooks.js';
 
@@ -624,7 +624,7 @@ describe('#1887 — compound sharing condition compiled + enforced (ADR-0058 D3)
 });
 
 // ---------------------------------------------------------------------------
-// #13943 — the seeder's skip WARN carries the compiler's reason AND detail
+// #13943 — the declared-rule skip WARN carries the compiler's reason AND detail
 //
 // `compileCelToFilter` returns `{ ok: false, reason, detail }` on every
 // refusal; `celToFilter` used to collapse the whole thing to `null` one line
@@ -636,20 +636,19 @@ describe('#1887 — compound sharing condition compiled + enforced (ADR-0058 D3)
 // The skip DECISION is unchanged either way — an unlowerable condition is
 // never seeded as a permissive match-all (ADR-0049).
 // ---------------------------------------------------------------------------
-describe('#13943 — sharing-rule seeder skip WARN names the compiler’s reason and detail', () => {
+describe('#13943 — a declared rule that is not served names the compiler’s reason and detail', () => {
   const SKIP_WARN =
-    '[sharing-rule] skipped (missing or untranslatable CEL condition — never seeded as match-all) [experimental]';
+    '[sharing-rule] declared rule not served (missing or untranslatable CEL condition — never served as match-all) [experimental]';
 
-  /** Registry-backed seeder harness: declared rules in, defineRule + log lines out. */
-  function seedHarness(declared: any[]) {
-    const engine = { _registry: { listItems: (type: string) => (type === 'sharing_rule' ? declared : []) } };
-    const defineRule = vi.fn(async (input: any) => ({ id: `id_${input.name}` }));
+  /** Registry-backed source harness: declared rules in, served rules + log lines out. */
+  function sourceHarness(declared: any[]) {
+    const engine = { registry: { listItems: (type: string) => (type === 'sharing_rule' ? declared : []) } };
     const warns: Array<{ msg: string; meta: any }> = [];
     const logger = {
       warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); },
       info: () => {},
     };
-    return { engine, ruleService: { defineRule } as any, logger, warns, defineRule };
+    return { source: createDeclaredSharingRuleSource({ engine, logger }), warns };
   }
 
   const RULE_BASE = {
@@ -677,13 +676,11 @@ describe('#13943 — sharing-rule seeder skip WARN names the compiler’s reason
     expect(celToFilter('record.amount >= 100000')).toEqual(ok.filter);
   });
 
-  it('an untranslatable condition is skipped WITH the why: reason + detail land in the WARN meta', async () => {
-    const { engine, ruleService, logger, warns, defineRule } = seedHarness([
+  it('an untranslatable condition is not served, WITH the why: reason + detail land in the WARN meta', async () => {
+    const { source, warns } = sourceHarness([
       { ...RULE_BASE, name: 'r_unsupported', condition: 'size(record.tags) > 0' },
     ]);
-    const res = await bootstrapDeclaredSharingRules(ruleService, null, engine, logger);
-    expect(res).toEqual({ seeded: 0, skipped: 1 });
-    expect(defineRule).not.toHaveBeenCalled();
+    expect(await source.list()).toEqual([]);
     const skips = warns.filter((w) => w.msg === SKIP_WARN);
     expect(skips).toHaveLength(1);
     // The fact (rule, condition) is still there; the why (reason, detail) now is too.
@@ -696,32 +693,38 @@ describe('#13943 — sharing-rule seeder skip WARN names the compiler’s reason
     expect(skips[0].meta.detail.length).toBeGreaterThan(0);
   });
 
-  it('NEGATIVE: a rule whose condition lowers cleanly emits no skip line and seeds as before', async () => {
-    const { engine, ruleService, logger, warns, defineRule } = seedHarness([
-      { ...RULE_BASE, name: 'r_clean', condition: 'record.amount >= 100000' },
+  it('the WARN is once per rule per process, not once per read of the rule set', async () => {
+    const { source, warns } = sourceHarness([
+      { ...RULE_BASE, name: 'r_unsupported', condition: 'size(record.tags) > 0' },
     ]);
-    const res = await bootstrapDeclaredSharingRules(ruleService, null, engine, logger);
-    expect(res).toEqual({ seeded: 1, skipped: 0 });
-    // No new log line of any kind on the clean path — not just "no skip WARN".
-    expect(warns).toHaveLength(0);
-    expect(defineRule).toHaveBeenCalledTimes(1);
-    expect(defineRule.mock.calls[0][0]).toMatchObject({
-      name: 'r_clean',
-      criteria: { amount: { $gte: 100000 } },
-    });
+    await source.list();
+    await source.list();
+    await source.list();
+    expect(warns.filter((w) => w.msg === SKIP_WARN)).toHaveLength(1);
   });
 
-  it('NEGATIVE: a MISSING condition takes the path it takes today — skipped via the same WARN, never seeded', async () => {
-    const { engine, ruleService, logger, warns, defineRule } = seedHarness([
+  it('NEGATIVE: a rule whose condition lowers cleanly emits no skip line and is served in the runtime shape', async () => {
+    const { source, warns } = sourceHarness([
+      { ...RULE_BASE, name: 'r_clean', condition: 'record.amount >= 100000' },
+    ]);
+    const served = await source.list();
+    // No log line of any kind on the clean path — not just "no skip WARN".
+    expect(warns).toHaveLength(0);
+    expect(served).toEqual([{
+      name: 'r_clean', label: 'r_clean', description: null, object: 'opportunity',
+      criteria: { amount: { $gte: 100000 } }, recipientType: 'user', recipientId: 'alice',
+      accessLevel: 'read', active: true,
+    }]);
+  });
+
+  it('NEGATIVE: a MISSING condition is refused through the same WARN, never served', async () => {
+    const { source, warns } = sourceHarness([
       { ...RULE_BASE, name: 'r_missing' /* no condition at all */ },
     ]);
-    const res = await bootstrapDeclaredSharingRules(ruleService, null, engine, logger);
-    expect(res).toEqual({ seeded: 0, skipped: 1 });
-    expect(defineRule).not.toHaveBeenCalled();
+    expect(await source.list()).toEqual([]);
     const skips = warns.filter((w) => w.msg === SKIP_WARN);
     expect(skips).toHaveLength(1);
-    // Same branch, same message string as before; the cause names the
-    // compiler's own empty-expression refusal rather than being absent.
+    // The cause names the compiler's own empty-expression refusal rather than being absent.
     expect(skips[0].meta).toMatchObject({
       rule: 'r_missing',
       reason: 'parse-error',
@@ -2090,5 +2093,193 @@ describe('#8710 — a deactivated position confers no sharing-rule shares', () =
     await rules.evaluateAllForRecord('opportunity', 'opp1', SYS);
     expect(ledgerReads).toBe(2);
     expect(shareRecipients()).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────
+// [ADR-0131 D2] Declared sharing rules are READ from the registry — the seeder
+// that copied them into `sys_sharing_rule` is retired. A declared rule writes
+// no row, still grants, and stops granting when its declaration goes; an
+// organization-authored rule keeps working through its row; under a wall the
+// declaration is served once per organization, exactly the passes the seeder
+// made, and one organization's reconcile never touches another's grants.
+// ─────────────────────────────────────────────────────────────────────
+
+describe('[ADR-0131 D2] declared sharing rules are read from the registry, never written', () => {
+  const BOOT = { isSystem: true, positions: [], permissions: [] } as any;
+  const DECLARED = {
+    name: 'share_red_projects',
+    label: 'Red projects → exec',
+    object: 'project',
+    condition: 'record.status == "red"',
+    sharedWith: { type: 'user', value: 'exec' },
+    accessLevel: 'read',
+  };
+
+  /**
+   * The file's fake engine, its `project` reads given the driver's tenant
+   * scope (`organization_id = :tenant OR IS NULL`) so a projection's criteria
+   * sweep stays inside its organization, as `SqlDriver.applyTenantScope` keeps
+   * it — and a `registry` holding the declarations.
+   */
+  function harness(declared: any[], records: Row[]) {
+    const engine: any = makeEngine();
+    engine._tables.project = records;
+    const find = engine.find.bind(engine);
+    engine.find = async (o: string, opts?: any) => {
+      const rows = await find(o, opts);
+      const tenant = opts?.context?.tenantId;
+      if (o !== 'project' || !tenant) return rows;
+      return rows.filter((r: Row) => r.organization_id == null || r.organization_id === tenant);
+    };
+    engine.registry = { listItems: (type: string) => (type === 'sharing_rule' ? declared : []) };
+    const rules = new SharingRuleService({
+      engine,
+      sharing: new SharingService({ engine }),
+      declaredRules: createDeclaredSharingRuleSource({ engine }),
+    });
+    const grants = (): Row[] => engine._tables.sys_record_share ?? [];
+    return { engine, rules, grants };
+  }
+
+  describe('`single`: one organization-less projection', () => {
+    let h: ReturnType<typeof harness>;
+    beforeEach(() => {
+      h = harness([DECLARED], [
+        { id: 'p_red', status: 'red', organization_id: 'org_default' },
+        { id: 'p_green', status: 'green', organization_id: 'org_default' },
+      ]);
+    });
+
+    it('a declared rule is listed and enforces — and no `sys_sharing_rule` row is written for it', async () => {
+      const listed = await h.rules.listRules({}, BOOT);
+      expect(listed).toEqual([expect.objectContaining({
+        id: DECLARED.name, name: DECLARED.name, organization_id: null, object_name: 'project',
+        criteria: { status: 'red' }, recipient_type: 'user', recipient_id: 'exec', access_level: 'read',
+        active: true, managed_by: 'package', customized: false,
+      })]);
+      expect(isDeclaredSharingRule(listed[0])).toBe(true);
+
+      const pass = await h.rules.evaluateRule(DECLARED.name, BOOT);
+      expect(pass).toMatchObject({ ruleId: DECLARED.name, matchedRecords: 1, grantsCreated: 1 });
+      expect(h.grants()).toEqual([expect.objectContaining({
+        record_id: 'p_red', recipient_id: 'exec', source: 'rule', source_id: DECLARED.name,
+      })]);
+      expect(h.engine._tables.sys_sharing_rule ?? []).toEqual([]);
+    });
+
+    it('the per-record pass the write hooks run grants through the declaration too', async () => {
+      await h.rules.evaluateAllForRecord('project', 'p_red', BOOT);
+      expect(h.grants().map((g) => [g.record_id, g.recipient_id, g.source_id])).toEqual([['p_red', 'exec', DECLARED.name]]);
+    });
+
+    it('POSITIVE CONTROL: remove the declaration and the grant stops (the boot sweep revokes it)', async () => {
+      await h.rules.evaluateRule(DECLARED.name, BOOT);
+      expect(h.grants()).toHaveLength(1);
+      // The declaration leaves the registry — a redeploy without it.
+      h.engine.registry = { listItems: () => [] };
+      expect(await h.rules.listRules({}, BOOT)).toEqual([]);
+      await expect(h.rules.evaluateRule(DECLARED.name, BOOT)).rejects.toThrow('RULE_NOT_FOUND');
+      expect(await h.rules.sweepOrphanedRuleGrants()).toBe(1);
+      expect(h.grants()).toEqual([]);
+    });
+
+    it('NEGATIVE: the sweep leaves a served declaration’s grants standing', async () => {
+      await h.rules.evaluateRule(DECLARED.name, BOOT);
+      expect(await h.rules.sweepOrphanedRuleGrants()).toBe(0);
+      expect(h.grants()).toHaveLength(1);
+    });
+
+    it('an organization-authored rule keeps working through its row, with its row id as the grant source', async () => {
+      const row = await h.rules.defineRule({
+        name: 'green_to_alice', label: 'Green → alice', object: 'project',
+        criteria: { status: 'green' }, recipientType: 'user', recipientId: 'alice',
+      } as any, { ...BOOT, tenantId: 'org_default' });
+      expect(row.id).not.toBe(row.name);
+      await h.rules.evaluateRule(row.id, BOOT);
+      expect(h.grants().find((g) => g.recipient_id === 'alice')).toMatchObject({ record_id: 'p_green', source_id: row.id });
+      expect((await h.rules.listRules({}, BOOT)).map((r) => r.name)).toEqual(['green_to_alice', DECLARED.name]);
+    });
+
+    it('a row holding the declared name answers for it, and the declaration is not served beside it', async () => {
+      // A seeded copy an administrator customized (deactivated) — the row the
+      // seeder would never overwrite, and the one the ceremony keeps.
+      h.engine._tables.sys_sharing_rule = [{
+        id: 'srule_customized', organization_id: 'org_default', name: DECLARED.name, label: 'customized',
+        object_name: 'project', criteria_json: JSON.stringify({ status: 'red' }), recipient_type: 'user',
+        recipient_id: 'exec', access_level: 'read', active: false, managed_by: 'package', customized: true,
+      }];
+      const listed = await h.rules.listRules({}, BOOT);
+      expect(listed.map((r) => r.id)).toEqual(['srule_customized']);
+      expect(await h.rules.evaluateRule(DECLARED.name, BOOT)).toMatchObject({ ruleId: 'srule_customized', grantsCreated: 0 });
+      expect(h.grants()).toEqual([]);
+    });
+
+    it('an org-scoped sharing admin reads the platform-global projection, and cannot delete it', async () => {
+      const admin = { userId: 'admin', organizationId: 'org_default', systemPermissions: ['manage_sharing'] } as any;
+      expect((await h.rules.getRule(DECLARED.name, admin))?.id).toBe(DECLARED.name);
+      await expect(h.rules.deleteRule(DECLARED.name, admin)).rejects.toThrow(/^PERMISSION_DENIED: .*declared in the application's code/);
+      // System contexts are refused alike: there is no row, and code is changed in code.
+      await expect(h.rules.deleteRule(DECLARED.name, BOOT)).rejects.toThrow(/^PERMISSION_DENIED/);
+    });
+  });
+
+  describe('walled: one projection per organization, each organization’s grants its own', () => {
+    let h: ReturnType<typeof harness>;
+    beforeEach(() => {
+      h = harness([DECLARED], [
+        { id: 'a_red', status: 'red', organization_id: 'org_a' },
+        { id: 'b_red', status: 'red', organization_id: 'org_b' },
+      ]);
+      h.rules.setDeclaredRuleScopes(['org_a', 'org_b']);
+    });
+
+    it('lists one projection per organization, each sweeping only its organization’s records', async () => {
+      const listed = await h.rules.listRules({}, BOOT);
+      expect(listed.map((r) => [r.id, r.organization_id])).toEqual([[DECLARED.name, 'org_a'], [DECLARED.name, 'org_b']]);
+      const pass = await h.rules.evaluateRule(DECLARED.name, BOOT);
+      expect(pass).toMatchObject({ ruleId: DECLARED.name, matchedRecords: 2, grantsCreated: 2 });
+      expect(h.grants().map((g) => [g.record_id, g.organization_id, g.source_id]).sort()).toEqual([
+        ['a_red', 'org_a', DECLARED.name],
+        ['b_red', 'org_b', DECLARED.name],
+      ]);
+      expect(h.engine._tables.sys_sharing_rule ?? []).toEqual([]);
+    });
+
+    it('one organization’s reconcile leaves the other organization’s grants of the same rule standing', async () => {
+      await h.rules.evaluateRule(DECLARED.name, BOOT);
+      const admin = { userId: 'admin', organizationId: 'org_a', systemPermissions: ['manage_sharing'] } as any;
+      // org_a's own evaluation — the projection it reads is its own.
+      expect((await h.rules.listRules({}, admin)).map((r) => r.organization_id)).toEqual(['org_a']);
+      expect(await h.rules.evaluateRule(DECLARED.name, admin)).toMatchObject({ matchedRecords: 1, grantsRevoked: 0 });
+      expect(h.grants()).toHaveLength(2);
+      // The per-record pass over org_b's record does not revoke org_a's grant.
+      await h.rules.evaluateAllForRecord('project', 'b_red', BOOT);
+      expect(h.grants().map((g) => g.record_id).sort()).toEqual(['a_red', 'b_red']);
+    });
+
+    it('a row of the declared name answers in ITS organization only', async () => {
+      h.engine._tables.sys_sharing_rule = [{
+        id: 'srule_a', organization_id: 'org_a', name: DECLARED.name, label: 'org_a own',
+        object_name: 'project', criteria_json: JSON.stringify({ status: 'red' }), recipient_type: 'user',
+        recipient_id: 'exec', access_level: 'read', active: false, managed_by: 'admin', customized: false,
+      }];
+      const listed = await h.rules.listRules({}, BOOT);
+      expect(listed.map((r) => [r.id, r.organization_id])).toEqual([['srule_a', 'org_a'], [DECLARED.name, 'org_b']]);
+    });
+
+    it('the sweep keeps each organization’s served grants and revokes a grant in an organization no projection serves', async () => {
+      await h.rules.evaluateRule(DECLARED.name, BOOT);
+      h.rules.setDeclaredRuleScopes(['org_a']);
+      expect(await h.rules.sweepOrphanedRuleGrants()).toBe(1);
+      expect(h.grants().map((g) => g.organization_id)).toEqual(['org_a']);
+    });
+
+    it('an organization created after boot is served from its creation on; unknown organizations serve nothing', async () => {
+      h.rules.setDeclaredRuleScopes([]);
+      expect(await h.rules.listRules({}, BOOT)).toEqual([]);
+      h.rules.addDeclaredRuleScope('org_b');
+      expect((await h.rules.listRules({}, BOOT)).map((r) => r.organization_id)).toEqual(['org_b']);
+    });
   });
 });

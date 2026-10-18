@@ -24,6 +24,7 @@ import { type VerifyStack } from '@objectstack/verify';
 import { bootShowcase } from './showcase-boot.js';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import { PermissionSetSchema } from '@objectstack/spec/security';
+import type { ISharingRuleService } from '@objectstack/spec/contracts';
 
 const MEMBER = 'd34-member@verify.test';
 /** The showcase's compound (ADR-0058 D3) sharing rule — re-homed by #9237. */
@@ -81,18 +82,20 @@ describe('showcase: D3 compound sharing (#1887) + D4 RLS check', () => {
   afterAll(async () => { await stack?.stop(); });
 
   // ── ADR-0058 D3 / #1887 ────────────────────────────────────────────────────
-  it('compound sharing condition is SEEDED as a compound criteria_json (not skipped)', async () => {
-    const rule = await ql.findOne('sys_sharing_rule', { where: { name: RULE }, context: SYS.context });
-    expect(rule, 'compound rule was seeded').toBeTruthy();
-    expect(JSON.parse(rule.criteria_json)).toEqual({
+  it('compound sharing condition is SERVED as a compound criteria (not skipped)', async () => {
+    // [ADR-0131 D2] Read from the registry by the sharing-rule service — the
+    // boot writes no sys_sharing_rule row for a declared rule.
+    const rule = await stack.kernel.getService<ISharingRuleService>('sharingRules').getRule(RULE, SYS.context);
+    expect(rule, 'compound rule is served').toBeTruthy();
+    expect(rule?.criteria).toEqual({
       $and: [{ stage: 'qualified' }, { company: 'Northwind' }],
     });
   });
 
-  it('the compound criteria_json matches ONLY the contact satisfying BOTH clauses', async () => {
-    const rule = await ql.findOne('sys_sharing_rule', { where: { name: RULE }, context: SYS.context });
-    const criteria = JSON.parse(rule.criteria_json);
-    // Apply the SEEDED compound criteria to our three contacts: only qualified-AND-key passes.
+  it('the compound criteria matches ONLY the contact satisfying BOTH clauses', async () => {
+    const rule = await stack.kernel.getService<ISharingRuleService>('sharingRules').getRule(RULE, SYS.context);
+    const criteria = rule?.criteria;
+    // Apply the SERVED compound criteria to our three contacts: only qualified-AND-key passes.
     const hit = await ql.find('showcase_contact', {
       where: { $and: [criteria, { id: { $in: ['ct_q_key', 'ct_q_other', 'ct_new_key'] } }] },
       fields: ['id'], context: SYS.context,

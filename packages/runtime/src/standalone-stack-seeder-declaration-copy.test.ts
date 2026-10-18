@@ -16,7 +16,10 @@
 //   (bootstrap-declared-permissions.ts did the same for 'permission', and
 //   bootstrap-declared-capabilities.ts for 'capability', until ADR-0131 D3
 //   retired them: a declared permission set or capability now has no row at all)
-//   bootstrap-declared-sharing-rules.ts readDeclared(engine,'sharing_rule') then metadataService.list
+//   plugin-sharing declared-sharing-rules.ts: engine.registry.listItems('sharing_rule')
+//   then metadataService.list — read at ENFORCEMENT since ADR-0131 D2 retired the
+//   sharing-rule seeder, so a declared sharing rule has no row either, and the
+//   rule the sharing-rule service serves is where the copy it read shows
 //
 // Triage (14491#issuecomment-5507909226) ruled the card down to four questions
 // and forbade every repair:
@@ -67,11 +70,10 @@
 // DECLARED: one composition input — `tenancy: { posture: 'single' }`.
 // `createStandaloneStack` composes no auth plugin, and `AuthPlugin` is the only
 // registrar of the `tenancy` service; absent it, `SharingServicePlugin`'s
-// `sharingPosture()` takes its fail-safe walled default, `resolveRuleSeedPasses`
-// enumerates `sys_organization` (empty on a fresh boot) and runs ZERO seeding
-// passes — measured: `[sharing-rule] hooks bound {"ruleCount":0}` and an empty
-// `sys_sharing_rule`, which measures the tenancy default rather than the read
-// under study. `single` is what the open runtime's own `createTenancyService`
+// `sharingPosture()` takes its fail-safe walled default, `resolveDeclaredRuleScopes`
+// enumerates `sys_organization` (empty on a fresh boot) and serves declared
+// rules in ZERO scopes — the sharing-rule service then lists none, which
+// measures the tenancy default rather than the read under study. `single` is what the open runtime's own `createTenancyService`
 // resolves to when no `org-scoping` service is installed (auth-plugin.ts
 // `probeIsolation`), i.e. the self-hosted single-tenant posture — so this
 // declares the deployment shape, it does not stand in for anything being
@@ -232,6 +234,8 @@ let registryCopy: Record<string, any[]>;
 let doorCopy: Record<string, any[]>;
 /** The rows the seeders left behind. */
 let rows: Record<string, any[]>;
+/** [ADR-0131 D2] The sharing rules the sharing-rule service serves — read from the registry, no row. */
+let served: any[];
 
 const byName = (items: readonly any[], name: string): any =>
   items.find((i: any) => i?.name === name);
@@ -287,6 +291,9 @@ beforeAll(async () => {
     // [C3 stage 8] A retired catalog row object has no table, and no rows.
     rows[t] = ql.getObject?.(t) ? await ql.find(t, { context: { isSystem: true } }) : [];
   }
+  served = await kernel
+    .getService<{ listRules(filter: object, context: object): Promise<any[]> }>('sharingRules')
+    .listRules({}, { isSystem: true, positions: [], permissions: [] });
 }, BOOT_TIMEOUT);
 
 afterAll(async () => {
@@ -353,14 +360,12 @@ describe('#14491 Q2 — the runtime type of a sharing rule `condition` at the se
     }
   });
 
-  it('ABSORBED: `compileCelToFilter` accepts `string | { source }`, so the persisted `criteria_json` is the same either way', () => {
+  it('ABSORBED: `compileCelToFilter` accepts `string | { source }`, so the served `criteria` is the same either way', () => {
     // `celToFilterOutcome` → `compileCelToFilter(cel as string | { source?: string })`,
     // whose `toSource` reads both shapes. The divergence is real at the seam
-    // and has no consequence in the row.
-    const modern = byName(rows.sys_sharing_rule, 'share_modern_deals');
-    expect(JSON.parse(modern.criteria_json)).toEqual({ stage: 'won' });
-    const legacyLevel = byName(rows.sys_sharing_rule, 'share_legacy_level');
-    expect(JSON.parse(legacyLevel.criteria_json)).toEqual({ tier: 'gold' });
+    // and has no consequence in the rule enforcement reads.
+    expect(byName(served, 'share_modern_deals').criteria).toEqual({ stage: 'won' });
+    expect(byName(served, 'share_legacy_level').criteria).toEqual({ tier: 'gold' });
   });
 });
 
@@ -446,7 +451,7 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
     expect(doorLegacy).toMatchObject({ active: true, _packageVersion: '3.0.0' });
   });
 
-  it('a legacy `accessLevel` alone arrives at the seeder already converted, on both copies, and lands `edit`', () => {
+  it('a legacy `accessLevel` alone arrives at the reader already converted, on both copies, and is served `edit`', () => {
     // `share_legacy_level` declares `full` over a recipient type the seeder
     // accepts, so the level axis is not masked by the recipient axis.
     // [#22994] CONVERGED: the forward conversion maps the retired spelling on
@@ -456,7 +461,7 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
     // `defineRule` → `normalizeAccessLevel(input.accessLevel, 'read')`.)
     expect(byName(registryCopy.sharing_rule, 'share_legacy_level').accessLevel).toBe('edit');
     expect(byName(doorCopy.sharing_rule, 'share_legacy_level').accessLevel).toBe('edit');
-    expect(byName(rows.sys_sharing_rule, 'share_legacy_level')).toMatchObject({
+    expect(byName(served, 'share_legacy_level')).toMatchObject({
       access_level: 'edit',
       recipient_type: 'position',
       recipient_id: 'sales_lead',
@@ -465,7 +470,7 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
     });
   });
 
-  it('the rule whose recipient the door converts is SEEDED, as a position share, exactly once', () => {
+  it('the rule whose recipient the door converts is SERVED, as a position share, exactly once — and no row is written', () => {
     // AN AUTHORIZATION OUTCOME. `mapRecipientType` still refuses `'role'`, and
     // used to: before #22994 the registry copy kept the legacy recipient, the
     // seeder took its `skipped (unmappable recipient)` branch, and this rule had
@@ -474,7 +479,8 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
     // door's copy says, `position`, which `mapRecipientType` accepts.
     expect(byName(doorCopy.sharing_rule, 'share_legacy_deals').sharedWith.type).toBe('position');
     expect(byName(registryCopy.sharing_rule, 'share_legacy_deals').sharedWith.type).toBe('position');
-    expect(byName(rows.sys_sharing_rule, 'share_legacy_deals')).toMatchObject({
+    expect(byName(served, 'share_legacy_deals')).toMatchObject({
+      id: 'share_legacy_deals',
       name: 'share_legacy_deals',
       object_name: 'crm_deal',
       recipient_type: 'position',
@@ -485,18 +491,19 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
       customized: false,
       organization_id: null,
     });
-    expect(JSON.parse(byName(rows.sys_sharing_rule, 'share_legacy_deals').criteria_json))
-      .toEqual({ status: 'open' });
+    expect(byName(served, 'share_legacy_deals').criteria).toEqual({ status: 'open' });
 
-    // Three declared rules in, three rows out, each exactly once: the legacy
-    // rule is seeded ONE time, not a second time beside a modern spelling.
-    expect(rows.sys_sharing_rule.filter((r: any) => r.name === 'share_legacy_deals')).toHaveLength(1);
-    expect(rows.sys_sharing_rule.map((r: any) => r.name).sort())
+    // Three declared rules in, three served, each exactly once: the legacy
+    // rule is served ONE time, not a second time beside a modern spelling.
+    expect(served.filter((r: any) => r.name === 'share_legacy_deals')).toHaveLength(1);
+    expect(served.map((r: any) => r.name).sort())
       .toEqual(['share_legacy_deals', 'share_legacy_level', 'share_modern_deals']);
+    // [ADR-0131 D2] Read, not written: the boot leaves `sys_sharing_rule` empty.
+    expect(rows.sys_sharing_rule).toEqual([]);
   });
 
-  it('the rows that DID land carry the seeder-derived shape, organization-less under the `single` posture', () => {
-    const modern = byName(rows.sys_sharing_rule, 'share_modern_deals');
+  it('the rules served carry the reader-derived shape, organization-less under the `single` posture', () => {
+    const modern = byName(served, 'share_modern_deals');
     expect(modern).toMatchObject({
       name: 'share_modern_deals',
       object_name: 'crm_deal',
@@ -508,6 +515,6 @@ describe('#14491 Q1 + Q4 — which copy the seeders consume, and which copy wins
       customized: false,
       organization_id: null,
     });
-    expect(JSON.parse(modern.criteria_json)).toEqual({ stage: 'won' });
+    expect(modern.criteria).toEqual({ stage: 'won' });
   });
 });

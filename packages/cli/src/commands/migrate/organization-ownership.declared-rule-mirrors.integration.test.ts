@@ -2,43 +2,46 @@
 
 /**
  * `os migrate organization-ownership --apply` on a v17-shaped database whose
- * packages declare sharing rules, on a release whose served boot still seeds
- * them — through the command, over a SQLite file.
+ * packages declare sharing rules, on the release that retired their seeder
+ * (ADR-0131 C3 stage 9) — through the command, over a SQLite file.
  *
  * ## The database
  *
- * Built the way an environment's is. First a served boot of THIS release
- * (`@objectstack/verify`'s `bootStack`: `os serve`'s composition, plugin starts
- * included) of a package declaring one sharing rule, over the file. Then what
- * a 17.x runtime left beside it: ten more declared rules its seeder wrote
- * organization-less, an organization's own rule, a customized declared rule
- * with no organization, and a column-drop table still carrying
- * `organization_id`. That is HotCRM's measured shape: eleven declared rules,
- * one of them seeded by the first v18 boot, before any ceremony ran.
+ * Built the way an environment's is, in the project directory the command runs
+ * in (its `objectstack.config.mjs` declares the package). First a served boot
+ * of THIS release (`@objectstack/verify`'s `bootStack`: `os serve`'s
+ * composition, plugin starts included) of a package declaring eleven sharing
+ * rules, over the file. Then
+ * what a 17.x runtime left beside it: the eleven declared rules its seeder
+ * wrote organization-less, each with the grant it materialised naming it by
+ * row id, an organization's own rule with its grant, a customized declared
+ * rule with no organization, and a column-drop table still carrying
+ * `organization_id`. That is HotCRM's measured shape: eleven declared rules.
  *
  * ## The cases
  *
- *  1. The served boot writes the declared rule as exactly the row the
- *     `declared-rule-mirrors` departure names (`managed_by 'package'`,
- *     uncustomized, no organization), and that is what
- *     `DECLARED_SHARING_RULE_SEEDER_RUNS` states. ⛔ When the seeder retires
- *     this case fails until the constant flips — in the same change.
+ *  1. The served boot writes NO `sys_sharing_rule` row for a declared rule —
+ *     what `DECLARED_SHARING_RULE_SEEDER_RUNS` (`false`) states — and the
+ *     sharing-rule service still serves every declared rule, read from the
+ *     registry (its id is its name).
  *  2. Plan, then `--apply --json`, development boots like the boot that built
- *     the file: `blocking 0`, the eleven rows advisory and named, the
- *     `sys_migration` marker verified with `blocking 0`, every rule row kept.
- *     Then a served boot of the certified file with the v18 boot guard
- *     composed (`os serve`'s refusal) starts — with a table put back in the
- *     v17 shape, so the guard decides on the marker and not on columns — and
- *     `os migrate apply`'s drop gate reads the marker as verified.
+ *     the file: the mirror-deletion step renames each mirror's grant to its
+ *     rule's name, then deletes exactly the eleven; `blocking 0`, nothing
+ *     advisory, nothing remaining; every grant resolves (a kept row's id, or a
+ *     declared name); the customized and the organization's rules stay; the
+ *     `sys_migration` marker is verified. Then a served boot of the certified
+ *     file with the v18 boot guard composed (`os serve`'s refusal) starts —
+ *     with a table put back in the v17 shape, so the guard decides on the
+ *     marker and not on columns — and serves the declared rules.
  *
- * The same verdict without a boot — the restore once the seeder retires, and a
- * host departure of the same id that still blocks — is
+ * The same verdict without a boot — the blocking, the checkpointed re-run and
+ * the seeding legs, and a host departure of the same id that still blocks — is
  * `utils/organization-ownership-apply.declared-rule-mirrors.test.ts`.
  */
 
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -59,9 +62,9 @@ let MigrateOrganizationOwnership: Command;
 
 const CLI_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
 const CASE_TIMEOUT_MS = 120_000;
-/** The rows a 17.x seeder left, beside the one this release's served boot writes. */
-const V17_MIRRORS = 10;
-const MIRRORS = V17_MIRRORS + 1;
+/** The declared rules, each of which a 17.x seeder left as a mirror row (HotCRM declares eleven). */
+const MIRRORS = 11;
+const DECLARED = Array.from({ length: MIRRORS }, (_, i) => `share_declared_${i + 1}`);
 
 /** Env that would point a boot somewhere other than the fixture, or change what it composes. */
 const OVERRIDING_ENV = [
@@ -80,22 +83,30 @@ const stackConfig = () => ({
       fields: { name: { type: 'text', label: 'Name' }, status: { type: 'text', label: 'Status' } },
     },
   ],
-  sharingRules: [
-    {
-      name: 'share_open_deals',
-      type: 'criteria',
-      object: 'crm_deal',
-      accessLevel: 'read',
-      condition: 'record.status == "open"',
-      sharedWith: { type: 'position', value: 'sales_rep' },
-    },
-  ],
+  sharingRules: DECLARED.map((name) => ({
+    name,
+    type: 'criteria',
+    object: 'crm_deal',
+    accessLevel: 'read',
+    condition: 'record.status == "open"',
+    sharedWith: { type: 'position', value: 'sales_rep' },
+  })),
 });
+
+/** What the sharing-rule service serves, as a system caller lists it: [id, name] per rule. */
+async function servedRules(kernel: { getService(name: string): unknown }): Promise<Array<[string, string]>> {
+  const service = kernel.getService('sharingRules') as {
+    listRules(filter: Record<string, unknown>, context: Record<string, unknown>): Promise<Array<{ id: string; name: string }>>;
+  };
+  return (await service.listRules({}, { isSystem: true, positions: [], permissions: [] })).map((r) => [r.id, r.name]);
+}
 
 let dir: string;
 let file: string;
 /** What the served boot left in `sys_sharing_rule`, read before the 17.x leftovers join it. */
 let seeded: Record<string, unknown>[];
+/** What the served boot's sharing-rule service served, read before it stopped. */
+let servedAtBoot: Array<[string, string]>;
 const savedEnv: Record<string, string | undefined> = {};
 const savedCwd = process.cwd();
 
@@ -150,10 +161,17 @@ describe('os migrate organization-ownership on a database whose packages declare
     ({ default: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
     dir = mkdtempSync(join(tmpdir(), 'os-ceremony-declared-rules-'));
     file = join(dir, 'fixture.db');
+    // The project the command runs in: the ceremony boots ITS composition, so
+    // the registry it asks for the declared rules holds this package's.
+    writeFileSync(join(dir, 'objectstack.config.mjs'), `export default ${JSON.stringify(stackConfig(), null, 2)};\n`);
 
     // The served boot of this release, over the file.
     const stack = await bootStack(stackConfig(), { databaseFile: file });
-    await stack.stop();
+    try {
+      servedAtBoot = await servedRules(stack.kernel);
+    } finally {
+      await stack.stop();
+    }
     seeded = sql('SELECT name, managed_by, customized, organization_id FROM sys_sharing_rule ORDER BY name');
 
     // What a 17.x runtime left beside it.
@@ -165,8 +183,18 @@ describe('os migrate organization-ownership on a database whose packages declare
           `'sales_rep', 'read', 1, ?, ?)`,
         id, organizationId, name, name, '{"status":"open"}', managedBy, customized,
       );
-    for (let i = 1; i <= V17_MIRRORS; i++) rule(`rule_v17_${i}`, `share_v17_${i}`, 'package', 0, null);
+    const grant = (id: string, record: string, sourceId: string) =>
+      sql(
+        'INSERT INTO sys_record_share (id, organization_id, object_name, record_id, recipient_type, recipient_id, ' +
+          `access_level, source, source_id, created_at) VALUES (?, ?, 'crm_deal', ?, 'user', 'usr_rep', 'read', 'rule', ?, ?)`,
+        id, organization!, record, sourceId, '2026-01-01T00:00:00.000Z',
+      );
+    DECLARED.forEach((name, i) => {
+      rule(`rule_v17_${i + 1}`, name, 'package', 0, null);
+      grant(`share_v17_${i + 1}`, `deal_${i + 1}`, `rule_v17_${i + 1}`);
+    });
     rule('rule_organization', 'organization_rule', 'admin', 0, organization!);
+    grant('share_organization', 'deal_org', 'rule_organization');
     rule('rule_customized', 'customized_rule', 'package', 1, null);
     sql('ALTER TABLE sys_job ADD COLUMN organization_id varchar(255)');
     sql(`INSERT INTO sys_job (id, name, organization_id) VALUES ('job_v17', 'nightly', NULL)`);
@@ -180,7 +208,7 @@ describe('os migrate organization-ownership on a database whose packages declare
     if (dir) rmSync(dir, { recursive: true, force: true });
   });
 
-  it('a served boot of this release writes the declared rule as the row the departure names, as DECLARED_SHARING_RULE_SEEDER_RUNS states', () => {
+  it('a served boot of this release writes no row for a declared rule, as DECLARED_SHARING_RULE_SEEDER_RUNS states, and serves every one from the registry', () => {
     expect(
       seeded,
       `DECLARED_SHARING_RULE_SEEDER_RUNS (utils/organization-ownership-inventory.ts) is ${DECLARED_SHARING_RULE_SEEDER_RUNS}, and ` +
@@ -188,18 +216,21 @@ describe('os migrate organization-ownership on a database whose packages declare
         'boot does, in the change that changed the boot',
     ).toEqual(
       DECLARED_SHARING_RULE_SEEDER_RUNS
-        ? [{ name: 'share_open_deals', managed_by: 'package', customized: 0, organization_id: null }]
+        ? DECLARED.map((name) => ({ name, managed_by: 'package', customized: 0, organization_id: null })).sort((a, b) => (a.name < b.name ? -1 : 1))
         : [],
     );
+    expect(DECLARED_SHARING_RULE_SEEDER_RUNS).toBe(false);
+    // Read, not written: each declared rule is served under its name as its id.
+    expect(servedAtBoot).toEqual([...DECLARED].sort().map((name) => [name, name]));
   });
 
-  it('--apply certifies: blocking 0, the eleven rows advisory, the marker verified; then the served boot with the v18 guard starts', async () => {
+  it('--apply renames the grants, deletes exactly the eleven mirrors and certifies; then the served boot with the v18 guard starts', async () => {
     const planFile = join(dir, 'plan.json');
     const plan = await run(['--dev', '--database-url', `file:${file}`, '--json', '--out', planFile]);
     expect(plan.payload.error, JSON.stringify(plan.payload).slice(0, 800)).toBeUndefined();
     expect(plan.exitCode).toBe(0);
-    // Said before the first write, and carried by the plan file.
-    expect(plan.payload.plan.warnings).toContainEqual(expect.stringMatching(new RegExp(`^sys_sharing_rule holds ${MIRRORS} organization-less row\\(s\\) of `)));
+    // Nothing is held as advisory any more, so nothing is said of it.
+    expect(plan.payload.plan.warnings.filter((w: string) => w.startsWith('sys_sharing_rule holds'))).toEqual([]);
 
     const apply = await run([
       '--dev', '--apply', '--backup-taken', '--plan-file', planFile, '--database-url', `file:${file}`, '--json',
@@ -208,17 +239,29 @@ describe('os migrate organization-ownership on a database whose packages declare
     expect(apply.payload.error, JSON.stringify(apply.payload).slice(0, 800)).toBeUndefined();
     const { report } = apply.payload;
     const unattributable = report.tables.reduce((n: number, t: { unattributable: unknown[] }) => n + t.unattributable.length, 0);
-    expect([apply.exitCode, report.complete, report.blocking, report.advisory]).toEqual([0, true, 0, unattributable + MIRRORS]);
+    const blockers = report.steps.flatMap((s: { blockers: string[] }) => s.blockers);
+    expect([apply.exitCode, report.complete, report.blocking, report.advisory], blockers.join('\n')).toEqual([0, true, 0, unattributable]);
     expect(report.tables.find((t: { object: string }) => t.object === 'sys_sharing_rule')).toMatchObject({
       remaining: 0,
-      departures: [{ id: 'declared-rule-mirrors', as: 'mirror-deletion', rows: MIRRORS, advisory: expect.stringMatching(/own boot still writes them/) }],
-      notNull: { willReceive: false, reason: expect.stringMatching(new RegExp(`^${MIRRORS} row\\(s\\) stay NULL on this release, reported as advisory: `)) },
+      deleted: MIRRORS,
+      departures: [],
+    });
+    expect(report.steps.find((s: { step: string }) => s.step === 'mirror-deletion')).toMatchObject({
+      status: 'done',
+      summary: { grantsRenamed: MIRRORS },
     });
     expect(
       sql('SELECT verified_at IS NOT NULL AS verified, applied_at IS NOT NULL AS applied, blocking, advisory FROM sys_migration WHERE id = ?', ORGANIZATION_OWNERSHIP_MIGRATION_ID),
-    ).toEqual([{ verified: 1, applied: 1, blocking: 0, advisory: unattributable + MIRRORS }]);
-    // Nothing of the table was deleted; the eleven kept their NULL.
-    expect(sql('SELECT COUNT(*) AS n, SUM(organization_id IS NULL) AS nulls FROM sys_sharing_rule')).toEqual([{ n: MIRRORS + 2, nulls: MIRRORS }]);
+    ).toEqual([{ verified: 1, applied: 1, blocking: 0, advisory: unattributable }]);
+    // Exactly the eleven went: the organization's rule and the customized one
+    // stay, and no row of the table is organization-less any more.
+    expect(sql('SELECT id FROM sys_sharing_rule ORDER BY id')).toEqual([{ id: 'rule_customized' }, { id: 'rule_organization' }]);
+    expect(sql('SELECT COUNT(*) AS nulls FROM sys_sharing_rule WHERE organization_id IS NULL')).toEqual([{ nulls: 0 }]);
+    // Every grant resolves: by name for a declared rule, by row id for the rule that keeps its row.
+    expect(sql(`SELECT id, source_id FROM sys_record_share WHERE source = 'rule' ORDER BY id`)).toEqual([
+      { id: 'share_organization', source_id: 'rule_organization' },
+      ...DECLARED.map((name, i) => ({ id: `share_v17_${i + 1}`, source_id: name })).sort((a, b) => (a.id < b.id ? -1 : 1)),
+    ]);
 
     // A table back in the v17 shape, so the guard decides on the marker.
     sql('ALTER TABLE sys_job ADD COLUMN organization_id varchar(255)');
@@ -231,6 +274,11 @@ describe('os migrate organization-ownership on a database whose packages declare
         Parameters<typeof readOrganizationOwnershipMarker>[0];
       expect(await findV17ShapeTables(engine)).toEqual(['sys_job']);
       expect((await readOrganizationOwnershipMarker(engine)).verified).toBe(true);
+      // The declared rules are served, the organization's rule beside them; the boot wrote no row.
+      expect((await servedRules(served.kernel)).map(([, name]) => name)).toEqual(
+        [...DECLARED, 'customized_rule', 'organization_rule'].sort(),
+      );
+      expect(sql('SELECT COUNT(*) AS n FROM sys_sharing_rule')).toEqual([{ n: 2 }]);
     } finally {
       await served.stop();
     }

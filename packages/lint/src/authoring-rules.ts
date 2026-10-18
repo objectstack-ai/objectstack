@@ -2087,9 +2087,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // sharing rule where the predicate is EXACT rather than inferred.
   //
   //  - `condition` has a single runtime consumer
-  //    (`bootstrapDeclaredSharingRules`) whose only use of the key is
+  //    (`createDeclaredSharingRuleSource`) whose only use of the key is
   //    `compileCelToFilter(condition, { variables: {} })`; a condition that
-  //    does not lower means the rule is SKIPPED at boot.
+  //    does not lower means the rule is SKIPPED by enforcement.
   //  - `object` decides whether the grant is refused outright: reconcile hands
   //    each row to `SharingService.grant`, whose ADR-0111 D7 pre-flight THROWS
   //    `SHARING_NOT_ENABLED` when the anchor's effective sharing model is

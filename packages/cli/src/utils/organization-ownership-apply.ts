@@ -111,7 +111,12 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  *     `mirror-deletion` object that match its mirror selector and none of its
  *     named categories are deleted. Templates: the promotion runs again first,
  *     and beyond the seeded mirrors only the rows whose environment copy that
- *     pass verified are deleted, by id.
+ *     pass verified are deleted, by id. Then the `declared-rule-mirrors`
+ *     departure on the fate-3 `sys_sharing_rule`, made executable (ADR-0131
+ *     C3 stage 9): every grant naming a mirror row is renamed to the rule's
+ *     NAME, which the registry must resolve, and only then is the mirror
+ *     deleted ({@link runDeclaredRuleMirrorDeletion}). It runs again on a
+ *     checkpointed run while a mirror stands.
  *  4h. `history-renumber` — seat answer Q2 A: `sys_metadata_history`'s
  *     `event_seq` and every `(type, name, version)` unique environment-wide
  *     before the column goes. Every lineage still tagged to an organization
@@ -128,11 +133,11 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  *     one would refuse them; they are reported, never deleted).
  *
  * Then the post-check re-runs the plan and reports, per table, what remains.
- * A departure no step of this release can perform — the declared sharing-rule
- * mirrors, which this release's own boot keeps seeding
- * (`DECLARED_SHARING_RULE_SEEDER_RUNS`, the inventory) — is reported as
- * advisory: named and counted, its rows still NULL, never deleted, and not a
- * discrepancy. Every other remaining row is one.
+ * A departure no step of a release can perform — the declared sharing-rule
+ * mirrors while a release's own boot still seeded them
+ * (`DECLARED_SHARING_RULE_SEEDER_RUNS`, the inventory; `false` since the
+ * seeder retired) — is reported as advisory: named and counted, its rows still
+ * NULL, never deleted, and not a discrepancy. Every other remaining row is one.
  *
  * ## Idempotent and resumable
  *
@@ -236,6 +241,16 @@ export interface ServedViewsPort {
  */
 export interface MetadataLockPort {
   verdict(type: string, name: string, packageId: string | null): Promise<{ editable: boolean; lock?: string; lockReason?: string }>;
+}
+
+/**
+ * [ADR-0131 C3 stage 9] The sharing rules the deployment's packages DECLARE,
+ * by name — the registry the plugin's enforcement reads them from (the
+ * command: the booted engine's registry). A declared-rule mirror is deleted
+ * only once its name resolves here.
+ */
+export interface DeclaredSharingRulesPort {
+  names(): Promise<readonly string[]>;
 }
 
 /** The `email_template` item the registry serves for one `(name, locale)` bundle member. */
@@ -512,6 +527,11 @@ export interface ApplyOptions {
   catalog: CatalogPort;
   door: MetadataDoorPort;
   templates: TemplatePort;
+  /**
+   * [ADR-0131 C3 stage 9] The declared sharing rules, by name. Absent, a run
+   * that finds a declared-rule mirror standing blocks instead of deleting it.
+   */
+  declaredSharingRules?: DeclaredSharingRulesPort;
   /** The served views, for carrying form withdrawals. */
   views: ServedViewsPort;
   /** The door's lock verdict, for the one write the ceremony makes in place. */
@@ -2447,7 +2467,188 @@ async function runMirrorDeletion(run: Run): Promise<StepReport> {
     const kept = Math.max(0, table.rows!.total - (run.deleted.get(table.object) ?? 0));
     if (kept > 0) notes.push(`${table.object}: ${kept} row(s) are not mirrors (a named category or their non-seeded provenance claims them) and stay.`);
   }
-  return { step: 'mirror-deletion', status: 'done', summary: { deleted: total }, blockers: [], notes };
+  const declared = await runDeclaredRuleMirrorDeletion(run);
+  if (declared.status !== 'done') return { ...declared, summary: { ...declared.summary, deleted: total }, notes: [...notes, ...declared.notes] };
+  return {
+    step: 'mirror-deletion',
+    status: 'done',
+    summary: { ...declared.summary, deleted: total + (declared.summary.deleted ?? 0) },
+    blockers: [],
+    notes: [...notes, ...declared.notes],
+  };
+}
+
+// ── Step 4, continued: the declared sharing-rule mirrors (ADR-0131 C3 stage 9) ─
+
+const SHARING_RULES = 'sys_sharing_rule';
+const RECORD_SHARES = 'sys_record_share';
+/** The inventory departure on `sys_sharing_rule` whose selector names the mirrors. */
+const DECLARED_RULE_MIRRORS = 'declared-rule-mirrors';
+
+/** One declared-rule mirror row, where it lives. */
+interface DeclaredRuleMirror {
+  id: string;
+  name: string;
+  table: string;
+}
+
+/**
+ * Every `sys_sharing_rule` row the `declared-rule-mirrors` departure's selector
+ * names (`managed_by` package or platform, not customized) — the copies of code
+ * the retired seeder wrote: organization-less under `single` (the departure's
+ * NULL rows), one per organization under a wall (#10103). Both are copies of
+ * the same declaration, which the registry now serves in every scope, so both
+ * go. A customized copy and an organization's own rule are not selected.
+ */
+async function readDeclaredRuleMirrors(run: Run): Promise<DeclaredRuleMirror[]> {
+  const where = mirrorEntry(run, SHARING_RULES)?.departures?.find((d) => d.id === DECLARED_RULE_MIRRORS)?.where;
+  const table = run.plan.tables.find((t) => t.object === SHARING_RULES);
+  if (!where || !table || table.physical !== 'present') return [];
+  const out: DeclaredRuleMirror[] = [];
+  for (const physical of table.tables) {
+    const cols = await columnsOf(run, physical);
+    if (!cols?.has('name')) continue;
+    const selector = predicateSql(databaseFor(run, physical).sql, physical, cols, where);
+    for (const row of await readAll(run, physical, ['name'], selector)) {
+      out.push({ id: String(row.id), name: typeof row.name === 'string' ? row.name : '', table: physical });
+    }
+  }
+  return out;
+}
+
+/** Whether a declared-rule mirror stands that this release deletes (not while the departure is advisory). */
+async function declaredRuleMirrorsDue(run: Run): Promise<boolean> {
+  const departure = run.plan.tables.find((t) => t.object === SHARING_RULES)?.departures.find((d) => d.id === DECLARED_RULE_MIRRORS);
+  return !departure?.advisory && (await readDeclaredRuleMirrors(run)).length > 0;
+}
+
+/** The grants (`source = 'rule'`) whose `source_id` is `sourceId`, on each physical grant table. */
+async function countRuleGrants(run: Run, tables: readonly string[], sourceId: string): Promise<number> {
+  let n = 0;
+  for (const physical of tables) {
+    const { sql } = databaseFor(run, physical);
+    n += await sql.count(
+      physical,
+      `SELECT COUNT(*) AS n FROM ${sql.q(physical, physical)} WHERE ${sql.q('source', physical)} = ? AND ${sql.q('source_id', physical)} = ?`,
+      ['rule', sourceId],
+    );
+  }
+  return n;
+}
+
+/**
+ * [ADR-0131 C3 stage 9; ruling β on the C3 epic] Delete the declared-rule
+ * mirrors — once enforcement reads declared rules from the registry, they are
+ * copies nothing needs. In the ruled order:
+ *
+ *  1. Every grant naming a mirror must be able to name its rule instead: the
+ *     mirror's name must resolve to a rule a package declares (the registry,
+ *     {@link DeclaredSharingRulesPort}). A mirror whose rule no package
+ *     declares any more, and that grants still name, blocks — named, with its
+ *     remedy, nothing written: deleting it would withdraw that access on the
+ *     operator's behalf. One no grant names is a copy of nothing that grants
+ *     nothing, and goes like every fate-2 mirror.
+ *  2. Item 5 (c): every grant naming a mirror row by id
+ *     (`sys_record_share.source_id`, `source = 'rule'`) is renamed to the
+ *     rule's NAME — the id a declared rule's grants carry — BEFORE any mirror
+ *     is deleted, so no standing access is orphaned. Then it is verified: no
+ *     grant names a mirror row any more.
+ *  3. The mirrors are deleted by id, the selector re-asserted, and counted to
+ *     zero.
+ *
+ * Idempotent: a second run finds no mirror and writes nothing.
+ */
+async function runDeclaredRuleMirrorDeletion(run: Run): Promise<StepReport> {
+  // While a release's boot still seeds them the departure is advisory and no
+  // step removes them: the next boot would write them again.
+  const departure = run.plan.tables.find((t) => t.object === SHARING_RULES)?.departures.find((d) => d.id === DECLARED_RULE_MIRRORS);
+  const mirrors = departure?.advisory ? [] : await readDeclaredRuleMirrors(run);
+  if (mirrors.length === 0) return { step: 'mirror-deletion', status: 'done', summary: {}, blockers: [], notes: [] };
+  const blocked = (blockers: string[]): StepReport => ({ step: 'mirror-deletion', status: 'blocked', summary: { deleted: 0 }, blockers, notes: [] });
+
+  if (!run.opts.declaredSharingRules) {
+    return blocked([
+      `${SHARING_RULES} holds ${mirrors.length} declared-rule mirror(s), deleted only once each name resolves to a ` +
+        'rule a package declares, and this run has no registry to read the declared sharing rules from. Run the ' +
+        'command against the deployment\'s own composition, then re-run.',
+    ]);
+  }
+  const declared = new Set(await run.opts.declaredSharingRules.names());
+
+  const shares = run.plan.tables.find((t) => t.object === RECORD_SHARES);
+  const grantTables: string[] = [];
+  for (const physical of shares?.physical === 'present' ? shares.tables : []) {
+    const cols = await columnsOf(run, physical);
+    if (cols?.has('source') && cols.has('source_id')) grantTables.push(physical);
+  }
+  const grantsOf = new Map<string, number>();
+  for (const mirror of mirrors) grantsOf.set(mirror.id, await countRuleGrants(run, grantTables, mirror.id));
+  const unnameable = mirrors.filter((m) => !declared.has(m.name) && grantsOf.get(m.id)! > 0);
+  if (unnameable.length > 0) {
+    const names = [...new Set(unnameable.map((m) => m.name || '(no name)'))].sort();
+    return blocked([
+      `${unnameable.length} declared-rule mirror(s) on ${SHARING_RULES} name a sharing rule no installed package ` +
+        `declares (${names.join(', ')}; rows ${unnameable.map((m) => m.id).sort().join(', ')}), and ${RECORD_SHARES} ` +
+        'grants still name them. Their grants cannot be renamed to a rule the registry serves, and deleting the ' +
+        'mirrors would withdraw that access, so they stay and nothing was written. Declare the rule in its package ' +
+        `again, or delete each row and the ${RECORD_SHARES} rows whose source_id names it, then re-run.`,
+    ]);
+  }
+
+  // (c) — the grants first.
+  let renamed = 0;
+  for (const mirror of mirrors) {
+    if (grantsOf.get(mirror.id) === 0) continue;
+    for (const physical of grantTables) {
+      const { sql } = databaseFor(run, physical);
+      const n = await countRuleGrants(run, [physical], mirror.id);
+      if (n === 0) continue;
+      await execute(
+        run,
+        physical,
+        `UPDATE ${sql.q(physical, physical)} SET ${sql.q('source_id', physical)} = ? ` +
+          `WHERE ${sql.q('source', physical)} = ? AND ${sql.q('source_id', physical)} = ?`,
+        [mirror.name, 'rule', mirror.id],
+      );
+      renamed += n;
+    }
+  }
+  for (const mirror of mirrors) {
+    const left = await countRuleGrants(run, grantTables, mirror.id);
+    if (left !== 0) {
+      throw new Error(
+        `${left} grant(s) still name the declared-rule mirror ${mirror.id} (${mirror.name}) after the rename; no mirror was deleted.`,
+      );
+    }
+  }
+  if (renamed > 0) run.opts.onProgress?.(`declared-rule mirrors: ${renamed} grant(s) now name their rule`);
+
+  // The mirrors, by id, the selector re-asserted.
+  const where = mirrorEntry(run, SHARING_RULES)!.departures!.find((d) => d.id === DECLARED_RULE_MIRRORS)!.where;
+  let deleted = 0;
+  for (const physical of [...new Set(mirrors.map((m) => m.table))]) {
+    const { sql } = databaseFor(run, physical);
+    const cols = (await columnsOf(run, physical))!;
+    const selector = predicateSql(sql, physical, cols, where);
+    const ids = mirrors.filter((m) => m.table === physical).map((m) => m.id);
+    for (let i = 0; i < ids.length; i += IN_CHUNK) {
+      const chunk = ids.slice(i, i + IN_CHUNK);
+      const byId = `${sql.q('id', physical)} IN (${chunk.map(() => '?').join(', ')})`;
+      await execute(run, physical, `DELETE FROM ${sql.q(physical, physical)} WHERE ${byId} AND (${selector.text})`, [...chunk, ...selector.params]);
+      const left = await sql.count(physical, `SELECT COUNT(*) AS n FROM ${sql.q(physical, physical)} WHERE ${byId}`, chunk);
+      if (left !== 0) throw new Error(`The declared-rule mirror delete on ${physical} left ${left} row(s) behind; nothing past it was deleted.`);
+      deleted += chunk.length;
+    }
+  }
+  run.deleted.set(SHARING_RULES, (run.deleted.get(SHARING_RULES) ?? 0) + deleted);
+  run.opts.onProgress?.(`declared-rule mirrors: ${deleted} row(s) of ${SHARING_RULES} deleted`);
+  return {
+    step: 'mirror-deletion',
+    status: 'done',
+    summary: { deleted, grantsRenamed: renamed },
+    blockers: [],
+    notes: [`${SHARING_RULES}: ${deleted} declared-rule mirror(s) deleted; the registry serves those rules (ADR-0131 D2).`],
+  };
 }
 
 /** Delete, by id, the promotion rows whose environment copy this run verified; nothing else. */
@@ -2779,6 +2980,22 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
     // could clear.
     if (done && step === 'attribution' && rowsToAttribute(before) > 0) {
       const again = await RUNNERS[step](run);
+      steps.push(again);
+      if (again.status !== 'done') {
+        stopped = true;
+        continue;
+      }
+      checkpoint.completed[step] = { at: now().toISOString(), summary: again.summary };
+      await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+      run.columns.clear();
+      continue;
+    }
+    // [ADR-0131 C3 stage 9] The declared-rule mirrors are deleted again on a
+    // checkpointed run while one stands: a database whose ceremony completed on
+    // a release whose boot still seeded them carries them (advisory then), and
+    // the step that deletes them is this release's.
+    if (done && step === 'mirror-deletion' && (await declaredRuleMirrorsDue(run))) {
+      const again = await runDeclaredRuleMirrorDeletion(run);
       steps.push(again);
       if (again.status !== 'done') {
         stopped = true;
