@@ -175,8 +175,8 @@ the Layer 0 pre-image path. Adding a mandatory post-image tenant check would
 risk denying legitimate inserts before the auto-stamp runs — a regression, not a
 fix — so it is deliberately excluded from D1.
 
-> **Amended 2026-10-18 (ruling of record 6250748677 on #24164, letter E′ — the
-> maintainer's 「同意」) — Layer 1 silence on the platform identity objects.**
+> **Amended 2026-10-18 (#24339; ruling of record 6250748677 on #24164, letter E′
+> — the maintainer's 「同意」) — Layer 1 silence on the platform identity objects.**
 > Layer 0 is inert on 22 of the 23 objects the ruling names, which carry no
 > `organization_id` column: the seven SCIM projections (`sys_scim_user`,
 > `sys_scim_subject`, `sys_scim_projection_grant`, `sys_scim_identity_tombstone`,
