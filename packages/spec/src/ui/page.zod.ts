@@ -1293,6 +1293,7 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
   ['record:history', 'draws a window of the history feed (`limit`, 50 unless set), so a printed copy carries only part of it'],
   ['record:activity', 'draws a window of the activity feed (`limit`) with comment and reaction controls, so a printed copy carries only part of it'],
   ['object-grid', 'pages its rows (`pagination` / `pageSize`), so a printed copy carries only the page on screen'],
+  ['list-view', 'pages its rows (`pagination`), so a printed copy carries only the page on screen'],
   ['object-timeline', 'draws a window of its items (`limit`) along a time axis scrolled to the visible range'],
   ['object-tree', 'draws only the nodes a viewer has expanded, so a printed copy depends on who expanded what'],
   // Lays itself out to the screen.

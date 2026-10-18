@@ -66,9 +66,17 @@ const ADMIN_GRANTS: Record<string, any[]> = {
     sys_user_permission_set: [{ id: 'ups_1', user_id: 'admin', permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: null }],
     sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
 };
+/**
+ * [#24150] With `OS_RUNTIME_VERSION` unset, the bind claim's `runtime_version`
+ * is the release the discovery document reports, read through the `protocol`
+ * service. The suites below only need one to be present; the value itself is
+ * pinned against the real producer in `cloud-connection-runtime-version.pin.test.ts`.
+ */
+const DISCOVERY = { getDiscovery: async () => ({ version: 'release-from-discovery' }) };
 function makeCtx(rawApp: any, explicit: Record<string, any> = {}) {
     const services: Record<string, any> = {
         objectql: bindCatalogFromTables({ find: async (object: string) => ADMIN_GRANTS[object] ?? [] }, ADMIN_GRANTS),
+        protocol: DISCOVERY,
         ...explicit,
     };
     const hooks = new Map<string, any>();
