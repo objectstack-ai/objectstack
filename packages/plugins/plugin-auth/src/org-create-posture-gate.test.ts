@@ -294,6 +294,9 @@ describe('#5233 — no tenancy service wired: the gate reads OS_TENANCY_POSTURE,
     const run = await runGuidedWorkspaceCreation({ posture: 'single' }, 'single-posture');
 
     expect(run.status).toBe(403);
+    // [#24243] The registered ADR-0112 code the console branches on, serialised
+    // by the real better-auth route — not only the prose.
+    expect(run.body?.code).toBe('ORGANIZATION_CREATION_DISABLED');
     expect(JSON.stringify(run.body)).toContain(
       'Creating additional organizations is disabled on this deployment.',
     );
@@ -352,6 +355,9 @@ describe('#5233 — with a `tenancy` service wired, as a real kernel boot has', 
     );
 
     expect(run.status).toBe(403);
+    // [#24243] The same code as a posture that asked for no wall: the code names
+    // the deployment's effective posture, not what was requested.
+    expect(run.body?.code).toBe('ORGANIZATION_CREATION_DISABLED');
     expect(JSON.stringify(run.body)).toContain(
       'Creating additional organizations is disabled on this deployment.',
     );

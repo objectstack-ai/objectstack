@@ -138,11 +138,31 @@ const EMAIL_SOURCE = readFileSync(resolve(HERE, 'email-routes.ts'), 'utf8');
  * literal the class hands it, whose `objectQLProvider` is a getter onto the
  * class's own field: so it is still this slot's consumer, and still this
  * census's population. A site is identified by `file:line`, never by a line alone.
+ *
+ * [#23050 slice 13e] Two more consumers moved the same way:
+ * `GET /meta/object/:name/state/:field` (the SECOND consumer, #15405's) to
+ * `meta-object-state-routes.ts`, and `GET /meta/:type/:name/published` (the
+ * FOURTH) to `meta-item-history-routes.ts`. Each still reads
+ * `this.objectQLProvider`, off a host literal the inner `/meta` method hands it,
+ * whose `objectQLProvider` is a getter onto the class's own field. The two left
+ * in `rest-server.ts` are the authorization-input seam and the layered chain's
+ * owner step, both in the class head.
  */
-const SLOT_FILES = ['rest-server.ts', 'batch-routes.ts'] as const;
+const SLOT_FILES = [
+    'rest-server.ts',
+    'batch-routes.ts',
+    'meta-object-state-routes.ts',
+    'meta-item-history-routes.ts',
+] as const;
 const SOURCES = new Map<string, string>(SLOT_FILES.map((file) => [
     file, file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'),
 ]));
+/**
+ * [#23050 slice 13e] The state-machine read's module: its retired-spelling
+ * comment, which quotes this file's subject, is what §1's comment-dropping
+ * control reads.
+ */
+const STATE_SOURCE = SOURCES.get('meta-object-state-routes.ts')!;
 
 /** Every invocation site of the slot over every censused file, keyed `file:line`. */
 function censusInvocationSites(field: string): Array<{ file: string; line: number; text: string; lines: string[] }> {
@@ -192,16 +212,23 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // this file replaces.
         expect(readSites(SOURCE, 'objectQLProviderThatDoesNotExist')).toEqual([]);
         // And the scanner really does drop comment lines: this file's own
-        // subject is quoted inside a retired-spelling comment in `rest-server.ts`.
-        expect(SOURCE).toContain('this.objectQLProvider(environmentId).catch(() => undefined)');
-        expect(invocationSites(SOURCE, 'objectQLProvider').some((s) => s.text.startsWith('//'))).toBe(false);
+        // subject is quoted inside a retired-spelling comment in the state-machine
+        // read's body. [#23050 slice 13e] That body moved to
+        // `meta-object-state-routes.ts`, so both halves read it there.
+        expect(STATE_SOURCE).toContain('this.objectQLProvider(environmentId).catch(() => undefined)');
+        expect(invocationSites(STATE_SOURCE, 'objectQLProvider').length).toBeGreaterThan(0);
+        expect(invocationSites(STATE_SOURCE, 'objectQLProvider').some((s) => s.text.startsWith('//'))).toBe(false);
     });
 
     it('⭐ FIVE consumers: three, not two, was the count the two prose censuses got wrong, and #24210 adds /published and the layered view', () => {
         // [#23050 slice 2] 3 UNCHANGED, over two files: 2 in `rest-server.ts`
         // and the batch door's 1 in `batch-routes.ts`. [#24210] 4: `/published`'s
         // disabled-owner check joins `rest-server.ts`; 5: the layered chain's
-        // owner step (`metaItemReadGateSources`) joins it too.
+        // owner step (`metaItemReadGateSources`) joins it too. [#23050 slice 13e]
+        // 5 UNCHANGED, over four files: 2 in `rest-server.ts` (the class head's
+        // two), the batch door's 1, the state-machine read's 1 in
+        // `meta-object-state-routes.ts` and `/published`'s 1 in
+        // `meta-item-history-routes.ts`.
         const sites = censusInvocationSites('objectQLProvider');
         // The message carries the sites, so a failure here hands the next
         // reader the new census instead of a bare number.
@@ -260,6 +287,8 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // host interface's member, typed `RestServer['objectQLProvider']`. That
         // one spelling is set aside before the check and pinned at exactly one
         // there (zero here), so setting it aside cannot grow into an exemption.
+        // [#23050 slice 13e] The same for the two `/meta` modules: each spells it
+        // once, in the one host interface of its own that hands the slot on.
         const HOST_MEMBER_TYPE = "RestServer['objectQLProvider']";
         for (const [file, source] of SOURCES) {
             expect(source.split(HOST_MEMBER_TYPE).length - 1, file).toBe(file === 'rest-server.ts' ? 0 : 1);

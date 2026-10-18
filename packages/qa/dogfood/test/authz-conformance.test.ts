@@ -1638,7 +1638,8 @@ describe('#9084 — the rest-server.ts transport tripwire keys off mechanics', (
     // [#23050 slice 13b] Length 14 → 15 (`meta-item-read-routes.ts`), still 0 over it.
     // [#23050 slice 13c] Length 15 → 16 (`meta-item-write-routes.ts`), still 0 over it.
     // [#23050 slice 13d] Length 16 → 17 (`meta-item-history-routes.ts`), still 0 over it.
-    expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(17);
+    // [#23050 slice 13e] Length 17 → 18 (`meta-object-state-routes.ts`), still 0 over it.
+    expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
     expect(REST_SERVER_REGISTRAR_PATHS[0]).toBe(REST_SERVER);
     const listed = REST_SERVER_REGISTRAR_PATHS.map((file) => readFileSync(join(REPO_ROOT, file), 'utf8'));
     for (const probe of [MECHANICS, ROUTES]) {

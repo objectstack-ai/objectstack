@@ -624,7 +624,7 @@ knows which object was addressed.
 
 The [error catalog's `INVALID_FIELD` entry](/docs/api/error-catalog#invalid_field) carries
 the authoritative cause text — it enumerates every read axis this one code answers on
-(`select`, `expand`, `searchFields`, `groupBy`, `aggregations[].field`) and the
+(`select`, `expand`, `search`, `searchFields`, `groupBy`, `aggregations[].field`) and the
 off-request `backfillSummaryNulls` case.
 
 ### Resource Errors
@@ -738,8 +738,9 @@ have let them count the dependents; `dependentObject` is named either way. Treat
 #### `RATE_LIMIT_EXCEEDED`
 **HTTP Status:** 429  
 **Meaning:** Too many requests, rate limit exceeded  
-**Envelope:** nested — built by the inbound rate limiter, which sits **ahead of every
-route**, so it is never flat whichever family you were calling
+**Envelope:** nested from the inbound rate limiter, which sits **ahead of every
+route**, so its refusal is never flat whichever family you were calling. The phone-OTP
+send walls answer this code too, flat (see the end of `QUOTA_EXCEEDED` below)
 
 **Example:**
 ```json
@@ -835,10 +836,14 @@ Don't feed this 429 to a retry loop that only checks the status, such as the
 `RATE_LIMIT_EXCEEDED` example above. It has no `Retry-After` to wait on, and every
 retry before `resetAt` is refused again.
 
-Other quota enforcement answers with its own code rather than this one
-(the SMS daily quota answers `TOO_MANY_REQUESTS`). For request pacing, the code
-on the wire is `RATE_LIMIT_EXCEEDED` above, whose `Retry-After` header and
-`retryAfterSeconds` / `resetAt` details are what a client acts on.
+Other quota enforcement answers with a code other than this one. The phone-OTP send
+walls (`/auth/phone-number/send-otp` and `/auth/phone-number/request-password-reset`), a
+phone number's own limit and the deployment's daily SMS quota, both answer 429
+`RATE_LIMIT_EXCEEDED`: one code for both, so a caller cannot tell which budget it hit.
+That body is better-auth's flat `code` and `message`, with no `Retry-After` header and no
+`details`. At the inbound rate limiter, the code on the wire is `RATE_LIMIT_EXCEEDED`
+above, whose `Retry-After` header and `retryAfterSeconds` / `resetAt` details are what a
+client acts on.
 
 ### Server Errors
 

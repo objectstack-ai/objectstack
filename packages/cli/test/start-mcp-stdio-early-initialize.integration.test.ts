@@ -78,10 +78,9 @@ import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-f
 import {
   childEnv,
   E2E_SECRET_KEY,
-  portContentionError,
-  portDriftError,
+  KERNEL_ASSIGNED_PORT,
   probeThroughChild,
-  randomPort,
+  readKernelAssignedPort,
   requireBuiltCli,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
@@ -191,10 +190,11 @@ beforeAll(async () => {
   db = `file:${join(dir, 'probe.db')}`;
 
   // ── Boot 1: mint the stdio key through the product route ────────────────
-  const port = randomPort();
+  // A kernel-assigned port (#24295): no number is drawn and released before the
+  // spawn, so there is no gap for another process to take it in.
   const mint = spawn(
     process.execPath,
-    [CLI, 'serve', 'objectstack.config.ts', '-p', port, '--dev', '--no-ui'],
+    [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev', '--no-ui'],
     {
       cwd: dir,
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -208,7 +208,7 @@ beforeAll(async () => {
   );
   groups.push(mint);
   let output = '';
-  await new Promise<void>((ready, fail) => {
+  const port = await new Promise<number>((ready, fail) => {
     const timer = setTimeout(
       () => fail(new Error(`the minting serve never printed ${READY}\n--- output ---\n${output.slice(-4000)}`)),
       BOOT_TIMEOUT_MS,
@@ -217,18 +217,16 @@ beforeAll(async () => {
       output += String(d);
       if (!READY.test(output)) return;
       clearTimeout(timer);
-      // `--dev` opens serve's port auto-shift: a taken port is a GREEN boot
-      // elsewhere, so the port is read back out of the child's own banner.
-      const drift = portDriftError(output, 'os serve --dev (the minting boot)', port);
-      if (drift) fail(drift);
-      else ready();
+      // The child is the only authority on the port the kernel assigned it.
+      const bound = readKernelAssignedPort(output, 'os serve --dev (the minting boot)');
+      if (bound instanceof Error) fail(bound);
+      else ready(bound);
     };
     mint.stdout!.on('data', onData);
     mint.stderr!.on('data', onData);
     mint.on('exit', (code) => {
       clearTimeout(timer);
-      fail(portContentionError(output, 'os serve --dev (the minting boot)', port)
-        ?? new Error(`the minting serve exited ${String(code)} before ${READY}\n--- output ---\n${output.slice(-4000)}`));
+      fail(new Error(`the minting serve exited ${String(code)} before ${READY}\n--- output ---\n${output.slice(-4000)}`));
     });
   });
 
@@ -279,10 +277,14 @@ afterAll(async () => {
 
 describe('os start with the stdio MCP transport and an initialize written at spawn (#24002)', () => {
   it('answers that initialize and boots the configured app, through the compile and serve children', async () => {
-    const port = randomPort();
+    // ⭐ A kernel-assigned port (#24295). This child is in production posture,
+    // which refuses to auto-shift, so a port drawn and released beforehand was a
+    // RED whenever another process took it in the gap — on `main`'s hourly run
+    // this very boot printed `Port 45195 is already in use`. Nothing below talks
+    // to the port, so nothing reads it back.
     const child = spawn(
       process.execPath,
-      [CLI, 'start', '-p', port, '--no-ui', '--database', db],
+      [CLI, 'start', '-p', KERNEL_ASSIGNED_PORT, '--no-ui', '--database', db],
       {
         cwd: dir,
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -315,10 +317,7 @@ describe('os start with the stdio MCP transport and an initialize written at spa
       child.stderr!.on('data', (d) => { stderr += String(d); });
       child.on('exit', (code) => {
         clearTimeout(timer);
-        settle({
-          why: portContentionError(stdout + stderr, 'os start (bin/run.js, NODE_ENV unset ⇒ production)', port)?.message
-            ?? `os start exited ${String(code)} before answering`,
-        });
+        settle({ why: `os start exited ${String(code)} before answering` });
       });
     });
     const seen = `\n--- ${outcome.why} ---\n--- stdout ---\n${stdout.slice(-3000)}\n--- stderr ---\n${stderr.slice(-6000)}`;

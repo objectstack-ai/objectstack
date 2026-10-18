@@ -356,7 +356,12 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // block: the rollback's `Number(toVersionRaw)`, an exemption row. Its key names
         // the route, never the file, so no ledger row changed:
         // 9 = 7 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1, length 16 → 17.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(17);
+        // [#23050 slice 13e] Nor do the object state-machine read
+        // (`meta-object-state-routes.ts`) and the published read (now in
+        // `meta-item-history-routes.ts`): both read their query as strings and coerce
+        // no number of it:
+        // 9 = 7 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0, length 17 → 18.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });
