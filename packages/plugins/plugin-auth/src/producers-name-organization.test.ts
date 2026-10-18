@@ -116,8 +116,6 @@ function grantEngine() {
   return {
     inserts,
     async find() { return []; },
-    async findOne() { return null; },
-    async count() { return 0; },
     async insert(object: string, data: Record<string, unknown>) {
       inserts.push([object, { ...data }]);
       return { ...data };
