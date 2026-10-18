@@ -2977,11 +2977,12 @@ const ObjectSchemaBase = strictObject(
    * no filter.
    *
    * The describe states the CONTRACT, not shipped behaviour (Prime Directive
-   * #10, the claim as narrow as the enforcement): its one reader is
+   * #10, the claim as narrow as the enforcement): its one reader is to be
    * plugin-security's `collectRLSPolicies`, the collection every read, write
    * and explain door uses (#24340), and until that lands no server reads the
-   * key; its writers are the platform identity objects (#24341). The liveness
-   * row is `planned` with an author warning until the reader lands.
+   * key; its writers are to be the platform identity objects (#24341), and no
+   * object declares it yet. The liveness row is `planned` with an author
+   * warning until the reader lands.
    *
    * The ruling's semantics, which the reader is to meet: when no held set
    * carries a row policy for this object, the default applies; an authored set
@@ -2992,14 +2993,15 @@ const ObjectSchemaBase = strictObject(
   defaultRowScope: DefaultRowScopeSchema.optional().describe(
     "The object's default row scope: one row-level security policy, written like a permission set's "
     + '`rowLevelSecurity` entry without `object` (the declaring object is implied; writing `object` is '
-    + 'refused). The contract for the security plugin\'s row-policy collection, the one step every read, '
-    + 'write and explain passes through: when no permission set the caller holds carries a row policy for '
-    + 'this object, this policy applies; a policy an authored set carries for the object is used as '
-    + 'authored, and this default is not added to it; a principal whose superuser bypass skips row '
-    + 'policies is unaffected; an object that declares none keeps the behaviour it has without the key. '
-    + 'Declared by the platform\'s identity objects for their own tables. Not applied yet: no server reads '
-    + 'this key in this release, so declaring it filters no rows. Until the collection applies it, '
-    + 'restrict rows with a permission set\'s `rowLevelSecurity` policy.',
+    + 'refused). The contract the security plugin\'s row-policy collection, the one step every read, write '
+    + 'and explain passes through, is to meet once it reads the key: when no permission set the caller '
+    + 'holds carries a row policy for this object, this policy is to apply; a policy an authored set '
+    + 'carries for the object is to be used as authored, with this default not added to it; a principal '
+    + 'whose superuser bypass skips row policies is to be unaffected; an object that declares none keeps '
+    + 'the behaviour it has without the key. The platform\'s identity objects are to declare it for their '
+    + 'own tables. Not applied yet: no server reads this key in this release, so declaring it filters no '
+    + 'rows. Until the collection applies it, restrict rows with a permission set\'s `rowLevelSecurity` '
+    + 'policy.',
   ),
 
   /**

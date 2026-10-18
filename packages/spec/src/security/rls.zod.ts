@@ -692,9 +692,10 @@ const DEFAULT_ROW_SCOPE_OBJECT_GUIDANCE =
  * a policy copied from a permission set fails loudly instead of parsing with a
  * target the runtime would never read.
  *
- * Reader and writers (#24164 ruling E′): the reader is the security plugin's
- * `collectRLSPolicies` (#24340); the writers are the platform identity
- * objects (#24341). Until the reader lands, no server reads the key.
+ * Reader and writers (#24164 ruling E′): the reader is to be the security
+ * plugin's `collectRLSPolicies` (#24340); the writers are to be the platform
+ * identity objects (#24341). Neither exists yet: until the reader lands, no
+ * server reads the key, and until the writers land, no object declares it.
  */
 export const DefaultRowScopeSchema = lazySchema(() => {
   const { object: _implied, priority: _priority, tags: _tags, ...members } = RowLevelSecurityPolicySchema.shape;
