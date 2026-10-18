@@ -42,7 +42,6 @@ export const CloudConnectionSettingsPage: Page = {
         },
         {
             name: 'main',
-            width: 'large',
             components: [
                 {
                     // Registered console widget — the RFC 8628 device-code

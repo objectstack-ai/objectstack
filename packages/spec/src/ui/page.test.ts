@@ -184,7 +184,6 @@ describe('PageSchema', () => {
         },
         {
           name: 'main',
-          width: 'large',
           components: [
             { type: 'related.list', properties: { objectName: 'contact' } },
           ],
@@ -374,7 +373,7 @@ describe('PageSchema', () => {
       regions: [
         { name: 'header', components: [] },
         { name: 'sidebar', width: 'small', components: [] },
-        { name: 'main', width: 'large', components: [] },
+        { name: 'main', components: [] },
         { name: 'footer', components: [] },
       ],
     });

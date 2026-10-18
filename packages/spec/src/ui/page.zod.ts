@@ -46,7 +46,8 @@ export const PageRegionSchema = lazySchema(() => strictObject({
   aliases: { id: 'name', region: 'name', children: 'components', items: 'components', content: 'components', size: 'width', span: 'width' },
 }, {
   name: z.string().describe("Region name — a slot the page's `template` places: header, sidebar, main, aside or footer on 'default' and 'three-column'; header, sidebar or main on 'header-sidebar-main'; any name on 'dashboard' (header and footer span it, every other region is a grid cell). One region per slot. A name the template does not place, and a second region filling a slot already filled, are refused.").meta({ title: 'Region' }),
-  width: z.enum(['small', 'medium', 'large', 'full']).optional().meta({ title: 'Width' }),
+  width: z.enum(['small', 'medium', 'large', 'full']).optional().meta({ title: 'Width' })
+    .describe("Region width. A region named `main` takes only 'full', which is page-wide: the page drops its max-width cap and fills the screen. 'small', 'medium' and 'large' are refused on `main`, because a `main` region is drawn at the width its template leaves it: beside `sidebar` and `aside` it takes the space they leave, and on 'dashboard' it is one grid cell."),
   components: z.array(z.lazy(() => PageComponentSchema)).describe('Components in this region').meta({ title: 'Components' })
 }));
 
@@ -1787,6 +1788,60 @@ export function checkPageRegionPlacement(
   });
 }
 
+/** The `width` values a region named `main` is refused with ({@link checkPageMainRegionWidth}). */
+const MAIN_REGION_REFUSED_WIDTHS: readonly string[] = ['small', 'medium', 'large'];
+
+/**
+ * The `main` region width check attached to {@link PageSchema}: a region named
+ * `main` takes only `width: 'full'`, and `'small'`, `'medium'` or `'large'`
+ * there is refused at that region's `width`, naming the region and the one
+ * value it takes.
+ *
+ * Measured against the renderer, objectui
+ * `packages/components/src/renderers/layout/page.tsx` at the `.objectui-sha`
+ * pin: every layout draws `main` at the width the layout leaves it — the
+ * flexible column beside `sidebar` and `aside` on `default`,
+ * `header-sidebar-main`, `three-column` and a page that names no template, one
+ * grid cell on `dashboard` — and none of them reads `main.width`. The one
+ * reader is the page itself, and only for `'full'`: a `main` region declared
+ * `width: 'full'` lifts the page's max-width cap (`PageRenderer`'s full-bleed).
+ * So the other three values validated, saved and were served while they
+ * changed nothing on screen: a three-column page that asked for a `large`
+ * main got the space the two rails left, wider than `large` means anywhere
+ * else.
+ *
+ * The rule is `main`'s alone — every other region accepts the same widths as
+ * before. It is judged on every page kind and template, since nothing reads
+ * `main.width` other than `'full'` on any of them. Region names match
+ * case-insensitively, as the renderer's do. Data at rest replays the retired
+ * ADR-0087 D2 entry `page-main-region-width-removed`, which deletes exactly
+ * the widths this refuses: the page renders the same without them.
+ *
+ * Exported for the reason {@link checkPageSourceCompleteness} is, and
+ * attached by identifier — pinned in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPageMainRegionWidth(
+  page: { regions?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (!Array.isArray(page.regions)) return;
+  page.regions.forEach((region, index) => {
+    if (!region || typeof region !== 'object') return;
+    const { name, width } = region as { name?: unknown; width?: unknown };
+    if (typeof name !== 'string' || name.toLowerCase() !== 'main') return;
+    if (typeof width !== 'string' || !MAIN_REGION_REFUSED_WIDTHS.includes(width)) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['regions', index, 'width'],
+      message: `Region \`${name}\` is refused with \`width: '${width}'\` (since @objectstack/spec 18): a \`main\` region `
+        + "takes only `width: 'full'`. It is drawn at the width its template leaves it — beside `sidebar` and `aside` "
+        + "it takes the space they leave, and on `dashboard` it is one grid cell — so `'small'`, `'medium'` and "
+        + "`'large'` change nothing there. `'full'` is page-wide: the page drops its max-width cap and fills the "
+        + "screen. Delete `width` to keep the page exactly as it renders, or write `width: 'full'` for a full-width page.",
+    });
+  });
+}
+
 export const PageSchema = lazySchema(() => strictObject({
   surface: 'this page',
   history: PAGE_HISTORY,
@@ -2102,12 +2157,17 @@ export const PageSchema = lazySchema(() => strictObject({
   // The page `record` binding exists only on an app page — the one page
   // type that opens no row of its own. Attached by identifier for the same
   // reason as the checks above.
-  .superRefine(checkPageRecordBindingPlacement));
-// PageSchema's cross-field rules are the seven checks above: the
+  .superRefine(checkPageRecordBindingPlacement)
+  // A region named `main` takes only `width: 'full'` — no layout reads any
+  // other width there. Attached by identifier for the same reason as the
+  // checks above.
+  .superRefine(checkPageMainRegionWidth));
+// PageSchema's cross-field rules are the eight checks above: the
 // ADR-0080/0081 source completeness check, the compiled-kind `requires`
 // check, the print-page composition check, the `details` + `tabs` slot
 // pair check, the `isDefault` placement check, the region placement
-// check and the `record` binding placement check. A component's `properties` bag is judged by none of them: it is
+// check, the `record` binding placement check and the `main` region width
+// check. A component's `properties` bag is judged by none of them: it is
 // `@objectstack/lint`'s `validateComponentProps`, at the CLI doors and the
 // runtime save door alike. It once also required
 // `recordReview`/`blankLayout` and `slots` (all removed — unrendered roadmap /

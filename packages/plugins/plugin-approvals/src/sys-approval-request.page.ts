@@ -44,6 +44,14 @@ import type { Page } from '@objectstack/spec/ui';
  *    snapshot's, else the humanized machine name. Where the chain yields
  *    nothing, the field has no value, the strip draws no Flow chip, and the
  *    record title still names `process_name`.
+ *  - The step chip is `current_step_label` (the "Approval Step" field), not
+ *    `current_step` (the Approval node's machine id, such as `approve_step`).
+ *    The approvals get serves it by the same chain: the stored label, else
+ *    the snapshot's `__nodeLabel`, else the humanized node id. A request with
+ *    no step at all serves neither field, and the strip draws no step chip.
+ *  - The Object chip is `object_name`, the target object's API name as
+ *    stored. The object declares no field that holds that object's label, so
+ *    the strip has none to list in its place.
  *  - `tabs` is authored: Details (`record:details`, a bare node: see the
  *    strip above) and Timeline — `sys_approval_action` as a
  *    related list keyed on `request_id`, newest first. The `tabs` slot is
@@ -80,7 +88,7 @@ export const SysApprovalRequestDetailPage: Page = {
     highlights: {
       type: 'record:highlights',
       properties: {
-        fields: ['process_label', 'object_name', 'status', 'current_step', 'submitter_id', 'updated_at'],
+        fields: ['process_label', 'object_name', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
       },
     },
 

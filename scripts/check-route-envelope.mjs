@@ -866,12 +866,36 @@ const MODULES = {
   // sibling-`code` body), so each sum is unchanged. Both only ever tick down.
   // Discovered by the `*-routes.ts` convention and declared in the same PR that
   // created the module, so the gap never exists.
+  // [#23050 slice 13e] The eighth and last `/meta` group, the published read
+  // (`{metaPath}/:type/:name/published`), joined this module on the same terms. Its
+  // three response bodies are all nested ADR-0112 envelopes or the served document
+  // (stringError 0, siblingCode 0, measured on the moved text), so both counts here
+  // are unchanged and `rest-server.ts`' row does not move.
   'packages/rest/src/meta-item-history-routes.ts': {
     dialectOnly:
       'moved out of `rest-server.ts` by #23050 slice 13d and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 5,
     siblingCode: 1,
+  },
+
+  // [#23050 slice 13e] The seventh `/meta` group of
+  // `RestServer#registerMetadataEndpointsInner`' body — the object state-machine
+  // read (`{metaPath}/object/:name/state/:field`) — moved out of `rest-server.ts` on
+  // exactly slice 1's terms above: a MOVE, no wire answer changed, so it inherits
+  // `dialectOnly` and the two dialect facts, and no write-site count. Both counts
+  // were measured on the moved file at 0 (its three response bodies are the nested
+  // ADR-0112 `404 NOT_FOUND` and `501 NOT_IMPLEMENTED` envelopes and the served
+  // answer), which is what left `rest-server.ts` (its row stays 2 / 2), so each sum
+  // is unchanged. Both only ever tick down. Discovered by the `*-routes.ts`
+  // convention and declared in the same PR that created the module, so the gap
+  // never exists.
+  'packages/rest/src/meta-object-state-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13e and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
   },
 };
 

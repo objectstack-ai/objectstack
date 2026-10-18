@@ -500,7 +500,7 @@ const CONTROL_MUST_NOT_FIRE = [
     'const b3 = (o: any, message: string) => { if (o.logger?.warn) o.logger.warn(message); };',
     '// packages/objectql/src/engine.ts',
     'const b4 = (o: any, msg: string) => { if (typeof o.logger.error === "function") o.logger.error(msg); };',
-    '// packages/plugins/plugin-security/src/per-organization-catalog.ts',
+    '// packages/plugins/plugin-auth/src/member-role-canonical.ts',
     'const b5 = (logger: any, message: string) => { logger?.error?.(message); };',
 ].join('\n');
 

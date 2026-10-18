@@ -69,7 +69,6 @@ export const CONNECT_AGENT_PAGE: Page = {
     },
     {
       name: 'main',
-      width: 'large' as const,
       components: [{ type: 'mcp:connect-agent', properties: {} }],
     },
   ],

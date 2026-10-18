@@ -372,7 +372,9 @@ describe('[#8027] an object overlay row is a base layer, not the resolved schema
         // fields, `effective` did not, and the `overlay` layer explained nothing.
         const host = await measure({ overlay: 'verbatim' });
 
-        expect(fieldNamesOf(host.layerEffective)).toEqual(fieldNamesOf(host.layerCode));
+        // [#24314] The authored set, as everywhere else in this file: `code` is
+        // the raw layer and carries no platform column, `effective` is governed.
+        expect(declaredFieldsOf(host.layerEffective)).toEqual(declaredFieldsOf(host.layerCode));
         for (const field of EXTENSION_FIELDS) {
             expect(fieldNamesOf(host.layerCode)).toContain(field);
             expect(fieldNamesOf(host.layerEffective)).toContain(field);

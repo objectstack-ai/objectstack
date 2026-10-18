@@ -504,6 +504,7 @@
     "checkListViewCalendarVisualization (function)",
     "checkListViewChartBinding (function)",
     "checkPageDefaultPlacement (function)",
+    "checkPageMainRegionWidth (function)",
     "checkPagePrintComposition (function)",
     "checkPageRecordBindingPlacement (function)",
     "checkPageRegionPlacement (function)",

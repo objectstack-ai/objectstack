@@ -113,8 +113,8 @@ export async function handleApprovalsActRequest(
         return {
             handled: true,
             response: deps.error(
-                'Approval action pages are not available: no approvals service is registered for this '
-                + 'environment. Register @objectstack/plugin-approvals to serve them.',
+                'Approval action pages are not available: no approvals service is registered. '
+                + 'Register @objectstack/plugin-approvals to serve them.',
                 501,
             ),
         };
@@ -123,8 +123,8 @@ export async function handleApprovalsActRequest(
         return {
             handled: true,
             response: deps.error(
-                'Approval action pages are not available: the approvals service registered for this '
-                + 'environment does not implement handleActionPage.',
+                'Approval action pages are not available: the registered approvals service '
+                + 'does not implement handleActionPage.',
                 501,
             ),
         };

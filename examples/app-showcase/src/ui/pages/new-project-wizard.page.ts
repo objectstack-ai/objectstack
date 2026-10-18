@@ -21,7 +21,6 @@ export const NewProjectWizardPage = definePage({
   regions: [
     {
       name: 'main',
-      width: 'large',
       components: [
         {
           type: 'object-form',

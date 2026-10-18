@@ -66,6 +66,7 @@ import {
   checkPageDefaultPlacement,
   checkPageRegionPlacement,
   checkPageRecordBindingPlacement,
+  checkPageMainRegionWidth,
 } from './page.zod';
 import {
   GlobalFilterSchema,
@@ -334,6 +335,18 @@ const pageRegionPlacementFixtures: Fixture[] = [
   { label: 'an unplaced name on a `slotted` page — it renders its slots, not its regions', value: { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted', regions: [region('left_sidebar')] }, refusesAt: [] },
 ];
 
+// A region named `main` takes only `width: 'full'`; every other region keeps
+// its widths. No fixture here names a region its template does not place, so
+// the placement check stays silent and each row exercises this check alone.
+const pageMainRegionWidthFixtures: Fixture[] = [
+  { label: '`large` on the `main` of a `three-column` page', value: { ...PAGE_BASE, template: 'three-column', regions: [region('sidebar', 'small'), region('main', 'large')] }, refusesAt: ['regions.1.width'] },
+  { label: '`small` on `Main` — the renderer matches case-insensitively', value: { ...PAGE_BASE, regions: [region('Main', 'small')] }, refusesAt: ['regions.0.width'] },
+  { label: '`medium` on the `main` cell of a `dashboard` page', value: { ...PAGE_BASE, template: 'dashboard', regions: [region('main', 'medium')] }, refusesAt: ['regions.0.width'] },
+  { label: '`medium` on the `main` of a `slotted` page — no layout reads it on any kind', value: { ...PAGE_BASE, type: 'record', object: 'account', kind: 'slotted', regions: [region('main', 'medium')] }, refusesAt: ['regions.0.width'] },
+  { label: '`full` on `main` — the one width it takes, page-wide', value: { ...PAGE_BASE, regions: [region('main', 'full')] }, refusesAt: [] },
+  { label: '`large` on `header` and `aside` — the rule is `main`\'s alone', value: { ...PAGE_BASE, template: 'three-column', regions: [region('header', 'large'), region('main'), region('aside', 'large')] }, refusesAt: [] },
+];
+
 const ORG_ROW = { object: 'sys_organization', sort: [{ field: 'created_at', order: 'asc' }] } as const;
 const pageRecordBindingPlacementFixtures: Fixture[] = [
   { label: 'a `record` binding on an `app` page', value: { ...PAGE_BASE, type: 'app', record: ORG_ROW }, refusesAt: [] },
@@ -562,6 +575,7 @@ const MIRRORED: MirroredSchema[] = [
       { name: 'checkPageDefaultPlacement', check: checkPageDefaultPlacement, fixtures: pageDefaultPlacementFixtures },
       { name: 'checkPageRegionPlacement', check: checkPageRegionPlacement, fixtures: pageRegionPlacementFixtures },
       { name: 'checkPageRecordBindingPlacement', check: checkPageRecordBindingPlacement, fixtures: pageRecordBindingPlacementFixtures },
+      { name: 'checkPageMainRegionWidth', check: checkPageMainRegionWidth, fixtures: pageMainRegionWidthFixtures },
     ],
     cleanFixtures: [{ ...PAGE_BASE }],
   },
@@ -716,9 +730,9 @@ describe('each schema attaches its export BY IDENTIFIER — no inline copy', () 
     expect(attachments(src, 'checkListViewPageMount')).toBe(0);
   });
 
-  it('page.zod.ts declares all seven exports and attaches each to PageSchema', () => {
+  it('page.zod.ts declares all eight exports and attaches each to PageSchema', () => {
     const src = read('page.zod.ts');
-    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageDefaultPlacement', 'checkPageRegionPlacement', 'checkPageRecordBindingPlacement']) {
+    for (const name of ['checkPageSourceCompleteness', 'checkPageRequiresKind', 'checkPagePrintComposition', 'checkPageSlotPair', 'checkPageDefaultPlacement', 'checkPageRegionPlacement', 'checkPageRecordBindingPlacement', 'checkPageMainRegionWidth']) {
       expect(src).toContain(`export function ${name}(`);
       expect(declarations(src, name)).toBe(1);
       expect(attachments(src, name)).toBe(1);
@@ -762,6 +776,7 @@ describe('`./index` (the `@objectstack/spec/ui` surface) exports the same functi
     ['checkPageDefaultPlacement', checkPageDefaultPlacement],
     ['checkPageRegionPlacement', checkPageRegionPlacement],
     ['checkPageRecordBindingPlacement', checkPageRecordBindingPlacement],
+    ['checkPageMainRegionWidth', checkPageMainRegionWidth],
     ['checkGlobalFilterDateDefaultValue', checkGlobalFilterDateDefaultValue],
   ] as const)('%s — reference identity, and the `(value, ctx)` arity', (name, fn) => {
     expect((ui as Record<string, unknown>)[name]).toBe(fn);
