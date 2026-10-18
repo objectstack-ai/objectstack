@@ -18,8 +18,9 @@
  *    MFA_REQUIRED` with the session's message, storage never touched;
  *  - a key whose owner holds only `PASSWORD_EXPIRED` (scope `credential`) →
  *    never the gate's answer;
- *  - a held session beside an un-held owner's key → never the gate's answer:
- *    the session is not read for a key;
+ *  - [#24366] the family gate and the route judge the same credential: a
+ *    session the gate holds is refused `403` with its own posture whatever
+ *    else the request carries, storage never touched;
  *  - the refusal is not a revocation: the same key passes once it clears.
  *
  * The composition is `storage-routes.auth-gate.pin.test.ts`'s, with a data
@@ -154,13 +155,13 @@ describe('storage family — a key answers as its owner\'s session does (#23287,
     expect(POSTURE_CODES).not.toContain(answer.code);
   });
 
-  it.each(census)('%s · a held session beside an un-held owner\'s key → never the gate, session not read', async (route) => {
-    const { routes, sessionReads } = await mount({ [OWNER]: [] });
-    const before = sessionReads.n;
+  it.each(census)('%s · [#24366] a held session is refused with its own posture whatever else the request carries', async (route) => {
+    const { routes, calls } = await mount({ [OWNER]: [] });
     const answer = await drive(routes, route, { 'x-api-key': KEY, 'x-test-user': 'u_cookie', 'x-test-hold': 'MFA_REQUIRED' });
-    expect(POSTURE_CODES).not.toContain(answer.code);
-    // The DOOR made no session read for the key (a route's own upload resolver may).
-    expect(sessionReads.n - before).toBeLessThanOrEqual(1);
+    expect(answer.status).toBe(403);
+    expect(answer.code).toBe('MFA_REQUIRED');
+    expect(answer.body?.error?.message).toBe(MFA_REQUIRED.message);
+    expect(calls).toEqual([]);
   });
 
   it('the refusal is not a revocation: the same key passes the door once the posture clears', async () => {

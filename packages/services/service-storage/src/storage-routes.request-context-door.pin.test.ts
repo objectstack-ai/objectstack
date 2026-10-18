@@ -24,8 +24,10 @@
  *  - ADR-0069: the family's gate reader runs before the door. A session the
  *    policy holds is refused `403` with its posture while a gate is active, and
  *    a session read that fails while a gate is active is the `503` outage. A key
- *    answers for its own owner's `account`-scope posture, whatever cookie rides
- *    beside it. With no gate active nothing is re-read and the held session is
+ *    answers for its own owner's `account`-scope posture, and [#24366] a held
+ *    session is refused whatever else the request carries: the family gate and
+ *    the route judge the same credential. With no gate active nothing is
+ *    re-read and the held session is
  *    served, and the context the door hands on carries the posture that the
  *    admitting read decided.
  *
@@ -275,9 +277,9 @@ const ROWS: Array<{
     status: 403, code: MFA_REQUIRED.code, message: MFA_REQUIRED.message,
   },
   {
-    name: 'ADR-0069: a key beside the held cookie answers for its own owner, never for the cookie',
+    name: 'ADR-0069 [#24366]: a held session is refused 403 with its posture whatever else the request carries, and the owner record is never read',
     host: { auth: 'session' }, headers: { 'x-api-key': KEY, cookie: HELD_COOKIE },
-    status: 200, principal: 'u_key',
+    status: 403, code: PASSWORD_EXPIRED.code, message: PASSWORD_EXPIRED.message,
   },
   {
     name: 'ADR-0069: with no gate active the held session is served, and its context carries the posture the admitting read decided',
