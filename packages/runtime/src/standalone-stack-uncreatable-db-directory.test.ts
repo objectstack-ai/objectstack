@@ -35,10 +35,19 @@
 //   3. CONTROL: a creatable path three levels deep is made, in both arms.
 //   4. CONTROL: the read-only boot (`sqliteAbsentFile: 'empty-in-memory'`, #6743)
 //      over an absent file still makes no directory at all.
+//   5. A dangling symlink AS the directory, both arms: refused at once with
+//      `EEXIST`, naming the file and the directory (#24090). The host used to
+//      accept any `EEXIST` on a created level, so the link went through to the
+//      driver and the boot failed later in a plugin's start, naming neither
+//      (measured at `os serve` on `origin/main` b9ac35cbf: exit 1 after 2.7 s,
+//      "Plugin package-service failed to start"). In-process: the operating
+//      system answers a dangling link at once whatever the walk.
+//   6. CONTROL: a directory that already exists, and a live symlink to one,
+//      are accepted as they stand, in both arms.
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -211,5 +220,36 @@ describe('createStandaloneStack — a SQLite directory the host cannot make (#23
     const filename = join(root, 'ro', 'a', 'ctl.db');
     await createStandaloneStack({ databaseUrl: `file:${filename}`, sqliteAbsentFile: 'empty-in-memory' });
     expect(existsSync(join(root, 'ro'))).toBe(false);
+  });
+});
+
+describe('createStandaloneStack — a dangling symlink in the SQLite directory\'s path (#24090)', () => {
+  it('refuses a dangling symlink as the directory at once with EEXIST, in both arms, naming the file and the directory', async () => {
+    const link = join(root, 'link');
+    symlinkSync(join(root, 'nowhere'), link);
+
+    const native = join(link, 'ctl.db');
+    expectNamedRefusal(await refusalOf(createStandaloneStack({ databaseUrl: `file:${native}` })), native, link, 'EEXIST');
+
+    const wasm = join(link, 'wasm.db');
+    expectNamedRefusal(await refusalOf(createStandaloneStack({ databaseUrl: `wasm-sqlite://${wasm}` })), wasm, link, 'EEXIST');
+
+    expect(lstatSync(link).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(root, 'nowhere'))).toBe(false);
+  });
+
+  it('CONTROL: a directory that already exists, and a live symlink to one, are accepted, in both arms', async () => {
+    const existing = join(root, 'existing');
+    mkdirSync(existing);
+    await createStandaloneStack({ databaseUrl: `file:${join(existing, 'ctl.db')}` });
+    await createStandaloneStack({ databaseUrl: `wasm-sqlite://${join(existing, 'wasm.db')}` });
+    expect(statSync(existing).isDirectory()).toBe(true);
+
+    const live = join(root, 'live');
+    mkdirSync(join(root, 'target'));
+    symlinkSync(join(root, 'target'), live);
+    await createStandaloneStack({ databaseUrl: `file:${join(live, 'ctl.db')}` });
+    await createStandaloneStack({ databaseUrl: `wasm-sqlite://${join(live, 'wasm.db')}` });
+    expect(lstatSync(live).isSymbolicLink()).toBe(true);
   });
 });

@@ -123,14 +123,19 @@ import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 // [#19328] The install door's DECLARED body contract, asked whole at
 // `POST /api/v1/packages` — the union of the wrapped request and a bare
-// manifest — plus the wrapped branch by name, which the refusal re-reads to
-// locate a failure on the form the caller wrote. Both are the declarations
+// manifest — plus each branch by name, which the refusal re-reads to locate a
+// failure on the form the caller wrote. All three are the declarations
 // `@objectstack/spec` publishes for this door; nothing here restates them.
 // Its own line on purpose: the `@objectstack/spec/kernel` import above carries
 // the id/version legs' names and is not this import's to share.
-import { PackageInstallBodySchema, PackageInstallRequestSchema } from '@objectstack/spec/api';
+import {
+    PackageInstallBodySchema,
+    PackageInstallManifestSchema,
+    PackageInstallRequestSchema,
+} from '@objectstack/spec/api';
 
 /**
  * [#13598] The `protocol` service slot **as this domain reaches it** — one
@@ -860,7 +865,10 @@ interface InstallBodyIssue {
  */
 function installBodyRefusal(body: unknown, unionIssues: ReadonlyArray<InstallBodyIssue>): string {
     const wrapped = body !== null && typeof body === 'object' && 'manifest' in body;
-    const branch = (wrapped ? PackageInstallRequestSchema : ManifestSchema).safeParse(body);
+    // The bare branch is the union's own, `PackageInstallManifestSchema` — ⛔ not
+    // `ManifestSchema`, which admits the platform scopes this door refuses, so a
+    // re-parse through it passed and the bare-form refusal lost its sentence.
+    const branch = (wrapped ? PackageInstallRequestSchema : PackageInstallManifestSchema).safeParse(body);
     // By the disjointness above the branch cannot pass where the union failed;
     // if a future union ever made it, the union's own issues still say what
     // was refused rather than an empty sentence.
@@ -1063,6 +1071,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             };
         }
     }
+    // [#24151] The body is read once the floor above has admitted the caller,
+    // never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
@@ -1381,6 +1392,23 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     response: deps.error(`Package '${pkgId}' already exists`, 409),
                 };
             }
+            // [#24030] ADR-0070 D2 — the READ-ONLY gate, asked for the manifest's
+            // id before either install limb below writes. `overwrite` only ever
+            // bypassed the 409 above; nothing asked whether the id is a package
+            // the deployment ships, so an overwrite over a code-booted or
+            // marketplace-installed id answered 201, replaced its registry row
+            // with an authored one (and, on the protocol limb, wrote its
+            // `sys_packages` row) while `engine.manifests` kept judging it
+            // read-only. Disable, publish, revert and delete refuse that id with
+            // this same answer; ⛔ the rule is not re-derived here — it is
+            // {@link requireWritablePackage}, i.e. {@link isWritablePackage}.
+            //
+            // Placed AFTER the 409, so an install that does not ask to overwrite
+            // keeps its 409 answer for any existing id. An id nothing installed
+            // is writable by the predicate's own rule, so a fresh install —
+            // `overwrite` set or not — answers as before.
+            const readOnly = requireWritablePackage(deps, qlService, pkgId, overwrite ? 'overwrite' : 'install');
+            if (readOnly) return readOnly;
             // ⚠️ The MANIFEST handed on is the one the caller sent, ⛔ not the
             // parsed copy. `ManifestSchema` applies defaults at parse time
             // (`scope`, `defaultDatasource`), and this door has always stored

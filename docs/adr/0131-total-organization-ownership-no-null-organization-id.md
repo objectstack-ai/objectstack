@@ -327,6 +327,12 @@ organization data. So are the other things an organization writes: business unit
 record shares it authors, approvals, files, and every business row. Every such row carries the
 authoring organization, NOT NULL.
 
+> **Note (2026-10-17, ruling of record `6228728551` on #23960, letter B).** The organization's admins
+> who create and remove assignments in the paragraph above are the organization-level administrators
+> of [ADR-0090](./0090-permission-model-v2-concept-convergence.md) D12's 2026-10-17 amendment, and the
+> sentence runs under that amendment's boundary: they assign only sets with no wildcard superuser bit,
+> no `adminScope` and only `scope: 'org'` capabilities.
+
 Under `single` the authoring organization is the Default Organization
 ([ADR-0093](./0093-tenancy-mode-and-membership-lifecycle.md); `ensure-default-organization.ts`), which
 becomes **load-bearing**: it exists before the first write that needs an owner (today it is created on

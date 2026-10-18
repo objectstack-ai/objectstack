@@ -14,6 +14,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  INVITE_ISSUER_MEMBER_ONLY_CODE,
+  INVITE_ISSUER_UNVERIFIED_CODE,
+  INVITE_ROLE_ABOVE_ISSUER_CODE,
   invitationRoleCapFailure,
   isPlainMemberInvitation,
   orgRoleGrade,
@@ -21,6 +24,9 @@ import {
 } from './invitation-role-cap.js';
 
 const DELEGATE = 'delegated_admin';
+
+/** The refusal's ADR-0112 code — what a client branches on (#23945). */
+const codeOf = (requested: unknown, issuer: unknown) => invitationRoleCapFailure(requested, issuer)?.code;
 
 describe('parseOrgRoles', () => {
   it('accepts better-auth’s three role shapes', () => {
@@ -79,16 +85,15 @@ describe('isPlainMemberInvitation', () => {
 
 describe('invitationRoleCapFailure — the escalation chain', () => {
   it('REFUSES the chain: a delegate inviting an admin', () => {
-    const failure = invitationRoleCapFailure('admin', DELEGATE);
-    expect(failure).toMatch(/never confer a role above the issuer/);
+    expect(codeOf('admin', DELEGATE)).toBe(INVITE_ROLE_ABOVE_ISSUER_CODE);
   });
 
   it('REFUSES a delegate inviting an owner', () => {
-    expect(invitationRoleCapFailure('owner', DELEGATE)).toMatch(/above the issuer/);
+    expect(codeOf('owner', DELEGATE)).toBe(INVITE_ROLE_ABOVE_ISSUER_CODE);
   });
 
   it('REFUSES admin smuggled inside a comma list', () => {
-    expect(invitationRoleCapFailure('member,admin', DELEGATE)).toMatch(/above the issuer/);
+    expect(codeOf('member,admin', DELEGATE)).toBe(INVITE_ROLE_ABOVE_ISSUER_CODE);
   });
 
   it('REFUSES a delegate inviting an app role — membership roles are a capability channel too', () => {
@@ -97,13 +102,11 @@ describe('invitationRoleCapFailure — the escalation chain', () => {
     // them with nothing gating the hand-out. A delegate's channel for
     // capability is the invitation's PLACEMENT intent, which the D12 gate
     // allowlists position-by-position.
-    expect(invitationRoleCapFailure('sales_manager', DELEGATE)).toMatch(
-      /may invite only as 'member'/,
-    );
+    expect(codeOf('sales_manager', DELEGATE)).toBe(INVITE_ISSUER_MEMBER_ONLY_CODE);
   });
 
   it('REFUSES a delegate minting another delegate', () => {
-    expect(invitationRoleCapFailure(DELEGATE, DELEGATE)).toMatch(/may invite only as 'member'/);
+    expect(codeOf(DELEGATE, DELEGATE)).toBe(INVITE_ISSUER_MEMBER_ONLY_CODE);
   });
 
   it('ALLOWS a delegate inviting a plain member — the capability the fix exists to grant', () => {
@@ -123,7 +126,7 @@ describe('invitationRoleCapFailure — org owners and admins are unaffected', ()
     expect(invitationRoleCapFailure('admin', 'admin')).toBeNull();
     expect(invitationRoleCapFailure(DELEGATE, 'admin')).toBeNull();
     expect(invitationRoleCapFailure('sales_manager', 'admin')).toBeNull();
-    expect(invitationRoleCapFailure('owner', 'admin')).toMatch(/above the issuer/);
+    expect(codeOf('owner', 'admin')).toBe(INVITE_ROLE_ABOVE_ISSUER_CODE);
   });
 
   it('an issuer holding both roles is judged on the higher one', () => {
@@ -131,14 +134,30 @@ describe('invitationRoleCapFailure — org owners and admins are unaffected', ()
   });
 });
 
+describe('invitationRoleCapFailure — each refusal answers its own code (#23945)', () => {
+  it('the three codes, by value — the strings the error-code ledger registers under plugin-auth', () => {
+    expect([INVITE_ROLE_ABOVE_ISSUER_CODE, INVITE_ISSUER_MEMBER_ONLY_CODE, INVITE_ISSUER_UNVERIFIED_CODE]).toEqual([
+      'INVITE_ROLE_ABOVE_ISSUER',
+      'INVITE_ISSUER_MEMBER_ONLY',
+      'INVITE_ISSUER_UNVERIFIED',
+    ]);
+  });
+
+  it('a refusal carries its reason beside the code', () => {
+    for (const [requested, issuer] of [['admin', DELEGATE], [DELEGATE, DELEGATE], ['admin', null]] as const) {
+      const refusal = invitationRoleCapFailure(requested, issuer);
+      expect(refusal?.message, `${requested} by ${issuer}`).toEqual(expect.any(String));
+      expect(refusal?.message.length).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe('invitationRoleCapFailure — fail-closed', () => {
   it('an unresolvable issuer role confers nothing above a plain member', () => {
     for (const unresolved of [null, undefined, '']) {
       // Reported as what it is — unverified, not outranked.
-      expect(invitationRoleCapFailure('admin', unresolved)).toMatch(/could not be verified/);
-      expect(invitationRoleCapFailure('sales_manager', unresolved)).toMatch(
-        /could not be verified/,
-      );
+      expect(codeOf('admin', unresolved)).toBe(INVITE_ISSUER_UNVERIFIED_CODE);
+      expect(codeOf('sales_manager', unresolved)).toBe(INVITE_ISSUER_UNVERIFIED_CODE);
       // …but the ordinary invitation still works: an unreadable membership row
       // must not take the whole invite surface down with it.
       expect(invitationRoleCapFailure('member', unresolved)).toBeNull();

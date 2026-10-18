@@ -35,7 +35,7 @@ describe('installPackage — protocol handshake (ADR-0087 P0)', () => {
     const { impl, registryCalls, publish } = makeImpl();
     await expect(
       (impl as any).installPackage({
-        manifest: { id: 'com.acme.crm', version: '1.0.0', engines: { protocol: OLD } },
+        manifest: { id: 'com.acme.crm', name: 'CRM', type: 'app', version: '1.0.0', engines: { protocol: OLD } },
       }),
     ).rejects.toBeInstanceOf(ProtocolIncompatibleError);
     // The refusal happens BEFORE any registry write or durable persist.
@@ -47,7 +47,7 @@ describe('installPackage — protocol handshake (ADR-0087 P0)', () => {
     const { impl } = makeImpl();
     try {
       await (impl as any).installPackage({
-        manifest: { id: 'com.acme.crm', version: '1.0.0', engines: { protocol: OLD } },
+        manifest: { id: 'com.acme.crm', name: 'CRM', type: 'app', version: '1.0.0', engines: { protocol: OLD } },
       });
       throw new Error('expected installPackage to throw');
     } catch (e) {
@@ -63,7 +63,7 @@ describe('installPackage — protocol handshake (ADR-0087 P0)', () => {
   it('installs a package that declares a compatible range', async () => {
     const { impl, registryCalls } = makeImpl();
     const res: any = await (impl as any).installPackage({
-      manifest: { id: 'com.acme.ok', version: '1.0.0', engines: { protocol: CURRENT } },
+      manifest: { id: 'com.acme.ok', name: 'OK', type: 'app', version: '1.0.0', engines: { protocol: CURRENT } },
     });
     expect(registryCalls).toHaveLength(1);
     expect(res.package.status).toBe('installed');
@@ -74,7 +74,7 @@ describe('installPackage — protocol handshake (ADR-0087 P0)', () => {
     try {
       const { impl, registryCalls } = makeImpl();
       const res: any = await (impl as any).installPackage({
-        manifest: { id: 'com.acme.legacy', version: '1.0.0' },
+        manifest: { id: 'com.acme.legacy', name: 'Legacy', type: 'app', version: '1.0.0' },
       });
       expect(registryCalls).toHaveLength(1);
       expect(res.package.status).toBe('installed');

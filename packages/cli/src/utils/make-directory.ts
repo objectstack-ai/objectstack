@@ -23,10 +23,10 @@ import { dirname, resolve } from 'node:path';
  *
  * ## The walk
  *
- * The one `driver-sql`'s connect, the runtime's standalone host and `os dev`'s
- * database prep already run (#23696, #23737), made synchronous so it can stand
- * in for `mkdirSync` where it stood: find the nearest level that exists, then
- * create the missing ones top-down.
+ * The one `driver-sql`'s connect runs (#23696), made synchronous so it can
+ * stand in for `mkdirSync` where it stood: find the nearest level that exists,
+ * then create the missing ones top-down. `os dev`'s database prep
+ * (`prepareDevDatabaseDirectory` in `commands/dev.ts`) runs it too (#24090).
  *
  * - `EEXIST` on a created level is a concurrent creator winning the race, and
  *   it is accepted only when what now stands there is a directory, as the

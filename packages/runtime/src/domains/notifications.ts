@@ -37,6 +37,7 @@ import { parseBooleanParam, parseIntegerParam, parseStringParam } from '../query
 import { capabilityUnavailable } from './unavailable.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 
 // ---------------------------------------------------------------------------
 // [#6928] GET /notifications — the query parse point, with the coercions checked
@@ -134,6 +135,9 @@ export async function handleNotificationRequest(
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
         };
     }
+    // [#24151] The body is read once the baseline above has admitted the
+    // caller, never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     // [#4127] Typed against the contract instead of `as any`, so a call this
     // file makes that `INotificationService` does not declare is a compile

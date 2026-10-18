@@ -67,7 +67,7 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 import { prepareImportRequest } from './import-prepare.js';
-import { readTemplateMode } from './import-template.js';
+import { readTemplateMode, templateFieldDefs } from './import-template.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { handleRouteError } from './error-response.js';
@@ -155,6 +155,24 @@ import {
  * this file's business.
  */
 export type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
+
+/**
+ * [#24183] One export row as a json object carrying exactly `fields`, in that
+ * order — the json arm's counterpart of the column list `formatRowCells` writes
+ * for csv / xlsx. A name whose value the read did not return is left out, never
+ * written as `null`: the read answered nothing for it, and inventing a value
+ * would read as a stored null.
+ */
+function pickExportKeys(row: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    if (!row || typeof row !== 'object') return out;
+    for (const f of fields) {
+        // Own keys only: a name such as `constructor` must not pick up a
+        // prototype member the row never carried.
+        if (Object.prototype.hasOwnProperty.call(row, f) && row[f] !== undefined) out[f] = row[f];
+    }
+    return out;
+}
 
 /**
  * The `RestServer` members {@link registerDataActionEndpoints} reads — every
@@ -749,7 +767,12 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     //
     // Query params:
     //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.)
-    //   fields=a,b,c        (default: derive from object schema; falls back to keys of the first row)
+    //   fields=a,b,c        (every format. csv / xlsx write exactly these columns and
+    //                        json rows carry exactly these keys, in list order; a key
+    //                        the read did not return is absent from a json row.
+    //                        Default for csv / xlsx: the object schema's fields minus
+    //                        those declared `hidden`; falls back to keys of the first
+    //                        row. Without it json writes each row as the read returns it.)
     //   filter=<json>       ($filter as URL-encoded JSON, same shape as list endpoint)
     //   search=<term>       (full-text term, same semantics as the list endpoint's
     //                        $search; composes with `filter` rather than replacing it)
@@ -957,6 +980,10 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 } else if (Array.isArray(q.fields)) {
                     fields = q.fields.filter((s: any) => typeof s === 'string' && s.length > 0);
                 }
+                // [#24183] The caller named the columns. Nothing below narrows
+                // or reorders an explicit list, so `fields` stays exactly this
+                // for every format, json included.
+                const fieldsExplicit = !!fields && fields.length > 0;
 
                 // Field metadata drives readable formatting (lookup names, select
                 // labels, 是/否, formatted dates) and the $expand that resolves
@@ -993,7 +1020,19 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     }
                     metaMap = buildFieldMetaMap(schema);
                     if (!fields || fields.length === 0) {
-                        const names = [...metaMap.keys()];
+                        // [#24143] The default columns are the fields the object
+                        // SHOWS by default: a field declared `hidden` ("Hidden from
+                        // default UI", `FieldSchema.hidden`) is not one. Without
+                        // this the hidden `__search` companion became an empty
+                        // "Search Index" column on every export. Column selection
+                        // only: `metaMap` keeps every field, so an explicit
+                        // `?fields=` naming a hidden field is answered as before.
+                        // `templateFieldDefs` reads the field definitions under
+                        // the same names `buildFieldMetaMap` gives them.
+                        const defs = templateFieldDefs(schema);
+                        const names = [...metaMap.keys()].filter(
+                            (name) => (defs.get(name) as { hidden?: unknown } | undefined)?.hidden !== true,
+                        );
                         if (names.length > 0) { fields = names; fieldsFromSchema = true; }
                     }
                 } catch { /* fall back to first-row derivation + raw values */ }
@@ -1160,9 +1199,18 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                             r.commit();
                         }
                     } else {
+                        // [#24183] An explicit `?fields=` is json's column set as
+                        // it is csv's and xlsx's: each row carries exactly the
+                        // named keys, in list order, read from the same resolved
+                        // `fields` the other two arms write. A named key the read
+                        // did not return (field-level security deletes it, the
+                        // read strips the search companion) stays absent rather
+                        // than being invented as `null` — the answer the list
+                        // door gives the same `$select`.
                         for (let i = 0; i < rows.length; i++) {
                             const prefix = (firstChunk && i === 0) ? '' : ',';
-                            res.write(prefix + JSON.stringify(formatRowForJson(rows[i], metaMap, timezone)));
+                            const row = fieldsExplicit ? pickExportKeys(rows[i], fields!) : rows[i];
+                            res.write(prefix + JSON.stringify(formatRowForJson(row, metaMap, timezone)));
                         }
                     }
                     firstChunk = false;

@@ -30,11 +30,11 @@
 // workspace. The scan cannot tell you it never ran; only its (unprinted) file
 // count could, and nobody reads a count that is not printed.
 //
-// A whole-`packages/` rename also happens to be caught downstream, because both
-// DELEGATORS live under that same root and check (2) reports them missing. That
+// A whole-`packages/` rename also happens to be caught downstream, because every
+// DELEGATOR lives under that same root and check (2) reports them missing. That
 // is luck, not coverage, and it misdirects the diagnosis: the operator is told
-// two files are missing when the actual event is that the duplicate-resolver
-// scan read nothing at all. Move either delegator out of `packages/`, or add a
+// the delegators are missing when the actual event is that the duplicate-resolver
+// scan read nothing at all. Move a delegator out of `packages/`, or add a
 // second scan root, and that downstream crutch goes silent — the #4916 shape,
 // one refactor away. So the roots are resolved up front and a dead one fails the
 // gate BY NAME, before any conclusion is drawn from the scan.
@@ -212,11 +212,16 @@ const ALLOW = new Map([
   ],
 ]);
 
-// Entry points that MUST delegate to the shared resolver (never re-inline it).
-const DELEGATORS = [
-  'packages/rest/src/rest-server.ts',
-  'packages/runtime/src/security/resolve-execution-context.ts',
-];
+// Entry points that MUST delegate to the shared resolver (never re-inline it), each
+// with the call it delegates through: the resolver itself, or the one
+// request-to-ExecutionContext composition in core that calls it (ruling record
+// 6227928430, letter A). A door converted onto that composition moves its row's
+// call, and the composition is itself a delegator of the resolver.
+const DELEGATORS = new Map([
+  ['packages/rest/src/rest-server.ts', 'resolveRequestExecutionContext'],
+  ['packages/runtime/src/security/resolve-execution-context.ts', 'resolveRequestExecutionContext'],
+  ['packages/core/src/security/request-execution-context.ts', 'resolveAuthzContext'],
+]);
 
 // Every directory check (1) claims to have read. Relative to the repo root.
 const SCAN_ROOTS = ['packages'];
@@ -444,12 +449,12 @@ function audit(root = ROOT) {
   }
 
   // (2) Entry points still delegate to the shared resolver.
-  for (const rel of DELEGATORS) {
+  for (const [rel, via] of DELEGATORS) {
     let src;
     try { src = readFileSync(join(root, rel), 'utf8'); } catch { errors.push(`Delegator missing: ${rel}`); continue; }
-    if (!src.includes('resolveAuthzContext')) {
+    if (!src.includes(via)) {
       errors.push(
-        `${rel} no longer delegates to resolveAuthzContext.\n` +
+        `${rel} no longer delegates to ${via}.\n` +
         `  Every HTTP entry point must resolve authorization via the shared\n` +
         `  @objectstack/core resolver — do not re-inline session/role/permission reads.`,
       );
@@ -649,13 +654,13 @@ function selfTest() {
   };
   try {
     // A tree that mirrors the real one: the canonical resolver, an allow-listed
-    // explain mirror, a mention-only seed, two delegating entry points, and one
+    // explain mirror, a mention-only seed, the delegating entry points, and one
     // innocent file.
     write(CANONICAL, resolverFixtureBody());
     write('packages/plugins/plugin-security/src/explain-engine.ts', resolverFixtureBody());
     write('packages/plugins/plugin-security/src/objects/default-permission-sets.ts',
       mentionOnlyFixtureBody());
-    for (const d of DELEGATORS) write(d, "import { resolveAuthzContext } from '@objectstack/core';\n");
+    for (const [d, via] of DELEGATORS) write(d, `import { ${via} } from '@objectstack/core';\n`);
     write('packages/core/src/unrelated.ts', 'export const x = 1;\n');
 
     expect('a compliant tree passes', audit(dir).length, 0);
@@ -765,12 +770,14 @@ function selfTest() {
     expect('...and restores the corpus to its previous size', collectScanFiles(dir).length, beforeExt);
 
     // (2) — an entry point that stops delegating.
-    write(DELEGATORS[0], '// re-inlined the session/role reads here\n');
-    const delErrors = audit(dir);
-    expect('a non-delegating entry point is flagged', delErrors.length, 1);
-    expect('the entry point is named', delErrors[0]?.startsWith(`${DELEGATORS[0]} no longer delegates`), true);
-    write(DELEGATORS[0], "import { resolveAuthzContext } from '@objectstack/core';\n");
-    expect('restoring the delegation clears it', audit(dir).length, 0);
+    for (const [d, via] of DELEGATORS) {
+      write(d, '// re-inlined the session/role reads here\n');
+      const delErrors = audit(dir);
+      expect(`a non-delegating entry point is flagged (${d})`, delErrors.length, 1);
+      expect(`the entry point and its call are named (${d})`, delErrors[0]?.startsWith(`${d} no longer delegates to ${via}`), true);
+      write(d, `import { ${via} } from '@objectstack/core';\n`);
+      expect(`restoring the delegation clears it (${d})`, audit(dir).length, 0);
+    }
 
     // --- Reverse proof for the positive control (#6286), made permanent. ---
     // Direction declared before running: rewrite the canonical resolver so it reads
@@ -1014,7 +1021,7 @@ function main() {
     console.error('✗ check:authz-resolver failed:\n\n' + errors.join('\n\n') + '\n');
     process.exit(1);
   }
-  console.log('✓ check:authz-resolver: single shared authorization resolver intact; both entry points delegate.');
+  console.log(`✓ check:authz-resolver: single shared authorization resolver intact; all ${DELEGATORS.size} entry points delegate.`);
 }
 
 main();

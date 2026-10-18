@@ -279,7 +279,8 @@ describe('the declaration boot writes nothing (#13332)', () => {
     // execute() forwarded this run, the outcome claim HELD and is printed.
     const note = guard.disarm();
     expect(note).toContain('Refused 1 write(s)');
-    expect(note).toContain('a plan writes nothing');
+    expect(note).toContain('a plan writes no row or table');
+    expect(note).not.toContain('writes nothing');
     expect(note).toContain('create() on sys_ai_model');
 
     await kernel.shutdown();
@@ -325,7 +326,7 @@ describe('the declaration boot writes nothing (#13332)', () => {
     // Hatch)") — not a driver-sql extension. The guard cannot classify a raw
     // command as read-vs-write (the contract admits any native shape), so it
     // must not refuse — but the one unacceptable outcome is the SILENT one: a
-    // raw write landing while the run claims "a plan writes nothing". This
+    // raw write landing while the run claims "a plan writes no row or table". This
     // pins all three properties: forwarded, counted, and the claim dropped.
     const driver = new RecordingDriver();
     const guard = createDeclarationBootWriteGuard();
@@ -362,13 +363,20 @@ describe('the declaration boot writes nothing (#13332)', () => {
     expect(guard.rawExecutions).toEqual([{ driver: 'driver.recording', count: 1 }]);
 
     // REPORTED — and the flat claim is DROPPED: neither the refusal half nor
-    // any other part of the note may print "a plan writes nothing" over a run
+    // any other part of the note may print "a plan writes no row or table" over a run
     // in which a raw command went through unclassified.
     const note = guard.disarm();
     expect(note).toContain('Refused 1 write(s) during the declaration boot:');
     expect(note).toContain('Raw execute() was called 1 time(s) during the declaration boot');
     expect(note).toContain('1 via driver.recording');
-    expect(note).not.toContain('a plan writes nothing');
+    expect(note).not.toContain('a plan writes no row or table');
+    // What the run CAN say about a raw command, conditionally, and no wider:
+    // the connect may still have switched a SQLite file's journal mode, which
+    // rewrites its header, so the conditional names no row or table, never
+    // "nothing". `os migrate plan` appends the journal-mode note on a SQLite
+    // file (its own pin).
+    expect(note).toContain('If those commands only read, no row or table was written; if one wrote, it landed.');
+    expect(note).not.toContain('nothing was written');
 
     await kernel.shutdown();
   });
@@ -661,7 +669,7 @@ describe('the two named boundaries (#14126)', () => {
     // claim prints — the same sentence the `driver.*` path prints.
     const note = guard.disarm();
     expect(note).toContain(
-      'Refused 1 write(s) during the declaration boot — a plan writes nothing: create() on report_row.',
+      'Refused 1 write(s) during the declaration boot — a plan writes no row or table: create() on report_row.',
     );
 
     // disarm() gave the engine its prototype method back, and the driver its own.
@@ -711,7 +719,7 @@ describe('the two named boundaries (#14126)', () => {
     expect(guard.refusals).toEqual([
       { driver: 'engine.archive', method: 'update', object: 'archive_row', count: 1 },
     ]);
-    expect(guard.disarm()).toContain('a plan writes nothing');
+    expect(guard.disarm()).toContain('a plan writes no row or table');
     await kernel.shutdown();
   });
 
@@ -751,7 +759,7 @@ describe('the two named boundaries (#14126)', () => {
       { driver: 'driver.recording', method: 'create', object: 'sys_thing', count: 2 },
     ]);
     expect(guard.disarm()).toContain(
-      'Refused 2 write(s) during the declaration boot — a plan writes nothing: create() on sys_thing x2.',
+      'Refused 2 write(s) during the declaration boot — a plan writes no row or table: create() on sys_thing x2.',
     );
     await kernel.shutdown();
   });
@@ -820,7 +828,7 @@ describe('the two named boundaries (#14126)', () => {
         + '(dropTable() on sys_old_table via driver.recording x2, rotateShards() on sys_log via driver.recording)',
       );
       expect(note).toContain('those calls EXECUTED');
-      expect(note).not.toContain('a plan writes nothing');
+      expect(note).not.toContain('a plan writes no row or table');
     } finally {
       warn.mockRestore();
       await kernel.shutdown();
@@ -856,7 +864,7 @@ describe('the two named boundaries (#14126)', () => {
       // from a boot in which nothing happened.
       expect(note).not.toBeNull();
       expect(note).toContain('Immediate DDL was called 1 time(s) during the declaration boot (dropTable() on sys_old_table via driver.recording)');
-      expect(note).not.toContain('writes nothing');
+      expect(note).not.toContain('a plan writes no row or table');
     } finally {
       warn.mockRestore();
       await kernel.shutdown();
@@ -903,7 +911,7 @@ describe('the two named boundaries (#14126)', () => {
     expect(note).toContain('Could NOT guard ');
     expect(note).toContain('driver.frozen.create');
     expect(note).toContain('does NOT claim to have written nothing');
-    expect(note).not.toContain('a plan writes nothing');
+    expect(note).not.toContain('a plan writes no row or table');
     await kernel.shutdown();
   });
 
@@ -942,7 +950,7 @@ describe('the two named boundaries (#14126)', () => {
     const note = guard.disarm();
     expect(note).toContain('Refused 1 write(s) during the declaration boot: create() on sys_thing.');
     expect(note).toContain('Could NOT shadow objectql.registerDriver');
-    expect(note).not.toContain('a plan writes nothing');
+    expect(note).not.toContain('a plan writes no row or table');
     await kernel.shutdown();
   });
 

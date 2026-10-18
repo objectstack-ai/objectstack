@@ -23,10 +23,12 @@
  *     seam, against tables that really exist.
  *
  * ⛔ The NEGATIVE control is the point. `sys_user_permission_set` (from the composed
- * plugin) and `sys_secret` (from the platform floor) are put in the database
- * BEFORE the boot and must NOT be reported, alongside `_objectstack_sequences`
- * and an application table. A sweep observed only in the presence of an orphan
- * would be indistinguishable from one that reports everything.
+ * plugin), `sys_secret` (from the platform floor) and [#24059] `sys_packages`
+ * (the package registry's, declared outside the object set) are put in the
+ * database BEFORE the boot and must NOT be reported, alongside
+ * `_objectstack_sequences` and an application table. A sweep observed only in
+ * the presence of an orphan would be indistinguishable from one that reports
+ * everything.
  *
  * The positive control is the card's own measured case: a `sys_`-prefixed table
  * left behind by a retired object, which no plan can mention today.
@@ -81,6 +83,9 @@ const NEGATIVE_CONTROLS = [
   // declared by nothing, so the sweep is RIGHT to report it.
   'sys_user_permission_set', // declared by the composed host plugin
   'sys_secret',              // declared by the platform floor
+  // [#24059] Not an object: the composed package registry declares it through
+  // `package.storage`, and `os migrate apply` creates it from that declaration.
+  'sys_packages',
   '_objectstack_sequences',  // the driver's own autonumber ledger
   'app_leftovers',           // no reserved prefix at all
 ];
@@ -143,6 +148,7 @@ describe('os migrate plan — unmanaged tables, against a real database (#13204)
     return collectUnmanagedTables({
       drivers: stack!.drivers,
       declaredObjects: stack!.allObjects(),
+      nonObjectTables: stack!.nonObjectTables,
       composition: stack!.composition,
       normalize: normalizeRows,
     });
@@ -209,6 +215,12 @@ describe('os migrate plan — unmanaged tables, against a real database (#13204)
     const declared = (stack!.allObjects() as Array<{ name?: string }>).map((o) => o?.name);
     expect(declared).toContain('sys_user_permission_set');
     expect(declared).toContain('sys_secret');
+    // [#24059] The table outside the object set is named by the declaration the
+    // plan creates it from — the composed registry's own `package.storage` —
+    // although the table exists here, so the plan has nothing pending for it.
+    const storage = stack!.kernel.getService('package.storage') as { table: string };
+    expect(stack!.nonObjectTables).toEqual([storage.table]);
+    expect(stack!.pendingSchemaWork.filter((w) => w.table === storage.table)).toEqual([]);
   });
 
   it('REPORTS the stranded table, and reports ONLY it', async () => {

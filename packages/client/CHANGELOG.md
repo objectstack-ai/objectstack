@@ -1,5 +1,96 @@
 # @objectstack/client
 
+## 18.0.0-next.3
+
+### Patch Changes
+
+- 6d1660d: Clause-②: no
+  
+  fix(client): `client.automation.getRuntimeStatus()` types its rows as the declared contract `FlowRuntimeState` (#23859)
+  
+  **What was wrong.** The method declared its answer as `{ flows: Array<{ name, enabled, bound }>; total }`. `GET /automation/_status` serves the automation engine's `getFlowRuntimeStates()` rows unchanged, and each row is the contract `FlowRuntimeState` from `@objectstack/spec/contracts`. The SDK's type therefore hid five optional fields the wire already carries: `status`, `triggerType`, `object`, `reason` (one sentence saying why an enabled, triggered flow is not armed) and `unboundCause` (which of the closed `FLOW_UNBOUND_CAUSES` that sentence describes). A caller that read `row.reason` or `row.unboundCause` got a type error and either cast past it or concluded the field did not exist.
+  
+  **What changes.** The return type is now `Promise<{ flows: FlowRuntimeState[]; total: number }>`. `name`, `enabled` and `bound` stay required, so existing callers compile unchanged. Read `row.unboundCause` to classify an unarmed flow, and render `row.reason` without parsing it. The request, the route and the values on the wire are unchanged.
+- 66d2757: feat(spec)!: every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
+  
+  Clause-②: yes (narrowing — the served row gains two declared keys, and the record schema, the served-row union and the registry's installPackage signature each refuse what they accepted before)
+  
+  **BREAKING** — three published accept sets narrow. `InstalledPackageSchema` refuses a row without `source`, or with a value outside `code` / `marketplace` / `authored`. The served-row union `InstalledPackageAtEitherStageSchema` refuses a row without a boolean `writable`. `SchemaRegistry.installPackage` and `EngineSchemaRegistryView.installPackage` take `source` as their second argument and refuse a call without it. The migration is below. None of it is mechanically convertible, because only the door that registers a package knows where it came from.
+  
+  **What is new on the wire.** `GET /api/v1/packages` and `GET /api/v1/packages/:id` serve two declared keys on every row:
+  
+  - `source` names the package's origin. `code` means the deployment's own code registered it (a `defineStack()` host, a plugin's bundled manifest, a platform package). `marketplace` means the marketplace install-local plugin installed it, and that holds after a restart too, when the plugin rehydrates it from its ledger. `authored` means it is a database-authored package (a Studio base, a duplicate, an HTTP install), including after the restart that rehydrates it from `sys_packages`. The door that registers the package stamps the value. No reader derives it.
+  - `writable` is the server's own writability verdict (ADR-0070 D2), served on these rows since #14375 and now declared. It is computed per read and never stored, so it is declared on the served row (`InstalledPackageAtEitherStageSchema`) and not on the registry record.
+  
+  FROM → TO for a reader of these rows:
+  
+  | you did | do instead |
+  | --- | --- |
+  | treated `writable: true` as authored, and looked up each non-writable row in the marketplace's installed list (the control plane's, else install-local's) to tell marketplace from code | read `row.source` |
+  | read the undeclared `writable` | read the declared `writable` (unchanged value) |
+  
+  The two keys are separate statements: `source` says where the package came from, and `writable` says what this server lets an org do to it.
+  
+  **`InstalledPackageSchema` requires `source`.** It is `InstalledPackageSourceSchema`, exported from `@objectstack/spec/kernel`. A row without it, or with a value outside the closed set, is refused at the `source` key.
+  
+  **API change for code that registers packages (`@objectstack/objectql`).** The registry records the origin and never infers it:
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `registry.installPackage(manifest)` | `registry.installPackage(manifest, 'code')` (or `'marketplace'` / `'authored'`, whichever is where the package came from) |
+  | `registry.installPackage(manifest, settings, scope)` | `registry.installPackage(manifest, source, settings, scope)` |
+  | `ctx.getService('manifest').register(artifact)` for a marketplace install | `ctx.getService('manifest').register(artifact, { source: 'marketplace' })` |
+  
+  `SchemaRegistry.installPackage` throws a `TypeError` naming the closed set when `source` is missing or unknown, before anything is recorded. `ObjectQL.registerApp(body, scope?, source?)` and the `manifest` service record `'code'` when no source is given. They accept `'code'` or `'marketplace'` and refuse `'authored'`. The `IObjectQLEngine` registry contract (`@objectstack/spec/contracts`) declares the same `installPackage(manifest, source, settings?)`.
+  
+  **The one-line fix:** pass the package's origin as `installPackage`'s second argument.
+  
+  Readers: objectui's Setup → Packages Source column and its `?source=` filter (it switches from the two-read join to `source` in its own follow-up), and the client SDK's `packages.list()` / `packages.get()` row types.
+  
+  <!-- adr-0087: registered installed-package-row-source-required, registry-install-package-source-argument -->
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

@@ -147,7 +147,7 @@ describe('the save door judges a permission set\'s FLS key forms as `os validate
         await kernel.bootstrap();
         protocol = kernel.getService('protocol');
 
-        await protocol.installPackage({ manifest: { id: P, name: 'FLS keys', type: 'application' } });
+        await protocol.installPackage({ manifest: { id: P, name: 'FLS keys', type: 'app' } });
         const res = await protocol.saveMetaItem({ type: 'object', name: customerBody.name, packageId: P, item: customerBody });
         expect(res.success).toBe(true);
     });

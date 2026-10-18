@@ -1,5 +1,256 @@
 # @objectstack/platform-objects
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 77efc66: feat(platform-objects)!: Setup's organization, team, business-unit and user records carry no Discussion feed: `sys_organization`, `sys_team`, `sys_business_unit` and `sys_user` declare `enable.feeds: false`, so a comment create on one of their records answers `403 FEEDS_DISABLED`
+  
+  Clause-②: no (narrowing: the comment create door refuses on four platform objects that accept it today)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is added, removed, renamed or re-shaped, and no stored row is rewritten or deleted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is one runtime write door: the existing `enable.feeds` gate now refuses a comment whose thread names one of four platform objects, and the remedy is in the request a caller sends to that door, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and no exported declaration is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Setup's identity records are directory entries, not discussion surfaces. The four objects declared no `enable.feeds`, so they took the default (`true`), and the console drew "Discussion (0)" with a comment composer on every organization, team, business unit and user record.
+  
+  What changes:
+  
+  - **The record page.** The console reads the flag (`enable.feeds !== false`), so it no longer draws the Discussion feed or its composer on these four objects' records. The record's activity history is unchanged.
+  - **The data API.** A `sys_comment` create whose `thread_id` names one of these objects (`sys_user:USER_ID`, `sys_organization:ORG_ID`, `sys_team:TEAM_ID` or `sys_business_unit:UNIT_ID`) answers `403 FEEDS_DISABLED` and writes nothing, through REST, the SDK and every other caller of the data engine. An update that moves an existing comment into one of these threads is refused the same way.
+  - **Comments already stored** on these records are kept. They stay readable through the data API, and an edit that does not change `thread_id`, such as a body edit, still saves.
+  
+  Unchanged: every other platform object and every application object keeps its own `enable.feeds` setting, and an object that declares none still accepts comments.
+  
+  Remedy: stop creating comments on these four objects' records. A discussion about a user, a team or an organization belongs on a record of an object that keeps its feed on.
+- e246f06: feat(plugin-auth,platform-objects,core)!: an API key an administrator's forced password reset revoked is restored by a platform administrator only; its owner creates a new key (#23993)
+  
+  **BREAKING** (an accept-set narrowing at the `sys_api_key` write door), shipped as `minor` under the launch-window convention for breaking changes. For an operator: a key revoked by `POST /api/v1/auth/admin/set-user-password` (the forced reset, which revokes the user's keys by default) can no longer be restored by its owner; a platform administrator restores it with the Restore API Key action, or the owner creates a new key. For an integrator: `PATCH /api/v1/data/sys_api_key/{id}` with `{ revoked: false }` on such a key now answers `403 PERMISSION_DENIED` for its owner, where it answered `200`; and `sys_api_key` gains a readonly `revoked_reason` column.
+  
+  Clause-②: yes (narrowing)
+  
+  What widens: `sys_api_key` declares one more field, `revoked_reason`. What narrows: the owner's restore of a key whose `revoked_reason` is `admin_password_reset` is refused, where it was admitted.
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A write-door narrowing on one platform object plus one new readonly platform field, not a metadata change an author makes. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite: the refused request is a runtime call whose remedy is a person (a platform administrator) or a new key, not a rewrite. No ADR-0087 id covers this and none is added. -->
+  
+  #23287 ruling C′ makes the forced reset revoke the user's API keys by default, for a suspected compromise: a key that outlives the reset is the hole the reset was meant to close. Its changeset names who acts afterwards: a platform administrator restores such a key, or the owner mints a replacement. The owner could nevertheless restore it through the same door as any revoked key, because the row recorded no reason. Now it does.
+  
+  - **`sys_api_key.revoked_reason` (`@objectstack/platform-objects`).** A readonly `select` whose one value is `admin_password_reset`, set when the forced reset revoked the key and cleared when the key is restored. Empty for a key revoked from the API Keys list. Translated in `zh-CN`, `ja-JP` and `es-ES`.
+  - **The stamp (`@objectstack/plugin-auth`).** The forced reset's revocation writes `revoked_reason: admin_password_reset` beside `revoked: true`, the one place the reason is set. A key already revoked before the reset is not written, so it keeps no reason.
+  - **The restore guard (`@objectstack/plugin-auth`).** One `beforeUpdate` hook on `sys_api_key`, registered after the ADR-0092 D2 identity write guard. A user-context restore of a key carrying the reason is refused `403 PERMISSION_DENIED` unless the caller has platform-administrator standing (the ADR-0068 D2 rung); the refusal names both roads. Every restore it admits, the administrator's included, clears the reason. Revoking an already-revoked key leaves the reason in place, and the column is not on the D2 whitelist, so no data-API write can clear it. On a multi-row update every row is judged by its own stored state. System-context writes (the mint, the last-used stamp, the forced reset) are never refused.
+  - **The key door's message (`@objectstack/core`).** `API_KEY_REVOKED` for a key the forced reset revoked now says only a platform administrator can restore it; any other revoked key keeps today's sentence. Code, status and every carried field are unchanged.
+  
+  What changes for you:
+  
+  - **Refused now:** the owner restoring a key the forced reset revoked: `403 PERMISSION_DENIED`, naming the platform administrator and the new-key road. The administrator's restore works as before and clears the reason.
+  - **Unchanged:** revoking and restoring a key from the API Keys list, by its owner or an administrator; a forced reset with `revokeSessionsAndKeys: false`, which revokes nothing.
+  - **Keys revoked by a forced reset before this release** carry no reason, so their owner can still restore them. Such keys exist only where `18.0.0-next.2` or a `main` build since 2026-10-14 ran a forced reset; nothing backfills them, because the reset's audit row records counts, not key ids.
+
+### Patch Changes
+
+- 8776119: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  feat(spec): `referenceDeletedWhen` beside `referenceVia` marks a polymorphic pointer's target as platform-deleted
+  
+  Clause-②: yes
+  
+  `FieldSchema` gains one optional key beside `referenceVia`: `referenceDeletedWhen: { field, value }`. On rows where the sibling `select` field `field` holds the option `value`, the record the pointer names was deleted by the platform's own assertion, and a renderer draws a tombstone from that option's own label instead of a link. Example: `record_id: Field.text({ referenceVia: 'object_name', referenceDeletedWhen: { field: 'cancel_reason', value: 'record_deleted' } })`.
+  
+  Any other shape is refused at parse, naming the field and the option:
+  
+  - the key on a field that declares no `referenceVia` (`FieldSchema`), or an unknown key inside it;
+  - a `field` that is the declaring field itself, is not declared on the object, is not a `select`, is a `multiple: true` select, or declares no inline `options` (a `picklist`-backed select); a `value` that is not one of the sibling's option values (`ObjectSchema`, at every door: `ObjectSchema.create()`, `defineStack`, raw `.parse()` and the metadata save door).
+  
+  Nothing that parsed before is refused: the key is new. Its liveness row is `planned` until the renderer that reads it ships.
+  
+  The other packages classify the new key where every field key is classified:
+  
+  - **`@objectstack/metadata-core`.** `FIELD_REFERENCE_POSITIONS` deletes a served field's `referenceDeletedWhen` when its `field` names a field the caller cannot read (field-level security); `value` is an option value and never a field name.
+  - **`@objectstack/driver-sql`.** `FIELD_KEY_STORAGE_CLASS` classifies it `presentation`: no DDL reads it.
+  - **`@objectstack/platform-objects`.** The field form's new `referenceDeletedWhen` row carries its labels and help text in zh-CN, ja-JP and es-ES.
+- 30ce56e: Clause-②: no
+  
+  Setup pages describe their records in plain admin sentences. Business Units now reads "Your
+  company structure — divisions, departments, regions and offices — used to scope data and
+  reports.", Notification Events "Every notification the platform sent, one row per event.",
+  Notification Preferences "Which topics and channels each user receives; admins set the
+  defaults.", Notification Templates "The subject and body each notification topic sends, per
+  channel and language." and HTTP Deliveries "Outgoing HTTP calls made by webhooks and flows, one
+  row per call, with its delivery status." Field help on Users, Organizations, Invitations and SSO
+  Providers, and the metadata-storage and notification-delivery object descriptions, no longer
+  carry design-record numbers; those references stay in the code comments. The zh-CN, ja-JP and
+  es-ES translations follow. Wording only: no field, permission or behaviour changes.
+- 2e0e451: feat(platform-objects): Setup's menu no longer lists "User Preferences" or "Identity Links". You reach both from the user they belong to: open a user in Setup › Users, and the user's page has a "Preferences" tab and its existing "Linked Accounts" tab.
+  
+  Clause-②: no
+  
+  Both lists held rows that belong to one user each: identity links are written when a user signs in with a provider, and preferences are what the console remembers as a user works (recent items, favourites, list settings). A menu entry listing them for every user at once was not a page an administrator works from.
+  
+  - **Where they are now.** On a user's page, "Preferences" lists that user's preference rows (key, created, updated) and "Linked Accounts" lists their identity links, with the same Unlink action. New, Edit and Delete on the Preferences tab follow the same rules as the old list did. Search finds the user, and the tabs are on the user's page.
+  - **What did not change.** The two objects, their list views and their addresses are unchanged, so a bookmarked list still opens, and a preference row's breadcrumb still leads to the full list.
+  - **Nothing to migrate.** No data moves and no setting changes.
+- 1ecb08a: Clause-②: no
+  
+  The `description` of four metadata types in `DEFAULT_METADATA_TYPE_REGISTRY`, which Setup shows under the
+  type's title, is now one plain sentence for an administrator instead of ADR vocabulary:
+  
+  - `api`: "A stable HTTP URL that other systems call to run a flow or work with records in the app"
+  - `doc`: "A help page written in Markdown that a package ships or you write yourself"
+  - `book`: "A table of contents that groups help pages into ordered sections"
+  - `capability`: "A permission a package defines; you grant it through permission sets"
+  
+  The ADR references (ADR-0121, ADR-0046, ADR-0046 §6, ADR-0066 D1) moved to the comments beside the
+  registry rows. The generated metadata-forms translations carry the new sentences in en, zh-CN, ja-JP
+  and es-ES. No key, type or accept/refuse result changes.
+- adad73f: feat(spec)!: a select option declares its lifecycle `kind` (`open` / `won` / `lost`), and every option of an object's `stageField` must declare it
+  
+  Clause-②: yes (narrowing)
+  
+  `SelectOptionSchema` gains one optional key, `kind`, a closed vocabulary of three lifecycle categories that means the same on every object: `open` (a step on the way), `won` (the successful end: a deal's Closed Won, a lead's Converted, a task's Done, a case's Resolved) and `lost` (the unsuccessful end: Closed Lost, Unqualified, Cancelled). It is the spelling `record:path` `stages[].terminal` already takes, so the data layer and the page say one thing one way. Example: `{ label: 'Closed Lost', value: 'closed_lost', kind: 'lost' }`. The exported type `SelectOptionKind` names the three values.
+  
+  - On a plain single-value `select` / `radio` the key is optional, and an absent kind reads as `open`. Nothing is written in at parse: an option without `kind` parses without it.
+  - On any other field's options (`multiselect`, `checkboxes`, `tags`, a `multiple: true` select, a lookup's static options) `FieldSchema` refuses it at `options.<i>.kind`: a lifecycle is one value per record.
+  - A shared `picklist`'s options accept it (the same option shape). A form view's option list does not (`FormSelectOptionSchema`): it is refused there as an unknown key whose message points at the object field's own option.
+  
+  **BREAKING (authoring):** when an object's `stageField` names a field, every option of that field must declare `kind`. `ObjectSchema` refuses the object otherwise, at every door that parses one (`ObjectSchema.create()`, `defineStack`, `os validate`, `os build`, the metadata save door), with one issue per option at `fields.<field>.options.<i>.kind` naming the field and the option. There is no default under `stageField`. Also refused, at `stageField`: a stage field that takes its options from a `picklist` (the object cannot see them to check), and a stage field carrying options that holds no single option code per record (`multiselect`, a `multiple: true` select). Unchanged: `stageField: false`, a `stageField` naming no declared field, and one naming a field with no options.
+  
+  Migration: add `kind` to each option of the stage field, marking each terminal state `won` or `lost` and every other state `open`:
+  
+  - `status: Field.select({ options: [{ label: 'New', value: 'new' }, { label: 'Converted', value: 'converted' }, { label: 'Unqualified', value: 'unqualified' }] })` with `stageField: 'status'` → the same options with `kind: 'open'`, `kind: 'won'` and `kind: 'lost'`.
+  - A picklist-backed stage field → declare its options inline on the field.
+  - An object with no linear lifecycle → `stageField: false`.
+  
+  No conversion makes this edit, because which option ends a record's life successfully is the author's to say. `os migrate meta` lists the D3 entry `stage-field-option-kind-required` with the prescription.
+  
+  The Studio object designer's options repeater offers `kind`; the field form's options repeater lists it.
+  
+  The other packages follow the new key:
+  
+  - **`@objectstack/platform-objects`.** The metadata-form translation bundles (`./metadata-translations`) carry the options repeater's new `kind` row, with its label and help text in zh-CN, ja-JP and es-ES.
+  - **`@objectstack/metadata-core`.** The published contract fixture `FLS_CONTRACT_OBJECT` (`@objectstack/metadata-core/testing`) names `salary_grade` as its `stageField`, so its two options now declare `kind: 'open'`, and the fixture meets the stage-field rule: `ObjectSchema` raises no issue at `stageField` or under `fields.salary_grade.options`. The fixture is not otherwise a spec-valid object (its `script` actions carry no `body` or `target`), and this change leaves that as it was.
+  
+  <!-- adr-0087: registered stage-field-option-kind-required -->
+- 8f4260f: Setup's Invitations, API Keys, OAuth Applications and Notification Preferences, Subscriptions and Templates lists say what belongs on them when they are empty, and API Keys gains a Create Key button (#23852)
+  
+  Clause-②: no
+  
+  **What an admin saw.** An empty Invitations, API Keys or OAuth Applications list read "No identity records — these records are created by the authentication provider … not added by hand here", which is false for all three. The three notification lists read the generic "Nothing here yet". API Keys had no way to create a key at all.
+  
+  **What changes.**
+  
+  - Every list view of `sys_invitation`, `sys_api_key` and `sys_oauth_application` declares its own `emptyState` (a title and one sentence), and a filtered view names itself: Invitations opens on "No pending invitations", the Revoked keys view reads "No revoked keys".
+  - `sys_notification_preference`, `sys_notification_subscription` and `sys_notification_template` each ship one list view, `all`, declared only for its `emptyState`: it sets no columns (`columns: []`, so the grid keeps the columns it derived before), no filter, no sort and no page size.
+  - `sys_api_key` gains `create_api_key` ("Create Key"), a primary list-toolbar action on every API Keys list, Setup's and the Account app's. It calls the existing `POST /api/v1/keys` route with the name you give it; the key is created for you, in the organization you are working in, and the raw key is shown once in a dialog you close after copying it. Nothing about the route changes, and the data API still does not create keys.
+  - The new copy ships in `en`, `zh-CN`, `ja-JP` and `es-ES`.
+  
+  Unchanged: every field, index, permission and the `revoke_api_key` / `restore_api_key` row actions.
+- d0fe050: Clause-②: no
+  
+  Six help texts an administrator reads in Setup no longer carry ADR numbers. On the Permission Sets edit form,
+  `isDefault`, `managedBy` and `packageId` are rewritten as plain sentences that say what the field does, and
+  `adminScope` drops its "(ADR-0090 D12)" prefix. On the Positions edit form, `delegatable` drops "(ADR-0091 D3)".
+  The view form's End-user controls description drops "(ADR-0047, Airtable Interface parity)".
+  
+  The ADR references moved to the comments beside the form rows. The generated metadata-forms translations carry
+  the new wording in en, zh-CN, ja-JP and es-ES. No key, type or accept/refuse result changes.
+- bbdfc05: feat(spec)!: retire the permission set's authored `managedBy` — a provenance key nothing read (#23891)
+  
+  **BREAKING** — an author can no longer write `managedBy` (`'package' | 'platform' | 'user'`) on a permission set (`PermissionSetSchema`, ADR-0086 D3): it is refused at parse. Nothing ever read the authored key. No seeder, package upgrade or lock consulted it, so `package` never made a set upgrade-owned, and `platform` or `user` never kept an upgrade off a set. Delete the key. A set's provenance is the package that ships it, decided from that package's artifact and recorded as `packageId`; a set created in this environment carries neither. The `sys_permission_set.managed_by` column is a different surface and is untouched, as is `ObjectSchema.managedBy`.
+  
+  Clause-②: yes (narrowing)
+  
+  Measured before removal, at `6d1660dc3b`: no shipped permission set authored the key (the example apps, `plugin-security`'s default sets, and HotCRM 4.0.1's seven sets at `1d7148bf2d`: zero, against seven `objects:` controls). Its one writer was Setup's Permission Sets form row, which wrote it into stored rows. The liveness ledger had ruled it `dead` on 2026-10-11.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `definePermissionSet({ …, managedBy: 'package' })` | nothing: delete the key; a package-shipped set is the package's because the package ships it (`packageId`) |
+  | `managedBy: 'platform'` or `managedBy: 'user'` | nothing: delete the key; a set created in this environment carries neither `managedBy` nor `packageId` |
+  | relying on `managedBy` to keep a package upgrade off a set | clone the packaged set and edit the clone (the packaged-set lock refuses in-place edits) |
+  
+  **The one-line fix:** delete `managedBy` from every permission set.
+  
+  **What an author who still writes it sees.** `tsc` fails at the authoring site (`PermissionSet` types the key as retired), and the parse (`definePermissionSet()`, `defineStack({ permissions })`, `PUT /api/v1/meta/permission/:name`) refuses it at its own path with the prescription:
+  
+  > `permission.managedBy` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove, ADR-0086 D3) — nothing ever read the authored key: no seeder, package upgrade or lock consulted it, so `package` never made a set upgrade-owned and `platform` or `user` never shielded one from an upgrade. Delete the key; a set's provenance is the package that ships it, decided from that package's artifact and recorded as `packageId`, and a set created in this environment carries neither. Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  **What does not stop on it.** A stored `permission` row that Setup's form wrote, and an installed package's built artifact, still load: the rehydration seams (`applyConversionsToStoredItem`, `applyArtifactForwardConversions`) replay the D2 conversion below and strip the key, with a notice naming the set. Only the authoring, save and publish doors refuse it.
+  
+  ## The retirement kit
+  
+  - **A `retiredKey()` tombstone** on `PermissionSetSchema`, a `strictObject`, so the refusal carries its prescription and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `security/PermissionSet:managedBy`.
+  - **The D2 conversion `permission-set-managed-by-removed`** (protocol 18, retired from the load path) deletes the key from every `permissions[]` item, whatever it holds, one notice per set.
+  - **The D3 entry `permission-set-managed-by-retired`** records the judgement the strip cannot make: any runbook that relied on the value to keep an upgrade off a set needs another path.
+  - **`@objectstack/platform-objects`:** the Permission Sets form's `managedBy` row, its help text and its three option labels (Package / Platform / User) leave Setup in all four locales.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED** beyond HotCRM 4.0.1. `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for. Studio's provenance badge reads the value as one of three inputs; it retires in an objectui follow-up.
+  
+  <!-- adr-0087: registered permission-set-managed-by-removed, permission-set-managed-by-retired -->
+- d731b89: fix(identity): the Invite User dialog offers only the roles the caller may grant, read from the same table the invitation role cap enforces
+  
+  Clause-②: yes (widening)
+  
+  **What was wrong.** A `delegated_admin` who opened Invite User was offered Owner, Admin and Delegated Admin. The server's invitation role cap refuses all three for that issuer. The `role` param inherited one static option list from the field, and nothing told the client which roles this caller may grant.
+  
+  **What is new in `@objectstack/spec` (`identity`).** One table, `INVITATION_ROLE_GRANTORS`, says which issuer grades may invite as each membership role:
+  
+  | role | issuers that may grant it |
+  |---|---|
+  | `owner` | `owner` |
+  | `admin`, `delegated_admin` | `owner`, `admin` |
+  | `member` | any issuer (`INVITATION_ROLE_ANY_ISSUER`) |
+  
+  New exports beside it: `invitationRoleGrantors(role)` (a role the closed vocabulary does not list takes the `owner`, `admin` row), `invitationRoleGrantPredicate(role)` (the CEL gate, one `'<projected grade>' in current_user.positions` term per grade, `undefined` for an any-issuer row), `INVITATION_ROLE_OPTIONS` (the role picker's options, each carrying its gate as `visibleWhen`), and the types `InvitationRoleGrantors` and `InvitationRoleOption`.
+  
+  **`@objectstack/plugin-auth`.** The invitation role cap now reads that table to decide which invitations it admits. It refuses exactly what it refused before, with the same refusal text. A pin compares it with the previous implementation on 1,517 request and issuer pairs.
+  
+  **`@objectstack/platform-objects`.** The `role` param of the three `invite_user` actions (`sys_user`, `sys_member`, `sys_invitation`) declares `INVITATION_ROLE_OPTIONS` itself instead of inheriting the field's list. The option values and English labels are unchanged. A `delegated_admin` is now offered Member only, an admin Admin, Delegated Admin and Member, and an owner all four. The per-option gate is a UI courtesy; the server cap remains the authority. Because the options are declared on the param, their labels now translate under `_actions.invite_user.params.role.options.<value>`, and the bundles carry those keys in every locale.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

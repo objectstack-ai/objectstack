@@ -159,7 +159,8 @@ describe('control: a value carrying markup characters, per face', () => {
       data: {
         inviter: { name: "O'Brien", email: 'ob@acme.test' },
         organization: { name: 'R&D <Lab>' },
-        role: 'member',
+        // #24154 — the sender passes the role's LABEL, and the text body names it too.
+        role: 'Member',
         acceptUrl: LINK,
         appName: 'Acme',
       },
@@ -169,7 +170,7 @@ describe('control: a value carrying markup characters, per face', () => {
     expect(sent.html).toContain('<strong>R&amp;D &lt;Lab&gt;</strong>');
     expect(sent.html).toContain('<strong>O&#39;Brien</strong>');
     expect(sent.text).toBe(
-      "O'Brien (ob@acme.test) invited you to join R&D <Lab> on Acme.\n\n" + `Accept: ${LINK}`,
+      "O'Brien (ob@acme.test) invited you to join R&D <Lab> on Acme as Member.\n\n" + `Accept: ${LINK}`,
     );
     expect(sent.subject).toBe("O'Brien invited you to R&D <Lab>");
     expect(rows[0].subject).toBe("O'Brien invited you to R&D <Lab>");

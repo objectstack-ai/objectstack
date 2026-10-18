@@ -66,7 +66,7 @@
       "title": "Create → read → update → delete a record through the console UI",
       "since": "v15",
       "status": "active",
-      "revision": 9,
+      "revision": 10,
       "priority": "P0",
       "surface": "browser",
       "personas": [
@@ -148,7 +148,7 @@
         }
       ],
       "negative": [
-        "save with required status empty → the form blocks with a named field error AND no row is created (filtered API count stays 0) — a silent success is a FAIL",
+        "save with the required Account Name empty → the form blocks with a named field error AND no row is created (filtered API count stays 0) — a silent success is a FAIL. ⛔ Not the Lifecycle (status) select: it offers no empty option and defaults to Prospect, so a status-empty save cannot be staged in the form",
         "a clone that carries over the source's id / audit columns / an autonumber / a readonly approval_status instead of re-deriving them is a FAIL (#3043 — a clone must not mint an already-approved record); a clone of an RLS-invisible source that SUCCEEDS (200/201 with a new row) is a FAIL — the findOne runs in the caller's context precisely to refuse it",
         "a direct API POST missing required status on an object whose required field has NO default → 400 VALIDATION_FAILED with fields[] carrying code 'required' (server enforces, not just the form — packages/objectql/src/validation/record-validator.ts). ⛔ Do NOT drive this on showcase_account: its status is required:true but the 'prospect' option carries default:true (data/objects/account.object.ts), so the default satisfies the requirement and the row is created with status:'prospect' — a 201 here is CORRECT behaviour, not a missing server guard. Pick a required field with no defaulted option, or record the substitution",
         "a create with tax_id violating the tax_id_format rule → named validation error, never a silently-stored bad value"
@@ -219,6 +219,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 2). acceptance[6]'s readonly half was blocked(fixture): no stock readonly column can be set over HTTP, so a carried value and a re-derived one read the same. Disposition: pin. protocol.readonly-insert.test.ts pins that clone forwards the copied readonly column to engine.insert and reports the drop, and engine-insert-static-readonly-strip.test.ts pins the engine's strip on a real engine. The clause now says to score that half from those pins, and `automated` names them for that half only",
           "ref": "#22017"
+        },
+        {
+          "revision": 10,
+          "date": "2026-10-16",
+          "change": "negative[0] re-pointed (checklist-accuracy finding of QA run #23949, wave #23878): the Lifecycle select has no empty option and defaults to Prospect, so 'save with required status empty' could not be staged; the negative now empties the required Account Name, which the form can leave empty. Not loosened: the form must still block with a named error and create no row",
+          "ref": "#24036"
         }
       ]
     },
@@ -227,7 +233,7 @@
       "title": "Field-type matrix: every FieldTypeSchema member renders its widget, accepts a valid value, round-trips over HTTP, and rejects invalid input",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -298,7 +304,7 @@
       "steps": [
         "run the pinned HTTP round-trip matrix: pnpm --filter @objectstack/dogfood exec vitest run test/field-zoo-roundtrip.dogfood.test.ts (write vectors + expected read shapes live in test/field-zoo.matrix.ts)",
         "boot showcase isolated; open Field Zoo (/_console/apps/com.example.showcase/showcase_field_zoo) and open 'Specimen — Full' in edit mode; screenshot the form before reading DOM",
-        "enumerate the rendered control for every f_* field and build a variant→widget table (date→date input, color→color input, richtext→editor, select/multiselect→pickers, image/file→upload, code→code editor, location/address→structured inputs, rating/slider/progress→their own controls, autonumber/formula→read-only)",
+        "enumerate the rendered control for every f_* field and build a variant→widget table (date→date input, color→color input, richtext / markdown / html / code→their dedicated field widgets, select/multiselect→pickers, image/file→upload, location/address→structured inputs, rating/slider/progress→their own controls, autonumber/formula→read-only). At the console pin the richtext, markdown, html and code widgets are textarea-based BY DESIGN (objectui packages/fields/src/widgets/RichTextField.tsx / CodeField.tsx: a Textarea inside the dedicated widget, with its own label and controls): record that as the dedicated widget, not as a generic text input",
         "through the form, change one representative value per family (a select, an array type, a temporal, a structured JSON), Save, and capture the PATCH",
         "re-read the record via GET /api/v1/data/showcase_field_zoo/<id> and diff against the submitted values (arrays compared as sets)",
         "POST an out-of-set select value (f_select: 'not-a-value') directly to /api/v1/data/showcase_field_zoo and capture the refusal",
@@ -313,7 +319,7 @@
           "evidence": "test run output"
         },
         {
-          "clause": "PER-VARIANT: each of the 49 FieldTypeSchema members renders its real widget on the Specimen — Full form (not a generic text input), with per-variant evidence recorded in the variant→widget table",
+          "clause": "PER-VARIANT: each of the 49 FieldTypeSchema members renders its real widget on the Specimen — Full form (its dedicated field widget, not the generic text input), with per-variant evidence recorded in the variant→widget table. For richtext, markdown, html and code the dedicated widget is textarea-based by design (RichTextField / CodeField) — that counts; the generic text input rendered for one of them does not",
           "oracle": "dom",
           "verify": "after the screenshot confirms render, match each f_* control against its declared type; every variant row in the table carries its own observed control + screenshot crop",
           "evidence": "form screenshot + the 49-row variant→widget table"
@@ -382,6 +388,12 @@
           "date": "2026-08-08",
           "change": "pinned enumSource for the variants-freshness ratchet — spec enum drift is caught by the manual check on this item directly",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps[2] and acceptance[1].clause say what counts for the textarea-based widgets (checklist-accuracy finding of QA run #23949, wave #23878). 'not a generic text input' with 'richtext→editor' read as a FAIL for richtext, markdown, html and code, whose dedicated widgets are textarea-based by design at the console pin (RichTextField / CodeField). The clause now scores the dedicated widget, and the generic text input still FAILS. Wording: no request or oracle changed",
+          "ref": "#24036"
         }
       ],
       "enumSource": {
@@ -395,7 +407,7 @@
       "title": "List-view capability matrix: filter, search, sort, pagination, saved views, inline edit, export, visualization switcher, bulk/row actions, conditional formatting",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -425,14 +437,14 @@
       ],
       "steps": [
         "open /_console/apps/com.example.showcase/showcase_task and screenshot the default All Tasks grid",
-        "switch to the in_progress saved view; capture the data request — expect $filter carrying the stored rule as an ObjectQL AST ([[\"status\",\"equals\",\"in_progress\"]]) and a 200; the count bar must read 2",
-        "quick-search 'huaning' on Accounts (or '张' on Contacts); capture the $search request and the hits (pinyin + CJK recall, ADR-0061)",
+        "switch to the in_progress saved view; capture the data request — expect `filter` carrying the stored rule as an ObjectQL AST ([[\"status\",\"equals\",\"in_progress\"]]) and a 200; the count bar must read 2. The console spells its list params WITHOUT a `$` — filter, top, skip, search, sort — the same AST under the bare name, so a literal grep for $filter finds nothing",
+        "quick-search 'huaning' on Accounts (or '张' on Contacts); capture the `search` request and the hits (pinyin + CJK recall, ADR-0061)",
         "open the tabular saved view (string-form sort 'estimate_hours desc' — the objectui#2601 fixture); confirm it renders and the request carries the sort",
-        "page a list past page 1; capture $top/$skip on every data request; confirm no unpaged full fetch",
+        "page a list past page 1. No stock list holds more rows than the 50-row page (the largest seeded task and contact lists are under it), so stage one first: POST /api/v1/data/showcase_inquiry/createMany with a bare JSON array of 55 rows (name + email each), then page the Inquiries list; capture `top`/`skip` on every data request; confirm no unpaged full fetch",
         "in the grid saved view (inlineEdit: true), edit one cell in place; save; capture the PATCH; re-read the row via API",
-        "on in_progress, with the export grant from fixtures.requires[3] bound, export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export control is absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
+        "on in_progress, with the export grant from fixtures.requires[3] bound, open the toolbar's Display popover — Export sits in its footer ('Export as CSV / XLSX / JSON'), not as a separate toolbar button — and export each declared format (csv, xlsx, json); capture the requests and files. Without the grant the Export entries are absent and the route answers 403 EXPORT_NOT_PERMITTED — the opt-in working as designed, not a fail of the export variant",
         "open the visualization switcher on All Tasks; enumerate the offered types; switch through each",
-        "on bulk_actions, select rows and run showcase_mark_done (per-record) and showcase_recalc_selection (aggregate — ONE dispatch carrying params._selectedIds); on legacy_row_actions confirm both named row actions resolve to live menu entries",
+        "on bulk_actions, select rows and run showcase_mark_done (per-record) and showcase_recalc_selection (aggregate — ONE dispatch: an api-type action, it POSTs to its own endpoint /api/v1/apps/showcase/recalc with `_selectedIds` at the body's top level); on legacy_row_actions confirm both named row actions resolve to live menu entries",
         "on Field Zoo, confirm the conditionalFormatting row highlight applies to Specimen — Full (f_lookup set) and not Specimen — Minimal"
       ],
       "acceptance": [
@@ -443,21 +455,21 @@
           "evidence": "per-variant trace/screenshot set"
         },
         {
-          "clause": "a saved view's stored filter reaches $filter as an ObjectQL AST, the server answers 200, and the filtered count is server-computed (2 of 10 for in_progress)",
+          "clause": "a saved view's stored filter reaches the `filter` param as an ObjectQL AST, the server answers 200, and the filtered count is server-computed (2 of 10 for in_progress)",
           "oracle": "network",
-          "verify": "captured GET /api/v1/data/showcase_task?...$filter=[[\"status\",\"equals\",\"in_progress\"]] → 200; count bar matches the response total",
+          "verify": "captured GET /api/v1/data/showcase_task?...filter=[[\"status\",\"equals\",\"in_progress\"]] → 200; count bar matches the response total",
           "evidence": "request/response trace + screenshot"
         },
         {
-          "clause": "quick-search issues a server-side $search (not client filtering) and finds the CJK account via pinyin ('huaning' → 华宁科技)",
+          "clause": "quick-search issues a server-side `search` (not client filtering) and finds the CJK account via pinyin ('huaning' → 华宁科技)",
           "oracle": "api",
-          "verify": "the captured request carries $search; the response contains the CJK row; the same query direct against GET /api/v1/data/showcase_account reproduces it",
+          "verify": "the captured request carries `search`; the response contains the CJK row; the same query direct against GET /api/v1/data/showcase_account reproduces it",
           "evidence": "request trace + response JSON"
         },
         {
-          "clause": "paging issues $top/$skip requests; the full set is never fetched; a walked page sequence visits every row exactly once (deterministic paging)",
+          "clause": "paging issues `top`/`skip` requests; the full set is never fetched; a walked page sequence visits every row exactly once (deterministic paging)",
           "oracle": "network",
-          "verify": "page 1 = $top=N; page 2 = $top=N&$skip=N; union of pages has no duplicate and no missing id",
+          "verify": "page 1 = top=N; page 2 = top=N&skip=N; union of pages has no duplicate and no missing id",
           "evidence": "the request URLs + the id-union check"
         },
         {
@@ -475,7 +487,7 @@
         {
           "clause": "export offers exactly the declared formats (csv, xlsx, json on in_progress) and the exported rows equal the FILTERED set, not the whole table",
           "oracle": "network",
-          "verify": "with the fixtures.requires[3] export grant bound (export is opt-in): the export menu lists the three exportOptions; each downloaded file contains the 2 in_progress rows. Record which grant the run provisioned",
+          "verify": "with the fixtures.requires[3] export grant bound (export is opt-in): the Display popover's Export footer lists the three exportOptions; each downloaded file contains the 2 in_progress rows. Record which grant the run provisioned",
           "evidence": "menu screenshot + the three files"
         },
         {
@@ -485,7 +497,7 @@
           "evidence": "dropdown screenshot + one screenshot per visualization"
         },
         {
-          "clause": "bulk actions dispatch correctly by mode: per-record actions issue one dispatch per selected record; the aggregate def (showcase_recalc_selection, execution: 'aggregate') issues ONE request carrying every selected id in params._selectedIds",
+          "clause": "bulk actions dispatch correctly by mode: per-record actions issue one dispatch per selected record; the aggregate def (showcase_recalc_selection, execution: 'aggregate', an api-type action) issues ONE request — POST /api/v1/apps/showcase/recalc — carrying every selected id in `_selectedIds` at the body's top level",
           "oracle": "network",
           "verify": "count the captured POSTs against the selection size for each mode",
           "evidence": "network trace of both runs"
@@ -530,6 +542,12 @@
           "date": "2026-10-13",
           "change": "fixtures.requires[3] (new) provisions an export grant, and steps[6] and acceptance[6].verify name it (fixture gap, #23163 A6; parked on #23121, carried by #23169). Export is opt-in: resolveUserExportAllowed allows it only where a set says allowExport: true, and no stock permission set does, the admin wildcard included (#3544). So as the seeded admin Export is hidden and the export route answers 403 EXPORT_NOT_PERMITTED. QA run #23163 scored A6 through a runtime set granting showcase_task allowRead + allowExport, bound through sys_user_permission_set by the set's NAME. The recipe uses the spec's PermissionSetSchema key `objects` at the metadata door (the stored sys_permission_set column is object_permissions). No clause's verdict logic changed",
           "ref": "#23169"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps[1], [2], [4], [6] and [8] and acceptance[1], [2], [3], [6] and [8] re-pointed (checklist-accuracy findings of QA run #23949, wave #23878). The console sends its list params without a `$` (filter / top / skip / search / sort — the same AST), so every $-spelled expectation named a param no request carries; the aggregate bulk action is api-typed and POSTs `_selectedIds` at the body top level to /api/v1/apps/showcase/recalc, not params._selectedIds to /actions; no stock list exceeds the 50-row page, so the paging step now stages 55 inquiries through createMany (as #23949 did); and Export sits in the Display popover's footer. Not loosened: every clause scores the same server requests and counts",
+          "ref": "#24036"
         }
       ]
     },
@@ -858,7 +876,7 @@
       "title": "Grid-level conditional rules: row-scoped requiredWhen and parent-scoped readonlyWhen in the inline line-item grid",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -887,7 +905,7 @@
         {
           "clause": "row-scoped requiredWhen flags the cell per row: only the row crossing quantity >= 100 is marked, and the batch save is blocked with a named cell error while its description is empty",
           "oracle": "dom",
-          "verify": "after screenshot, assert the required flag on row 1 and its absence on row 2; blocked save shows the error (pinned by objectui e2e/live/grid-conditional-rules.spec.ts)",
+          "verify": "after screenshot, assert the required flag on row 1 and its absence on row 2; the blocked save shows the named cell error and NOTHING is written (pinned for the inline flag by objectui e2e/live/grid-conditional-rules.spec.ts). Note for the reader: the client still sends the one batch, and the server refuses it 400 (description / required) — that send is by design (recheck 6218243967 item 13), so score the refusal and the unchanged rows, never the absence of a request; the objectui pin asserts only the inline required flag",
           "evidence": "screenshots + blocked save"
         },
         {
@@ -950,6 +968,12 @@
           "date": "2026-10-05",
           "change": "clause 5, step 3 and the invoice fixture line re-paired (invalid pairing, #21782 VF3; VF3 gave no verbatim wording, so the clause is derived). On stock INV-1001 (positions 0 and 1), editing one line sends only that line, and the sibling stays byte-identical (masterDetailTx changedFields). The position re-emit happens only when sibling lines share a stored position, because the grid stamps row[sortField] = index on every change (GridField). INV-1002 ships one line, and a second line added through the API defaults to position 0, so the run's collision was created by the fixture. The clause now names an invoice whose lines carry distinct positions, and the fixture says how to seed one. Re-read at objectui 9dfaca6543: the mechanism is unchanged. The grid's config key moved from sort_field to sortField at both ends in the #21772 pin range (GridField + MasterDetailForm), so the source cites the new spelling",
           "ref": "#21797"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "acceptance[0].verify records what 'blocked' means on this surface (the #23949 note for the next author): a client-blocked grid save still sends one batch, which the server refuses 400, by design per recheck 6218243967 item 13, and the objectui pin asserts only the inline flag. The verify text now scores the refusal and the unchanged rows. Wording: the clause and its oracle are unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -1566,7 +1590,7 @@
       "title": "Action buttons surface at exactly their declared locations — list toolbar, list row, record header/more/related/section — and each dispatches for real",
       "since": "v15",
       "status": "active",
-      "revision": 10,
+      "revision": 11,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -1597,7 +1621,7 @@
         "boot the showcase isolated; sign in as admin; open the showcase_task list view",
         "for each location variant, navigate to its surface (list header / row menu / a not-done task's Task Detail title bar / that title bar's ⋯ menu / the rows of the Tasks related list on a project's Project Detail Related tab, not the Tasks tab's line-items grid / the Task Detail quick-actions bar; fixtures.knownGaps names each record host), screenshot AFTER render settles, then read the rendered action buttons from the DOM",
         "record for every fixture action WHERE it rendered — building the full placement matrix (rendered locations vs declared locations)",
-        "dispatch one action per location with a ref-targeted click: bulk_reassign (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.form), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
+        "dispatch one action per location with a ref-targeted click: bulk_reassign from the list toolbar — select a row FIRST: with none selected it toasts 'This action runs on a single record — select a row first' and dispatches nothing — (screen-flow wizard opens), quick_view (modal opens), mark_done (script executes), log_time (form dialog opens on showcase_task.form), open_docs (url navigation), recalc_selection from the ⋯ menu (api POST); capture each network trace",
         "verify the state-changing dispatches server-side: mark_done flips the task's done flag (API re-read), recalc_selection's per-record branch recomputes the estimate",
         "CEL visibility both sides: locate a done task and a not-done task; read the row menu and record header of each for showcase_mark_done",
         "empty-locations probe, both halves: (a) only where a PACKAGED action with NO locations key exists (none ships on stock — knownGaps), sweep all six surfaces (list toolbar, row menu, record header, ⋯ overflow, related-list section, quick-actions bar) recording every surface it appears on — the expected list is EMPTY; otherwise record half (a) blocked(fixture). ⛔ Do not author the probe at runtime: a runtime-authored action is not served at all, so its empty sweep is no evidence; (b) sweep the same six surfaces for showcase_new_task, the fixture fleet's headless `locations: []` declaration, and record that its list is empty too"
@@ -1715,6 +1739,12 @@
           "date": "2026-10-13",
           "change": "knownGaps[2] (new), steps[6] and acceptance[4].verify (fixture gap, #23163 A4; parked on #23121, carried by #23169). steps[6](a) authored a locations-less probe action at runtime. QA run #23163 found runtime-authored actions are not joined into the served object's actions[]: its positive control, the same probe with a location, rendered nowhere either, so the empty sweep proved nothing. The half needs a packaged specimen with no `locations` key, and the stock showcase ships none (the shape action-no-placement warns about). Half (a) now scores blocked(fixture) on stock; half (b) on showcase_new_task is unchanged. Shipping the specimen is a showcase fixture change, not made here",
           "ref": "#23169"
+        },
+        {
+          "revision": 11,
+          "date": "2026-10-16",
+          "change": "steps[3] names the selection the toolbar dispatch needs (checklist-accuracy finding of QA run #23949, wave #23878): showcase_bulk_reassign on the list toolbar runs on a selected row, and with none selected it only toasts 'select a row first'. The clauses are unchanged",
+          "ref": "#24036"
         }
       ],
       "enumSource": {
@@ -1728,7 +1758,7 @@
       "title": "All six validation-rule types enforce on the write path with their exact per-type error codes — and advisory severities flag without blocking",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1748,7 +1778,7 @@
         "state_machine — create with non-initial status → invalid_initial_state; illegal transition → invalid_transition",
         "format — bad tax_id / billing_email → invalid_format",
         "json_schema — off-schema support_config → json_schema_violation; non-JSON string → invalid_json",
-        "cross_field — project end_date < start_date → rule_violation naming end_date",
+        "cross_field — project end_date < start_date → rule_violation on start_date (the rule declares fields [start_date, end_date], and the server targets fields[0] — acceptance[1])",
         "script — spent > budget → rule_violation",
         "conditional — status 'churned' without churn_reason → the wrapped rule fires; with churn_reason present it does not",
         "severity — 'error' (the default, validation.zod.ts) blocks; 'warning'/'info' rules that MATCH do not block: the write lands and the message is logged server-side (rule-validator.ts 'only error blocks')"
@@ -1787,9 +1817,9 @@
           "evidence": "the twins"
         },
         {
-          "clause": "a MATCHING advisory rule does not block, and its message still surfaces where the contract puts it — the SERVER LOG, not the response: the green→red health jump answers 2xx, the row persists with the jumped value, and the log carries \"Validation rule 'project_health_progression' (warning): Health changed by more than one step…\" — advisory rules stay advisory (only severity 'error' feeds the ValidationError throw)",
+          "clause": "a MATCHING advisory rule does not block, and its hit still surfaces where the contract puts it — the SERVER LOG and the write answer's `warnings`, never as an error: the green→red health jump answers 2xx AND its write answer carries the hit in `warnings` (one entry: rule project_health_progression, severity 'warning', field health, code invalid_transition — the code the rule's own type raises, copied from its violation — #22726), the row persists with the jumped value, and the log carries \"Validation rule 'project_health_progression' (warning): Health changed by more than one step…\" — advisory rules stay advisory (only severity 'error' feeds the ValidationError throw)",
           "oracle": "log",
-          "verify": "the 2xx response + the persisted re-read + the logger.warn line (packages/objectql/src/validation/rule-validator.ts — non-error severities route to opts.logger.warn, never into `errors`). ⛔ Do not require the message in the RESPONSE body — best-effort logging is the documented surface; a run wanting a UI-visible advisory is asking for a feature, not verifying this one",
+          "verify": "the 2xx response with its `warnings` entry naming the rule (the write answer reports the write's own advisory hits — packages/metadata-protocol/src/protocol.ts, #22726), the persisted re-read, and the logger.warn line (packages/objectql/src/validation/rule-validator.ts — non-error severities route to opts.logger.warn, never into `errors`). Score the entry's rule, severity, field and code (packages/objectql/src/validation/rule-validator.ts#advisoryEvent copies field and code from the violation, so a state_machine advisory reports invalid_transition), not its message wording; a run wanting a UI-visible advisory is asking for a feature, not verifying this one",
           "evidence": "response + re-read + the captured log line"
         }
       ],
@@ -1819,6 +1849,12 @@
           "date": "2026-08-30",
           "change": "added the severity axis the matrix silently assumed away: every clause drove severity:'error' (the default) while the spec declares 'warning'/'info' and the evaluator routes them to a non-blocking logger.warn — a matching advisory rule was never proven NOT to block, and its message never proven to surface. New variant line, step, acceptance clause (log oracle — the message's contract surface is the server log, not the response) and two negatives, including that fail-closed (#4649) is severity-scoped. Register corrected against source: the sweep's claim that showcase rules are all default-error is FALSE — project.object.ts ships the advisory project_health_progression precisely for this, so the warning leg is stock-drivable; only 'info' (same code branch) lacks a specimen",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "variants[3] and acceptance[4] (clause, verify) corrected (checklist-accuracy finding of QA run #23949, wave #23878, and #23879). variants[3] said cross_field answers rule_violation naming end_date, but the server targets fields[0] = start_date, which is what acceptance[1] already says. And a write that matches an advisory rule now reports the hit in its answer's `warnings` (#22726), so the verify text's 'do not require the message in the response' is stale — the clause now asks for the warnings entry by rule, severity, field and code — invalid_transition, the state_machine's own code, which this card's re-run read — beside the log line. Not loosened: the advisory must still not block, and the log line is still required",
+          "ref": "#24036"
         }
       ]
     },
@@ -2136,7 +2172,7 @@
       "title": "User-built FilterBuilder/SortBuilder toolbar merges with the view filter, restores across nav, and reproduces rows from the URL",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -2158,7 +2194,7 @@
         "open the FilterBuilder toolbar; add 2 conditions (e.g. priority = high, estimate_hours > 4); open the SortBuilder and add a sort (due_date desc); capture the data request",
         "assert the request $filter is the MERGE of the view's stored rule AND the two toolbar conditions (buildEffectiveFilter/mergeFilterNodes), and $orderby carries the toolbar sort; the returned rows satisfy view-filter AND toolbar conditions",
         "navigate away via an in-app nav link to another object (the link carries no query string, so the URL state is dropped), then navigate back to showcase_task in_progress; screenshot; confirm the toolbar filter + sort restored",
-        "read localStorage key list-filters:<userId>:showcase_task:<viewId> and confirm it embeds the signed-in user id",
+        "read where the toolbar filter and sort are kept: the signed-in user's own sys_user_preference row keyed ui.list.showcase_task (GET /api/v1/data/sys_user_preference filtered to that key; its value's perView.<view> carries the filters and the sort — objectui ListPreferencesProvider.tsx, objectui#12418), and its localStorage write-through cache list-state:<userId>:showcase_task. Confirm both are the signed-in user's: the row's user_id, and the cache key's user segment. (Only the search term stays under the older list-filters:<userId>:showcase_task:<viewId> key)",
         "sign out; sign in as the SECOND account; open the same object+view; confirm the first account's cached toolbar filter does NOT appear",
         "userFilters/URL: where UserFilters are hosted (an interface page or the userFilters surface — NOT a bare object list, ADR-0053), apply a quick-filter; copy the URL; open it in a fresh tab; confirm the uf_<field> params (comma-joined, URI-encoded) reproduce the same rows and uf__tab carries the active preset (ADR-0047)",
         "negative sweep: confirm userFilters (quick-filter chips / uf_* params) do NOT leak onto the bare object list view"
@@ -2177,15 +2213,15 @@
           "evidence": "the request URL + row order"
         },
         {
-          "clause": "the toolbar filter + search survive a FULL in-app navigation away and back — restored from localStorage (URL params alone are lost on an in-app nav link that carries no query string; listFilterStorage exists precisely to bridge that)",
+          "clause": "the toolbar filter + search survive a FULL in-app navigation away and back — restored from the user's own list preference (sys_user_preference ui.list.<object>, cached in localStorage list-state:<user>:<object>; URL params alone are lost on an in-app nav link that carries no query string, which is what the preference bridges)",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the list rendered, the FilterBuilder shows the two conditions and the SortBuilder the sort; the request re-issued on return carries the same merged $filter (app-shell/src/views/listFilterStorage.ts)",
+          "verify": "after a screenshot confirms the list rendered, the FilterBuilder shows the two conditions and the SortBuilder the sort; the request re-issued on return carries the same merged `filter` param (the console spells it without a `$`; objectui app-shell/src/context/ListPreferencesProvider.tsx)",
           "evidence": "before/after screenshots + the re-issued request"
         },
         {
-          "clause": "the localStorage cache is USER-SCOPED — the key embeds the user id (list-filters:<userId>:<object>:<view>) so a second account on the same browser never reads the first account's cached filters (a filter value can be sensitive)",
+          "clause": "the list state is USER-SCOPED — it is the user's own sys_user_preference row (user_id = the signed-in user), and its localStorage cache key embeds the user id (list-state:<userId>:<object>), so a second account on the same browser never reads the first account's filters (a filter value can be sensitive)",
           "oracle": "dom",
-          "verify": "read the storage key as account A, then sign in as account B and confirm B's view opens with no A-authored toolbar filter; anon falls to its own 'anon' bucket (buildListFilterKey)",
+          "verify": "read account A's ui.list.showcase_task preference row and its list-state cache key, then sign in as account B on the same browser and confirm B's view opens with no A-authored toolbar filter (B reads its own row, or none)",
           "evidence": "the two accounts' storage keys + B's clean toolbar"
         },
         {
@@ -2197,7 +2233,7 @@
       ],
       "negative": [
         "a toolbar filter that REPLACES the view's stored filter (rows appear that the view filter should exclude) is a FAIL — buildEffectiveFilter merges, it does not overwrite the base",
-        "userFilters (quick-filter chips / uf_* params) leaking onto a bare OBJECT list view is a FAIL — ADR-0053 suppresses them there by design (filter elements belong to interface pages; the list-view-capabilities item flags the same regression)",
+        "userFilters (quick-filter chips, uf_<field> params, the uf__tab preset) leaking onto a bare OBJECT list view is a FAIL — ADR-0053 suppresses them there by design (filter elements belong to interface pages; the list-view-capabilities item flags the same regression). The reserved list-state params an object list writes for ITSELF — uf__filter, uf__search, uf__sort, uf__group (objectui#11860, userFilterUrlState.ts), e.g. uf__sort after a toolbar sort — are the list's own state mirrored into the URL, not userFilters, and do not count",
         "a cached toolbar filter from account A visible to account B on the same browser is a FAIL — the key embeds the user id precisely to prevent that leak",
         "an incomplete FilterBuilder row emitted as [field, op, ''] (which matches only empty and silently excludes everything) instead of being dropped is a FAIL — convertFilterGroupToAST skips valueless rows (#1964)"
       ],
@@ -2212,7 +2248,7 @@
       },
       "source": [
         "objectui: packages/plugin-list/src/ListView.tsx (buildEffectiveFilter, convertFilterGroupToAST, mergeFilterNodes; $filter + $orderby assembly)",
-        "objectui: packages/app-shell/src/views/listFilterStorage.ts (user-scoped localStorage key, debounced write, clear)",
+        "objectui: packages/app-shell/src/context/ListPreferencesProvider.tsx (objectui#12418 — the per-user ui.list.<object> sys_user_preference row, cached in localStorage list-state:<user>:<object>); packages/app-shell/src/views/listFilterStorage.ts now keeps only the search term",
         "objectui: packages/app-shell/src/views/userFilterUrlState.ts (uf_* params, ADR-0047)",
         "ADR-0053 (userFilters belong to interface pages, suppressed on object list views); examples/app-showcase/src/ui/views/task.view.ts",
         "cross-ref: records-forms.list-view-capabilities (saved-view-filter / userFilters negative)"
@@ -2229,6 +2265,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps[4], acceptance[2] (clause, verify), acceptance[3] (clause, verify), negative[1] and source[1] re-pointed (checklist-accuracy findings of QA run #23949, wave #23878). Since objectui#12418 the toolbar filter and sort live in the user's sys_user_preference row ui.list.<object> (cached in localStorage list-state:<user>:<object>), not in localStorage list-filters:<user>:<object>:<view> — #23949 read them there, user-scoped. The negative now says that the reserved list-state params (uf__sort and siblings, objectui#11860) are the list's own state and do not count as a userFilters leak. Not loosened: a second account must still see none of the first account's filters",
+          "ref": "#24036"
         }
       ]
     },
@@ -2332,7 +2374,7 @@
       "title": "Concurrent edits collide loudly (OCC 409 + conflict dialog), never silent last-write-wins; inline two-surface edit is ONE atomic OCC-guarded save",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -2352,8 +2394,8 @@
         "open the SAME record's detail in session A and session B (both hold the same updated_at)",
         "in A: edit one field, Save; capture the PATCH carrying If-Match: <updated_at> → 200; the record's updated_at advances",
         "in B (still holding the STALE updated_at): edit the same field, Save; capture the response",
-        "assert B receives 409 CONCURRENT_UPDATE and the conflict dialog appears (Reload latest / Overwrite) — NOT a silent overwrite, NOT a bare error",
-        "in B choose Reload → the form refetches and shows A's value",
+        "assert B receives 409 CONCURRENT_UPDATE and the conflict dialog appears — on the modal edit form it is occSave's 'Save conflict' dialog offering Keep editing / Overwrite; on an inline edit it is the ConcurrentUpdateDialog offering Reload / Overwrite — NOT a silent overwrite, NOT a bare error",
+        "Reload lives on the INLINE-edit ConcurrentUpdateDialog (objectui plugin-detail), not on the modal form's dialog: drive this leg as an inline stale save — in B double-click the field on the record page, let A's write land, Save → 409 → choose Reload; the page refetches and shows A's value, and B sends no further write",
         "in B re-edit and choose Overwrite → the retry re-keys ifMatch to the version the 409 reported → 200; re-read shows exactly one winner (B's value)",
         "INLINE two-surface (§E1): on the detail, enter the shared inline-edit session; edit one details-BODY field AND one header-HIGHLIGHT field; confirm ONE Save bar; Save; capture the single PATCH and its keys + headers",
         "stale-ifMatch inline path: repeat the inline save holding a stale updated_at (a concurrent write landed between) and capture the outcome"
@@ -2362,17 +2404,17 @@
         {
           "clause": "the losing save is REFUSED with 409 CONCURRENT_UPDATE server-side — never a silent last-write-wins that overwrites A with no signal",
           "oracle": "api",
-          "verify": "B's PATCH returns HTTP 409 with code CONCURRENT_UPDATE (framework rest-server.ts error mapping: error.code CONCURRENT_UPDATE / ConcurrentUpdateError → 409); A's value is intact on an independent re-read",
+          "verify": "B's PATCH returns HTTP 409 with code CONCURRENT_UPDATE — the 409 mapping is packages/types/src/data-error-classification.ts#structuredCodeAnswer (error.code CONCURRENT_UPDATE / ConcurrentUpdateError → 409, the current head as data), and the error class is packages/metadata-protocol/src/protocol.ts#ConcurrentUpdateError; A's value is intact on an independent re-read",
           "evidence": "B's 409 response + the intact re-read"
         },
         {
-          "clause": "the conflict surfaces a conflict DIALOG offering Reload/Overwrite (Keep editing) — a structured choice, not a silent overwrite and not a raw stack trace",
+          "clause": "the conflict surfaces a conflict DIALOG offering a structured choice — Keep editing / Overwrite on the modal edit form (occSave), Reload / Overwrite on an inline edit (ConcurrentUpdateDialog) — not a silent overwrite and not a raw stack trace",
           "oracle": "dom",
           "verify": "after screenshot, the ConcurrentUpdateDialog (plugin-detail) / occSave conflict dialog (plugin-form) renders with the racer's version and the two actions",
           "evidence": "the conflict-dialog screenshot"
         },
         {
-          "clause": "Reload DISCARDS B's pending edit and refetches — B's form then shows A's value",
+          "clause": "on the inline-edit conflict dialog (the surface that offers it), Reload DISCARDS B's pending edit and refetches — the page then shows A's value",
           "oracle": "api",
           "verify": "after Reload, the form's field equals A's saved value (a fresh GET), and no B write landed",
           "evidence": "the refetch read + no-write trace"
@@ -2414,7 +2456,7 @@
       "source": [
         "objectui: packages/plugin-detail/src/ConcurrentUpdateDialog.tsx (Reload/Overwrite UX), packages/plugin-form/src/occSave.tsx (If-Match → 409, conflict dialog, re-key overwrite)",
         "objectui: packages/plugin-detail/src/InlineEditSaveBar.tsx + packages/react/src/context/InlineEditContext.tsx (one save bar, changed-keys draft, ifMatch)",
-        "framework: packages/rest/src/approvals-routes.ts#mapping (CONCURRENT_UPDATE → 409 mapping), packages/metadata-protocol/src/protocol.ts#updateData updateData (If-Match / expectedVersion)",
+        "framework: packages/types/src/data-error-classification.ts#structuredCodeAnswer (the CONCURRENT_UPDATE / ConcurrentUpdateError → 409 arm, the current head as data), packages/metadata-protocol/src/protocol.ts#ConcurrentUpdateError (the error class), packages/metadata-protocol/src/protocol.ts#updateData updateData (If-Match / expectedVersion)",
         "PENDING-GAPS §C concurrent-edit-conflict + §E1 inline-edit atomic two-surface (objectui#2542/2549/2604); cross-ref records-forms.crud-roundtrip"
       ],
       "history": [
@@ -2429,6 +2471,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "source[2], acceptance[0].verify, steps[3] and [4] and acceptance[1] and [2] (clauses) re-pointed (the carried reading and a checklist-accuracy finding of QA run #23949, wave #23878). The source cited packages/rest/src/approvals-routes.ts#mapping for CONCURRENT_UPDATE → 409, but that map holds only the approvals codes; the row is structuredCodeAnswer in packages/types/src/data-error-classification.ts and the class is ConcurrentUpdateError in metadata-protocol's protocol.ts — and acceptance[0]'s 'rest-server.ts error mapping' was not where it lives either. 'In B choose Reload' could not be followed on the modal form, whose dialog offers Keep editing / Overwrite; Reload is on the inline-edit ConcurrentUpdateDialog, which is where #23949 drove it. Not loosened: a silent overwrite, a bare error, or a Reload that lets B's write land still FAILS",
+          "ref": "#24036"
         }
       ]
     },
@@ -2594,7 +2642,7 @@
       "title": "Grid personalization persists across reload: column resize/reorder/pin, row-height, group-by (with API-true totals), row-color",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2620,10 +2668,10 @@
       "steps": [
         "open showcase_task grid; screenshot",
         "resize a column (reorder two columns only on a grid that sets reorderableColumns; there is no runtime pin control — acceptance[0]), and set a row-height mode (compact/short/medium/tall/extra_tall)",
-        "reload; confirm the columnState (widths, and the order where reorder is enabled) and row-height restored from localStorage grid-columns-showcase_task-<viewId> (or the persisted view override via dataSource.updateViewConfig)",
-        "group-by status; confirm per-group headers appear and each group shows its summarizeField (estimate_hours) total; clear grouping and confirm the headers are removed cleanly",
-        "cross-check one group's total against a direct API aggregate: GET /api/v1/data/showcase_task grouped client-side from the raw rows",
-        "set a row-color rule; confirm rows paint by the rule (useRowColor)",
+        "reload; confirm the columnState (widths, and the order where reorder is enabled) and row-height restored — they now persist in the signed-in user's own list preference, sys_user_preference ui.list.showcase_task (perView.<view>.columnState / rowHeight, objectui#12418), with localStorage grid-columns-showcase_task[-<viewId>] as the component's cache; the old per-view override through dataSource.updateViewConfig is retired (objectui#12504). Also reload in a FRESH browser context as the same user: the layout follows the user",
+        "group-by status; confirm per-group headers appear and each group shows its record count — summarizeField (estimate_hours) is declared on the KANBAN config of task.view.ts, not on the grid, so grid groups carry counts; clear grouping and confirm the headers are removed cleanly",
+        "cross-check each group's count against a direct per-group server count (GET /api/v1/data/showcase_task filtered to that status, read its total)",
+        "read the row-color rule the stock Grid view declares — rowColor on priority with the colors map low slate / medium blue / high amber / urgent red (examples/app-showcase/src/ui/views/task.view.ts); there is no runtime row-color authoring control — and confirm rows paint by it (useRowColor, the -100 tint of each name)",
         "reload once more; confirm every personalization survives; capture a screenshot per variant"
       ],
       "acceptance": [
@@ -2640,9 +2688,9 @@
           "evidence": "before/after screenshots"
         },
         {
-          "clause": "group-by renders per-group headers and CLEARS cleanly, and the grouped totals MATCH a direct API aggregate of the grouping/summary field — grouping summarizes the real rows, not the rendered page",
+          "clause": "group-by renders per-group headers and CLEARS cleanly, and each group's count MATCHES a direct server count for that group — grouping summarizes the real rows, not the rendered page",
           "oracle": "api",
-          "verify": "compare a group's summarizeField total against GET /api/v1/data/showcase_task aggregated client-side (ObjectGrid grouping + useColumnSummary); clearing grouping removes the headers",
+          "verify": "compare every group's count against a per-group server count from GET /api/v1/data/showcase_task (ObjectGrid grouping); clearing grouping removes the headers. A group count equal to the rendered page's rows rather than the server count is the FAIL",
           "evidence": "board screenshot + the aggregate check"
         },
         {
@@ -2652,10 +2700,10 @@
           "evidence": "post-reload screenshot"
         },
         {
-          "clause": "the column-state store is per-browser and deliberately NOT user-scoped (cosmetic), UNLIKE the runtime filter store — so a shared column layout across accounts on one browser is by-design, not a leak to fail on",
+          "clause": "the column state follows the USER, not the browser: since objectui#12418 widths and row height persist in the user's own sys_user_preference row (ui.list.<object>, perView.<view>.columnState / rowHeight), so they restore for that user in a fresh browser and never for another account; the component's localStorage key grid-columns-<object>[-<view>] carries no user id and is only a cache under that row",
           "oracle": "dom",
-          "verify": "the key is grid-columns-<object>[-<view>] with no user id (listFilterStorage.ts documents the deliberate asymmetry: widths cosmetic, filter values sensitive)",
-          "evidence": "the storage key"
+          "verify": "the sys_user_preference ui.list.showcase_task row carries the widths / row height under the signed-in user's user_id, and the same user in a fresh browser context sees them restored; a second account on the same browser does not (objectui app-shell/src/context/ListPreferencesProvider.tsx). The localStorage grid-columns-<object>[-<view>] key carries no user id and is only the cache",
+          "evidence": "the preference row + the fresh-context restore + the second account's default layout"
         }
       ],
       "negative": [
@@ -2695,6 +2743,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21782 parked on #22017 (row 6), re-pointed clause. A1's reorder / pin half was blocked: reorderableColumns is off and there is no runtime pin control. Verified in source: reorderableColumns is an ObjectGridPropsSchema prop (packages/spec/src/ui/component.zod.ts) that ObjectGrid defaults to false, never a ListView key; pinning is the author's ListColumnSchema `pinned`; the persisted columnState holds widths and order only. The clause asserted two user personalizations the stock list view does not offer. A1 now asserts resize persistence, reorder only where enabled, and an author-pinned column after reload; the verify, two variants, steps 2-3 and source follow",
           "ref": "#22017"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "steps[2], [3], [4] and [5] and acceptance[2] (clause, verify) and [4] (clause, verify, evidence) re-pointed (checklist-accuracy findings of QA run #23949, wave #23878). Column state and row height now persist in the user's own sys_user_preference row (ui.list.<object>, objectui#12418) and restore in a fresh browser — #23949 read them there — so acceptance[4]'s 'deliberately NOT user-scoped' describes a store the console replaced; the clause now asserts the per-user row (a stale spec re-pointed to objectui#12418). summarizeField is a kanban config, so grid groups show counts and the reconciliation is per-group count; the row-color step now names the rule the stock Grid view declares, since no runtime authoring control exists; the updateViewConfig override is retired (objectui#12504). Not loosened: counts must still match the server, and another account must not see the layout",
+          "ref": "#24036"
         }
       ]
     },
@@ -2899,7 +2953,7 @@
       "title": "Lookup picker quick-create: a user-facing zero-hit lookup opens the referenced create form and adopts the new id; system references offer no quick-create",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "browser",
       "personas": [
@@ -2921,7 +2975,7 @@
         "click create-new; the referenced object's FULL create form opens (via the ActionProvider modal); fill required fields and save",
         "confirm the picker ADOPTS the newly created id and the parent form's field now holds it",
         "save the parent; re-read the parent over the API — its reference resolves to the new id",
-        "type a search WITH hits; confirm each keystroke issues a scoped server request (not client filtering of a preloaded set)",
+        "type a search WITH hits; confirm the picker issues a scoped server request per SETTLED term — it debounces, so a typed word sends one request (search=TERM) once typing pauses, not one per keystroke; still a server find, never client filtering of a preloaded set",
         "open a lookup to a system/user-directory reference (sys_/cloud_/ai_ or user/users); confirm NO create-new affordance is offered"
       ],
       "acceptance": [
@@ -2980,6 +3034,12 @@
           "date": "2026-08-21",
           "change": "recorded on the item that its automation is pinned exclusively in the objectui repo and is therefore neither runnable nor pin-evidenced from this checkout — one of 23 items in that position, each of which every sweep had been re-deriving from scratch. The knownGap names the two honest ways to score it (hand-drive it as a manual run, or run the pin in an objectui checkout and cite the revision) and forbids the third: treating the `automated` field itself as coverage. The protocol and the exclusive-vs-mixed distinction live once in RUNNER.md; this line is the pointer (#10236 A5)",
           "ref": "#10236"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps[5] corrected (checklist-accuracy finding of QA run #23949, wave #23878): the picker debounces, so it sends one scoped server request per settled term, not one per keystroke — still server-side, which is what acceptance[2] scores. Wording only: no request or oracle changed",
+          "ref": "#24036"
         }
       ]
     },
@@ -3083,7 +3143,7 @@
       "title": "Async import job: terminal state + per-row results, undo removes exactly the imported rows, cancel mid-job leaves a coherent partial",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -3094,7 +3154,7 @@
         "requires": [
           "an import-job-capable client wired into the console AND an object with an async-import route (framework packages/rest/src/rest-route-ledger.ts: POST /api/v1/data/:object/import/jobs, /import/jobs/:jobId/{cancel,undo,results}) — the STOCK console already satisfies the client half (run #21845, console pin 2e818d0b51ec); no extra wiring is needed",
           "the objectui import specs, which self-gate on IMPORT_CONSOLE_LIVE=1 (console) or a reachable import harness /live.html",
-          "RUNTIME FIXTURE — the live-gated console spec (proved by run #21845; nothing committed in either repo): in an objectui checkout, run e2e/import-console/import-console-undo.spec.ts with IMPORT_CONSOLE_LIVE=1 against the booted showcase, from a SCRATCH COPY of the spec whose page goto path is the console-mounted /_console/apps/{app}/{object} (the spec's own path does not carry the /_console mount the framework serves the console under)"
+          "RUNTIME FIXTURE — the live-gated console spec (proved by run #21845; nothing committed in either repo): in an objectui checkout, run e2e/import-console/import-console-undo.spec.ts with IMPORT_CONSOLE_LIVE=1 against the booted showcase, from a SCRATCH COPY of the spec whose page goto path is the console-mounted /_console/apps/{app}/{object} (the spec's own path does not carry the /_console mount the framework serves the console under). The spec imports a name,email,status CSV and counts rows on LIVE_IMPORT_OBJECT, and NO showcase object carries those three fields — author a scratch object first (e.g. qa_lead with name / email / status text fields and a declared sharingModel, in a writable package, published) and run with LIVE_IMPORT_APP=showcase_app LIVE_IMPORT_OBJECT=qa_lead, as QA run #23949 did"
         ],
         "knownGaps": [
           "CLOSED for runs by the live-gated console spec in requires (#21845): e2e/import-console/import-console-undo.spec.ts skips unless IMPORT_CONSOLE_LIVE=1, and its goto path needs the /_console mount — with both supplied it runs against the stock console. A skip without the gate is the control, never a result. The harness twin e2e/import-harness/import-undo.spec.ts still skips unless the harness origin serves /live.html; it is optional evidence, and the API half below needs no gate at all",
@@ -3171,6 +3231,12 @@
           "date": "2026-10-05",
           "change": "blocked lifted: run #21845 found that the stock console already satisfies the 'import-job-capable client' gate (console pin 2e818d0b51ec) and passed the objectui console spec twice with IMPORT_CONSOLE_LIVE=1 from a scratch copy whose goto path is /_console/apps/{app}/{object}, plus the API half. That recipe is written into fixtures.requires and the gate knownGap is marked CLOSED-for-runs, not deleted. The API step now says that creation is POST /api/v1/data/:object/import/jobs and that progress, results, cancel, undo and the list all live under /api/v1/data/import/jobs. The job-list reads now treat revertedAt as absent, not null, until the job is reverted — the old { revertedAt:null } shape would fail a healthy list (card #21851 entry 4)",
           "ref": "#21845"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "fixtures.requires[2] names the scratch object the console spec needs (checklist-accuracy finding of QA run #23949, wave #23878): the spec imports a name,email,status CSV onto LIVE_IMPORT_OBJECT, and no showcase object has those three fields, so #23949 authored qa_lead and ran with LIVE_IMPORT_APP=showcase_app LIVE_IMPORT_OBJECT=qa_lead. The clauses are unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -3179,7 +3245,7 @@
       "title": "Object lifecycle hooks fire on the write path with the right timing, gate, async and error semantics — driven over /api/v1/data/*, oracled by the record effect and the log line",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3221,8 +3287,8 @@
         "condition fails CLOSED (#4775) — SCRATCH: an unevaluable/uncompilable condition ABORTS the operation and is NOT softened by onError:'log' nor fire-and-forgotten (the gate runs OUTSIDE both); add a scratch hook with a broken condition (unit-pinned in hook-wrappers.ts)"
       ],
       "steps": [
-        "boot showcase isolated; sign in as seeded admin; confirm the four hooks this item drives actually registered before asserting any no-fire — GET /api/v1/meta/types/hook (or the boot log) lists showcase_normalize_task_title / showcase_stamp_inquiry_defaults / showcase_audit_task_completion / showcase_warn_over_budget (a hook that never bound fakes every no-fire — seed-data-thin)",
-        "stamp defaults (beforeInsert): POST /api/v1/data/showcase_inquiry {name:'os-qa-<runid>'} OMITTING status AND source; re-read via GET and confirm source == 'web' — the hook is the SOLE producer of that value (the source field carries no default), so a correct read proves the hook fired; status == 'new' corroborates but is NOT hook-attributable alone (the 'new' status option is default:true)",
+        "boot showcase isolated WITH OS_LOG_LEVEL=info exported (or --log-level info): the audit oracle is a ctx.log.info line, and `os dev` defaults the kernel logger to warn (packages/cli/src/utils/log-level.ts DEFAULT_LOG_LEVEL), so on a default boot a correct product prints no audit line and every 'fires' clause reads as a no-fire; sign in as seeded admin; confirm the four hooks this item drives actually registered before asserting any no-fire — GET /api/v1/meta/types/hook (or the boot log) lists showcase_normalize_task_title / showcase_stamp_inquiry_defaults / showcase_audit_task_completion / showcase_warn_over_budget (a hook that never bound fakes every no-fire — seed-data-thin)",
+        "stamp defaults (beforeInsert): POST /api/v1/data/showcase_inquiry {name:'os-qa-<runid>', email, message} — email and message are required, so a name-only body answers 400 VALIDATION_FAILED before any hook runs — OMITTING status AND source; re-read via GET and confirm source == 'web' — the hook is the SOLE producer of that value (the source field carries no default), so a correct read proves the hook fired; status == 'new' corroborates but is NOT hook-attributable alone (the 'new' status option is default:true)",
         "title trim (beforeInsert + beforeUpdate): POST /api/v1/data/showcase_task with title '  os-qa-<runid>  ' (leading/trailing spaces) and valid required fields; re-read → title == 'os-qa-<runid>' (insert trim); then PATCH the same row's title to another padded value and re-read → trimmed again (update trim); ONE multi-event hook covered both",
         "completion audit — FIRES (transition): PATCH /api/v1/data/showcase_task/<Build homepage id> {done:true} (previous done:false); after the HTTP response resolves, settle briefly (the audit is async fire-and-forget, it runs after the write returns), then read the server log for 'task completed: Build homepage'",
         "completion audit — DOES NOT FIRE (two-root proof): PATCH an already-done task (<App wireframes id>, done:true) changing ONLY priority (medium→high), leaving done untouched; settle; confirm NO new 'task completed: App wireframes' line — previous.done == true makes the transition condition false even though record.done == true",
@@ -3284,7 +3350,7 @@
         {
           "clause": "a condition that cannot be evaluated FAILS CLOSED (#4775): the write is ABORTED, not silently skipped — and it is NOT softened by onError:'log' nor fire-and-forgotten, because the condition gate runs OUTSIDE the async/retry/onError wrappers",
           "oracle": "api",
-          "verify": "scratch hook with a broken/uncompilable condition on an object; a write to that object returns a HookConditionError-class refusal and the row does not land (hook-wrappers.ts: conditionFn throws outside runWithErrorPolicy)",
+          "verify": "scratch hook whose condition COMPILES but cannot be evaluated at runtime (e.g. int(record.name) > 0, written to a row whose name is not numeric); a write to that object returns a HookConditionError-class refusal and the row does not land (hook-wrappers.ts: conditionFn throws outside runWithErrorPolicy). An UNCOMPILABLE condition never reaches this gate: it is refused at authoring (PUT /api/v1/meta/hook → 422 INVALID_METADATA, expression-invalid), so it cannot stand in for the runtime fail-closed probe",
           "evidence": "the refusal + a post-attempt count showing no row"
         },
         {
@@ -3346,6 +3412,12 @@
           "date": "2026-10-13",
           "change": "the onError:'log' step and acceptance[7].verify quote the log line the product writes (wording drift, #23166 A7; parked on #23121, carried by #23169). For an async afterUpdate hook declared onError:'log', hook-wrappers.ts runWithErrorPolicy catches the throw, logs ERROR '[hook] handler failed (onError=log; suppressing)' and returns. The '[hook] async handler error (fire-and-forget)' line the item quoted is the fire-and-forget catch, which only an async hook without onError:'log' reaches. QA run #23166 read the first line. Read from source at 6d7f4df3c. The clause's verdict logic is unchanged",
           "ref": "#23169"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "steps[0], steps[1] and acceptance[8].verify corrected (checklist-accuracy findings of QA run #23949, wave #23878, and of this card's re-run). The audit oracle is a ctx.log.info line, and the CLI's default log level is warn, so the boot step now exports OS_LOG_LEVEL=info (#23949 ran on an info boot). The fail-closed scratch must be runtime-unevaluable, not uncompilable: an uncompilable condition is refused at authoring with 422 INVALID_METADATA expression-invalid and never reaches the runtime gate. And steps[1]'s inquiry body named only `name`, which answers 400 VALIDATION_FAILED (email and message are required) before any hook runs; the step now carries them. Not loosened: a write that lands past an unevaluable condition still FAILS",
+          "ref": "#24036"
         }
       ]
     },
@@ -3499,7 +3571,7 @@
       "title": "Cascade clear-semantics and the server boundary: stale-child clear on parent change, the WRITTEN-value server gate, and where cascade scope is client-only",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3519,7 +3591,7 @@
       },
       "steps": [
         "boot showcase isolated; sign in as the seeded admin; keep an API token for direct /api/v1/data/* writes",
-        "SELECT client clear: open a New Cascading Select (/_console/apps/com.example.showcase/showcase_cascade); pick country=cn, province=zj; screenshot; switch country=us; screenshot; enumerate province options (expect {California,Texas}) and confirm zj CLEARED and not carried into the us submit",
+        "SELECT client clear: open a New Cascading Select (/_console/apps/showcase_app/showcase_cascade — the app name is the canonical segment; the console also accepts the package id com.example.showcase there); pick country=cn, province=zj; screenshot; switch country=us; screenshot; enumerate province options (expect {California,Texas}) and confirm zj CLEARED and not carried into the us submit",
         "SELECT server gate (written value): direct POST /api/v1/data/showcase_cascade {country:'cn', province:'ca'} → capture the refusal; then {country:'cn', province:'zj'} → capture success",
         "SELECT stale-child EDGE (gap probe): create {country:'cn', province:'zj'}; PATCH only {country:'us'} (omit province); GET the row and record whether province='zj' (now invalid for us) is still stored and the PATCH returned 200 — expected: accepted, stale value kept (server does not revalidate an unwritten child)",
         "LOOKUP twin client re-query + clear: on a New Invoice, choose account=Northwind and capture the contact picker's candidate request (scoped to Northwind); pick a Northwind contact; switch account=Contoso; capture the re-issued (Contoso-scoped) candidate request and confirm the Northwind contact CLEARED from the field",
@@ -3599,6 +3671,12 @@
           "date": "2026-10-09",
           "change": "source line corrected: the server option gate no longer fails open on an unevaluable predicate. Since #22402 (ruling A, ADR-0137 D2 on the write path) it refuses the write as rule_violation / unevaluable, naming the option, the field and the fault; only a system write with no acting user whose predicate reads one is still admitted. No step or oracle of this item moves: its cascade predicates evaluate cleanly on the write path (a payload without country reads null == 'cn', a clean false).",
           "ref": "claude/issue-22402-option-gate-fails-closed"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps[1] uses the canonical app segment (checklist-accuracy finding of QA run #23949, wave #23878): /_console/apps/showcase_app/… names the app; the package-id spelling still resolves. Wording only: no request or oracle changed",
+          "ref": "#24036"
         }
       ]
     },
@@ -3709,7 +3787,7 @@
       "title": "fieldGroups[].visibleWhen section predicate: both spellings accepted, the parse normalizes to the envelope, retired visibleOn refused with the located prescription, derivation carries it verbatim — the console gates the section on the form AND the detail page (objectui#11630 fixed)",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -3728,7 +3806,7 @@
       },
       "steps": [
         "boot showcase isolated; sign in as the seeded admin; keep an API token",
-        "author the scratch carrier: install a scratch package, then PUT /api/v1/meta/object/qa_group_gate?package=<id> with a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', and fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }] — the same call sequence the area's qa-feeds-disabled recipe grounds",
+        "author the scratch carrier: install a scratch package, then PUT /api/v1/meta/object/qa_group_gate?package=<id> with a `kind` select (options basic|pro, basic default), two member fields declaring group: 'pro_details', fieldGroups: [{ key: 'pro_details', label: 'Pro details', visibleWhen: \"record.kind == 'pro'\" }], and highlightFields: ['kind'] — without highlightFields the derived detail page puts every field in its highlight strip and draws no body sections, so step 5's detail half has nothing to observe — the same call sequence the area's qa-feeds-disabled recipe grounds",
         "GET the object back over /api/v1/meta and read fieldGroups[0].visibleWhen — expect the body AS AUTHORED: a bare string comes back a bare string, because runtime-authored object metadata persists verbatim (ADR-0005 appendix (c)). Then PUT the envelope spelling and read it back the same way. The string → envelope normalization belongs to the schema parse and is proven by the batch20 pin (step 5), not by this read",
         "PUT a second draft spelling the key `visibleOn` and capture the refusal body",
         "run the spec pins: vitest run over packages/spec/src/data/object-strictness-batch20.test.ts and field-group-layout.test.ts",
@@ -3803,6 +3881,12 @@
           "date": "2026-10-13",
           "change": "acceptance[3] (clause and verify), knownGaps[1], the title and source[2] re-pointed: the detail half is no longer expected to fail (stale spec, #23166 A3; parked on #23121, carried by #23169). At objectui 1fb1ced36243 the detail page writes each field group as a `{ group }` reference (buildDefaultPageSchema.ts resolveDetailSections), and record:details evaluates the group's visibleWhen per record, pinned by record-details.groupVisibleWhen-11630.test.tsx. QA run #23166 (objectstack 36b2889c) saw the group gate live on the form and on the detail page. Re-read from objectui source at that pin, still this repo's .objectui-sha",
           "ref": "#23169"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "steps[1] gains highlightFields (checklist-accuracy finding of QA run #23949, wave #23878): with none declared, the derived detail page for qa_group_gate puts every field in the highlight strip and draws no body sections, so the detail half of the console clause could not be observed; #23949 authored highlightFields ['kind']. The clauses are unchanged",
+          "ref": "#24036"
         }
       ]
     },
@@ -3811,7 +3895,7 @@
       "title": "Field-level `unique` on the write path: colliding writes refused 409 UNIQUE_VIOLATION on both driver families, NULL-distinct, organization-scoped by default, whole-batch refusal, autonumber resync converges",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3840,9 +3924,9 @@
       ],
       "acceptance": [
         {
-          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), a message that NAMES THE OBJECT ('Duplicate record refused on 'qa_unique': …') and states 'No record was written.', with NO driver prefix and no driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
+          "clause": "a colliding create is REFUSED, not landed: status 409, code UNIQUE_VIOLATION (ADR-0112 envelope), whose developerMessage NAMES THE OBJECT ('Duplicate record refused on 'qa_unique': …') and states 'No record was written.', while the user-facing `error` stays generic ('A record with this value already exists'); NEITHER carries a driver prefix, a driver statement or bound values — and the row count is unchanged. On the live SQLite leg the field is named only when the driver reports a single offending column (a tenant-scoped unique index is composite, so the sentence reads 'a unique constraint already holds these values'); the `object.field` wording is the memory driver's and stays a memory-pin assertion",
           "oracle": "api",
-          "verify": "the refusal body + a post-refusal count; the SQL-family envelope is single-sourced at packages/objectql/src/duplicate-record-error.ts (buildDuplicateMessage / envelopeUniqueViolation); the memory driver's `object.field` sentence (memory-unique-constraint.ts uniqueViolationError) is asserted by memory-unique-constraint.test.ts, not live",
+          "verify": "the refusal body — status, code, and the developerMessage naming the object, read from developerMessage, not from the generic `error` — + a post-refusal count; the SQL-family envelope is single-sourced at packages/objectql/src/duplicate-record-error.ts (buildDuplicateMessage / envelopeUniqueViolation); the memory driver's `object.field` sentence (memory-unique-constraint.ts uniqueViolationError) is asserted by memory-unique-constraint.test.ts, not live",
           "evidence": "refusal response + before/after counts"
         },
         {
@@ -3909,6 +3993,12 @@
           "date": "2026-10-04",
           "change": "A1, step 1 and fixtures re-pointed to the stock SQLite store: the in-memory engine is no longer a boot store (every boot door refuses it), so the live legs run on SQLite and answer 409 UNIQUE_VIOLATION with the object named and 'No record was written.' (duplicate-record-error.ts buildDuplicateMessage); the `object.field` wording stays a memory-pin assertion (memory-unique-constraint.test.ts). 'memory driver (the stock default)' dropped; the SQL knownGap inverted into a memory-leg-is-pin-only gap; negative and source follow. Stale clause. Source 9a4182a75 (#21598)",
           "ref": "#21735"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "acceptance[0] (clause, verify) re-pointed (checklist-accuracy finding of QA run #23949, wave #23878): on the SQLite leg the object-naming sentences are in the envelope's developerMessage, and the user-facing `error` is the generic 'A record with this value already exists' — #23949 read them so. The clause now reads the naming where it lives. Not loosened: the object must still be named, no driver text may appear in either field, and nothing may be written",
+          "ref": "#24036"
         }
       ]
     },
@@ -4298,7 +4388,7 @@
       "title": "A validation rule reads a parent field one hop through a lookup",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -4332,7 +4422,7 @@
         {
           "clause": "the write is REFUSED when the parent field trips the rule, carrying the AUTHORED message, not a fault",
           "oracle": "api",
-          "verify": "400 VALIDATION_FAILED naming the rule no_invoice_for_churned_account, with the authored sentence about reactivating the account — a refusal that reads 'could not be evaluated' is a FAIL, not a pass",
+          "verify": "400 VALIDATION_FAILED whose fields[] entry is { field: '_record', code: 'rule_violation' } and whose message is the rule's AUTHORED message — the one no_invoice_for_churned_account declares in the object metadata (the sentence about reactivating the account). A rule that evaluates true answers its authored message, not its name: the rule name appears in no field of the body (packages/objectql/src/validation/rule-validator.ts). Score the code, the field and that the message equals the declared one; a refusal that reads 'could not be evaluated' is a FAIL, not a pass",
           "evidence": "the rejection envelope"
         },
         {
@@ -4377,6 +4467,12 @@
           "date": "2026-10-06",
           "change": "partial-coverage gap of QA run #21720 parked on #22017 (row 14), re-pointed clause. A4 was blocked(fixture): no stock persona has invoice CRUD without account read, and the item's knownGap said otherwise. Verified in source: showcase_member_default grants showcase_account read to every member (examples/app-showcase/src/security/permission-sets.ts), and grants are additive, so the persona cannot be provisioned on stock. The knownGap, the second persona, step 4 and A4's verify now say so. A4 is scored from engine-predicate-relationship.test.ts (named in `automated`) or live on the scratch-object substitute the record measured",
           "ref": "#22017"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "acceptance[1].verify corrected (checklist-accuracy finding of QA run #23949, wave #23878): the 400 carries the authored message, not the rule name — a rule that evaluates true answers {field: '_record', code: 'rule_violation', message: authored} (rule-validator.ts), and #23949 saw no rule name in the body. The verify text now scores the code, the field and the declared message. Not loosened: a 'could not be evaluated' refusal still FAILS",
+          "ref": "#24036"
         }
       ]
     },

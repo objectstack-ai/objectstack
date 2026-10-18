@@ -8,7 +8,7 @@ export const featureFlagsSettingsManifest: SettingsManifest = {
   version: 1,
   label: 'Feature Flags',
   icon: 'FlaskConical',
-  description: 'Toggle experimental and beta features for this workspace.',
+  description: 'Toggle experimental and beta features for this organization.',
   scope: 'tenant',
   readPermission: 'setup.access',
   writePermission: 'setup.write',

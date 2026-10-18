@@ -256,7 +256,27 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0, length 9 → 10.
         // [#23050 slice 10] Nor does the UI view body (`ui-routes.ts`):
         // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0, length 10 → 11.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
+        // [#23050 slice 11] Nor do the public form doors (`form-routes.ts`): they
+        // read the environment's view and object lists, never a draft:
+        // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0, length 11 → 12.
+        // [#23050 slice 12] Nor do the six CRUD doors (`crud-routes.ts`): they
+        // read and write records, never a draft:
+        // 8 = 6 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 12 → 13.
+        // [#23050 slice 13a] The first three `/meta` groups moved to
+        // `meta-collection-routes.ts` with three of `rest-server.ts`' six switches:
+        // the `_drafts` door's two (the 501 probe and the listing) and the
+        // per-type list's `?preview=draft`. A key names its route, never its file,
+        // so no ledger row changed:
+        // 8 = 3 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3, length 13 → 14.
+        // [#23050 slice 13b] The per-item reads moved to `meta-item-read-routes.ts`
+        // with two more: the item read's `?state=draft` and `?preview=draft`. Keys
+        // name the route, so again no ledger row changed:
+        // 8 = 1 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3 + 2, length 14 → 15.
+        // [#23050 slice 13c] The per-item writes moved to `meta-item-write-routes.ts`
+        // with the last one `rest-server.ts` held: the reset's `?state=draft` (a
+        // `write` row). Its key names the route, so again no ledger row changed:
+        // 8 = 0 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3 + 2 + 1, length 15 → 16.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });

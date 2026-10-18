@@ -363,14 +363,18 @@ describe('StorageServicePlugin: the session bridge reports the ACTIVE organizati
     expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_A', isSystem: true } });
   });
 
-  it('accepts the flattened shape a host may hand back directly', async () => {
+  it('⛔ does not read a top-level `activeOrganizationId` — no producer answers that shape', async () => {
+    // [#24222] `AuthSessionApi.getSession` declares the active organization on
+    // `session.activeOrganizationId` alone, and better-auth answers
+    // `{ user, session }`. The flattened operand tolerated a shape no
+    // in-process producer emits; a payload carrying only it stamps nothing.
     const { res, engine } = await bootPluginAndUpload({
       user: { id: 'u1' },
       activeOrganizationId: 'org_B',
     });
 
     expect(res._status).toBe(200);
-    expect(engine._inserts[0].options).toEqual({ context: { tenantId: 'org_B', isSystem: true } });
+    expect(engine._inserts[0].options).toEqual({ context: { isSystem: true } });
   });
 
   it('⛔ invents nothing when the session carries no active organization', async () => {

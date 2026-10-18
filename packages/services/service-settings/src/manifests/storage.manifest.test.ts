@@ -50,6 +50,29 @@ describe('storageSettingsManifest', () => {
   });
 });
 
+describe('storageSettingsManifest — the adapter-switch warning is an info_banner', () => {
+  const specs = storageSettingsManifest.specifiers as any[];
+  const sectionOf = (i: number) => specs.slice(0, i + 1).reverse().find((s) => s.type === 'group')?.id;
+
+  it('declares it as a warning-severity info_banner with an id, a title and a body', () => {
+    const banners = specs.filter((s) => s.type === 'info_banner');
+    expect(banners.map((b) => [b.id, b.bannerSeverity])).toEqual([['adapter_switch_warning', 'warning']]);
+    expect(typeof banners[0].label).toBe('string');
+    expect(banners[0].label.length).toBeGreaterThan(0);
+    expect(banners[0].bannerText.length).toBeGreaterThan(0);
+  });
+
+  it('places it in the Backend section, directly under the adapter select it concerns', () => {
+    const i = specs.findIndex((s) => s.id === 'adapter_switch_warning');
+    expect(sectionOf(i)).toBe('adapter');
+    expect(specs[i - 1].key).toBe('adapter');
+  });
+
+  it('carries the warning glyph nowhere — the banner severity is the only warning marker', () => {
+    expect(JSON.stringify(storageSettingsManifest)).not.toContain('⚠');
+  });
+});
+
 describe('storageTestActionHandler (fallback)', () => {
   it('rejects local adapter without local_root', async () => {
     const r = await storageTestActionHandler({

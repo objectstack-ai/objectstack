@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { CloudConnectionPlugin } from './cloud-connection-plugin.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), 'ccs-')); });
@@ -55,7 +56,29 @@ function makeRawApp() {
     };
 }
 const sessionAuth = (userId?: string) => ({ api: { getSession: async () => (userId ? { user: { id: userId } } : null) } });
-function makeCtx(rawApp: any, services: Record<string, any> = {}) {
+/**
+ * [#24148] The suites below sign in as `admin`, who must hold `setup.access` to
+ * reach the connection-changing doors (their subject is the credential, not the
+ * permission — that is `cloud-connection-setup-access.pin.test.ts`). Real
+ * permission-set rows, read by the shared resolver through `find`.
+ */
+const ADMIN_GRANTS: Record<string, any[]> = {
+    sys_user_permission_set: [{ id: 'ups_1', user_id: 'admin', permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: null }],
+    sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
+};
+/**
+ * [#24150] With `OS_RUNTIME_VERSION` unset, the bind claim's `runtime_version`
+ * is the release the discovery document reports, read through the `protocol`
+ * service. The suites below only need one to be present; the value itself is
+ * pinned against the real producer in `cloud-connection-runtime-version.pin.test.ts`.
+ */
+const DISCOVERY = { getDiscovery: async () => ({ version: 'release-from-discovery' }) };
+function makeCtx(rawApp: any, explicit: Record<string, any> = {}) {
+    const services: Record<string, any> = {
+        objectql: bindCatalogFromTables({ find: async (object: string) => ADMIN_GRANTS[object] ?? [] }, ADMIN_GRANTS),
+        protocol: DISCOVERY,
+        ...explicit,
+    };
     const hooks = new Map<string, any>();
     return {
         ctx: {

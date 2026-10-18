@@ -30,10 +30,20 @@
 //   2. A path through a regular file: refused with `ENOTDIR`, naming the file.
 //   3. CONTROL: a creatable unified-default path three levels deep is made.
 //   4. CONTROL: any other source is left to the serve child — nothing is made.
+//   5. A dangling symlink AS the directory (`OS_HOME/data` pointing nowhere):
+//      refused at once with `EEXIST`, naming the file and the directory (#24090).
+//      The walk used to accept any `EEXIST` on a created level, so the link went
+//      through to the serve child, whose boot failed seconds later with a
+//      plugin-start error naming neither (measured at `os dev` on `origin/main`
+//      b9ac35cbf: exit 1 after 8.3 s, "Plugin com.objectstack.auth failed to
+//      start").
+//   6. The answers the fold onto `makeDirectorySync` keeps: a directory that
+//      already exists, and a live symlink to one, are accepted as they stand; a
+//      regular file holding the directory's own name is refused with `EEXIST`.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -62,11 +72,22 @@ let outcomes: Map<string, Outcome>;
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'os-23737-dev-'));
   writeFileSync(join(root, 'plain'), '');
+  mkdirSync(join(root, 'dangling'));
+  symlinkSync(join(root, 'nowhere'), join(root, 'dangling', 'data'));
+  mkdirSync(join(root, 'existing', 'data'), { recursive: true });
+  mkdirSync(join(root, 'live', 'target'), { recursive: true });
+  symlinkSync(join(root, 'live', 'target'), join(root, 'live', 'data'));
+  mkdirSync(join(root, 'held'));
+  writeFileSync(join(root, 'held', 'data'), '');
   const cases: Array<{ label: string; url: string; source: string }> = [
     ...(RUNS_PROC ? [{ label: 'proc', url: `file:${PROC_FILE}`, source: 'unified-default' }] : []),
     { label: 'through-file', url: `file:${join(root, 'plain', 'data', 'objectstack.db')}`, source: 'unified-default' },
     { label: 'creatable', url: `file:${join(root, 'home', 'a', 'data', 'objectstack.db')}`, source: 'unified-default' },
     { label: 'other-source', url: `file:${join(root, 'env', 'a', 'data', 'objectstack.db')}`, source: 'env' },
+    { label: 'dangling', url: `file:${join(root, 'dangling', 'data', 'objectstack.db')}`, source: 'unified-default' },
+    { label: 'existing', url: `file:${join(root, 'existing', 'data', 'objectstack.db')}`, source: 'unified-default' },
+    { label: 'live-link', url: `file:${join(root, 'live', 'data', 'objectstack.db')}`, source: 'unified-default' },
+    { label: 'held', url: `file:${join(root, 'held', 'data', 'objectstack.db')}`, source: 'unified-default' },
   ];
   const script = [
     'const [subject, json] = process.argv.slice(1);',
@@ -142,5 +163,31 @@ describe('prepareDevDatabaseDirectory — os dev\'s unified-default directory (#
   it('CONTROL: any other source is left to the serve child — nothing is made', () => {
     expect(outcomeOf('other-source').outcome).toBe('returned');
     expect(existsSync(join(root, 'env'))).toBe(false);
+  });
+});
+
+describe('prepareDevDatabaseDirectory — a dangling symlink in the path is refused at once (#24090)', () => {
+  it('refuses a dangling symlink as the directory with EEXIST, naming the file and the directory', () => {
+    const o = outcomeOf('dangling');
+    expect(o.outcome).toBe('rejected');
+    expect(o.code).toBe('EEXIST');
+    expect(o.message).toContain(`'${join(root, 'dangling', 'data', 'objectstack.db')}'`);
+    expect(o.message).toContain(`'${join(root, 'dangling', 'data')}'`);
+    expect(lstatSync(join(root, 'dangling', 'data')).isSymbolicLink()).toBe(true);
+    expect(existsSync(join(root, 'nowhere'))).toBe(false);
+  });
+
+  it('CONTROL: a directory that already exists, and a live symlink to one, are accepted as they stand', () => {
+    expect(outcomeOf('existing').outcome).toBe('returned');
+    expect(statSync(join(root, 'existing', 'data')).isDirectory()).toBe(true);
+    expect(outcomeOf('live-link').outcome).toBe('returned');
+    expect(lstatSync(join(root, 'live', 'data')).isSymbolicLink()).toBe(true);
+  });
+
+  it('refuses a regular file holding the directory\'s own name with EEXIST, naming the file', () => {
+    const o = outcomeOf('held');
+    expect(o.outcome).toBe('rejected');
+    expect(o.code).toBe('EEXIST');
+    expect(o.message).toContain(`'${join(root, 'held', 'data', 'objectstack.db')}'`);
   });
 });

@@ -2796,7 +2796,7 @@ Installed package with runtime lifecycle state
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Name of the object the hit belongs to. |
 | **id** | `string` | ✅ | ID of the matched record. |
-| **title** | `string` | ✅ | Display title for the hit, resolved in order: the object's `titleFormat` template → the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → conventional name fields → first/last name → the record ID as a string. |
+| **title** | `string` | ✅ | Display title for the hit, resolved in order: the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → the object's deprecated `titleFormat` template → conventional name fields → first/last name → the record ID as a string. |
 | **snippet** | `string` | optional | Excerpt cut around the first matched term in a searchable text column, ellipsized at both ends when truncated. ABSENT when no source column literally contains a term (e.g. a pinyin companion match) — absence is a correct answer, not a miss. |
 | **record** | `Record<string, any>` | ✅ | The matched record as the engine's find path returns it (row-level security applied, internal fields already stripped). Object-specific — no cross-object field shape is promised beyond "a record of the named object". |
 
@@ -2837,7 +2837,7 @@ Installed package with runtime lifecycle state
 | :--- | :--- | :--- | :--- |
 | **object** | `string` | ✅ | Name of the object the hit belongs to. |
 | **id** | `string` | ✅ | ID of the matched record. |
-| **title** | `string` | ✅ | Display title for the hit, resolved in order: the object's `titleFormat` template → the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → conventional name fields → first/last name → the record ID as a string. |
+| **title** | `string` | ✅ | Display title for the hit, resolved in order: the declared primary-title pointer (`nameField`, ADR-0079; deprecated alias `displayNameField` still honored) → the object's deprecated `titleFormat` template → conventional name fields → first/last name → the record ID as a string. |
 | **snippet** | `string` | optional | Excerpt cut around the first matched term in a searchable text column, ellipsized at both ends when truncated. ABSENT when no source column literally contains a term (e.g. a pinyin companion match) — absence is a correct answer, not a miss. |
 | **record** | `Record<string, any>` | ✅ | The matched record as the engine's find path returns it (row-level security applied, internal fields already stripped). Object-specific — no cross-object field shape is promised beyond "a record of the named object". |
 

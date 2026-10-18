@@ -1,5 +1,365 @@
 # @objectstack/runtime
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 34b740f: fix(runtime,cli): an upper-case `FILE:` database URL opens the file its lower-case spelling opens, `file://NAME` opens `NAME` on both hosts, and the URL-to-filename rule is exported as `sqliteFilenameFromUrl`
+  
+  Clause-②: yes (widening)
+  
+  - **`FILE:` is stripped case-insensitively.** The standalone host classified `FILE:./app.db` as SQLite case-insensitively but stripped the prefix case-sensitively, so the prefix stayed in the file name: `OS_DATABASE_URL=FILE:./app.db` created a directory literally named `FILE:.` and put the database inside it, and `File:///tmp/app.db` was refused as an unsupported `File://` scheme. Both now open the file the lower-case spelling opens (`./app.db`, `/tmp/app.db`), as the `sqlite-wasm` path already did. Lower-case `file:` URLs and bare paths are unchanged.
+  - **New export: `sqliteFilenameFromUrl(url, kind)`** from `@objectstack/runtime`, `kind` being `'sqlite'` or `'sqlite-wasm'`. It is the one rule that turns a SQLite database URL (after `normalizeDatabaseUrl`) into a file name: `file:` / `file://` stripped case-insensitively, plus `wasm-sqlite:` for the WASM kind. For `'sqlite'` it throws a plain `Error` on a URL that is not a file path, naming the URL's scheme and never the URL. Nothing is removed.
+  - **`os serve`'s legacy storage path (`OS_MODE=off`, `bootMode: 'off'`, or a host config) turns a SQLite URL into a file by that same rule**, so both hosts open one file per URL. It used to strip only a lower-case `file:`: `OS_DATABASE_URL=file://NAME` opened `//NAME` at the filesystem root, where the standalone host opens `./NAME`, and `FILE:./app.db` made a `FILE:.` directory there too. `file:///abs/app.db` opens `/abs/app.db`; `sqlite:` / `sqlite://` URLs are unchanged.
+  - **What that rule refuses, the legacy path now refuses too, and fatally**, with the standalone host's own sentence (it names the URL's scheme, never the URL): an explicit `OS_DATABASE_DRIVER=sqlite` over a server URL such as `postgres://user:password@host/db`, which used to create directories named after the URL, credentials included, and a `file:` URL that names no file, which used to declare a database with an empty file name. Fix: point `OS_DATABASE_URL` at a file (`file:./app.db`), or select the driver the URL is for. The undocumented `sql://` prefix that path also stripped under an explicit `sqlite` selection is refused the same way; write `file:` instead. A blank `OS_DATABASE_URL` under an explicit `sqlite` selection is read as absent (`:memory:`), as an absent one always was.
+- ae4dfaf: feat(driver-turso,cli): the v18 organization-ownership ceremony runs on a Turso remote database
+  
+  Clause-②: yes (widening)
+  
+  `os migrate organization-ownership`, the plan and `--apply --backup-taken`, now completes against a Turso database reached over the remote transport (`libsql://…`), the transport hosted environments use. Before, the plan stopped at its boot with `Deferred schema DDL is not supported by the Turso REMOTE transport`, and the apply's column drops had no remote path either.
+  
+  - **`@objectstack/driver-turso`**, remote face:
+    - `detectManagedDrift()` answers instead of refusing with `NOT_IMPLEMENTED` / 501. The verdict is the shared differ's, the one the local face runs; the physical schema it diffs is read from the remote catalog (`pragma_table_info`, `sqlite_master`, `pragma_index_list` / `pragma_index_info`, and the ADR-0120 D4 duplicate probe). The declarations it diffs against are recorded by every remote schema door and by the DDL-free `registerObjectMetadata`, so a boot that skipped schema sync is covered too.
+    - `applyMigrationEntries()` applies `drop_index`, `create_index`, `recreate_index`, `replace_unique_index` and `drop_column` instead of refusing. Each entry runs as one libSQL `write` batch, so it lands whole or not at all: a `drop_column` drops the column's indexes with it in the same transaction, and a re-created index that fails to build leaves the old one in place. An entry is reported `applied` only once a read-back shows its target state. Every other column entry (nullability, width, a dropped DEFAULT) needs the SQLite table rebuild, which this transport does not run, so it is reported `skipped` and logged, as the in-place dialects report an op they cannot perform.
+    - The remote face declares `driftReportCaveat`: a sentence saying its drift report is for reading only and naming the reason. The OS_ARTIFACT_URL boot gate reads it (below). The local and embedded-replica faces declare `null`.
+    - The remote driver's `config` now carries its `url`, so the CLI labels a remote database by its URL (credential-free) instead of `better-sqlite3`. The ceremony writes that label into its plan and refuses an apply whose plan names another database; that refusal can now tell two remote databases apart.
+  - **`@objectstack/cli`**: the ceremony's plan and apply boots skip schema sync, instead of arming deferred DDL, when the primary datasource is a Turso remote one. No DDL is attempted, so the plan stays read-only, and every other datasource the boot connects is still deferred. The environment's own boot has already run the additive sync the ceremony reads. Every other `os migrate` command keeps refusing on that transport: their dry runs list held-back schema work, which a boot that holds nothing back cannot list.
+  - **`@objectstack/runtime`**: `createStandaloneStack` takes `skipSchemaSync`, passed to `ObjectQLPlugin` as the option `OS_SKIP_SCHEMA_SYNC=1` names. Unset, the plugin reads the variable as before.
+  
+  On a Turso remote primary, the `OS_ARTIFACT_URL` boot migration gate on `os serve` keeps its earlier answer: cannot judge, warn and boot. It applies no drift and refuses no boot. Only its warning's wording changes, from `Could not check the physical schema` to `Did not check the physical schema against the artifact: …`, followed by the driver's reason. The gate now decides this from a capability the driver declares (`driftReportCaveat`, a string on the remote face and `null` on the local and embedded-replica faces), not from a refusal it catches. Two follow-ups, filed separately and not closed by this change, have to land before that gate may act on a remote report:
+  - #23847: the remote transport's schema sync honours `storage.notNull` on create and add column, so the report stops naming a tightening its own sync produced;
+  - #23848: `os migrate apply` works on a Turso remote database, so the destructive drift the gate would refuse on has a remedy there.
+- 62f959d: fix(runtime)!: `POST /api/v1/packages` with `overwrite` refuses a read-only package with `422 WRITABLE_PACKAGE_REQUIRED`, as disable, publish, revert and delete already do
+  
+  ADR-0070 D2 makes a package the deployment ships read-only: one booted by code, one installed from the marketplace, and one whose manifest `scope` is `system` or `cloud`. `isWritablePackage` is that rule, and the four lifecycle doors that change a package (`PATCH /packages/:id/disable`, `POST /packages/:id/publish`, `POST /packages/:id/revert`, `DELETE /packages/:id`) refuse such a package with `422 WRITABLE_PACKAGE_REQUIRED`. The install door's `overwrite` option only bypassed the `409 … already exists` answer and never asked the rule. So an overwrite over a read-only package answered `201` and replaced its registry row with an authored one, and with a `protocol` service composed it also wrote that package's `sys_packages` row, while the server went on treating the package as read-only. The install door now asks the same rule, for the manifest's id, before either install path writes anything.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer one runtime REST door gives a caller who asks it to overwrite a package the deployment ships; the remedy is to install under an id the caller owns or to customise beside the shipped package, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a REST door's accept set narrows), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM:** `POST /api/v1/packages` with `overwrite: true` in the wrapped body, or `?overwrite=true`, and a manifest whose `id` names a read-only package, answered `201` and replaced that package's registry row.
+  - **TO:** the same request answers `422` with `error.code: 'WRITABLE_PACKAGE_REQUIRED'` and `error.details.packageId`, and writes nothing: no registry row, no `sys_packages` row. It is the refusal the four lifecycle doors give.
+  - **Unchanged:** an install of a new id, with or without `overwrite`, and an overwrite of a package an organization authored answer `201` as before. An install over an existing id without `overwrite` still answers `409`.
+  - **The fix for an integrator:** a package the deployment ships is managed by the deployment (its code release, or a new marketplace version), not over this API. Install the manifest under an id you own, or customise what the shipped package provides beside it as environment-level state (ADR-0131 D6).
+- cdf3777: The v18 organization-ownership ceremony now completes on a long-lived 17.x database, and `os dev` runs it for you on a local development database (ADR-0131, amendment 2026-10-16).
+  
+  **`os dev` upgrades a v17-shape development database in place.** When the boot refuses a local SQLite development database that is still in the v17 organization-ownership shape, `os dev` first copies the database and its `telemetry` sibling (with `-wal` / `-shm`) into `<data dir>/backups/organization-ownership-<timestamp>/`. It then runs `os migrate organization-ownership --dev` (the plan), applies that plan, and starts the server again. The plan, the apply report and the ceremony's log are kept beside the copy. If a step blocks, `os dev` stops and prints the blocker, where the copy is, and how to resume. `os serve` / `os start`, and any database that is not a local SQLite file, keep the manual ceremony and the boot refusal unchanged.
+  
+  **What the ceremony decides for you is printed as a warning before it writes anything.** The plan carries a `warnings` list. The plan prints it, `--apply` prints it again before its first write, and the apply report keeps it.
+  
+  **The `telemetry` sibling is covered.** A development boot (or an `OS_TELEMETRY_DB` deployment) keeps `sys_audit_log`, `sys_job_run`, `sys_notification` and the other lifecycle objects in a sibling database. The ceremony now plans, attributes and drops columns for each object in the database it lives in, reading anchors across databases. Before, the boot refusal read those tables in the sibling while the ceremony only read the primary, so an upgraded database could still never boot. A copy of such a table that an older boot left in the primary is listed under `staleCopies`, warned about, and left untouched; it no longer blocks the column drops.
+  
+  **The shipped permission sets an install seeded before 2026-08-15 are adopted.** Those installs store the eight shipped sets (`organization_admin`, `member_default`, …) as `managed_by: 'admin'` rows. The authored-conversion step used to refuse them with "rename the authored row". The ceremony now re-owns them as the platform seeds they are and deletes them as mirrors once every grant names its set, so the shipped definitions apply. The warning names each row; a Setup edit to one of them is not carried over, and the pre-upgrade backup keeps it.
+  
+  **`os migrate organization-ownership --dev`** composes the stack as `os serve --dev` does: the development auth secret's fallback (so the security and audit plugins), the development `.env*` files, and the `telemetry` sibling. A development boot's refusal now names the command with `--dev`, and every refusal now names an apply the ceremony accepts: `--out PLAN` first, then `--apply --plan-file PLAN --backup-taken`. A bare `--apply` is refused without a reviewed plan file. Before, running the ceremony from a shell without `NODE_ENV=development` composed neither plugin, and its apply blocked on the shipped permission sets and on `sys_audit_log`.
+  
+  `OrganizationOwnershipBootGuardPlugin` (`@objectstack/runtime`) takes `{ dev }`; `organizationOwnershipRefusalMessage` and `assertOrganizationOwnershipMigrated` take the same option.
+
+### Patch Changes
+
+- 9fcea20: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  fix(runtime): `callData`'s exposure refusal for the object a request addresses carries the data door's code, `OBJECT_API_DISABLED` (404) or `OBJECT_API_METHOD_NOT_ALLOWED` (405), on the dispatcher's `/data` routes, the `/mcp` data tools and declared endpoints (#23528)
+  
+  Clause-②: no
+  
+  **What was wrong.** An object can declare `apiEnabled: false` or an `apiMethods` whitelist. The runtime dispatcher's exposure check for the object a request addresses (`refuseUnexposedDataAction`, which every `callData` asks first) refused with a status and a message but no `code`. So:
+  
+  - the dispatcher's `/data` routes derived a code from the status: `404 RESOURCE_NOT_FOUND` / `405 METHOD_NOT_ALLOWED`;
+  - the `/mcp` data tools rendered the message alone;
+  - a declared endpoint whose target is an object answered the derived code too.
+  
+  `RestServer` and the MCP stdio tools answer the same declaration `OBJECT_API_DISABLED` / `OBJECT_API_METHOD_NOT_ALLOWED`, and so did the dispatcher's own refusal of a nested-relation filter on an unexposed object.
+  
+  **What a caller reads now.** Every one of these doors answers the data door's code with the same status as before:
+  
+  | door | declaration | FROM | TO |
+  |:--|:--|:--|:--|
+  | dispatcher `/data` (and declared endpoints) | `apiEnabled: false` | `404`, `error.code` `RESOURCE_NOT_FOUND` | `404`, `error.code` `OBJECT_API_DISABLED` |
+  | dispatcher `/data` (and declared endpoints) | verb outside `apiMethods` | `405`, `error.code` `METHOD_NOT_ALLOWED` | `405`, `error.code` `OBJECT_API_METHOD_NOT_ALLOWED` |
+  | `/mcp` data tools | either | `isError: true`; the text is the message | `isError: true`; the text is `{ "error": { "code", "message", "status" } }` |
+  
+  The status and the message do not change. The thrown value is now an `Error` carrying `code`, `status`, the addressed object as `object`, and the effective operation set as `allowed` on a 405. A caller that branched on `RESOURCE_NOT_FOUND` / `METHOD_NOT_ALLOWED` for an exposure refusal on these doors should branch on the two `OBJECT_API_*` codes, as it already does for `RestServer`.
+- ee0e115: docs: the default-record-page remedies name the other package's page, not the whole package
+  
+  Clause-②: no
+  
+  A second `isDefault: true` record page for one object is refused with `DEFAULT_RECORD_PAGE_CONFLICT`. The package registry's refusal already told the author to keep one default or "compose the deployment without the other package's page". Three sibling texts still told them to drop the whole package, though a deployment can keep a package and leave out the one page it ships:
+  
+  - `@objectstack/metadata-protocol`: the metadata save door's refusal now reads "a page a package ships stays the default unless the deployment is composed without that package's page." Only the remedy clause changed; `code`, `status`, `object` and `holders` are unchanged.
+  - `@objectstack/spec`: `PageSchema.isDefault`'s TSDoc and the error-code ledger's comment on `DEFAULT_RECORD_PAGE_CONFLICT` say the same.
+  - `@objectstack/runtime`: `AppPlugin`'s private `bundle` field now documents the three readers outside the class that read it structurally, so a rename is not made blind.
+  
+  No behaviour changes; nothing to migrate.
+- 7428da0: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  refactor(plugin-hono-server,runtime): the Hono doors and the HTTP dispatcher read the duplicate-record wire code off the shared error classification instead of spelling it themselves (#23714)
+  
+  **No behaviour change.** A repeated unique value still answers `409 UNIQUE_VIOLATION` at both Hono doors (a `HonoHttpServer` route or raw mount, and `createHonoApp`'s catch arms through `declaredEnvelopeForThrow`) and at the dispatcher's doors (`HttpDispatcher`'s thrown-error envelope), with the same `message`, the same `details` (`developerMessage`, `object`, and `field` when the driver named the column) and the same envelope keys. The answers were compared byte for byte at those doors before and after. A client or an app author has nothing to change.
+  
+  **What changed.** Both translations used to spell the wire code as a string literal. They now read it off the classification the REST server answers with (`structuredCodeAnswer` in `@objectstack/types`), as `@objectstack/mcp` already does. So the code has one source, and neither package stamps a code that the error-code ledger does not list under it. The engine's in-process code is unchanged: `DuplicateRecordError.code` is still `DUPLICATE_RECORD`.
+  
+  Clause-②: no
+- b55be42: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  fix(runtime): a sandboxed body that throws a value no read can flatten (`throw ''`, a null-prototype object, an object whose `message` getter throws) now ends its run at once with the sentence `the script threw a value that could not be read`, instead of waiting for the wall-clock ceiling (#23723)
+  
+  **Latency and answer change, for these values only.** The QuickJS runner's reject handler records a body's rejection as a flattened string, and the run ends only once that string is non-empty. For these values the read threw or gave `''`, so nothing was recorded: the run waited for the sandbox's wall-clock ceiling (30 s by default) and ended as a budget error with no business message, which the doors answer as a crash. The handler now records the fixed sentence above for any value it cannot read, and the run ends on the same path as any other rejection. The sentence names nothing the value carried and no stack.
+  
+  Measured at `POST /api/v1/actions/:object/:action` on a `type: 'script'` action:
+  
+  - `throw { code: 'EMAIL_TAKEN', get message() { throw new Error('boom') } }`
+    - FROM, after the 30 s ceiling: `500 {"success":false,"error":{"code":"INTERNAL_ERROR","message":"Internal server error","httpStatus":500}}`
+    - TO, in about 0.1 s: `400 {"success":false,"error":{"code":"VALIDATION_ERROR","message":"the script threw a value that could not be read","httpStatus":400,"declaredCode":"EMAIL_TAKEN"}}`
+  - `throw ''` and `throw Object.create(null)`
+    - FROM, after the 30 s ceiling: the same `500 INTERNAL_ERROR`
+    - TO, in about 0.1 s: `400 {"success":false,"error":{"code":"VALIDATION_ERROR","message":"the script threw a value that could not be read","httpStatus":400}}`
+  
+  The status and envelope are the ones the door already gives a body that threw; no door changed. A `code` the value carries is kept, as for any other thrown value. Two more values that could not be read move the same way: an `Error` whose `name` and `message` are both empty, and an `Error` whose `message` getter throws. To give the caller words, throw a readable `message` (or an `Error`).
+  
+  Control, unchanged byte for byte: every value the handler could already read (a thrown `Error` or subclass, a plain `{ code, message }` object and the other plain-object shapes, primitives, the engine's relayed duplicate refusal, a nested hook refusal's sentence, the `code` / `fields` / `status` / `userMessage` fields, and a capability denial). A body that never settles still ends at the wall-clock ceiling.
+  
+  In-process: the `SandboxError` a caller catches for such a throw now reads `KIND 'NAME' threw: Error: the script threw a value that could not be read`, with that sentence as `innerMessage`, instead of the wall-clock budget error.
+  
+  Clause-②: no
+- f7a5ebe: fix(runtime,cli): `os start` and `os dev` refuse a SQLite database whose directory cannot be made, at once, instead of hanging
+  
+  Clause-②: no
+  
+  **What was wrong.** The standalone host (`createStandaloneStack`, which `os start`, `os dev`'s standalone boot and every embedder run) prepared the directory of a file-backed SQLite database with Node's recursive `mkdirSync`. Node's recursive mkdir never returns when a level answers `ENOENT` although its parent exists: for `OS_DATABASE_URL=file:/proc/os-x/ctl.db` it looped `mkdir("/proc/os-x")` and `mkdir("/proc")` without end, holding the event loop. `os start` printed `→ Starting server...` and hung with no timeout and no message. The `sqlite-wasm` arm (`wasm-sqlite://…`, or `OS_DATABASE_DRIVER=sqlite-wasm`) did the same. `os dev` hung the same way in its own process when its default database lived under a state directory that cannot be made (for example `OS_HOME=/proc/os-x`).
+  
+  **What an operator sees now.** The boot exits non-zero within its normal start-up time, naming the database file, the directory and the operating system's error:
+  
+  ```text
+  ✗ [StandaloneStack] SQLite database file '/proc/os-x/ctl.db' cannot be created: its directory '/proc/os-x' could not be made: ENOENT: no such file or directory, mkdir '/proc/os-x'
+  ```
+  
+  `os dev` with an unusable state directory prints `✗ The default database '…/data/objectstack.db' cannot be created: its directory '…/data' could not be made: …`, followed by the remedy: point `OS_HOME` at a directory that can be created, or choose the database with `--database`.
+  
+  Nothing else changes. A creatable path is still made, every missing level of it. The read-only boot (`os migrate plan` over an absent database file) still creates no directory. The refusal names the path, never the database URL.
+- 9d4fb3c: fix(runtime): the standalone host's database-URL refusals name the URL's scheme and never print the URL, so a password or token in `OS_DATABASE_URL` no longer reaches the console or the boot log
+  
+  Clause-②: no
+  
+  The standalone host is what `os dev`, `os start` and `os serve` boot over a plain config, and what `os migrate` boots. Its URL refusals interpolated the whole database URL, and the CLI prints that message as it exits. A URL is where postgres / mysql / mongodb credentials ride, so whenever such a URL was refused, the password and any token in its query string were printed. Each refusal now names only the scheme (the letters before `://`), which cannot hold a username, a password, a host, a path or a query.
+  
+  - **An unsupported scheme.** With `OS_DATABASE_URL=redis://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:6399/0?authToken=PLACEHOLDER-TOKEN`:
+    - FROM: `[StandaloneStack] Unsupported database URL scheme: redis://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:6399/0?authToken=PLACEHOLDER-TOKEN. Supported schemes: …`
+    - TO: `[StandaloneStack] Unsupported database URL scheme "redis://". Supported schemes: …`. The list of supported schemes is unchanged. `os migrate … --json` carries the same text in its `error` field.
+  - **A `memory://` or `mingo://` URL (the retired in-memory engine).**
+    - FROM: `The database URL "memory://…"` (or `OS_DATABASE_URL "memory://…"`) followed by the full URL.
+    - TO: `A database URL with the "memory://" scheme` (or `An OS_DATABASE_URL with the "memory://" scheme`). A declared default datasource reads `(driver: memory, URL scheme "memory://")`. The rest of the sentence, which names the SQLite replacements, is unchanged.
+  - **An explicit `sqlite` driver over a URL that is not a file path** (for example `OS_DATABASE_DRIVER=sqlite` beside a `postgres://…` URL).
+    - FROM: `sqlite driver was selected but the URL does not look like a file path: "postgres://PLACEHOLDER-USER:PLACEHOLDER-SECRET@…"`
+    - TO: `sqlite driver was selected but the URL does not look like a file path (its scheme is "postgres://")`. A bare `file:` now reads `(it names no file after "file:")`.
+  
+  What does not change: which URLs resolve, and to which driver; the URL handed to the driver, which keeps its credentials; and where each refusal is raised, with the same error class. Each message keeps the phrase that identifies it: `Unsupported database URL scheme`, `selects the in-memory (mingo) engine`, `does not look like a file path`.
+- c5cf546: fix(runtime): the standalone host refuses an `OS_DATABASE_URL` with an opaque scheme (`jdbc:postgresql://…`, `redis:h`), and a `.wasm.db` ending no longer turns an unrecognised scheme into a SQLite file
+  
+  Clause-②: no
+  
+  This is the runtime's standalone host: `os dev`, `os start` and `os serve` over a plain config or an artifact, every `os migrate` subcommand, and every embedder of `createStandaloneStack`.
+  
+  - **Before, an opaque scheme (two or more characters and a `:` with no `//`).** `OS_DATABASE_URL=jdbc:postgresql://127.0.0.1:5999/db os serve --dev` printed `✓ Server is ready` and opened a SQLite file at a path made of the URL, creating the directories `./jdbc:postgresql:/127.0.0.1:5999/`. An operator who believed they were on Postgres wrote to that local file. This broke the host's own rule that an unknown URL scheme is refused and never falls back to SQLite.
+  - **Before, a `.wasm.db` ending.** It was tested ahead of every scheme check, so `OS_DATABASE_URL=redis://h/x.wasm.db` booted on a WASM SQLite file written under `./redis:/h/`.
+  - **After.** Both shapes get the refusal an unrecognised `<scheme>://` already got, unchanged: `[StandaloneStack] Unsupported database URL scheme "jdbc:". Supported schemes: …`. The boot stops before any plugin starts and creates nothing on disk. The message names only the scheme, never the URL, so credentials in the URL are not printed. A `*.wasm.db` name still selects the WASM engine for a `file:` URL or a path with no scheme. The CLI's legacy `os serve` path already refuses these values, so the two hosts now give the same answer.
+  - **A one-letter drive is a path, not a scheme** (`C:\data\app.db`, `C:/data/app.db`). A file name whose first segment contains a colon now reads as a scheme, as it does on the CLI path: `backup:2026.db` was a SQLite file and is now refused. Write `./backup:2026.db` or `file:backup:2026.db` for that file.
+  
+  `postgres://`, `pg://`, `mysql://`, `mongodb://`, `libsql://`, `wasm-sqlite://`, `file:`, `sqlite:`, `:memory:` and paths with no scheme resolve as before. An explicit `OS_DATABASE_DRIVER` still wins over the URL, which is then not classified.
+- 2e15620: fix(cli,runtime): a state, output or cache directory that can never be made is refused at once, naming the path and the operating system's code, instead of hanging
+  
+  Clause-②: no
+  
+  **What was wrong.** These commands and runtime paths created their directories with Node's recursive `mkdir`. Node's recursive mkdir never returns when a level answers `ENOENT` although its parent exists — what `/proc` and `/sys` answer for a name they do not have. It looped `mkdir("/proc/x")` and `mkdir("/proc")` without end, holding the event loop, so the command printed nothing more and no timeout could fire:
+  
+  - `os start` with `--home` / `OS_HOME` on such a path hung after its header.
+  - `os serve` hung the same way on the empty-boot artifact stub under `OS_HOME`, and on the cache of an `http(s):` `OS_ARTIFACT_URL` under `OS_HOME`.
+  - `os create --dir`, `os init <name>`, `os compile --output`, `os generate` (`--dir`, and `--output` for types, client and migration), `os i18n extract --out` and `os plugin build --out` hung on an output path there.
+  - `os login` and `os cloud login` never finished writing credentials under a `HOME` there, and the package enable / disable state the packages routes write under `OS_HOME` held the event loop of the host serving them.
+  
+  **What an operator sees now.** The command exits non-zero at once with the operating system's own error, which names the level that cannot be made:
+  
+  ```text
+  ✗ Cannot create home directory at /proc/os-x: ENOENT: no such file or directory, mkdir '/proc/os-x'
+  ```
+  
+  Not covered yet: the runtime state file `os serve` writes into `OS_HOME` once it is listening.
+  
+  Nothing else changes. Every directory these paths made before is still made, every missing level of it; every path that was refused before is still refused, with the operating system's code. The one difference is the path that was never answered at all.
+- 0cb45e9: fix(runtime): an explicit `sqlite` or `sqlite-wasm` driver selection refuses a database URL that is not a file path, instead of opening a SQLite file at a path made of the URL
+  
+  Clause-②: no
+  
+  An explicit selection (`OS_DATABASE_DRIVER`, `--database-driver`, or the `databaseDriver` option) skips the URL classification, so the only check its URL meets is the SQLite file-name rule, `sqliteFilenameFromUrl`. Both hosts call that rule: the runtime's standalone host (`os dev`, `os start` and `os serve` over a plain config or an artifact, every `os migrate` subcommand, every embedder of `createStandaloneStack`) and the CLI's legacy `os serve` path, which re-raises its refusal as the fatal `UnsupportedDriverError`.
+  
+  - **Before, an opaque scheme (two or more characters and a `:` with no `//`).** `OS_DATABASE_DRIVER=sqlite OS_DATABASE_URL=jdbc:postgresql://127.0.0.1:5999/db os serve --dev` printed `✓ Server is ready` and created the directories `./jdbc:postgresql:/127.0.0.1:5999/`. `redis:h` opened a file named `redis:h`. This happened under both kinds.
+  - **Before, a server URL under `sqlite-wasm`.** The WASM kind refused nothing: `OS_DATABASE_DRIVER=sqlite-wasm` beside `OS_DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5999/db` booted ready and created `./postgres:/USER:PASSWORD@127.0.0.1:5999/`, which put the credentials in a directory name. `redis://h/x.db` opened a file too.
+  - **After.** Under either kind, all of these get the refusal the `sqlite` kind already gave a `postgres://` URL. The kind is named in the sentence: `[StandaloneStack] sqlite-wasm driver was selected but the URL does not look like a file path (its scheme is "postgres://"). Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.` The message names the scheme only, never the URL, so credentials in the URL are not printed. The boot stops before it creates anything on disk.
+  - **One file name changes answer.** Under an explicit selection a first path segment that holds a colon now reads as a scheme, as it already does when the URL selects the driver: `backup:2026.db` was a SQLite file and is now refused as the scheme `backup:`. Write `./backup:2026.db` or `file:backup:2026.db` for that file. A one-letter drive is a path, not a scheme (`C:\data\app.db`, `C:/data/app.db`).
+  - **A `sqlite:` alias on a rung that does not normalize it.** `sqlite:` and `sqlite://` are aliases of `file:` in `OS_DATABASE_URL`, `--database` and the `databaseUrl` option. A declared default datasource's `url` and `TURSO_DATABASE_URL` reach the rule as written. There, under an explicit selection, `sqlite:./x.db` is now refused as the scheme `sqlite:`, where it used to open a file named `sqlite:./x.db`. `sqlite:///…` was already refused there under `sqlite` and is now refused under `sqlite-wasm` as well.
+  
+  `file:./x.db`, `./x.db`, `:memory:`, `wasm-sqlite:///path` (under `sqlite-wasm`), `sqlite:./x.db` in `OS_DATABASE_URL`, and paths with no scheme resolve to the same file as before. An empty name under `sqlite-wasm` is still `:memory:`.
+- 605aa01: fix(runtime): the SQLite "does not look like a file path" refusal names what the operator can change, instead of telling an operator who set `OS_DATABASE_DRIVER` to set it explicitly
+  
+  Clause-②: no
+  
+  `sqliteFilenameFromUrl` raises this refusal, and both hosts print it: the runtime's standalone host with its `[StandaloneStack]` tag, and the CLI's legacy `os serve` path, untagged, as the fatal `UnsupportedDriverError`. The first clause is unchanged and only the advice after it changes. The same URLs are refused, with the same error class and the same exit, and the message still names the URL's scheme and never the URL. Nothing that resolved before resolves differently.
+  
+  - **A URL with a scheme.** This is how an explicit `sqlite` or `sqlite-wasm` selection (`OS_DATABASE_DRIVER`, `--database-driver`, or the `databaseDriver` option) meets a server URL, an opaque scheme such as `jdbc:`, or a `<scheme>://` nothing recognises.
+    - FROM: `… (its scheme is "jdbc:"). Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.` The operator who reads this has already set the driver explicitly: that selection is what led here.
+    - TO: `… (its scheme is "jdbc:"). Use file:/path/to/db.sqlite to keep the sqlite driver, or use a driver that matches the URL: unset the driver selection (OS_DATABASE_DRIVER, --database-driver or the databaseDriver option) so the URL selects it, or set the selection to the URL's driver.` With the selection unset, a scheme no driver claims, such as `jdbc:`, gets the unsupported-scheme refusal, which lists the supported schemes.
+  - **A `file:` that names no file** (`OS_DATABASE_URL=file:`, whether the URL or an explicit `sqlite` selection chose the driver).
+    - FROM: `… (it names no file after "file:"). Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.`
+    - TO: `… (it names no file after "file:"). Name the file after "file:", as in file:/path/to/db.sqlite.` A `file:` URL is a SQLite URL whichever way the driver was chosen, so changing the driver never fixed it.
+- 9e797a8: fix(runtime): the standalone server hands every `/api/v1/keys` verb to the `keys` domain, so an anonymous caller is answered `401 UNAUTHENTICATED` whatever the verb
+  
+  Clause-②: no
+  
+  The v18 text for this door reads "`/keys`: `401 UNAUTHENTICATED` for every verb". The `keys` domain takes that decision first, but the standalone server (the one `os dev` and `os serve` run) mounted `/api/v1/keys` for `POST` only. Any other verb never reached the domain: the HTTP adapter answered it itself, with a `405` that named `POST` as the allowed method.
+  
+  What a `GET`, `PUT`, `PATCH` or `DELETE` call to `/api/v1/keys` is answered on the standalone server:
+  
+  - **Anonymous caller.** Before: `405 METHOD_NOT_ALLOWED` with `Allow: POST`, from the adapter. Now: `401 UNAUTHENTICATED` in the dispatcher's standard envelope, `{ success: false, error: { code: 'UNAUTHENTICATED', message, httpStatus: 401 } }`.
+  - **Signed-in caller.** Before: `405 METHOD_NOT_ALLOWED` with `Allow: POST`, from the adapter. Now: still `405 METHOD_NOT_ALLOWED`, answered by the `keys` domain in the same standard envelope (`error.httpStatus: 405`, no `error.details`), and without an `Allow` header.
+  
+  `POST /api/v1/keys` is unchanged, and so is every answer on a host that reaches the dispatcher through `@objectstack/hono`'s catch-all, which already answered this way. A `HEAD` request follows `GET`: `401` anonymous, `405` signed in. A sub-path such as `/api/v1/keys/<anything>` is still not mounted on the standalone server and is answered `404`.
+- 66d2757: feat(spec)!: every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
+  
+  Clause-②: yes (narrowing — the served row gains two declared keys, and the record schema, the served-row union and the registry's installPackage signature each refuse what they accepted before)
+  
+  **BREAKING** — three published accept sets narrow. `InstalledPackageSchema` refuses a row without `source`, or with a value outside `code` / `marketplace` / `authored`. The served-row union `InstalledPackageAtEitherStageSchema` refuses a row without a boolean `writable`. `SchemaRegistry.installPackage` and `EngineSchemaRegistryView.installPackage` take `source` as their second argument and refuse a call without it. The migration is below. None of it is mechanically convertible, because only the door that registers a package knows where it came from.
+  
+  **What is new on the wire.** `GET /api/v1/packages` and `GET /api/v1/packages/:id` serve two declared keys on every row:
+  
+  - `source` names the package's origin. `code` means the deployment's own code registered it (a `defineStack()` host, a plugin's bundled manifest, a platform package). `marketplace` means the marketplace install-local plugin installed it, and that holds after a restart too, when the plugin rehydrates it from its ledger. `authored` means it is a database-authored package (a Studio base, a duplicate, an HTTP install), including after the restart that rehydrates it from `sys_packages`. The door that registers the package stamps the value. No reader derives it.
+  - `writable` is the server's own writability verdict (ADR-0070 D2), served on these rows since #14375 and now declared. It is computed per read and never stored, so it is declared on the served row (`InstalledPackageAtEitherStageSchema`) and not on the registry record.
+  
+  FROM → TO for a reader of these rows:
+  
+  | you did | do instead |
+  | --- | --- |
+  | treated `writable: true` as authored, and looked up each non-writable row in the marketplace's installed list (the control plane's, else install-local's) to tell marketplace from code | read `row.source` |
+  | read the undeclared `writable` | read the declared `writable` (unchanged value) |
+  
+  The two keys are separate statements: `source` says where the package came from, and `writable` says what this server lets an org do to it.
+  
+  **`InstalledPackageSchema` requires `source`.** It is `InstalledPackageSourceSchema`, exported from `@objectstack/spec/kernel`. A row without it, or with a value outside the closed set, is refused at the `source` key.
+  
+  **API change for code that registers packages (`@objectstack/objectql`).** The registry records the origin and never infers it:
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `registry.installPackage(manifest)` | `registry.installPackage(manifest, 'code')` (or `'marketplace'` / `'authored'`, whichever is where the package came from) |
+  | `registry.installPackage(manifest, settings, scope)` | `registry.installPackage(manifest, source, settings, scope)` |
+  | `ctx.getService('manifest').register(artifact)` for a marketplace install | `ctx.getService('manifest').register(artifact, { source: 'marketplace' })` |
+  
+  `SchemaRegistry.installPackage` throws a `TypeError` naming the closed set when `source` is missing or unknown, before anything is recorded. `ObjectQL.registerApp(body, scope?, source?)` and the `manifest` service record `'code'` when no source is given. They accept `'code'` or `'marketplace'` and refuse `'authored'`. The `IObjectQLEngine` registry contract (`@objectstack/spec/contracts`) declares the same `installPackage(manifest, source, settings?)`.
+  
+  **The one-line fix:** pass the package's origin as `installPackage`'s second argument.
+  
+  Readers: objectui's Setup → Packages Source column and its `?source=` filter (it switches from the two-read join to `source` in its own follow-up), and the client SDK's `packages.list()` / `packages.get()` row types.
+  
+  <!-- adr-0087: registered installed-package-row-source-required, registry-install-package-source-argument -->
+- 6dede7a: fix(runtime, plugin-sharing): on the standalone server, an anonymous caller of any `/api/v1/notifications` verb or any `/api/v1/share-links` path off the two token faces is answered `401 UNAUTHENTICATED` in the dispatcher's standard envelope
+  
+  Clause-②: no
+  
+  The v18 text for these two doors reads "`/notifications`: `401 UNAUTHENTICATED` on every face" and "`/share-links`: `401 UNAUTHENTICATED` on the create, list and revoke faces and on every path the domain does not serve", in "the dispatcher's standard envelope … with the shared message every other dispatcher domain answers with". A host that reaches the dispatcher through `@objectstack/hono`'s catch-all already answered that way. The standalone server (the one `os dev` and `os serve` run) did not:
+  
+  - `/api/v1/notifications`, `/api/v1/notifications/read` and `/api/v1/notifications/read/all` were each mounted for the one verb they serve, so any other verb never reached the `notifications` domain and the HTTP adapter answered `405`, naming the allowed methods, to an anonymous caller as well.
+  - `/api/v1/share-links` is served there by `@objectstack/plugin-sharing`'s routes, not by the dispatcher. They registered five routes and nothing else, so another verb or path got the adapter's `405` or `404`, and the create, list and revoke faces answered `401` with a sentence of their own ("Sign in to list share links") and no `error.httpStatus`.
+  
+  What the standalone server answers now:
+  
+  - **Anonymous caller.** `401 UNAUTHENTICATED`, `{ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication is required to access this endpoint.', httpStatus: 401 } }`, on every verb of the three notifications paths, and on every verb and path under `/api/v1/share-links` except `GET /share-links/:token/resolve` and `GET /share-links/:token/messages`, which the capability token still admits. A body the server cannot parse does not outrank this answer anywhere under `/api/v1/share-links`, nor on the notifications verbs no face serves.
+  - **Signed-in caller of a verb or path that is not served.** Still refused. On the notifications paths the domain answers it: `404 ROUTE_NOT_FOUND` from the dispatcher (or the `501` capability answer on a deployment with no inbox), where the adapter used to answer `405`. Under `/api/v1/share-links` the share-link routes answer it themselves: `404 ENDPOINT_NOT_FOUND`, naming the request, where the adapter used to answer `405` or `404`. No `Allow` header is sent on either.
+  
+  Every request that was served is served as before. A notifications sub-path no face names, such as `/api/v1/notifications/<anything>`, is still not mounted on the standalone server and is answered `404`.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [b9dbc3d]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [1eac7ad]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [14aff67]
+- Updated dependencies [abb6df0]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [0cfd0c4]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [099cc9d]
+- Updated dependencies [6422da5]
+- Updated dependencies [2034975]
+- Updated dependencies [61e5ee9]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [6e18016]
+- Updated dependencies [d050a8f]
+- Updated dependencies [b25d98a]
+- Updated dependencies [5fb8d15]
+- Updated dependencies [c4111c6]
+- Updated dependencies [5c2ac83]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [aefab7c]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [c1c0a90]
+- Updated dependencies [ab3ba2c]
+- Updated dependencies [d6bd98a]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/plugin-security@18.0.0-next.3
+  - @objectstack/rest@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/metadata-protocol@18.0.0-next.3
+  - @objectstack/metadata@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/driver-sql@18.0.0-next.3
+  - @objectstack/plugin-auth@18.0.0-next.3
+  - @objectstack/driver-turso@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/driver-memory@18.0.0-next.3
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/observability@18.0.0-next.3
+  - @objectstack/service-cluster@18.0.0-next.3
+  - @objectstack/service-datasource@18.0.0-next.3
+  - @objectstack/service-i18n@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

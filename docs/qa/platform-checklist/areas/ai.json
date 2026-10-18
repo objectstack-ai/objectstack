@@ -9,7 +9,7 @@
       "title": "agent / tool / skill metadata kinds author, persist and list over the meta surface — retired keys reject with prescriptions, the closed agent kind has no runtime write door",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": ["admin"],
@@ -68,7 +68,7 @@
         {
           "clause": "the runtime write door matches the declared registry posture — ALL sides: PUT ?mode=draft succeeds for a RUNTIME-CREATED skill (and tool) name — one no package ships (allowRuntimeCreate:true); the same PUT against a PACKAGE-SHIPPED skill/tool is refused 403 NOT_OVERRIDABLE (allowEnvironmentOverlay:false, ee58392e1 — ADR-0005 ai row); and the agent kind has NO governed runtime write path (allowRuntimeCreate:false; 'for agents, the code is the record', metadata-plugin.zod.ts — migrateStoredMetadata reports agent rows 'skipped' by design)",
           "oracle": "api",
-          "verify": "the runtime-created skill draft PUT (qa_runtime_skill) returns 200 and the draft is readable via GET /api/v1/meta/skill/qa_runtime_skill?state=draft — ⚠️ the READ parameter is ?state=draft, not ?mode=draft: rest-server.ts keys the draft projection on req.query.state, while ?mode=draft is the WRITE-side parameter, so re-reading with ?mode=draft serves the active item (or 404s when none is active) and reads like the draft never landed. The draft PUT against the package-shipped qa_probe_skill answers 403 code NOT_OVERRIDABLE (sys-metadata-repository.ts assertAllowed, override-artifact intent) — CORRECT, not a bug: a 200 there would be a per-org overlay the registry row forbids. The agent runtime save is refused/unsupported (capture the actual status), and that refusal is recorded as CORRECT, not filed as a bug",
+          "verify": "the runtime-created skill draft PUT (qa_runtime_skill) returns 200 and the draft is readable via GET /api/v1/meta/skill/qa_runtime_skill?state=draft — ⚠️ the READ parameter is ?state=draft, not ?mode=draft: rest-server.ts keys the draft projection on req.query.state, while ?mode=draft is the WRITE-side parameter, and a GET carrying ?mode=draft answers 400 VALIDATION_ERROR ('The \"mode\" query parameter is not supported by this endpoint') — the read door refuses a parameter it does not understand instead of serving the active item. The draft PUT against the package-shipped qa_probe_skill answers 403 code NOT_OVERRIDABLE (sys-metadata-repository.ts assertAllowed, override-artifact intent) — CORRECT, not a bug: a 200 there would be a per-org overlay the registry row forbids. The agent runtime save is refused/unsupported (capture the actual status), and that refusal is recorded as CORRECT, not filed as a bug",
           "evidence": "the three PUT responses (runtime-created skill 200 + its ?state=draft read, package-shipped skill 403, agent refusal)"
         },
         {
@@ -107,6 +107,12 @@
           "date": "2026-10-04",
           "change": "A4 / step 7 re-pointed: the draft PUT targets a RUNTIME-CREATED skill/tool name (200, readable via ?state=draft); the same PUT against the package-shipped probe is 403 NOT_OVERRIDABLE, recorded as correct — tool/skill allowOrgOverride was rolled back to false (metadata-plugin.zod.ts tool/skill registry rows, sys-metadata-repository.ts assertAllowed). Assertion defect: the clause expected an overlay of a package-shipped skill to succeed. Source ee58392e1 (#6608)",
           "ref": "#21735"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "clause 4's verify said a GET with ?mode=draft serves the active item or 404s (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: PUT /meta/skill/qa_runtime_skill_24036?mode=draft → 200 state draft; GET ?state=draft → 200 with the draft; GET ?mode=draft → 400 VALIDATION_ERROR naming the unsupported mode parameter; the bare GET → 404 (no active item). The agent runtime save answers 403 NOT_CREATABLE (code-only type). The read-parameter warning keeps its point with the current answer",
+          "ref": "#24036"
         }
       ]
     },
@@ -115,7 +121,7 @@
       "title": "MCP HTTP transport (/mcp) and the public /mcp/skill endpoint gate exactly as documented: 404 when opted out, 501 when unimplemented, 401 anonymous, 403 scopeless-OAuth, full tool list when keyed",
       "since": "v15",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -165,9 +171,9 @@
           "evidence": "the 401 response incl. headers"
         },
         {
-          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, list_actions, run_action, validate_expression",
+          "clause": "a keyed MCP client completes initialize + tools/list, and the tool set is the documented principal-bound surface: list_objects, describe_object, query_records, aggregate_records, get_record, create_record, update_record, delete_record, list_actions, run_action, resume_run, validate_expression",
           "oracle": "network",
-          "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it — graceful degradation, record which)",
+          "verify": "tools/list names against packages/mcp/src/mcp-http-tools.ts registrations (aggregate_records may be absent only when the bridge cannot route it, and resume_run only when the host cannot resume runs — both graceful degradation; record which)",
           "evidence": "the session trace + tool-name list"
         },
         {
@@ -194,7 +200,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial — the #3358 sweep could not drive MCP because the config was off; both sides are now explicit", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-10-16", "change": "clause 5's tool list omitted resume_run (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 with an admin osk_ key: tools/list returns twelve tools, resume_run among them; mcp-http-tools.ts registers it only when the bridge exposes resumeRun, the same optional shape as aggregate_records, so the verify now names that degradation too", "ref": "#24036" }
       ]
     },
     {
@@ -202,7 +209,7 @@
       "title": "MCP stdio auto-start fails closed without OS_MCP_STDIO_API_KEY; with a member-bound key, reads AND aggregates honor RLS/FLS and revocation bites on the next call",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P0",
       "surface": "cli",
       "personas": ["restricted member API key (for the RLS half — on showcase, a contributor-bound member)", "a second restricted member API key for the FLS half (on showcase, a client_liaison-bound member — see fixtures.requires)", "admin API key (for the full-row comparison)"],
@@ -210,7 +217,7 @@
         "app": "any",
         "requires": [
           "an OWD-private object with rows owned by two different users (the showcase task/invoice seeds qualify when run against the showcase)",
-          "two osk_ API keys: one bound to a restricted member, one to an admin (Setup → Connect an Agent, or POST /api/v1/keys)",
+          "two osk_ API keys: one bound to a restricted member, one to an admin (Setup → Connect an Agent, or POST /api/v1/keys). Minting them on the os start boot: an auth POST that carries a Cookie header and no Origin (a curl cookie jar, for one) is refused there with 403 MISSING_OR_NULL_ORIGIN, while os dev accepts it, so send an Origin header naming the boot (Origin: http://localhost:PORT) or sign in without a cookie jar, then POST /api/v1/keys with the bearer token",
           "for the aggregate half: a field on that object the restricted member cannot read (the same FLS-masked field the row/field clause relies on), plus at least one readable field to group a count by",
           "⚠️ on showcase NO single persona carries both RLS-hidden rows and an FLS-masked field on one object, so the RLS and FLS halves take two personas. RLS: a contributor-bound member (the search:qa-contributor-bound-member recipe) reads only its own showcase_invoice rows. FLS: the only `readable: false` grants are showcase_client_liaison's on showcase_project.budget / spent / budget_remaining (permission-sets.ts ClientLiaisonPermissionSet), and showcase_project is public_read_write, so that persona has no RLS-hidden rows there. Mint a key for each; score the RLS legs of acceptance[3] and acceptance[4] on the first, the FLS legs of acceptance[3] and acceptance[5] on the second"
         ],
@@ -315,6 +322,12 @@
           "date": "2026-10-16",
           "change": "stale clause re-pointed (#23950, from QA run #23915): acceptance[6] pinned the generic text 'MCP stdio identity is no longer valid (key revoked or expired)', but since #23367 (API-key lifecycle) resolvePrincipal raises the key's branded ADR-0112 refusal, so a revoked key's next stdio call is an isError tool result carrying code API_KEY_REVOKED, status 403 and the key's own lifecycle message. The clause now scores that code (and pins none of the message's wording, which the lifecycle owner rewords under #23944), no row served after the revoke (the fail-closed property it exists for, unchanged) and a pre-revoke control read on the same session; its oracle is the tool result (api), not a log line. Same ruling, same item: acceptance[1] attributed one message to unknown, revoked and expired keys alike, while the up-front admission now refuses a lifecycle-refused key with '[MCP] OS_MCP_STDIO_API_KEY is refused (API_KEY_REVOKED): …', so it names both messages and gains a leg (a new step starts stdio with the just-revoked key). A negative pins both failure directions",
           "ref": "#23950"
+        },
+        {
+          "revision": 6,
+          "date": "2026-10-17",
+          "change": "runner note on minting the fixture keys on the os start boot (residual from the #23878 close-out, after PR #24000): measured on main c91af8ed6, os start answers a sign-in that carries a Cookie header and no Origin with 403 MISSING_OR_NULL_ORIGIN while os dev answers it 200; a cookie-less sign-in without Origin, and POST /api/v1/keys by session cookie or bearer without Origin, answer 200/201 on both. The fixture line now says so. No step, request or oracle changed",
+          "ref": "#24036"
         }
       ]
     },
@@ -323,7 +336,7 @@
       "title": "MCP run_action requires ai.exposed (fail-closed with the prescription), filters list_actions to exposed+permitted, refuses system objects, and logs the trusted-elevation audit line",
       "since": "v15.1",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
@@ -335,7 +348,7 @@
         ]
       },
       "steps": [
-        "over MCP, call list_actions (no objectName, then objectName: 'showcase_task'); record which actions appear",
+        "over MCP, call list_actions with NO arguments (its input schema is strict and empty: an objectName argument is refused — the tool result is isError with 'MCP error -32602: Input validation error … Unrecognized key(s) on this list_actions call: `objectName`'); record which actions appear",
         "call run_action on the UNDECLARED action (actionName: 'showcase_mark_done', a real recordId); capture the refusal",
         "verify the refusal left zero side effects: read the task over REST — status unchanged",
         "call run_action on the exposed action (actionName: 'showcase_portfolio_snapshot'); capture the result payload ({ ok, scope: 'global', accounts, projects, invoices })",
@@ -388,7 +401,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from the 15.1 plan §A9", "ref": "claude/platform-test-checklist-ocwugl" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-10-16", "change": "step 1 called list_actions with objectName: 'showcase_task' as a second form (#23878 checklist-accuracy finding). list_actions takes no arguments: re-measured on main c91af8ed6 the objectName call answers isError with MCP error -32602 'Unrecognized key(s) … objectName', while the no-argument call returns [showcase_portfolio_snapshot]. Re-run of the item's clauses on that boot: showcase_mark_done refused with the actionAiExposureError prescription and the task unchanged; showcase_portfolio_snapshot returns accounts 14 / projects 5 / invoices 12, equal to the REST totals; the [action-audit] MCP run_action line names the caller; a sys_* object is refused", "ref": "#24036" }
       ]
     },
     {
@@ -396,14 +410,14 @@
       "title": "MCP validate_expression returns build-accurate errors/warnings/inferred type + in-scope context for every site variant, and fail-closes on unknown/system objects",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "fixtures": {
         "app": "showcase",
         "requires": [
           "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)",
-          "a seeded object with number + text + date fields to probe against (showcase_task: est_hours/title/created_at qualify)"
+          "a seeded object with number + text + date fields to probe against (showcase_task: estimate_hours/title/created_at qualify)"
         ]
       },
       "variants": [
@@ -413,10 +427,10 @@
         "site: template"
       ],
       "steps": [
-        "over MCP, call validate_expression { objectName: 'showcase_task', expression: 'record.est_hours * 1.1', site: 'formula' } — a sound formula",
-        "call it with a BARE field ref in formula site ('est_hours * 1.1') and with an unknown field ('record.est_hourz * 1'); capture both error sets",
+        "over MCP, call validate_expression { objectName: 'showcase_task', expression: 'record.estimate_hours * 1.1', site: 'formula' } — a sound formula",
+        "call it with a BARE field ref in formula site ('estimate_hours * 1.1') and with an unknown field ('record.estimate_hourz * 1'); capture both error sets",
         "call it with a text field misused in arithmetic ('record.title * 2'); capture the WARNING (not error)",
-        "call the flow_condition site with bare fields ('est_hours > 8') — must validate clean",
+        "call the flow_condition site with bare fields ('estimate_hours > 8') — must validate clean",
         "call it against a nonexistent object and against a sys_* object; capture both refusals",
         "record the inScope payload (dialect/roots/fields/functions) returned alongside each verdict"
       ],
@@ -424,7 +438,7 @@
         {
           "clause": "the sound formula returns ok:true with an inferredType and the in-scope fields/functions — the same verdict `objectstack build` would give (the tool exists so agents self-correct BEFORE authoring, #1928)",
           "oracle": "api",
-          "verify": "response has ok:true, inferredType present, inScope.fields includes est_hours",
+          "verify": "response has ok:true, inferredType present, inScope.fields includes estimate_hours",
           "evidence": "the response"
         },
         {
@@ -436,7 +450,7 @@
         {
           "clause": "site changes the binding rules: bare fields are CORRECT in flow_condition and wrong in formula — the same expression flips verdict across the two sites",
           "oracle": "api",
-          "verify": "'est_hours > 8' ok under flow_condition, error under formula",
+          "verify": "'estimate_hours > 8' ok under flow_condition, error under formula",
           "evidence": "the paired responses"
         },
         {
@@ -457,7 +471,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-07", "change": "initial import from #3358 §9", "ref": "#3358" },
-        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 2, "date": "2026-08-07", "change": "expanded to deep-test contract: concrete steps, multi-clause acceptance, negatives, variants", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 3, "date": "2026-10-16", "change": "the probe field is showcase_task.estimate_hours, not est_hours (#23878 checklist-accuracy finding): est_hours answers ok:false with unknown-field est_hours, so every step built on it measured a typo, not the validator. Re-run on main c91af8ed6 over MCP HTTP: record.estimate_hours * 1.1 ok:true inferredType number, inScope.fields includes estimate_hours; the bare formula ref is a bare-reference error; estimate_hourz is unknown-field with did-you-mean estimate_hours; record.title * 2 is a type-mismatch WARNING; 'estimate_hours > 8' is clean under flow_condition and a bare-reference error under formula; an unknown object and sys_user are refused", "ref": "#24036" }
       ]
     },
     {
@@ -465,13 +480,13 @@
       "title": "Authored skill instructions project onto the MCP prompts primitive (#3905) — listed with identity, fetchable by name, and NOT projected when instruction-less or inactive",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "fixtures": {
         "app": "any",
         "requires": [
-          "three authored skills in a writable package: qa_prompt_full (instructions + label + description), qa_prompt_bare (tools only, NO instructions), qa_prompt_off (instructions but active:false)",
+          "three authored skills in a writable package: qa_prompt_full (instructions + label + description), qa_prompt_bare (tools only, NO instructions), qa_prompt_off (instructions but active:false) — or the same three authored at runtime with PUT /api/v1/meta/skill/NAME on stock showcase (admin; 200), which the projection serves at once",
           "MCP HTTP reachable with an osk_ key (see ai.mcp-http-surface)"
         ],
         "knownGaps": [
@@ -484,7 +499,7 @@
         "prompts/list; record the projected names",
         "prompts/get qa_prompt_full; capture the returned message body",
         "prompts/get qa_prompt_bare (not projected) and prompts/get a wholly unknown name; capture both errors",
-        "flip qa_prompt_off to active:true, reload metadata, and re-list"
+        "flip qa_prompt_off to active:true and make the change LIVE before re-listing. File-authored skill under os dev: save the source while the dev server watches it (it rebuilds and restarts: '✓ server restarted — the new build is live'), or run objectstack build (or start with --compile) before restarting. A bare restart serves the STALE dist (the boot warns 'dist/objectstack.json is OLDER than your sources'), and on that boot GET /api/v1/meta/skill/NAME reads the old definition while the MCP projection already follows the source, so the two surfaces disagree. Runtime-authored skill: PUT /api/v1/meta/skill/qa_prompt_off with active:true is live at once. Confirm GET /api/v1/meta/skill/qa_prompt_off reads active:true, then re-list"
       ],
       "acceptance": [
         {
@@ -531,7 +546,8 @@
         "packages/spec/liveness/skill.json (instructions/name/label/description/active live in-repo via skill-prompts.ts since 2026-08-06)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-07", "change": "new item: the open framework's one live skill consumer (#3905) had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-07", "change": "new item: the open framework's one live skill consumer (#3905) had no checklist coverage", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-17", "change": "steps[5] said 'reload metadata' without naming what makes a source edit live (checklist-accuracy finding, #23878 close-out): os dev serves the built dist, so a bare restart re-serves the old definition at /meta while the MCP projection follows the source. The step now names the rebuild routes (the watcher's rebuild + restart, objectstack build, --compile), the stale-boot warning, the runtime PUT route, and a /meta active:true check before re-listing; the fixture names the runtime-authored route. Re-run on main c91af8ed6. Runtime route on stock showcase: three skills PUT (200 each); initialize declares the prompts capability; prompts/list carries qa_prompt_full with title and description, not qa_prompt_bare or qa_prompt_off; prompts/get qa_prompt_full returns the authored instructions verbatim; prompts/get qa_prompt_bare and an unknown name answer -32602; PUT qa_prompt_off active:true and the next list carries it. File route on a scratch copy of the showcase under os dev: list carried only qa_prompt_full; saving active:true rebuilt and restarted the server and the list then carried qa_prompt_off (/meta active true); flipping it back to false with the server stopped and restarting without a build printed the stale-dist warning, and on that boot prompts/list omitted qa_prompt_off while GET /api/v1/meta/skill/qa_prompt_off still read active true. Clause 4: packages/mcp src/skill-prompts.test.ts 12 passed", "ref": "#24036" }
       ]
     },
     {

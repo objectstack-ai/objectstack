@@ -182,6 +182,38 @@ describe('rest-server.ts docblock position', () => {
  * the host interface's block and the function's. The UI view body held no TSDoc
  * block of its own, so `rest-server.ts` gives up only the alias's block
  * (164 → 163 there, still far above its floor).
+ *
+ * [#23050 slice 11] `form-routes.ts` carries three, as the search module does:
+ * the module header, the host interface's block and the function's. The public
+ * form body held no TSDoc block of its own, so `rest-server.ts` keeps every
+ * block it had (163).
+ *
+ * [#23050 slice 12] `crud-routes.ts` carries three, as the form module does:
+ * the module header, the host interface's block and the function's. The CRUD
+ * body held no TSDoc block of its own, so `rest-server.ts` keeps every block it
+ * had (163).
+ *
+ * [#23050 slice 13a] `meta-collection-routes.ts` carries five: the module
+ * header, the moved alias's block (`TransportScopedMetaRequest` moved on to it
+ * from `ui-routes.ts`, the `/meta` doors' envelope joining the first `/meta`
+ * module), `MetaRouteScope`'s block, the host interface's block and the
+ * function's. `ui-routes.ts` therefore gives up that block (4 → 3). The moved
+ * `/meta` groups held no TSDoc block of their own, so `rest-server.ts` keeps
+ * every block it had (163).
+ *
+ * [#23050 slice 13b] `meta-item-read-routes.ts` carries five: the module
+ * header, the host interface's block, the function's, and the blocks of the two
+ * module-level helpers only the per-item reads called, which moved with them
+ * (the reference sweep's declared-refusal re-dresser and the intake reasons'
+ * ETag dimension). The moved `/meta` group held no TSDoc block of its own, so
+ * `rest-server.ts` gives up exactly those two (163 → 161), still far above its
+ * floor.
+ *
+ * [#23050 slice 13c] `meta-item-write-routes.ts` carries three, as the form and
+ * CRUD modules do: the module header, the host interface's block and the
+ * function's. The moved per-item writes held no TSDoc block of their own and
+ * took no module-level helper with them, so `rest-server.ts` keeps every block
+ * it had (161).
  */
 const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
     'data-action-routes.ts': 4,
@@ -193,7 +225,12 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     'discovery-routes.ts': 5,
     'email-routes.ts': 3,
     'search-routes.ts': 3,
-    'ui-routes.ts': 4,
+    'ui-routes.ts': 3,
+    'form-routes.ts': 3,
+    'crud-routes.ts': 3,
+    'meta-collection-routes.ts': 5,
+    'meta-item-read-routes.ts': 5,
+    'meta-item-write-routes.ts': 3,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -228,9 +265,17 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // [#23050 slice 8] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 = 37 over eight, length 8 → 9.
         // [#23050 slice 9] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 = 40 over nine, length 9 → 10.
         // [#23050 slice 10] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 = 44 over ten, length 10 → 11.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
+        // [#23050 slice 11] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 + 3 = 47 over eleven, length 11 → 12.
+        // [#23050 slice 12] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 + 3 + 3 = 50 over twelve, length 12 → 13.
+        // [#23050 slice 13a] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 = 54 over
+        // thirteen, length 13 → 14 (`ui-routes.ts` 4 → 3: the alias's block moved on).
+        // [#23050 slice 13b] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 = 59 over
+        // fourteen, length 14 → 15.
+        // [#23050 slice 13c] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 + 3 = 62
+        // over fifteen, length 15 → 16.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(44);
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(62);
     });
 });

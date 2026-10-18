@@ -20,7 +20,7 @@ export const jaJP: PlatformTranslationData = {
       title: 'メール配信',
       description: 'SMTP およびトランザクションメールプロバイダー設定。',
       groups: {
-        provider: { title: 'プロバイダー', description: 'このワークスペースの送信方法を選択します。' },
+        provider: { title: 'プロバイダー', description: 'この環境の送信方法を選択します。' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'API キー' },
         from_address: { title: '差出人アドレス' },
@@ -60,13 +60,13 @@ export const jaJP: PlatformTranslationData = {
 
     branding: {
       title: 'ブランディング',
-      description: 'ワークスペース名・ロゴ・アクセントカラー。',
+      description: '組織名・ロゴ・アクセントカラー。',
       groups: {
         identity: { title: 'アイデンティティ' },
         appearance: { title: '外観' },
       },
       keys: {
-        workspace_name: { label: 'ワークスペース名' },
+        workspace_name: { label: '組織名' },
         support_email: { label: 'サポートメール', help: '例: support@example.com' },
         theme_mode: {
           label: 'デフォルトテーマ',
@@ -129,7 +129,7 @@ export const jaJP: PlatformTranslationData = {
         require_email_verification: { label: 'メール確認を必須にする' },
         membership_policy: {
           label: '新規ユーザーのメンバーシップ',
-          help: '「自動」はすべての新規ユーザーをこのデプロイの既定組織に紐付けます。「招待のみ」では、ワークスペースの作成、招待の承諾、管理者による追加、SSO のジャストインタイムプロビジョニングといった明示的な行為によってのみメンバーシップが付与されます。',
+          help: '「自動」はすべての新規ユーザーをこのデプロイの既定組織に紐付けます。「招待のみ」では、組織の作成、招待の承諾、管理者による追加、SSO のジャストインタイムプロビジョニングといった明示的な行為によってのみメンバーシップが付与されます。',
           options: {
             auto: '既定の組織に自動的に参加',
             'invite-only': '招待のみ — 自動では参加しない',
@@ -251,7 +251,7 @@ export const jaJP: PlatformTranslationData = {
       title: 'SMS 配信',
       description: 'OTP サインイン、招待、通知に使う SMS プロバイダー設定。',
       groups: {
-        provider: { title: 'プロバイダー', description: 'このワークスペースが送信 SMS をどう送るかを選択します。' },
+        provider: { title: 'プロバイダー', description: 'この環境が送信 SMS をどう送るかを選択します。' },
         aliyun: { title: 'Aliyun SMS' },
         twilio: { title: 'Twilio' },
         limits: { title: '送信上限', description: 'この配備の送信 SMS 量を制限します。SMS は有料チャネルで、1 通ごとに実費が発生します。' },
@@ -292,7 +292,7 @@ export const jaJP: PlatformTranslationData = {
         contact: { title: '連絡先' },
       },
       keys: {
-        legal_name: { label: '登記名', help: '組織の登記上の正式名称（ワークスペース名と異なる場合があります）。' },
+        legal_name: { label: '登記名', help: '組織の登記上の正式名称（「ブランディング」の組織名と異なる場合があります）。' },
         registration_number: { label: '登記番号', help: '会社の登記 / 設立番号（例:EIN、会社番号）。' },
         tax_id: { label: '税務 / VAT ID', help: '請求書に表示される税務識別番号(例:VAT、GST、ABN)。' },
         address_line1: { label: '住所 1' },
@@ -326,7 +326,7 @@ export const jaJP: PlatformTranslationData = {
 
     feature_flags: {
       title: '機能フラグ',
-      description: 'このワークスペースで実験的・ベータ機能を切替えます。',
+      description: 'この組織で実験的・ベータ機能を切替えます。',
       groups: {
         productivity: { title: '生産性' },
         collaboration: { title: 'コラボレーション' },
@@ -340,13 +340,15 @@ export const jaJP: PlatformTranslationData = {
         realtime_cursors: { label: 'リアルタイムカーソル' },
         inline_comments: { label: 'インラインコメント' },
       },
+      banners: {
+        beta_notice: { title: 'ご注意ください',
+          text: 'ベータ機能は予告なく変更される場合があります。デプロイ全体で固定するには環境変数 (例: `OS_FEATURE_FLAGS_AI_ENABLED=true`) を使用してください。' },
+      },
     },
 
     storage: {
       title: 'ファイルストレージ',
-      description:
-        '添付ファイル・エクスポート・ユーザーアップロードに使用するバックエンド。' +
-        '⚠ アダプターを切替えても既存ファイルは移行されません。以前のアダプターでアップロードされたファイルは新しいアダプターからアクセスできなくなります。',
+      description: '添付ファイル・エクスポート・ユーザーアップロードに使用するバックエンド。',
       groups: {
         adapter: { title: 'バックエンド', description: 'アップロードファイルの保存先を選択します。' },
         local: { title: 'ローカル' },
@@ -376,6 +378,10 @@ export const jaJP: PlatformTranslationData = {
       },
       actions: {
         test: { label: '接続テスト' },
+      },
+      banners: {
+        adapter_switch_warning: { title: '既存ファイルは移行されません',
+          text: 'アダプターを切替えても既存ファイルは移行されません。以前のアダプターでアップロードされたファイルは新しいアダプターからアクセスできなくなります。' },
       },
     },
 
@@ -459,7 +465,7 @@ export const jaJP: PlatformTranslationData = {
         trace_enabled: { label: 'トレースを記録',
           help: 'デバッグと再生のため prompt/response トレースを sys_ai_trace に保存します。' },
         log_prompts: { label: '完全なプロンプトを記録',
-          help: 'メタデータだけでなくレンダリングされたプロンプトをトレース行に含めます。⚠ PII が漏えいする可能性があります。規制環境では無効にしてください。' },
+          help: 'メタデータだけでなくレンダリングされたプロンプトをトレース行に含めます。' },
         embedder_provider: {
           label: 'プロバイダー',
           options: {
@@ -490,13 +496,15 @@ export const jaJP: PlatformTranslationData = {
         test: { label: '接続テスト' },
         test_embedder: { label: 'Embedder をテスト' },
       },
+      banners: {
+        log_prompts_warning: { title: 'PII 漏えいの可能性',
+          text: 'PII が漏えいする可能性があります。規制環境では無効にしてください。' },
+      },
     },
 
     knowledge: {
       title: 'ナレッジ',
-      description:
-        'RAG / ナレッジソース用のベクトルストアバックエンド。' +
-        '⚠ アダプターを切替えても既存のインデックスは移行されません。',
+      description: 'RAG / ナレッジソース用のベクトルストアバックエンド。',
       groups: {
         adapter: { title: 'バックエンド',
           description: 'ドキュメントチャンクとそのベクトルの保存先を選択します。' },
@@ -532,10 +540,16 @@ export const jaJP: PlatformTranslationData = {
         over_fetch: { label: 'オーバーフェッチ倍率',
           help: 'JS 側のメタデータフィルタリングでも行が残るよう、内部で topK × overFetch 件の候補を取得します。' },
         enforce_rls: { label: '検索時に RLS を強制',
-          help: '各ヒットを呼び出し元のレコードレベル権限に対して再確認します。⚠ 無効化するとプラットフォーム固有のセーフガードがスキップされます。' },
+          help: '各ヒットを呼び出し元のレコードレベル権限に対して再確認します。' },
       },
       actions: {
         test: { label: '接続テスト' },
+      },
+      banners: {
+        adapter_switch_warning: { title: '既存のインデックスは移行されません',
+          text: 'アダプターを切替えても既存のインデックスは移行されません。' },
+        enforce_rls_warning: { title: '本番環境では有効のままにしてください',
+          text: '無効化するとプラットフォーム固有のセーフガードがスキップされます。' },
       },
     },
   },

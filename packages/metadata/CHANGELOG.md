@@ -1,5 +1,72 @@
 # @objectstack/metadata
 
+## 18.0.0-next.3
+
+### Patch Changes
+
+- 8684079: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  fix(metadata-protocol,metadata): on a database the organization-ownership ceremony has not migrated, the paged family reads, `DatabaseLoader`'s count and the package rollback agree with the environment-only reads; the ceremony's apply is named with `--plan-file` (ADR-0131 D6/D7)
+  
+  Clause-②: no
+  
+  Every change below matters only where legacy organization rows still sit in the `sys_metadata` family, the database `os serve` refuses to start on until `os migrate organization-ownership` has verified. On a migrated or fresh database every answer is unchanged.
+  
+  - **`@objectstack/metadata-protocol`: a paged read leaves the legacy rows out before the page is cut.** `auditMetaItem` (`limit`), `listCommits` (`limit`), `revertStoredPackage`'s first-active-row probe and `SysMetadataRepository.list({ limit })` used to filter a legacy organization's rows out after the limit. A page they sat in came back short, and `revertStoredPackage` answered `RESOURCE_CONFLICT` (409) "has never been published" for a package the environment had published when its first active row was an organization's. When a page holds a legacy row, the read is now repeated with those rows excluded in the query.
+  - **`@objectstack/metadata-protocol`: `rollbackToPackageCommit` refuses a legacy organization's commit by name.** It answered `COMMIT_NOT_FOUND` (404) for a commit that is there. It now gives `revertCommit`'s refusal: `NOT_OVERRIDABLE` (403), the same sentence, naming the commit and its organization.
+  - **`@objectstack/metadata`: `DatabaseLoader` counts what it reads.** `exists()` answered true for an address only a legacy organization row held, while `load()` answered null, and `queryHistory`'s `total` counted legacy history rows no page serves. Neither counts them now.
+  - **`@objectstack/metadata-protocol`: internal cleanup.** The organization plumbing that only ever carried the environment (`null`) is removed from the list merge and the served-row resolution. No export changes.
+  - **`@objectstack/spec`: wording.** The four ADR-0087 entries `18.sys-metadata{,-audit,-commit,-history}-organization-column-retired` now name the ceremony's reviewed apply, `os migrate organization-ownership --out PLAN` and then `--apply --plan-file PLAN`, which `--plan-file`'s own entry requires. No id, category, version or field the migration engine reads changes.
+  - **`@objectstack/cli`: wording.** `os migrate apply --allow-destructive`'s refusal on an unmigrated database now reads "a drop the organization-ownership ceremony owns, and the ceremony has not verified on this database". Its `--json` payload is unchanged.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+  - @objectstack/metadata-fs@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

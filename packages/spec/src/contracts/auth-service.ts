@@ -294,7 +294,32 @@ export interface IAuthService {
      * [#4127 batch 4] Implemented by `AuthManager`; the execution-context
      * resolver has always called it through `any`.
      */
-    verifyMcpAccessToken?(token: string): Promise<{ userId: string; scopes: string[]; clientId?: string } | undefined>;
+    verifyMcpAccessToken?(token: string): Promise<{
+        userId: string;
+        scopes: string[];
+        clientId?: string;
+        /**
+         * The organization the user's OAuth consent bound (the consenting
+         * user's current organization at the moment of consent), read from
+         * the access token's `organization_id` claim.
+         *
+         * Absent when no consent bound one: a token minted before consents
+         * bound an organization. Absent means the principal resolves with no
+         * organization, so only its global grants apply.
+         *
+         * A claim, not an authorization. The caller vets it on every request
+         * by the rule that vets a session's active organization
+         * (`vetOrganizationClaim`, `@objectstack/core`): once no current
+         * membership backs it, the principal resolves with no organization
+         * (global grants only, so tenant reads come back empty and tenant
+         * writes are refused), never in another one. The token acts in this
+         * one organization: ⛔ never the union of the user's organizations,
+         * and ⛔ never the organization the user's browser session has
+         * selected now. Under ADR-0090 D10 it is the organization the
+         * delegator's grants are resolved in.
+         */
+        organizationId?: string;
+    } | undefined>;
 
     /**
      * [#23772] Mint a short-lived session for the requesting user's OWN
@@ -354,10 +379,66 @@ export interface IAuthService {
  * `cloud-connection-plugin.ts` and `marketplace-install-local-plugin.ts`
  * (twice). `packages/types/src/in-process-session-read.contract.test.ts`
  * holds the helper's return inside this declaration, key for key.
+ *
+ * [#24196] Each result field beyond `user.id`, `session.userId` and
+ * `session.activeOrganizationId` is declared for the reader named on it, typed
+ * as that reader takes it. Read undeclared, through `any` or a cast, a field
+ * better-auth drops or renames compiles and reads `undefined` — for
+ * `impersonatedBy`, an impersonation refusal switched off.
+ *
+ * [#24222] The other in-process readers read the result as declared here too.
+ * None reads a top-level `activeOrganizationId`: the read answers
+ * `{ user, session }`, and the active organization is
+ * `session.activeOrganizationId`.
  */
 export interface AuthSessionApi {
     getSession?(input: { headers: unknown; query?: { disableRefresh?: boolean } }): Promise<{
-        user?: { id?: string };
-        session?: { userId?: string; activeOrganizationId?: string };
+        user?: {
+            id?: string;
+            /** Read by `resolveAuthzContext`'s session arm (`@objectstack/core`) onto `ctx.email`. */
+            email?: string;
+            /**
+             * better-auth's projection of `sys_user.name`. Read by `dispatcher-plugin`'s
+             * concrete AI-route `req.user` resolver (`@objectstack/runtime`) as the
+             * actor's display name.
+             */
+            name?: string;
+            /**
+             * The ADR-0069 posture plugin-auth's `customSession` attaches. Read by
+             * `normalizeAuthGate` (`@objectstack/core`) from `resolveAuthzContext`'s
+             * session arm, which validates it against the closed posture vocabulary,
+             * so it is declared as that reader takes it: unvalidated.
+             */
+            authGate?: unknown;
+            /**
+             * The ADR-0068 D2 platform-admin posture rung plugin-auth's `customSession`
+             * derives (`false` when not held). Read by `judgePlatformAdmin`
+             * (`@objectstack/plugin-auth`, through `isPlatformAdminUser`), which admits
+             * on `true` alone, so an absent field refuses.
+             */
+            isPlatformAdmin?: boolean;
+            /**
+             * better-auth's `admin` plugin role scalar (`type: 'string'`, `required: false`,
+             * so a row may hold it as null). Read by `judgePlatformAdmin`
+             * (`@objectstack/plugin-auth`, through `isPlatformAdminUser`) as the legacy
+             * back-compat signal, which admits on `'admin'` alone, so an absent field refuses.
+             */
+            role?: string | null;
+        };
+        session?: {
+            userId?: string;
+            activeOrganizationId?: string;
+            /** The session ROW id. Read by `resolveAuthzContext`'s session arm for its dropped-claim log line. */
+            id?: string;
+            /** The session credential. Read by `resolveAuthzContext`'s session arm onto `ctx.accessToken`. */
+            token?: string;
+            /**
+             * The administrator who started an impersonation session (better-auth's
+             * admin plugin; stored as the nullable `sys_session.impersonated_by`).
+             * Read by the print door's `impersonatorOf` (`@objectstack/service-print`),
+             * which refuses a print from an impersonation session.
+             */
+            impersonatedBy?: string | null;
+        };
     } | undefined>;
 }

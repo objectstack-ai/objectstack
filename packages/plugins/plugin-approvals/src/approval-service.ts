@@ -3603,7 +3603,24 @@ export class ApprovalService implements IApprovalService {
     // OOO substitution audit + notification (#1322 M4). Each hop that rerouted
     // an approver away from an out-of-office user is recorded on the request's
     // audit trail (a system action, no human actor) and notified to both the
-    // delegate — who now owns the slot — and the skipped approver.
+    // delegate — who now owns the slot — and the skipped approver. [#23978]
+    // Both bodies name the record the way every approval notification does.
+    //
+    // [#24065] And each body names the person by display name, through the
+    // chain the approvals door names people with (`resolveUserNames`):
+    // both people of every hop in ONE read for the whole fan-out, and no read
+    // at all when nothing was substituted. A person the chain answers no name
+    // for (no account row, or the read failed) is named by the stored id, the
+    // way every reader of that chain renders an unresolved address. A body is
+    // a STORED copy of the name (messaging stores it, the inbox serves it),
+    // like the stored labels the `resolveUserNames` docblock lists.
+    //
+    // The audit `comment` keeps the ids by design: it is the request's audit
+    // trail of identities, served as written by the timeline and the action
+    // lists. Display names belong in read-time `*_name` companions (the
+    // `reassign` hand-off's shape), not frozen into an audit row.
+    const oooNames = await this.resolveUserNames(substitutions.flatMap((sub) => [sub.from, sub.to]));
+    const oooPerson = (userId: string): string => oooNames.get(userId) || userId;
     for (const sub of substitutions) {
       await this.engine.insert('sys_approval_action', await this.actionRow(row, {
         id: uid('aact'), request_id: id, organization_id: requestOrg,
@@ -3620,7 +3637,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-${id}-${sub.to}`,
         payload: {
           title: 'Approval routed to you (out-of-office cover)',
-          body: `You are covering an approval on ${input.object}/${input.recordId} while ${sub.from} is out of office.`,
+          body: `You are covering an approval on ${this.nameSubjectRecord(input.object, input.recordId)} while ${oooPerson(sub.from)} is out of office.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -3632,7 +3649,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-ooo-skip-${id}-${sub.from}`,
         payload: {
           title: 'Approval routed to your delegate',
-          body: `An approval on ${input.object}/${input.recordId} was routed to ${sub.to} while you are out of office.`,
+          body: `An approval on ${this.nameSubjectRecord(input.object, input.recordId)} was routed to ${oooPerson(sub.to)} while you are out of office.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -4747,6 +4764,8 @@ export class ApprovalService implements IApprovalService {
 
     const now = this.clock.now().toISOString();
     const maxRevisions = typeof (config as any).maxRevisions === 'number' ? (config as any).maxRevisions : 3;
+    // [#23978] Both sentences below name the record the way every approval notification does.
+    const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let priorSendBacks = 0;
     if (runId && nodeId) {
       const siblings = await this.engine.find('sys_approval_request', {
@@ -4806,7 +4825,7 @@ export class ApprovalService implements IApprovalService {
           source: { object: 'sys_approval_request', id: requestId },
           payload: {
             title: 'Approval auto-rejected',
-            body: `Your ${raw.object_name}/${raw.record_id} exceeded the revision limit (${maxRevisions}) and was rejected.`,
+            body: `Your ${subject} exceeded the revision limit (${maxRevisions}) and was rejected.`,
             actionUrl: '/system/approvals',
           },
         });
@@ -4850,7 +4869,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: requestId },
         payload: {
           title: 'Sent back for revision',
-          body: input.comment?.trim() || `Your ${raw.object_name}/${raw.record_id} needs rework before it can be approved.`,
+          body: input.comment?.trim() || `Your ${subject} needs rework before it can be approved.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -5112,7 +5131,7 @@ export class ApprovalService implements IApprovalService {
       dedupKey: `approval-reassign-${requestId}-${to}`,
       payload: {
         title: 'Approval handed to you',
-        body: `You are now an approver on ${raw.object_name}/${raw.record_id}.`,
+        body: `You are now an approver on ${this.nameSubjectRecord(raw.object_name, raw.record_id)}.`,
         actionUrl: '/system/approvals',
       },
     });
@@ -5157,6 +5176,8 @@ export class ApprovalService implements IApprovalService {
     // Per-approver fan-out: concrete identities (user ids / emails) each get
     // their OWN one-tap approve/reject links (ADR-0043); `position:*`-style
     // literals can't carry a personal token and fall back to a plain nudge.
+    // [#23978] One name for every recipient, the form `approval.requested` uses.
+    const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let notified = 0;
     const concrete = pending.filter(a => a && !a.includes(':'));
     const literals = pending.filter(a => a && a.includes(':'));
@@ -5172,7 +5193,7 @@ export class ApprovalService implements IApprovalService {
           dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
           payload: {
             title: 'Approval reminder',
-            body: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
+            body: `A decision on ${subject} is still waiting on you.`,
             actionUrl: '/system/approvals',
             actions: [
               { label: 'Approve', url: this.actionLinkUrl(tokens.approve) },
@@ -5196,7 +5217,7 @@ export class ApprovalService implements IApprovalService {
         dedupKey: `approval-remind-${requestId}-${nowIso}`,
         payload: {
           title: 'Approval reminder',
-          body: `A decision on ${raw.object_name}/${raw.record_id} is still waiting on you.`,
+          body: `A decision on ${subject} is still waiting on you.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -6499,6 +6520,8 @@ export class ApprovalService implements IApprovalService {
       typeof esc.escalateTo === 'string' && esc.escalateTo.trim() ? esc.escalateTo.trim() : undefined;
     const now = this.clock.now().toISOString();
     const pending = csvSplit(raw.pending_approvers);
+    // [#23978] Every escalation sentence names the record the way every approval notification does.
+    const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
 
     // `escalateTo` is a position machine name or a user id (same contract as
     // the `position` ApproverType, ADR-0090 D3). Position holders win; an
@@ -6539,7 +6562,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval escalated to you',
-          body: `An overdue approval on ${raw.object_name}/${raw.record_id} was escalated to you.`,
+          body: `An overdue approval on ${subject} was escalated to you.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -6558,7 +6581,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Approval SLA breached',
-          body: `A decision on ${raw.object_name}/${raw.record_id} is overdue.`,
+          body: `A decision on ${subject} is overdue.`,
           actionUrl: '/system/approvals',
         },
       });
@@ -6572,7 +6595,7 @@ export class ApprovalService implements IApprovalService {
         source: { object: 'sys_approval_request', id: raw.id },
         payload: {
           title: 'Your approval request breached its SLA',
-          body: `${raw.object_name}/${raw.record_id}: escalation action '${action}' was taken.`,
+          body: `${subject}: escalation action '${action}' was taken.`,
           actionUrl: '/system/approvals',
         },
       });

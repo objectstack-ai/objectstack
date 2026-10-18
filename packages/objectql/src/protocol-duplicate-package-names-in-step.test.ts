@@ -217,10 +217,10 @@ describe('ADR-0070 D4 — duplicatePackage keeps a copied name in step with what
 
     /** Seeds the third package and the source, then duplicates the source. */
     async function duplicate(): Promise<any> {
-        await protocol.installPackage({ manifest: { id: R, name: 'Other', type: 'application' } });
+        await protocol.installPackage({ manifest: { id: R, name: 'Other', type: 'app' } });
         await save(R, 'object', accountBody);
         await save(R, 'object', extBody);
-        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'application' } });
+        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
         expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
         await save(P, 'object', customerBody);
         await save(P, 'object', ticketBody);

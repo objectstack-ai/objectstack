@@ -18,6 +18,7 @@ import * as actionExec from '../action-execution.js';
 import { isSystemObjectName } from '../action-execution.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
@@ -90,6 +91,9 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
         }
         return { handled: true, response };
     }
+    // [#24151] The body is read once the anonymous decision above has admitted
+    // the caller, never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     // ── OAuth scope → tool-family enforcement (fail-closed, #2698) ──
     // `oauthScopes` is set ONLY for OAuth-token provenance. A token that
@@ -173,10 +177,10 @@ export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: str
         // Hand-rolled rather than `deps.error(...)` only because it carries an
         // `Allow` header; the BODY still goes through the one builder (#3842),
         // so this branch cannot drift back to a numeric `code`. The code is
-        // DERIVED (`method_not_allowed`), not spelled here — the other two 405
-        // sites (`domains/actions.ts`, `domains/keys.ts`) go through
-        // `deps.error` and derive theirs, and one dispatcher answering the same
-        // status two ways is the drift this issue is closing.
+        // DERIVED (`METHOD_NOT_ALLOWED`), not spelled here. Every 405 this
+        // dispatcher's domains answer (`actions.ts`, `ai.ts`, `keys.ts`,
+        // `meta.ts`, this one) is built this way: an `Allow` header, and the
+        // body through the one builder.
         return {
             handled: true,
             response: {

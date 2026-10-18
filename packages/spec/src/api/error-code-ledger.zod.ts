@@ -570,7 +570,12 @@ export const ERROR_CODE_LEDGER = {
     'INVALID_EMAIL',
     'INVALID_PHONE',
     'INVITE_EMAIL_FAILED',
+    // [#24082] The invitation role cap's three refusals (`invitation-role-cap.ts`),
+    // each thrown 403 from `beforeCreateInvitation` with its code (#23945).
+    'INVITE_ISSUER_MEMBER_ONLY',  // [#24082] 403: an issuer below admin grade may invite only as a plain `member`; the requested role does not outrank theirs but may carry capability of its own
+    'INVITE_ISSUER_UNVERIFIED',   // [#24082] 403, fail-closed: the issuer's `sys_member` role was not established (the read answered with no usable row, or the composition has no data engine to read), so the invitation may confer nothing beyond `member`; a read that throws answers `SERVICE_UNAVAILABLE` (503) instead
     'INVITE_REQUIRES_EMAIL',
+    'INVITE_ROLE_ABOVE_ISSUER',   // [#24082] 403: the requested role grades above the issuer's own (an invitation never confers authority above its issuer)
     'INVALID_REQUEST',
     'INVITE_SMS_FAILED',
     'IP_NOT_ALLOWED',

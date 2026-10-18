@@ -11,6 +11,7 @@ import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
 import { cwdConfigJoinsBoot } from '../utils/artifact-precedence.js';
@@ -884,6 +885,8 @@ export interface BoundPortChannels {
   /**
    * Writes `runtime.<environment>.<project>.json`. ⛔ Must COMPLETE before
    * either announcement below: it is the file both of them send a consumer to.
+   * Best-effort: when it cannot be written the boot goes on, and the real
+   * channel says so once, naming the file (#24091).
    */
   writeRuntimeState: (published: { port: number; url: string }) => void;
   /**
@@ -1073,16 +1076,20 @@ export function runtimeStateFileName(environmentId: string, servedAppRoot: strin
 }
 
 /**
- * The real channels: the same three writes this command has always done, with
- * their failure handling unchanged.
+ * The real channels: the same three writes this command has always done.
  *
  * Each leg keeps its OWN `try` — a boot must not die because a supervision file
  * could not be written or because an IPC channel had already closed, and one
- * leg failing must not cost the other two. Only the ORDER changed (commit faff497fd).
+ * leg failing must not cost the other two. The ORDER changed (commit faff497fd),
+ * and a state file that could not be written is now said once on stderr
+ * (#24091); a closed IPC channel is still the ordinary `os serve` case, silent.
  */
 export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChannels {
   return {
     writeRuntimeState: ({ port, url }) => {
+      // Named the moment it is known, so the catch below can say WHICH file
+      // was not written (#24091).
+      let attemptedFile: string | undefined;
       try {
         const environmentId = process.env.OS_ENVIRONMENT_ID ?? 'env_local';
         // Keyed by the SERVED APP'S ROOT as well as the environment, so two
@@ -1094,7 +1101,13 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
           resolveObjectStackHome(),
           runtimeStateFileName(environmentId, servedAppRootOrCwd()),
         );
-        fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
+        attemptedFile = runtimeFile;
+        // Bounded (#23858): an `OS_HOME` that can never be made — a name under
+        // `/proc` — is refused here at once, and the catch below lets the boot
+        // go on without the file, saying so. Node's recursive mkdir looped on
+        // it after the bind and before the banner, holding the event loop, so
+        // the server never announced itself.
+        makeDirectorySync(path.dirname(runtimeFile));
         fs.writeFileSync(runtimeFile, JSON.stringify({
           pid: process.pid,
           port,
@@ -1104,7 +1117,25 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
         }, null, 2));
         const cleanupRuntimeFile = () => { try { fs.rmSync(runtimeFile, { force: true }); } catch { /* noop */ } };
         process.on('exit', cleanupRuntimeFile);
-      } catch { /* non-fatal — supervision file is best-effort */ }
+      } catch (error) {
+        // Best-effort, NOT silent (#24091). The file stays optional — a boot
+        // must not die for a supervision file — but both announcements that
+        // follow (the banner, the IPC message) send a consumer to it, so a
+        // refusal swallowed here told a supervisor "ready" and then answered
+        // its read with nothing. One line, naming the file and the operating
+        // system's own error, carried verbatim rather than paraphrased.
+        //
+        // Said ONCE: `run()` publishes the bound port at exactly one site, so
+        // this leg runs once per boot. Channel: `console.warn`, i.e. stderr,
+        // like every other boot warning in this file — stdout belongs to the
+        // stdio MCP transport's JSON-RPC frames (#7915).
+        const thrown = error instanceof Error ? error.message : String(error);
+        console.warn(chalk.yellow(
+          `  ⚠ Runtime state file not written: ${attemptedFile ?? '(its path could not be resolved)'} — ${thrown}. ` +
+            'The server runs on without it, so a supervisor that reads it will not find this process there; ' +
+            'point OS_HOME at a directory this process can write.',
+        ));
+      }
     },
     announceListening: (message) => {
       try {
@@ -1391,7 +1422,13 @@ export default class Serve extends Command {
   static override description = 'Start ObjectStack server. Reads `objectstack.config.ts` if present; otherwise falls back to `dist/objectstack.json` (or OS_ARTIFACT_PATH, including http(s):// URLs) as a portable artifact.';
 
   static override args = {
-    config: Args.string({ description: 'Configuration file path', required: false, default: 'objectstack.config.ts' }),
+    // [#24191] `ignoreStdin`: oclif otherwise fills an omitted positional from
+    // a line already waiting on stdin (`tryStdin`), and with the stdio MCP
+    // transport that line is the client's `initialize`, written at spawn. It
+    // became the config path, the boot fell back to the artifact without the
+    // config, and the request was never answered. Stdin belongs to the
+    // transport; the config path comes from argv or the default.
+    config: Args.string({ description: 'Configuration file path', required: false, default: 'objectstack.config.ts', ignoreStdin: true }),
   };
 
   static override flags = {
@@ -5104,36 +5141,11 @@ export default class Serve extends Command {
           );
           trackPlugin('DatasourceAdminServicePlugin');
 
-          // REST routes under /api/v1/datasources. Registered via a tiny
-          // plugin so it resolves http.server during init (same pattern as
-          // the hostname guard above).
-          const adminRoutePlugin: any = {
-            name: 'com.objectstack.cli.datasource-admin-routes',
-            version: '1.0.0',
-            // init() resolves the `http.server` service the hono server plugin
-            // provides — order-if-present so route registration is
-            // deterministic (ADR-0116, #4471). Soft: without a server plugin
-            // the routes degrade on purpose (warn + not installed).
-            optionalDependencies: ['com.objectstack.server.hono'],
-            init: async (ctx: any) => {
-              try {
-                const httpServer: any =
-                  ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
-                if (!httpServer || typeof httpServer.get !== 'function') {
-                  ctx.logger?.warn?.(
-                    '[datasource-admin] http.server unavailable; REST routes not installed',
-                  );
-                  return;
-                }
-                registerDatasourceAdminRoutes(httpServer, ctx, '/api/v1');
-              } catch (routeErr: any) {
-                ctx.logger?.warn?.(
-                  `[datasource-admin] route registration failed: ${routeErr?.message ?? routeErr}`,
-                );
-              }
-            },
-          };
-          await kernel.use(adminRoutePlugin);
+          // REST routes under /api/v1/datasources, mounted by a tiny plugin
+          // during its init (same pattern as the hostname guard above). What
+          // it reads, and which warning a boot without a server gets, lives
+          // on `createDatasourceAdminRoutesPlugin()` below.
+          await kernel.use(createDatasourceAdminRoutesPlugin(registerDatasourceAdminRoutes));
           trackPlugin('DatasourceAdminRoutes');
 
           if (isDev) {
@@ -5791,6 +5803,59 @@ export default class Serve extends Command {
 }
 
 /**
+ * The plugin that mounts the datasource admin REST routes (`/api/v1/datasources`,
+ * `registerDatasourceAdminRoutes` from `@objectstack/service-datasource`) onto
+ * the composed HTTP server, from its own `init()`. Exported (#24022) so that
+ * `init` is reachable from a test against a real kernel, as
+ * {@link createUnknownHostnameGuardPlugin}'s is.
+ *
+ * ## The read
+ *
+ * The server is read through {@link readComposedHttpServer}: `http.server`
+ * only, inside a `try`, because the kernel's `getService` THROWS on a name
+ * nothing registered. The `getService?.(…) ?? getService?.(…)` chain this
+ * replaced never reached its `??`: on a boot with no server (`--no-server`)
+ * the throw landed in the registration `catch`, which printed "route
+ * registration failed" with the kernel's "composition/ordering fault" text
+ * when nothing was at fault.
+ *
+ * ## Which warning prints, and when
+ *
+ * - No server composed: the plugin's own degrade line, once. It is kept under
+ *   `--no-server` on purpose. The banner says why there is no server; this
+ *   line names the surface that leaves unmounted, beside the same boot's
+ *   other "not mounted" lines (REST API, runtime config, marketplace
+ *   install). A config can still compose its own server under that flag, and
+ *   then the routes mount. It never says "ordering fault".
+ * - A server composed, and registration throws: "route registration failed"
+ *   with the error. That is a genuine fault and stays loud.
+ *
+ * `optionalDependencies` orders the Hono server plugin ahead when it is
+ * composed (ADR-0116), so an absent server at this `init` is final for it.
+ */
+export function createDatasourceAdminRoutesPlugin(
+  registerRoutes: (server: any, ctx: any, basePath: string) => void,
+) {
+  return {
+    name: 'com.objectstack.cli.datasource-admin-routes',
+    version: '1.0.0',
+    optionalDependencies: ['com.objectstack.server.hono'],
+    init: async (ctx: any): Promise<void> => {
+      const httpServer: any = readComposedHttpServer(ctx);
+      if (!httpServer || typeof httpServer.get !== 'function') {
+        ctx.logger?.warn?.('[datasource-admin] http.server unavailable; REST routes not installed');
+        return;
+      }
+      try {
+        registerRoutes(httpServer, ctx, '/api/v1');
+      } catch (routeErr: any) {
+        ctx.logger?.warn?.(`[datasource-admin] route registration failed: ${routeErr?.message ?? routeErr}`);
+      }
+    },
+  };
+}
+
+/**
  * What {@link createUnknownHostnameGuardPlugin} is constructed with.
  */
 export interface UnknownHostnameGuardOptions {
@@ -5919,7 +5984,7 @@ export function createUnknownHostnameGuardPlugin(
     optionalDependencies: ['com.objectstack.server.hono'],
     init: async (ctx: any) => {
       try {
-        const httpServer: any = ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
+        const httpServer: any = readComposedHttpServer(ctx);
         const rawApp = httpServer?.getRawApp?.();
         if (!rawApp || typeof rawApp.use !== 'function') {
           ctx.logger?.warn?.('[unknown-hostname-guard] http.server unavailable; guard not installed');

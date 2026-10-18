@@ -5,13 +5,18 @@
  * `{ dialect, source }` envelope at every `ExpressionInputSchema` position
  * (#11480, extending #11255's platform-objects gate to this package).
  *
- * Both pages here are raw typed object literals reaching the kernel through
- * this plugin's own manifest bundles (`CLOUD_CONNECTION_UI_BUNDLE`,
- * `MARKETPLACE_INSTALLED_UI_BUNDLE`) — the same wire path as
- * `platform-objects`' pages, in files no `*.page.ts` sweep ever looked at.
- * They author ZERO expression keys today, which is exactly why the gate is
- * worth having: the hazard is the NEXT predicate added to one of them, which
- * would ship bare with every authoring-time signal green.
+ * The page here is a raw typed object literal reaching the kernel through
+ * this plugin's own manifest bundle (`CLOUD_CONNECTION_UI_BUNDLE`) — the same
+ * wire path as `platform-objects`' pages, in a file no `*.page.ts` sweep ever
+ * looked at. It authors ZERO expression keys today, which is exactly why the
+ * gate is worth having: the hazard is the NEXT predicate added to it, or the
+ * next page authored beside it, which would ship bare with every
+ * authoring-time signal green.
+ *
+ * `MarketplaceInstalledPage` (`MARKETPLACE_INSTALLED_UI_BUNDLE`) was the
+ * second page until #23933: the bundle's "Installed Apps" entry now opens
+ * Setup → Packages filtered to Source = marketplace, and the page is no longer
+ * shipped, so it left this population with its declaration.
  *
  * The detector lives in `@objectstack/lint` (`page-envelope-audit.ts` — its
  * header carries the hazard and the three-door design; its own test file
@@ -27,7 +32,9 @@
  * `ComponentPropsMap` row, so door 3 had no schema to read their
  * `properties` with. #11575 gave both types their rows (strict, empty —
  * measured from the renderers' read points at the `.objectui-sha` pin), so
- * door 3 now reads both bags and the exemption lists are empty. The
+ * door 3 read both bags and the exemption lists are empty (only the
+ * `cloud-connection:panel` bag is in this population since the
+ * `marketplace:installed-list` page retired with #23933). The
  * machinery stays: the exemption set is still asserted EXACTLY, so any NEW
  * unmapped type reds and forces the same decision — declare the props
  * schema in `ComponentPropsMap`, or record the exemption here with the
@@ -53,7 +60,6 @@ import {
 // Same spelling `packages/cli`'s contract tests use.
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
 import { CloudConnectionSettingsPage } from './cloud-connection-ui.js';
-import { MarketplaceInstalledPage } from './marketplace-ui.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -73,11 +79,6 @@ const AUDITED_PAGES: { exportName: string; page: Page; exemptUnmappedTypes: stri
   {
     exportName: 'CloudConnectionSettingsPage',
     page: CloudConnectionSettingsPage,
-    exemptUnmappedTypes: [],
-  },
-  {
-    exportName: 'MarketplaceInstalledPage',
-    page: MarketplaceInstalledPage,
     exemptUnmappedTypes: [],
   },
 ];
@@ -196,8 +197,10 @@ describe('cloud-connection Page exports serve canonical expression envelopes', (
     ).toBe('');
 
     // Population floor: the gate is worthless if it silently reads nothing.
-    expect(AUDITED_PAGES.length).toBeGreaterThanOrEqual(2);
-    expect(declared.length).toBeGreaterThanOrEqual(2);
+    // One page since #23933 retired `MarketplaceInstalledPage`; the two
+    // directions above already hold the scan and this list equal.
+    expect(AUDITED_PAGES.length).toBeGreaterThanOrEqual(1);
+    expect(declared.length).toBeGreaterThanOrEqual(1);
   });
 
   it.each(AUDITS)('$exportName parses through PageSchema (door 1 precondition)', ({ audit }) => {
@@ -268,25 +271,6 @@ describe('downgrade control — a shipped page, bare predicate injected', () => 
     const pristine = auditPageExpressionEnvelopes(
       CloudConnectionSettingsPage,
       pageLabel('CloudConnectionSettingsPage', CloudConnectionSettingsPage),
-    );
-    expect(renderBareExpressionFindings(pristine.findings)).toBe('');
-  });
-
-  it('flags MarketplaceInstalledPage the same way — the page the `: Page` scan used to miss', () => {
-    const source = JSON.parse(JSON.stringify(MarketplaceInstalledPage)) as AnyRec;
-    const regions = source.regions as AnyRec[];
-    const list = (regions[1]!.components as AnyRec[])[0]!;
-    expect(list.type).toBe('marketplace:installed-list');
-    list.visibleWhen = BARE;
-
-    const audit = auditPageExpressionEnvelopes(source, pageLabel('MarketplaceInstalledPage', source as unknown as Page));
-    expect(audit.findings.map(f => f.path)).toEqual(['regions[1].components[0].visibleWhen']);
-    const rendered = renderBareExpressionFindings(audit.findings);
-    expect(rendered).toContain('marketplace_installed');
-
-    const pristine = auditPageExpressionEnvelopes(
-      MarketplaceInstalledPage,
-      pageLabel('MarketplaceInstalledPage', MarketplaceInstalledPage),
     );
     expect(renderBareExpressionFindings(pristine.findings)).toBe('');
   });

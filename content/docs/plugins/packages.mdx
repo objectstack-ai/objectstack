@@ -15,7 +15,7 @@ ObjectStack is organized into **72 package manifests** across multiple categorie
 | **Framework adapters** | 1 | `hono` (other frameworks: build a thin adapter on `HttpDispatcher` — see below) |
 | **Drivers** | 5 | `driver-memory`, `driver-sql`, `driver-sqlite-wasm`, `driver-mongodb`, `driver-turso` |
 | **Plugins** | 17 | `plugin-auth`, `plugin-security`, `plugin-audit`, `plugin-approvals`, `plugin-sharing`, `plugin-email`, `plugin-webhooks`, `plugin-hono-server`, `plugin-dev`, `plugin-pinyin-search`, `mcp`, trigger plugins (`trigger-api`, `trigger-record-change`, `trigger-schedule`), and knowledge/embedder plugins (`knowledge-memory`, `knowledge-ragflow`, `embedder-openai`) |
-| **Platform services** | 16 | `service-analytics`, `service-automation`, `service-cache`, `service-cluster`, `service-cluster-redis`, `service-datasource`, `service-i18n`, `service-job`, `service-knowledge`, `service-messaging`, `service-package`, `service-queue`, `service-realtime`, `service-settings`, `service-sms`, `service-storage` |
+| **Platform services** | 17 | `service-analytics`, `service-automation`, `service-cache`, `service-cluster`, `service-cluster-redis`, `service-datasource`, `service-i18n`, `service-job`, `service-knowledge`, `service-messaging`, `service-package`, `service-print`, `service-queue`, `service-realtime`, `service-settings`, `service-sms`, `service-storage` |
 
 
 ## Core Packages
@@ -249,6 +249,13 @@ All services implement contracts from `@objectstack/spec/contracts` and are kern
 
 - **Features**: Provider adapters (Aliyun SMS, Twilio), `sms` settings namespace with live rebind, backs phone-number OTP sign-in/reset and the messaging `sms` channel
 - **When to use**: Phone OTP first-login / self-service reset, SMS notifications
+
+### @objectstack/service-print
+
+**Print Service** — Prints a record's print page to a PDF in headless Chromium, as the requesting user, and archives it as a file attached to the record (`print` service).
+
+- **Features**: One engine, headless Chromium, on a local executable (`OS_PRINT_CHROMIUM_PATH`) or a remote DevTools endpoint (`OS_PRINT_BROWSER_ENDPOINT`); probed and reported at startup; a short-lived session for the requesting user, revoked after each print; the PDF archived through `file-attachments`
+- **When to use**: Archiving invoices, delivery orders and letters as PDF attachments of their records — see [Print Pages](/docs/ui/print-pages)
 
 ### @objectstack/service-i18n
 

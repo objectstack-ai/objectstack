@@ -26,7 +26,7 @@ export const HoursByStatusReport = defineReport({
 export const StatusPriorityMatrixReport = defineReport({
   name: 'showcase_status_priority_matrix',
   label: 'Status × Priority (Matrix)',
-  description: 'Task counts cross-tabulated by status and priority.',
+  description: 'Estimated hours cross-tabulated by status and priority.',
   type: 'matrix',
   drilldown: true,
   // ADR-0021 D2 — true pivot: `rows` down × `columns` across, measures in cells.

@@ -1754,8 +1754,9 @@ describe('action param option vocabulary — declared only where a renderer deli
 
     // `color`: real one layer down, on the STORED-value display path. The
     // sentence must no longer defer to #5016 as an open question — it is
-    // decided — and must not promise the field-backed inheritance route, which
-    // `normaliseOptions` still drops (ledger finding 18).
+    // decided — and must not promise the field-backed inheritance route:
+    // objectui's `normaliseOptions` keeps the key by spread, but no reader of
+    // it on that route is measured (ledger finding 18).
     const color = messageFor({ label: 'A', value: 'a', color: 'red' });
     expect(color).toContain('SelectOptionSchema');
     expect(color).not.toContain('do not rely on it today');

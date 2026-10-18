@@ -1,5 +1,132 @@
 # @objectstack/verify
 
+## 18.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [b9dbc3d]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [1eac7ad]
+- Updated dependencies [9fcea20]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [7428da0]
+- Updated dependencies [b55be42]
+- Updated dependencies [abb6df0]
+- Updated dependencies [5b6c257]
+- Updated dependencies [0b1179f]
+- Updated dependencies [8776119]
+- Updated dependencies [74b4362]
+- Updated dependencies [f7a5ebe]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9d4fb3c]
+- Updated dependencies [c5cf546]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [f846cc2]
+- Updated dependencies [34b740f]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [94114c1]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [0cfd0c4]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [099cc9d]
+- Updated dependencies [77efc66]
+- Updated dependencies [747c8e9]
+- Updated dependencies [6422da5]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [67e8792]
+- Updated dependencies [2e15620]
+- Updated dependencies [0cb45e9]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [b74434c]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [605aa01]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [d050a8f]
+- Updated dependencies [9e797a8]
+- Updated dependencies [b25d98a]
+- Updated dependencies [75ced06]
+- Updated dependencies [5fb8d15]
+- Updated dependencies [2054a08]
+- Updated dependencies [5c2ac83]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [33228c5]
+- Updated dependencies [d731b89]
+- Updated dependencies [19955fb]
+- Updated dependencies [905f57b]
+- Updated dependencies [aefab7c]
+- Updated dependencies [66d2757]
+- Updated dependencies [c7168ac]
+- Updated dependencies [44fe210]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [b75129f]
+- Updated dependencies [6dede7a]
+- Updated dependencies [62f959d]
+- Updated dependencies [c1c0a90]
+- Updated dependencies [ab3ba2c]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [544b8d7]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+- Updated dependencies [cdf3777]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/service-storage@18.0.0-next.3
+  - @objectstack/plugin-security@18.0.0-next.3
+  - @objectstack/rest@18.0.0-next.3
+  - @objectstack/runtime@18.0.0-next.3
+  - @objectstack/service-job@18.0.0-next.3
+  - @objectstack/service-automation@18.0.0-next.3
+  - @objectstack/metadata@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/plugin-hono-server@18.0.0-next.3
+  - @objectstack/plugin-audit@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/plugin-approvals@18.0.0-next.3
+  - @objectstack/plugin-auth@18.0.0-next.3
+  - @objectstack/service-messaging@18.0.0-next.3
+  - @objectstack/plugin-sharing@18.0.0-next.3
+  - @objectstack/service-settings@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/plugin-email@18.0.0-next.3
+  - @objectstack/service-package@18.0.0-next.3
+  - @objectstack/mcp@18.0.0-next.3
+  - @objectstack/service-mailbox@18.0.0-next.3
+  - @objectstack/plugin-webhooks@18.0.0-next.3
+  - @objectstack/service-analytics@18.0.0-next.3
+  - @objectstack/service-cache@18.0.0-next.3
+  - @objectstack/service-datasource@18.0.0-next.3
+  - @objectstack/service-queue@18.0.0-next.3
+  - @objectstack/service-realtime@18.0.0-next.3
+  - @objectstack/service-sms@18.0.0-next.3
+  - @objectstack/trigger-api@18.0.0-next.3
+  - @objectstack/trigger-record-change@18.0.0-next.3
+  - @objectstack/trigger-schedule@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+  - @objectstack/plugin-pinyin-search@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

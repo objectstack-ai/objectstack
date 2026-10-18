@@ -9,6 +9,8 @@
  *   DELETE /api/v1/share-links/:idOrToken      → revoke             → data: { ok: true }
  *   GET    /api/v1/share-links/:token/resolve  → resolve token      → data: { record, link, redactFields }
  *   GET    /api/v1/share-links/:token/messages → conversation rows  → data: ai_messages[]
+ *   *      /api/v1/share-links/*               → every other verb and path: refused
+ *                                                (anonymous 401, signed-in 404)
  *
  * Every body is the declared `{ success: true, data }` / `{ success: false,
  * error: { code, message } }` envelope, written by the shared `sendOk` /
@@ -31,6 +33,12 @@
  */
 
 import type { IHttpServer, IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
+// ADR-0138 D2 — the platform's one anonymous decision and its one refusal: the
+// same predicate and the same three constants every dispatcher domain answers
+// with, so this family's 401 is the dispatcher twin's byte for byte.
+import {
+  shouldDenyAnonymous, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE,
+} from '@objectstack/core';
 // The declared envelope is written in ONE place for the whole platform (#3973).
 // [#23174] The door's catch-all fault answers through `sendServerFault`: the
 // route's `failure` text on the wire, the caught error with its stack in the
@@ -74,7 +82,7 @@ export interface ShareLinkRoutesOptions {
    * those verdicts: `accessible_org_ids` is the `group`-posture Layer 0 wall
    * (ADR-0105 D2) and denies when absent. The routes' OWN decision — is this
    * request authenticated at all? — is the only thing they read off it
-   * themselves, via {@link isAuthenticated}.
+   * themselves, via {@link refuseAnonymous}.
    */
   contextFromRequest?: (req: IHttpRequest) => ExecutionContext | Promise<ExecutionContext>;
 }
@@ -85,18 +93,36 @@ export interface ShareLinkRoutesOptions {
 const defaultContext = (_req: IHttpRequest): ExecutionContext => ({});
 
 /**
- * [commit 8e13ca876, full-envelope ruling] The routes' own 401 gate — authenticated vs anonymous, and nothing
- * more.
+ * ADR-0138 D2 — the family's anonymous floor. Returns `true` when the refusal
+ * was answered and the request must stop.
  *
- * Typed to {@link ShareLinkExecutionContext} deliberately: that is the shape
- * the contract retains for exactly this decision, and narrowing HERE (at the
- * read) rather than at the resolver (at the production site) is the whole point
- * of the ruling. The gate reads no authorization dimension, so it needs no
- * authorization envelope — while the object the routes hand on to the service
- * stays the complete one.
+ * The decision is the platform's shared one (`shouldDenyAnonymous`), asked
+ * about the user id alone, as the dispatcher twin (`runtime/src/domains/
+ * share-links.ts`) asks it: a link is managed BY a user, so no system-context
+ * arm is read. The method rides along for the preflight pass; the request PATH
+ * deliberately does not, since the family's base path is the host's option and
+ * a base moved under an allow-listed prefix must not inherit an exemption this
+ * family never declared.
+ *
+ * The answer is the twin's too, byte for byte: the dispatcher's standard
+ * envelope, `{ success: false, error: { code: 'UNAUTHENTICATED', message,
+ * httpStatus: 401 } }`, with the shared message every dispatcher domain answers
+ * with. This family used to answer each management face with its own sentence
+ * ("Sign in to list share links") and no `httpStatus`, so the same anonymous
+ * request read differently depending on which of the two mounts served it.
+ *
+ * [commit 8e13ca876, full-envelope ruling] Authenticated vs anonymous, and
+ * nothing more. Typed to {@link ShareLinkExecutionContext} deliberately: that
+ * is the shape the contract retains for exactly this decision, and narrowing
+ * HERE (at the read) rather than at the resolver (at the production site) is
+ * the whole point of the ruling. The gate reads no authorization dimension, so
+ * it needs no authorization envelope — while the object the routes hand on to
+ * the service stays the complete one.
  */
-function isAuthenticated(ctx: ShareLinkExecutionContext): boolean {
-  return Boolean(ctx.userId);
+function refuseAnonymous(res: IHttpResponse, method: string | undefined, ctx: ShareLinkExecutionContext): boolean {
+  if (!shouldDenyAnonymous({ userId: ctx.userId, method })) return false;
+  sendError(res, ANONYMOUS_DENY_STATUS, ANONYMOUS_DENY_CODE, ANONYMOUS_DENY_MESSAGE, { httpStatus: ANONYMOUS_DENY_STATUS });
+  return true;
 }
 
 /**
@@ -139,7 +165,9 @@ function refuseHeldSession(res: IHttpResponse, ctx: ExecutionContext): boolean {
  *   writes for a throw — by the context resolver or by `serve` — that declares
  *   no status of its own, in place of the caught error's text (#23174).
  * - `publicRoute` marks a token route: its no-store response headers are set
- *   on every outcome, the door's own refusal included.
+ *   on every outcome, the door's own refusal included, and it is the one kind
+ *   of route the door's anonymous floor ({@link refuseAnonymous}) admits — the
+ *   capability token is what authorizes it (ADR-0138 D2 class 2).
  */
 interface ShareLinkFamilyRoute {
   serve(req: IHttpRequest, res: IHttpResponse, ctx: ExecutionContext): Promise<void>;
@@ -272,19 +300,30 @@ export function registerShareLinkRoutes(
    *
    * In order, for every request: the token routes' response headers; the
    * caller's context (`contextFromRequest`); the held-session refusal
-   * ({@link refuseHeldSession}); then the route's own work with that context.
-   * A throw from any of them is answered by the route's own `catch` arm, as
-   * before — an authorization-store outage the resolver raises keeps its
-   * declared status and code. A throw that declares no status answers
-   * `500 INTERNAL` with the route's `failure` text, never its own text or
-   * code (#23174).
+   * ({@link refuseHeldSession}); the anonymous floor ({@link refuseAnonymous})
+   * on every route but the two token routes; then the route's own work with
+   * that context. A throw from any of them is answered by the route's own
+   * `catch` arm, as before — an authorization-store outage the resolver raises
+   * keeps its declared status and code. A throw that declares no status
+   * answers `500 INTERNAL` with the route's `failure` text, never its own text
+   * or code (#23174).
+   *
+   * [#24024] The anonymous decision is the DOOR's, taken once for the family
+   * (ADR-0138 D2: once per domain, never face by face). It used to be three
+   * per-face checks inside create, list and revoke, each with its own
+   * sentence, and a route added later had to remember its own.
    */
-  const mountFamilyRoute = (verb: 'get' | 'post' | 'delete', path: string, route: ShareLinkFamilyRoute): void => {
+  const mountFamilyRoute = (
+    verb: 'get' | 'post' | 'put' | 'patch' | 'delete',
+    path: string,
+    route: ShareLinkFamilyRoute,
+  ): void => {
     http[verb](path, (async (req, res) => {
       if (route.publicRoute) setPublicResponseHeaders(res);
       try {
         const ctx = await ctxOf(req);
         if (refuseHeldSession(res, ctx)) return;
+        if (!route.publicRoute && refuseAnonymous(res, req.method, ctx)) return;
         await route.serve(req, res, ctx);
       } catch (err: any) {
         // [#23174] A throw that declares its own status keeps the envelope its
@@ -314,8 +353,8 @@ export function registerShareLinkRoutes(
   // ── CREATE ─────────────────────────────────────────────────────
   mountFamilyRoute('post', base, {
     async serve(req, res, ctx) {
-      // [Finding-2] Managing links requires a verified principal.
-      if (!isAuthenticated(ctx)) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to create share links');
+      // [Finding-2] Managing links requires a verified principal: the door's
+      // anonymous floor refused every caller without one before this ran.
       const body: any = req.body ?? {};
       if (!body.object || !body.recordId) {
         return sendError(res, 400, 'VALIDATION_FAILED', 'object and recordId are required');
@@ -346,7 +385,6 @@ export function registerShareLinkRoutes(
   // ── LIST ───────────────────────────────────────────────────────
   mountFamilyRoute('get', base, {
     async serve(req, res, ctx) {
-      if (!isAuthenticated(ctx)) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to list share links');
       const q = req.query ?? {};
       const links = await service.listLinks(
         {
@@ -367,7 +405,6 @@ export function registerShareLinkRoutes(
   // ── REVOKE ─────────────────────────────────────────────────────
   mountFamilyRoute('delete', `${base}/:idOrToken`, {
     async serve(req, res, ctx) {
-      if (!isAuthenticated(ctx)) return sendError(res, 401, 'UNAUTHENTICATED', 'Sign in to revoke share links');
       await service.revokeLink(req.params.idOrToken, ctx);
       // `{ ok: true }` moves from BEING the body to being its `data`. It was a
       // second word for `success` at the top level (#3689 retired that from
@@ -592,4 +629,36 @@ export function registerShareLinkRoutes(
     },
     failure: 'Failed to load messages',
   });
+
+  // ── EVERY OTHER VERB AND PATH ─────────────────────────────────
+  //
+  // [#24024] The published v18 text (changeset
+  // `23225-domain-floor-anonymous-deny`) answers an anonymous caller `401
+  // UNAUTHENTICATED` "on the create, list and revoke faces and on every path the
+  // domain does not serve". The dispatcher twin keeps that by matching the whole
+  // `/share-links` segment. On a standalone server THIS family is the surface,
+  // and with only the five routes above registered, every other verb or path
+  // matched no route: the adapter answered first, `405` naming the allowed
+  // methods or `404`, to an anonymous caller as well.
+  //
+  // So one catch-all per verb, mounted through the same door and registered
+  // LAST: the router hands a request to the first registration that matches, so
+  // the five routes above keep every request they serve (the two token routes
+  // included), and the catch-all takes the rest, the bare base path under the
+  // three verbs it does not serve among them. The door refuses an anonymous
+  // caller before `serve` runs; a signed-in caller is told no route serves the
+  // request, with the status its twin answers (`404`), from this family rather
+  // than from the adapter.
+  //
+  // The body is never read, so a body the transport cannot parse costs nobody
+  // a `400` ahead of the door's answer.
+  const notServed: ShareLinkFamilyRoute = {
+    async serve(req, res) {
+      sendError(res, 404, 'ENDPOINT_NOT_FOUND', `No share-link route serves ${req.method} ${req.path}`);
+    },
+    failure: 'Failed to answer the request',
+  };
+  for (const verb of ['get', 'post', 'put', 'patch', 'delete'] as const) {
+    mountFamilyRoute(verb, `${base}/*`, notServed);
+  }
 }

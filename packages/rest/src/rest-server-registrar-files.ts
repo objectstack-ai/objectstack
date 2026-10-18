@@ -49,10 +49,52 @@ export const REST_SERVER_REGISTRAR_FILES = [
     'search-routes.ts',
     // [#23050 slice 10] `registerUiEndpoints`' body.
     'ui-routes.ts',
+    // [#23050 slice 11] `registerFormEndpoints`' body.
+    'form-routes.ts',
+    // [#23050 slice 12] `registerCrudEndpoints`' body.
+    'crud-routes.ts',
+    // [#23050 slice 13a] The first three `/meta` groups of
+    // `registerMetadataEndpointsInner`' body — see {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-collection-routes.ts',
+    // [#23050 slice 13b] The fourth `/meta` group of `registerMetadataEndpointsInner`'
+    // body, the per-item reads — see {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-item-read-routes.ts',
+    // [#23050 slice 13c] The fifth `/meta` group of `registerMetadataEndpointsInner`'
+    // body, the per-item writes — see {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-item-write-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
 export type RestServerRegistrarFile = (typeof REST_SERVER_REGISTRAR_FILES)[number];
+
+/**
+ * [#23050 slice 13a] The files on {@link REST_SERVER_REGISTRAR_FILES} that hold a
+ * moved `/meta` group: a module `RestServer#registerMetadataEndpointsInner` calls
+ * from inside its own body, with the host literal built there.
+ *
+ * A route registered from one of these runs inside the umbrella
+ * `registerMetadataEndpoints`' swap, behind the same wrapping registrar as the
+ * routes still in that method, even though no line of it is lexically inside
+ * the method. A reader that judges "inside the umbrella" by position in
+ * `rest-server.ts` reads these files as well; the dogfood blind-spot census is
+ * the one that does today.
+ *
+ * Named file by file, ⛔ never by a naming convention: a module joins this
+ * subset in the slice that moves a `/meta` group into it, and a reader that
+ * depends on it pins it against the module calls inside the inner method.
+ */
+export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = [
+    // [#23050 slice 13a] The type list, the whole-store maintenance family and the
+    // per-type list.
+    'meta-collection-routes.ts',
+    // [#23050 slice 13b] The per-item reads: `/references`, `/layers`, the book tree
+    // and the item read.
+    'meta-item-read-routes.ts',
+    // [#23050 slice 13c] The per-item writes: the item save and the reset. The first
+    // module here that registers nothing on the route manager itself: both routes go
+    // through the inner method's per-item registrar, handed over in its scope.
+    'meta-item-write-routes.ts',
+];
 
 /**
  * The repo-relative directory of {@link REST_SERVER_REGISTRAR_FILES}, for a

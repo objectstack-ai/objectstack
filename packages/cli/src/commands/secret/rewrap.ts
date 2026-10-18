@@ -143,6 +143,7 @@ export default class SecretRewrap extends Command {
       buildRewrapReport,
       executeSysSecretRewrap,
       planSysSecretRewrap,
+      REWRAP_NOTES,
       rewrapUnfinished,
     } = await import('../../utils/sys-secret-rewrap.js');
     const { ciphertextDerivationStatus } = await import('@objectstack/service-settings');
@@ -197,6 +198,12 @@ export default class SecretRewrap extends Command {
       const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
         ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
         : '';
+      // [#23899] The report's "Re-running is safe" note claims that a finished
+      // run writes no sys_secret row. Under `--apply` no other line names the
+      // switch, so on a SQLite file that note is followed by it; a dry run's
+      // closing line already carries it, so there the note carries none. The
+      // `--json` `report.notes` carry the notes as they are.
+      const noteSuffix = new Map<string, string>([[REWRAP_NOTES.resumable, flags.apply ? journalNote : '']]);
       const engine = stack.kernel.getService('objectql') as SecretReferenceEngineLike | undefined;
       if (!engine) {
         const message = 'No ObjectQL engine on this runtime, so no holder family can be enumerated.';
@@ -264,7 +271,7 @@ export default class SecretRewrap extends Command {
           keySource: null,
         });
         if (json) { await emitJson({ error: 'union_incomplete', refused: plan.refusal, report }, 1, { compact: true }); return; }
-        renderReport(report);
+        renderReport(report, noteSuffix);
         printError(plan.refusal.message);
         for (const gap of plan.refusal.gaps) printError(`  family '${gap.family}': ${gap.reason}`);
         this.exit(1);
@@ -322,7 +329,7 @@ export default class SecretRewrap extends Command {
       const exitCode = flags.apply && rewrapUnfinished(result) ? 1 : 0;
 
       if (json) { await emitJson({ mode, report }, exitCode, { compact: true }); return; }
-      renderReport(report);
+      renderReport(report, noteSuffix);
       if (flags.apply) {
         printSuccess(`Re-wrapped ${report.counts.rewrap} sys_secret row(s) in ${timer.display()}.`);
       } else {
@@ -356,8 +363,11 @@ async function confirm(question: string): Promise<boolean> {
   }
 }
 
-/** Render the report for a human. Classes and counts only. */
-function renderReport(report: SysSecretRewrapReport): void {
+/**
+ * Render the report for a human. Classes and counts only. `noteSuffix` maps a
+ * note's text to what follows it on its line (the journal-mode note, #23899).
+ */
+function renderReport(report: SysSecretRewrapReport, noteSuffix: ReadonlyMap<string, string>): void {
   console.log(chalk.bold('\n  Reference union — one line per holder family'));
   for (const [family, status] of Object.entries(report.families)) {
     if (status.status === 'enumerated') {
@@ -394,5 +404,5 @@ function renderReport(report: SysSecretRewrapReport): void {
   if (report.keySource) printInfo(`data key source: ${report.keySource}`);
 
   console.log(chalk.bold('\n  Read before acting'));
-  for (const note of report.notes) printWarning(note);
+  for (const note of report.notes) printWarning(`${note}${noteSuffix.get(note) ?? ''}`);
 }

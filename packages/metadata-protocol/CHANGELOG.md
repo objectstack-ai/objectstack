@@ -1,5 +1,257 @@
 # @objectstack/metadata-protocol
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 14aff67: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  fix(metadata-protocol)!: a draft save naming no package of an object its package-less definition owns is refused when its draft address is a package's draft, with a way out to the package-less draft (ADR-0029 D9.9)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten, converted or deleted by this change, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of the object save door for one shape: a draft save naming no package of an object whose registry owner is its package-less definition (the `sys_metadata` sentinel), when the draft address that save writes is a package's draft, is refused, where it wrote a draft no publish could serve. The remedy is in the requests a caller sends (a delete and draft discards through the same door, then the same save), never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The ADR-0029 D9.9 check of the object save door is now asked of the package the write lands in. A draft save naming no package (`PUT /api/v1/meta/object/NAME?mode=draft`, Studio's designer save) leaves the binding to the draft address, which is the item's one package `Q` when an active row is bound to `Q`, or `Q`'s draft when no active row is bound to a package and `Q`'s draft is the only one stored (ADR-0048). The check used to ask with the request's empty package, so an object whose owner is its package-less definition read as its own re-save, and the save wrote `Q`'s draft. It answered `200`, and the promote door then refused every publish of that draft.
+  
+  What changes for you, where object `NAME` is owned by its package-less definition and `Q` is any package. Every refusal below is `422 OBJECT_OVERLAY_PACKAGE_MISMATCH` with nothing written, carrying `packageId: Q` and `ownerPackageId: null`. Only rows written before the save door refused a package's row beside the package-less one, or drafts bound to a package stored before that row existed, reach these states.
+  
+  - Over a row bound to `Q` stored beside the package-less one, with no draft, with a draft bound to no package, or with both that draft and `Q`'s: FROM `PUT /api/v1/meta/object/NAME?mode=draft` answering `200` with `Q`'s draft written (a new one, or the draft bound to no package adopted into `Q`), TO the refusal "A draft save naming no package of object 'NAME' writes a draft bound to 'Q', which no publish can serve: the object is served by its package-less definition. First DELETE /api/v1/meta/object/NAME?package=Q, then send this save again: it writes the package-less draft. Nothing was written."
+  - The same row with `Q`'s draft and no draft bound to no package: FROM `200` into `Q`'s draft, TO the refusal naming `Q`'s draft discard after the row's delete: "First DELETE /api/v1/meta/object/NAME?package=Q, then ?state=draft&package=Q (the draft discard), then send this save again: …". Deleting the row alone leaves `Q`'s draft, which the address then still names. Each package's draft is named the same way when several are stored.
+  - No row bound to a package, and `Q`'s draft the only draft stored: FROM `200` into `Q`'s draft, TO the refusal "First DELETE /api/v1/meta/object/NAME?state=draft&package=Q (the draft discard), then send this save again: it writes the package-less draft. …".
+  
+  **Remedy, in one line.** Send the requests the refusal names, in its order, then the same draft save: it writes the package-less draft, and the table, its records and the served definition stay as they are. A discard removes only that package's draft, which no publish could serve; the save sent again carries the edit. To move the object into `Q` instead, send the draft save naming `Q`: its refusal names that move.
+  
+  **Unchanged.**
+  
+  - A draft save naming no package where no package's row and no package's draft is stored: it writes the draft bound to no package.
+  - A draft save naming no package where the draft bound to no package is the address (no package's row, that draft stored): it is written, as before.
+  - A draft save naming no package over rows bound to two or more packages, or over two packages' drafts with no package row and no draft bound to no package: `409 RESOURCE_CONFLICT`, as before.
+  - Every save naming a package, every publish-mode save, and the promote doors: same answers and texts.
+  - An object a code package ships, an object owned by a runtime row bound to a real package, and every type except `object`.
+  - Stored rows are not rewritten on upgrade.
+- cf07168: feat(metadata-protocol)!: the metadata save door refuses a retired flow spelling on a NEW flow, and a stored flow keeps re-saving
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (API save door):** a flow saved through `saveMetaItem` (`PUT /api/v1/meta/flow/:name`, the runtime dispatcher, and every caller of the protocol) with no stored row of that name at the save's address is now judged as authored input. It is canonicalized without the ADR-0087 D2 conversions retired from the authoring funnel, so a spelling the loader stopped lifting at 18 is no longer rewritten and stored: it meets the flow parse's refusal, `422 INVALID_METADATA`, with an issue located at the key and the same prescription `os validate` and `os build` print. Draft and publish mode alike. Before, the door lifted the old spelling, stored the new one and said nothing, so the client that wrote it (an AI writing flows through MCP or REST above all) was never told and wrote it again.
+  
+  What counts as a stored row: the row the save overwrites, at its state and package, and for a draft save with no draft yet the active row the draft overlays, so Studio's first draft edit of a stored flow is a re-save.
+  
+  Not changed:
+  
+  - A re-save of a stored flow keeps replaying the full chain, retired entries included, so a legacy row stays editable and is healed by the save, exactly as before.
+  - The server's own writes of bodies at rest keep the full chain: the stored-metadata migration (`os migrate meta --stored`), a package duplicate and an unmanaged package import.
+  - The automation engine's flow rehydration (`registerFlow`) and the read path, which still serves a stored flow verbatim.
+  
+  Migration, for a client that creates flows through the API:
+  
+  - `wait` node loose `config.duration` / `config.timerDuration` → `waitEventConfig.timerDuration`; `config.signal` / `config.signalName` → `waitEventConfig.signalName`; `config.eventType` → `waitEventConfig.eventType`. On the block itself, `timeoutMs` → `timerDuration` and `onTimeout` is removed.
+  - `connector_action` node loose `config.connectorId` / `config.actionId` / `config.input` → its `connectorConfig` block.
+  - CRUD node `config.filters` → `config.filter`; `config.object` → `config.objectName`.
+  - `map` and `subflow` node `config.flow` → `config.flowName`.
+  - `notify` node `config.to` → `recipients`, `subject` → `title`, `body` → `message`, `url` → `actionUrl`, `source: { object, id }` → `sourceObject` / `sourceId`.
+  - `script` node `config.functionName` → `function`, `input` → `inputs`; `actionType` / `template` / `recipients` / `variables` / `script` are removed.
+  - `errorHandling.retryDelayMs` and a `try_catch` node's `retry.retryDelayMs` → `backoffMs`; the flow keys `active` / `template`, a node's `outputSchema` and `errorHandling.fallbackNodeId` are removed.
+  
+  Each refusal names the key to write. `os migrate meta --from 16` lists the same edits for source files. Rows already stored need nothing.
+  
+  `@objectstack/service-automation`: `AutomationEngine.canonicalizeStoredFlow(name, definition, options?)` takes `{ includeRetired?: boolean }`. Omitted, it is `true` (the full chain, as every caller holding a body at rest wants). `false` is the authoring posture the save door asks for. `registerFlow` does not take the option.
+  
+  <!-- adr-0087: not-required (already-registered flow-node-crud-filter-alias, flow-node-crud-object-alias, flow-node-notify-config-aliases, flow-node-wait-event-config-lift, flow-node-map-flow-alias, flow-node-subflow-flow-alias, flow-node-connector-config-lift, flow-node-script-config-aliases, flow-inert-keys-removed, flow-node-wait-timeout-keys-removed, flow-node-script-branch-keys-removed, retry-policy-converged) these D2 entries already record every spelling the save door now refuses on a new flow; this change only stops the door replaying them for authored input, and their own migrations are the ones above -->
+- 6e18016: feat(metadata-protocol)!: a flow re-save that newly introduces a retired spelling is refused like a new flow's
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (API save door), the re-save case:** a flow saved through `saveMetaItem` (`PUT /api/v1/meta/flow/:name`, the runtime dispatcher, and every caller of the protocol) over a stored row is now judged as authored input when its body introduces a spelling retired from the authoring funnel that the stored row does not carry. Adding a node with an old spelling to a legacy flow, or writing one on a node the stored row holds in the canonical spelling, is no longer rewritten and stored: the save meets the flow parse's refusal, `422 INVALID_METADATA`, with an issue located at the key and the same prescription `os validate` and `os build` print, exactly as a new flow's does. Draft and publish mode alike. The whole body is judged that way, so the refusal also lists the retired spellings the stored row already carries; fixing the added one alone is enough to save. Before, a re-save healed every retired spelling in the body, the new one included, and said nothing.
+  
+  What counts as introduced: a retired conversion that fires on the request at a site where it does not fire on the stored row. A site is the key's path, with each node (and edge) named by its `id` rather than its position, so moving, adding or removing nodes does not change it. The stored rows compared are the row the save overwrites, and for a draft save the active row the draft overlays as well, so Studio's repeated draft saves of a legacy flow keep saving.
+  
+  Not changed:
+  
+  - A re-save whose retired spellings the stored row all carries, such as the served legacy body saved back unchanged, keeps replaying the full chain and is healed as before.
+  - A new flow with a retired spelling is refused, as it was.
+  - The server's own writes of bodies at rest keep the full chain: the stored-metadata migration (`os migrate meta --stored`), a package duplicate and an unmanaged package import.
+  - The automation engine's flow rehydration and the read path, which still serves a stored flow verbatim.
+  
+  Migration, for a client that edits flows through the API: write the spellings below on any node or key you add or change. The legacy spellings already on the stored row may stay until the row is healed.
+  
+  - `wait` node loose `config.duration` / `config.timerDuration` → `waitEventConfig.timerDuration`; `config.signal` / `config.signalName` → `waitEventConfig.signalName`; `config.eventType` → `waitEventConfig.eventType`. On the block itself, `timeoutMs` → `timerDuration` and `onTimeout` is removed.
+  - `connector_action` node loose `config.connectorId` / `config.actionId` / `config.input` → its `connectorConfig` block.
+  - CRUD node `config.filters` → `config.filter`; `config.object` → `config.objectName`.
+  - `map` and `subflow` node `config.flow` → `config.flowName`.
+  - `notify` node `config.to` → `recipients`, `subject` → `title`, `body` → `message`, `url` → `actionUrl`, `source: { object, id }` → `sourceObject` / `sourceId`.
+  - `script` node `config.functionName` → `function`, `input` → `inputs`; `actionType` / `template` / `recipients` / `variables` / `script` are removed.
+  - `errorHandling.retryDelayMs` and a `try_catch` node's `retry.retryDelayMs` → `backoffMs`; the flow keys `active` / `template`, a node's `outputSchema` and `errorHandling.fallbackNodeId` are removed.
+  
+  Each refusal names the key to write.
+  
+  <!-- adr-0087: not-required (already-registered flow-node-crud-filter-alias, flow-node-crud-object-alias, flow-node-notify-config-aliases, flow-node-wait-event-config-lift, flow-node-map-flow-alias, flow-node-subflow-flow-alias, flow-node-connector-config-lift, flow-node-script-config-aliases, flow-inert-keys-removed, flow-node-wait-timeout-keys-removed, flow-node-script-branch-keys-removed, retry-policy-converged) these D2 entries already record every spelling the save door now refuses when a re-save introduces it; this change only stops the door replaying them for a re-save's new authored input, and their own migrations are the ones above -->
+- a65a59b: feat(spec)!: the ADR-0078 conversion-conflict channel is retired — `CONVERSION_CONFLICT_CODE`, `ConversionConflictNotice`, `ConversionConflictDetail`, the `onConflict` / `reservedNodeTypes` conversion options, the `conflicts` arrays and the `FLOW_CONVERSION_CONFLICT` 409
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (published API):** the ADR-0087 conversion API carried a channel for a rename REFUSED because its old token was a live name in the environment: a conversion reported it through `ConversionContext.reportConflict`, `applyConversions` handed it to an `onConflict` sink as a `ConversionConflictNotice` (code `OS_METADATA_CONVERSION_CONFLICT`), the automation engine collected it in `canonicalizeStoredFlow`'s `conflicts` array, and the metadata protocol answered it with `409 FLOW_CONVERSION_CONFLICT`. Its only producer was the live-executor guard inside the flow-node HTTP callout rename. Protocol 18 reserved those three names (`FLOW_RESERVED_NODE_TYPES`), so the engine refuses an executor under one, no live owner can exist, and the guard went. Nothing can raise a conversion conflict any more, so the channel leaves the published surface rather than staying as a live-looking failure mode nothing triggers.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `import { CONVERSION_CONFLICT_CODE, type ConversionConflictNotice, type ConversionConflictDetail } from '@objectstack/spec'` | delete the import — no replacement |
+  | `applyConversions(stack, { onConflict, reservedNodeTypes, … })` (likewise `applyConversionsToFlow`, `applyConversionsToStoredItem`, `collectConversionNotices`) | delete both options; keep `onNotice` / `onTodo` |
+  | a conversion's `apply` reading `context.reservedNodeTypes` or calling `context.reportConflict` | a rename over an open namespace reserves its old names instead (the `FLOW_RESERVED_NODE_TYPES` pattern), so the refusal happens at registration; a site with no lossless rewrite goes to `context.reportTodo` |
+  | an `IAutomationService.canonicalizeStoredFlow` implementation returning `conflicts: […]` (or a `StoredFlowCanonicalization` from `@objectstack/metadata-protocol` carrying one) | drop the member; return `parsed`, `storable`, `notices` and optionally `todos` |
+  | a client branch on `error.code === 'FLOW_CONVERSION_CONFLICT'` / HTTP 409 from a flow save, a package duplication or an unmanaged package import | delete the branch — no request can produce it |
+  
+  **The one-line fix:** delete every reference; the branch it guarded was already dead, so deleting it changes no behaviour.
+  
+  **What an upgrader sees.** Importing a removed name is `TS2305`; passing a removed option, or returning a `conflicts` member from a typed canonicalizer, is an excess-property `tsc` error. `ErrorCode` no longer parses `FLOW_CONVERSION_CONFLICT`.
+  
+  **Runtime behaviour is unchanged.** The removed branches could not fire: a stored flow carrying a reserved callout name still loads as `http` (the rewrite has been unconditional since the names were reserved), and `saveMetaItem`, `duplicatePackage`, `importUnmanagedPackage` and `os migrate meta --stored` answer exactly as before. No metadata document needs editing.
+  
+  ## The retirement kit
+  
+  - **`@objectstack/spec`:** the three exports leave the root; `ApplyConversionsOptions` loses `onConflict` and `reservedNodeTypes`, `ConversionContext` loses `reservedNodeTypes` and `reportConflict`, the `IAutomationService.canonicalizeStoredFlow` result loses `conflicts`; the error-code ledger drops `FLOW_CONVERSION_CONFLICT` by its own "Retiring a code" rule (a row comes out with its last emitter).
+  - **`@objectstack/service-automation`:** `AutomationEngine.canonicalizeStoredFlow` no longer returns `conflicts`, and the engine no longer builds a live-name set for the conversion pass.
+  - **`@objectstack/metadata-protocol`:** `StoredFlowCanonicalization` loses `conflicts`; the flow save door's 409, the stored-migration pass's `failed` row for a refused rename, `duplicatePackage`'s failed item and `importUnmanagedPackage`'s 409 are gone with it.
+  - **The D3 entry `conversion-conflict-channel-removed`.** No D2 conversion and no tombstone: no metadata document ever carried any of it.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** The three packages are published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered conversion-conflict-channel-removed -->
+- d6bd98a: fix(metadata-protocol): `duplicatePackage` is refused, with nothing copied, when the install of the copy's package record is refused
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) The refusal is one verb's runtime answer at call time; no stored metadata, spec key or published type changes, so there is nothing for `objectstack migrate meta` to rewrite. The remedy is a different argument on the next call. -->
+  
+  - **Refused now.** `duplicatePackage`, and `POST /api/v1/packages/:id/duplicate` which calls it, installs the copy's package record before it copies any item. When that install is refused, the duplicate is now refused with that same refusal, and nothing is minted or copied. A copy whose namespace another installed package owns answers `422 NAMESPACE_CONFLICT` with the registry's own sentence (ADR-0048); that covers an explicit `targetNamespace` and one derived from the last segment of `targetPackageId`. A failed `sys_packages` write answers the install's own `500`. Before, both refusals were dropped and the items were copied anyway: bound to an id with no package record (absent from `GET /packages`), after a namespace conflict inside the namespace the other package owns, and the answer read `success: true`.
+  - **Unchanged.** A duplicate whose package record installs copies exactly as before, with the same answer shape, and per-item failures still ride `failed[]`. A source with no package record still copies without installing one.
+  - **Remedy.** Choose a target namespace no installed package owns: pass `targetNamespace` explicitly, or pick a `targetPackageId` whose last segment derives a free one. For a deliberate migration, `OS_METADATA_COLLISION=warn` still downgrades the namespace gate to a warning, and the duplicate then proceeds.
+  - **Logged.** The refusal is logged once at `warn` by `[protocol.duplicatePackage]`, naming the target and source ids and the refusal's code and message. For a store fault the error itself is attached, so its cause reaches the log.
+
+### Patch Changes
+
+- ee0e115: docs: the default-record-page remedies name the other package's page, not the whole package
+  
+  Clause-②: no
+  
+  A second `isDefault: true` record page for one object is refused with `DEFAULT_RECORD_PAGE_CONFLICT`. The package registry's refusal already told the author to keep one default or "compose the deployment without the other package's page". Three sibling texts still told them to drop the whole package, though a deployment can keep a package and leave out the one page it ships:
+  
+  - `@objectstack/metadata-protocol`: the metadata save door's refusal now reads "a page a package ships stays the default unless the deployment is composed without that package's page." Only the remedy clause changed; `code`, `status`, `object` and `holders` are unchanged.
+  - `@objectstack/spec`: `PageSchema.isDefault`'s TSDoc and the error-code ledger's comment on `DEFAULT_RECORD_PAGE_CONFLICT` say the same.
+  - `@objectstack/runtime`: `AppPlugin`'s private `bundle` field now documents the three readers outside the class that read it structurally, so a rename is not made blind.
+  
+  No behaviour changes; nothing to migrate.
+- 8684079: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  fix(metadata-protocol,metadata): on a database the organization-ownership ceremony has not migrated, the paged family reads, `DatabaseLoader`'s count and the package rollback agree with the environment-only reads; the ceremony's apply is named with `--plan-file` (ADR-0131 D6/D7)
+  
+  Clause-②: no
+  
+  Every change below matters only where legacy organization rows still sit in the `sys_metadata` family, the database `os serve` refuses to start on until `os migrate organization-ownership` has verified. On a migrated or fresh database every answer is unchanged.
+  
+  - **`@objectstack/metadata-protocol`: a paged read leaves the legacy rows out before the page is cut.** `auditMetaItem` (`limit`), `listCommits` (`limit`), `revertStoredPackage`'s first-active-row probe and `SysMetadataRepository.list({ limit })` used to filter a legacy organization's rows out after the limit. A page they sat in came back short, and `revertStoredPackage` answered `RESOURCE_CONFLICT` (409) "has never been published" for a package the environment had published when its first active row was an organization's. When a page holds a legacy row, the read is now repeated with those rows excluded in the query.
+  - **`@objectstack/metadata-protocol`: `rollbackToPackageCommit` refuses a legacy organization's commit by name.** It answered `COMMIT_NOT_FOUND` (404) for a commit that is there. It now gives `revertCommit`'s refusal: `NOT_OVERRIDABLE` (403), the same sentence, naming the commit and its organization.
+  - **`@objectstack/metadata`: `DatabaseLoader` counts what it reads.** `exists()` answered true for an address only a legacy organization row held, while `load()` answered null, and `queryHistory`'s `total` counted legacy history rows no page serves. Neither counts them now.
+  - **`@objectstack/metadata-protocol`: internal cleanup.** The organization plumbing that only ever carried the environment (`null`) is removed from the list merge and the served-row resolution. No export changes.
+  - **`@objectstack/spec`: wording.** The four ADR-0087 entries `18.sys-metadata{,-audit,-commit,-history}-organization-column-retired` now name the ceremony's reviewed apply, `os migrate organization-ownership --out PLAN` and then `--apply --plan-file PLAN`, which `--plan-file`'s own entry requires. No id, category, version or field the migration engine reads changes.
+  - **`@objectstack/cli`: wording.** `os migrate apply --allow-destructive`'s refusal on an unmigrated database now reads "a drop the organization-ownership ceremony owns, and the ceremony has not verified on this database". Its `--json` payload is unchanged.
+- 66d2757: feat(spec)!: every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
+  
+  Clause-②: yes (narrowing — the served row gains two declared keys, and the record schema, the served-row union and the registry's installPackage signature each refuse what they accepted before)
+  
+  **BREAKING** — three published accept sets narrow. `InstalledPackageSchema` refuses a row without `source`, or with a value outside `code` / `marketplace` / `authored`. The served-row union `InstalledPackageAtEitherStageSchema` refuses a row without a boolean `writable`. `SchemaRegistry.installPackage` and `EngineSchemaRegistryView.installPackage` take `source` as their second argument and refuse a call without it. The migration is below. None of it is mechanically convertible, because only the door that registers a package knows where it came from.
+  
+  **What is new on the wire.** `GET /api/v1/packages` and `GET /api/v1/packages/:id` serve two declared keys on every row:
+  
+  - `source` names the package's origin. `code` means the deployment's own code registered it (a `defineStack()` host, a plugin's bundled manifest, a platform package). `marketplace` means the marketplace install-local plugin installed it, and that holds after a restart too, when the plugin rehydrates it from its ledger. `authored` means it is a database-authored package (a Studio base, a duplicate, an HTTP install), including after the restart that rehydrates it from `sys_packages`. The door that registers the package stamps the value. No reader derives it.
+  - `writable` is the server's own writability verdict (ADR-0070 D2), served on these rows since #14375 and now declared. It is computed per read and never stored, so it is declared on the served row (`InstalledPackageAtEitherStageSchema`) and not on the registry record.
+  
+  FROM → TO for a reader of these rows:
+  
+  | you did | do instead |
+  | --- | --- |
+  | treated `writable: true` as authored, and looked up each non-writable row in the marketplace's installed list (the control plane's, else install-local's) to tell marketplace from code | read `row.source` |
+  | read the undeclared `writable` | read the declared `writable` (unchanged value) |
+  
+  The two keys are separate statements: `source` says where the package came from, and `writable` says what this server lets an org do to it.
+  
+  **`InstalledPackageSchema` requires `source`.** It is `InstalledPackageSourceSchema`, exported from `@objectstack/spec/kernel`. A row without it, or with a value outside the closed set, is refused at the `source` key.
+  
+  **API change for code that registers packages (`@objectstack/objectql`).** The registry records the origin and never infers it:
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `registry.installPackage(manifest)` | `registry.installPackage(manifest, 'code')` (or `'marketplace'` / `'authored'`, whichever is where the package came from) |
+  | `registry.installPackage(manifest, settings, scope)` | `registry.installPackage(manifest, source, settings, scope)` |
+  | `ctx.getService('manifest').register(artifact)` for a marketplace install | `ctx.getService('manifest').register(artifact, { source: 'marketplace' })` |
+  
+  `SchemaRegistry.installPackage` throws a `TypeError` naming the closed set when `source` is missing or unknown, before anything is recorded. `ObjectQL.registerApp(body, scope?, source?)` and the `manifest` service record `'code'` when no source is given. They accept `'code'` or `'marketplace'` and refuse `'authored'`. The `IObjectQLEngine` registry contract (`@objectstack/spec/contracts`) declares the same `installPackage(manifest, source, settings?)`.
+  
+  **The one-line fix:** pass the package's origin as `installPackage`'s second argument.
+  
+  Readers: objectui's Setup → Packages Source column and its `?source=` filter (it switches from the two-read join to `source` in its own follow-up), and the client SDK's `packages.list()` / `packages.get()` row types.
+  
+  <!-- adr-0087: registered installed-package-row-source-required, registry-install-package-source-argument -->
+- Updated dependencies [e375315]
+- Updated dependencies [cbbd96a]
+- Updated dependencies [b6805ac]
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/lint@18.0.0-next.3
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/metadata@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+  - @objectstack/sdui-parser@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

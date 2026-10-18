@@ -1743,7 +1743,8 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'element-flat-data-binding-retired',
     order: 90,
     text:
-      'It also retires the element layer\'s second data door (#11509, ruling A-narrow): the flat '
+      'It also retires the element layer\'s second data door (ruled 2026-10-08, which leaves the '
+      + '`object-*` blocks their native keys): the flat '
       + '`object` / `filter` / `sort` / `limit` keys of `element:record_picker` and '
       + '`element:repeater` and the flat `object` / `filter` of `element:number`, each the same query '
       + 'as a key of the node-level `dataSource` binding, resolved per element by three contradictory '
@@ -2333,8 +2334,9 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
     id: 'object-grid-default-filters-retired',
     order: 90,
     text:
-      'It also retires `object-grid`\'s `defaultFilters` (#11509, ruling A-narrow, in the shape '
-      + 'of the `defaultSort` retirement): the legacy second spelling of `filter`, read only when '
+      'It also retires `object-grid`\'s `defaultFilters` (ruled 2026-10-08 together with the '
+      + 'element layer\'s flat binding keys, in the shape of the `defaultSort` retirement): the '
+      + 'legacy second spelling of `filter`, read only when '
       + '`filter` lowered to nothing, which an earlier narrowing in this major had shaped as the rule '
       + 'array and this retirement absorbs. The mechanical conversion moves the rules onto an empty '
       + '`filter` and deletes the key beside a `filter` with content (the renderer never read it '
@@ -2508,6 +2510,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'alike, retired from the load path. Its D3 record is the semantic entry '
       + '`page-header-show-star-retired`. The host hook is not part of it: a host that wires the '
       + 'favorites toggle still draws its star.',
+  },
+  {
+    id: 'page-list-view-object-name-view-type-retired',
+    order: 101,
+    text:
+      'It also judges a list view embedded on a page as a list view (maintainer ruling 2026-10-10: one '
+      + 'list view has one set of property names wherever it is embedded). `ComponentPropsMap` gains a '
+      + '`list-view` row built from the list view\'s own members, with `columns` optional and the legacy '
+      + '`options` bag judged per kind as the list overlay member judges them, so a key every list view door '
+      + 'refuses (a kanban block\'s `groupField`, `options.grid`) is no longer saved green on a page. The page '
+      + 'carrier\'s own spelling of the binding and the kind, `objectName` and `viewType`, is refused by name '
+      + 'with the prescription the react tier gives the same two aliases on `ListView`. The D2 conversion '
+      + '`page-list-view-object-name-view-type-to-data-type` moves them to `data` and `type` on stored nodes, '
+      + 'retired from the load path, and leaves an alias that disagrees with the spec key beside it as stored, '
+      + 'reported as a TODO. Its D3 record is the semantic entry `page-list-view-object-name-view-type-retired`.',
   },
   {
     id: 'page-requires-non-compiled-kind-refused',
@@ -2887,6 +2904,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries, and on the assembled-manifest `viewItems` channel.',
   },
   {
+    id: 'ui-marketplace-installed-list-retired',
+    order: 102,
+    text:
+      'It also retires the `marketplace:installed-list` page element (ADR-0049 enforce-or-remove), '
+      + 'the plugin console widget that drew the separate Installed Apps view. That view was retired: '
+      + 'its one renderer was deleted and its one page had already left the cloud-connection plugin, '
+      + 'whose "Installed Apps" navigation entry opens Setup → Packages filtered to Source = '
+      + 'marketplace instead. The name was never a `PageComponentType` member, so it is refused by '
+      + 'name at the node, and its `ComponentPropsMap` row stays as a whole-bag refusal carrying the '
+      + 'same prescription. No conversion is registered: the only edit is deleting the node, a layout '
+      + 'decision that is the author\'s. Its D3 record is the semantic entry '
+      + '`ui-marketplace-installed-list-retired`.',
+  },
+  {
     id: 'ui-object-form-custom-fields-typed',
     order: 78,
     text:
@@ -3160,6 +3191,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'renames the value, retired from the load path so authors are refused at the door while stored rows and '
       + '`os migrate meta` replay it. Its D3 record is the semantic entry '
       + '`ui-page-action-row-navigation-executor-refused`.',
+  },
+  {
+    id: 'ui-record-json-retired',
+    order: 100,
+    text:
+      'It also retires the `record:json` page element (ADR-0049 enforce-or-remove), one '
+      + 'prerelease after it was declared: it shipped in 18.0.0-next.3 only, for the approval request '
+      + 'page\'s raw JSON panel, and the maintainer dropped that panel — the person deciding an '
+      + 'approval has no business need to read the request as JSON — so no renderer was built and no '
+      + 'page placed it. The name leaves `PageComponentType` and is refused by name at the node, its '
+      + '`ComponentPropsMap` row stays as a whole-bag refusal carrying the same prescription, and the '
+      + 'props def `RecordJsonProps` is unpublished. No conversion is registered: the only edit is '
+      + 'deleting the node, a layout decision that is the author\'s. Its D3 record is the semantic '
+      + 'entry `ui-record-json-retired`.',
   },
   {
     id: 'ui-record-line-items-props-closed',

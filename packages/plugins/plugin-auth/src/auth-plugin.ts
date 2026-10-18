@@ -31,7 +31,7 @@ import { SysOrganizationDetailPage, SysUserDetailPage } from '@objectstack/platf
 import { PLATFORM_OWNER_EMAIL_ENV, resolvePlatformOwnerEmail, resolveTenancyPosture } from '@objectstack/types';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { postureEnforcesWall, type OrgScopingEntitlement } from '@objectstack/spec/security';
-import type { IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, IDataEngine, IEmailService, II18nService, IObjectQLEngine, ISmsService } from '@objectstack/spec/contracts';
 import {
   AuthManager,
   resolveOidcProviderEnabled,
@@ -71,6 +71,7 @@ import { MANAGED_EXTENSION_EDITABLE_FIELDS } from './managed-extension-fields.js
 import { runSetInitialPassword } from './set-initial-password.js';
 import { runRegisterSsoProviderFromForm, runRegisterSamlProviderFromForm, runRequestDomainVerification, runVerifyDomain } from './register-sso-provider.js';
 import { runResendVerificationEmail } from './send-verification-email.js';
+import { readJsonRequestBody } from './request-json-body.js';
 import type { CounterStore } from './rate-limit-storage.js';
 import { authIdentityManifest } from './manifest.js';
 import { scheduleLegacySsoSecretMigration } from './sso-client-secret.js';
@@ -145,6 +146,13 @@ interface SettingsReadSurface {
 
 /** [#23367] The auth setting that records when the API-key lifecycle policy took effect. */
 const API_KEY_POLICY_STARTED_AT_KEY = 'api_key_policy_started_at';
+
+/**
+ * [#24222] What the in-process session read answers, as `AuthSessionApi` declares
+ * it. better-auth's own handle answers `null` for no session, hence the
+ * `| null` at each read.
+ */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 /**
  * The `protocol` slot's metadata reader, as the user-import route uses it.
@@ -506,6 +514,17 @@ export class AuthPlugin implements Plugin {
       getAuditSink: () => {
         try {
           return ctx.getService<AuthEventAuditSurface>('audit');
+        } catch {
+          return undefined;
+        }
+      },
+      // [#24154] The `i18n` service, resolved LAZILY at send time: the
+      // invitation mail names the membership role by the option label the
+      // console reads through this same service. `getService` throws for an
+      // unregistered service; the mail then names the authored label.
+      getI18n: () => {
+        try {
+          return ctx.getService<II18nService>('i18n');
         } catch {
           return undefined;
         }
@@ -2741,8 +2760,14 @@ export class AuthPlugin implements Plugin {
     // Upstream tracking: https://github.com/better-auth/better-auth
     rawApp.post(`${basePath}/admin/oauth2/toggle-disabled`, async (c: any) => {
       try {
-        let body: any = {};
-        try { body = await c.req.json(); } catch { body = {}; }
+        // [#24032] A declared-JSON body that does not parse is refused, never
+        // read as `{}` (which answered "client_id is required" for a body that
+        // carried it); see request-json-body.ts.
+        const reading = await readJsonRequestBody(c.req.raw);
+        if (!reading.ok) {
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: reading.message } }, 400);
+        }
+        const body: any = reading.body;
         const clientId: unknown = body?.client_id;
         const disabled: unknown = body?.disabled;
         if (typeof clientId !== 'string' || clientId.length === 0) {
@@ -2755,7 +2780,8 @@ export class AuthPlugin implements Plugin {
         // Platform-admin gate (ADR-0068 D2) — one shared judge for every
         // ObjectStack `/admin/*` mount; see platform-admin-gate.ts.
         const authApi = await this.authManager!.getApi();
-        const session = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+        // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`).
+        const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
         const verdict = judgePlatformAdmin(session);
         if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
 
@@ -2818,7 +2844,8 @@ export class AuthPlugin implements Plugin {
     // spelling instead of accreting per-mount copies.
     const gateAdmin = async (c: any): Promise<PlatformAdminActor | Response> => {
       const authApi = await this.authManager!.getApi();
-      const session = await (authApi as any).getSession(inProcessSessionReadInput(c.req.raw.headers));
+      // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`), not through `any`.
+      const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
       const verdict = judgePlatformAdmin(session);
       if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
       return verdict.actor;
@@ -2876,8 +2903,13 @@ export class AuthPlugin implements Plugin {
     // server-side; mirrors the toggle-disabled route's session+role check.
     rawApp.post(`${basePath}/admin/unlock-user`, async (c: any) => {
       try {
-        let body: any = {};
-        try { body = await c.req.json(); } catch { body = {}; }
+        // [#24032] Same read as toggle-disabled above: a truncated body used to
+        // answer "userId is required" for a body that carried `userId`.
+        const reading = await readJsonRequestBody(c.req.raw);
+        if (!reading.ok) {
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: reading.message } }, 400);
+        }
+        const body: any = reading.body;
         const userId: unknown = body?.userId ?? body?.user_id;
         if (typeof userId !== 'string' || userId.length === 0) {
           return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: 'userId is required' } }, 400);
@@ -2885,7 +2917,8 @@ export class AuthPlugin implements Plugin {
 
         // Platform-admin gate (ADR-0068 D2) — see platform-admin-gate.ts.
         const authApi = await this.authManager!.getApi();
-        const session = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+        // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`).
+        const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
         const verdict = judgePlatformAdmin(session);
         if (!verdict.ok) return c.json(verdict.refusal.body, verdict.refusal.status);
 
@@ -3203,8 +3236,9 @@ export class AuthPlugin implements Plugin {
       rawApp.post(`${basePath}/admin/has-permission`, async (c: any) => {
         try {
           const authApi = await this.authManager!.getApi();
-          const session = await (authApi as any).getSession(inProcessSessionReadInput(c.req.raw.headers));
-          const user = (session as { user?: { id?: unknown } } | null | undefined)?.user;
+          // [#24222] Read as `AuthSessionApi` declares the answer (see `SessionRead`), not through `any`.
+          const session: SessionRead | null = await authApi.getSession(inProcessSessionReadInput(c.req.raw.headers));
+          const user = session?.user;
           if (user?.id && isPlatformAdminUser(user)) {
             const { readEvaluatedPermissionQuery, answerPermissionQueryAsAdmin } = await import(
               './admin-has-permission-endpoint.js'
@@ -3429,8 +3463,12 @@ export class AuthPlugin implements Plugin {
     // just to fix UX. Keeping the wrapper scoped to the self-service flow.
     rawApp.post(`${basePath}/sys-oauth-application/register`, async (c: any) => {
       try {
-        let body: any = {};
-        try { body = await c.req.json(); } catch { body = {}; }
+        // [#24032] Same read as toggle-disabled: refused, never read as `{}`.
+        const reading = await readJsonRequestBody(c.req.raw);
+        if (!reading.ok) {
+          return c.json({ success: false, error: { code: 'INVALID_REQUEST', message: reading.message } }, 400);
+        }
+        const body: any = reading.body;
 
         const name: unknown = body?.name;
         const redirectUrlsInput: unknown = body?.redirectURLs;

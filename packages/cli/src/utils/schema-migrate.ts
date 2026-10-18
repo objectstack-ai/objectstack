@@ -31,6 +31,19 @@
  * §3.6), this boot provisions that sibling through the same helper
  * (`provisionTelemetryDatasource`, #22579), and the plan diffs and applies each
  * object against the database it lives in ({@link SchemaStack.detectManagedDrift}).
+ *
+ * [#24120] …and so are the datasources the deployment DECLARES. A serving boot
+ * connects every managed datasource its `datasourceMapping` routes objects to
+ * (or an object binds) through the `datasource-connection` service, under the
+ * datasource's declared name — so a `{ default: true, datasource: 'main' }`
+ * rule puts every object, platform objects included, in `main`. `os migrate
+ * plan` / `apply` compose that same service ({@link DeclaredDatasourceConnectionPlugin}),
+ * and plan each such datasource's driver beside the primary
+ * ({@link SchemaStack.drivers}). Without it the boot resolved the declared
+ * default's LOCATION as its primary but registered no driver under its name,
+ * so every object the rule routed there was bound to no driver: `Examined 0
+ * managed table(s)` over the database whose drift `os dev` reports, and names
+ * this command for.
  */
 import path from 'node:path';
 import chalk from 'chalk';
@@ -51,7 +64,7 @@ import {
   readDotenvFiles,
   type DotenvReading,
 } from '../commands/doctor.js';
-import { describeDriverConnection } from './connection-display.js';
+import { describeDriverConnection, describeDriverSqliteFile } from './connection-display.js';
 import { reserveStdoutForJson } from './json-stdout.js';
 import {
   buildSchemaMigrationPlugins,
@@ -125,10 +138,19 @@ export interface SchemaStack {
   telemetryDatabase: string | null;
   /**
    * [#22579] Every SQL driver this boot plans against, in order: the primary
-   * ({@link driver}), then the `telemetry` sibling when there is one. An object
-   * whose engine-resolved driver is not here is outside the plan.
+   * ({@link driver}), then the `telemetry` sibling when there is one, then
+   * [#24120] each declared managed datasource the boot connected for the
+   * objects routed or bound to it, by name. An object whose engine-resolved
+   * driver is not here is outside the plan.
    */
   drivers: readonly SqlDriverLike[];
+  /**
+   * [#24120] The database a planned driver ({@link drivers}) addresses, as an
+   * operator reads it: {@link dbLabel} for the primary, {@link telemetryDatabase}
+   * for the sibling, the connection a declared datasource's driver describes —
+   * or `null` for a driver this stack does not plan.
+   */
+  databaseOf: (driver: SqlDriverLike) => string | null;
   /**
    * [#22579] Managed drift over every datasource this boot plans against: the
    * primary, then the `telemetry` sibling when there is one. Each entry stays
@@ -176,6 +198,19 @@ export interface SchemaStack {
    * (#3917). Always `[]` unless the stack was booted with `deferSchemaDdl`.
    */
   pendingSchemaWork: PendingSchemaWork[];
+  /**
+   * [#24059] The physical tables this boot's composition declares OUTSIDE the
+   * object set: the package registry's `sys_packages`, named by the same
+   * `package.storage` declaration {@link pendingSchemaWork} plans it from
+   * (#23022) — or `[]` when the boot composed no package registry.
+   *
+   * Named whether or not the table exists, and on every boot: the plan lists the
+   * table as `create_table` only while it is absent, so once `os migrate apply`
+   * has created it the pending work names nothing. `os migrate plan`'s
+   * unmanaged-table sweep reads this, so the table the apply created is not
+   * reported as declared by nothing.
+   */
+  nonObjectTables: readonly string[];
   /**
    * [#21529] Did this boot MEASURE `objectName`'s table as absent? `true` only
    * when the held-back sync above would CREATE it (`create_table`), which the
@@ -309,29 +344,21 @@ interface PackageStorageDeclaration {
 }
 
 /**
- * [#23022] `sys_packages` as pending schema work, when it is absent.
+ * [#23022] The package registry's declaration of `sys_packages`, as this boot
+ * composed it — or `null` when the boot composed no package registry.
  *
- * ## Why the plan needs this
+ * [#24059] The ONE reader of that declaration. {@link planPackageTable} plans
+ * the table from what this returns, and {@link SchemaStack.nonObjectTables}
+ * names the table from the same object, so `os migrate plan`'s unmanaged-table
+ * sweep knows the table by the source the plan creates it from — and knows it
+ * whether or not the table exists, which the plan's pending work cannot say:
+ * that lists the table only while it is absent.
  *
- * `PackageServicePlugin.start()` creates `sys_packages` with raw DDL, because
- * the table cannot be a declared object (`service-package`'s
- * `package-table.ts` records the measurement: the driver's managed tables key
- * on `id` alone, and this one keys on `(id, version)`). So no driver deferral
- * ever listed it, and a deployment that sets `OS_SKIP_SCHEMA_SYNC=1` — whose
- * boot now creates nothing — was left with no way to get it from the documented
- * path. The plugin declares the table in `init()`, which a migrate boot runs,
- * and this lists it as `create_table` beside the objects' tables; `apply`'s
- * flush then runs the plugin's own statements, so `apply` creates exactly what
- * the boot creates.
- *
- * `null` when there is nothing to plan: the plugin is not composed, or the
- * table exists. When its presence could not be READ, that is not absence: a
- * note says the table was not examined, and nothing is planned.
+ * Throws when the service answers in a shape this CLI does not read: the two
+ * packages come from different releases, and neither the plan nor the sweep can
+ * name the table.
  */
-async function planPackageTable(
-  kernel: unknown,
-  notes: string[],
-): Promise<{ storage: PackageStorageDeclaration; work: PendingSchemaWork } | null> {
+function findPackageStorage(kernel: unknown): PackageStorageDeclaration | null {
   let service: unknown;
   try {
     service = (kernel as { getService?: (name: string) => unknown }).getService?.(PACKAGE_STORAGE_SERVICE);
@@ -350,7 +377,33 @@ async function planPackageTable(
       + 'from the same release.',
     );
   }
-  const declared = storage as PackageStorageDeclaration;
+  return storage as PackageStorageDeclaration;
+}
+
+/**
+ * [#23022] `sys_packages` as pending schema work, when it is absent.
+ *
+ * ## Why the plan needs this
+ *
+ * `PackageServicePlugin.start()` creates `sys_packages` with raw DDL, because
+ * the table cannot be a declared object (`service-package`'s
+ * `package-table.ts` records the measurement: the driver's managed tables key
+ * on `id` alone, and this one keys on `(id, version)`). So no driver deferral
+ * ever listed it, and a deployment that sets `OS_SKIP_SCHEMA_SYNC=1` — whose
+ * boot now creates nothing — was left with no way to get it from the documented
+ * path. The plugin declares the table in `init()`, which a migrate boot runs,
+ * and this lists it as `create_table` beside the objects' tables; `apply`'s
+ * flush then runs the plugin's own statements, so `apply` creates exactly what
+ * the boot creates.
+ *
+ * `null` when there is nothing to plan: the table exists. When its presence
+ * could not be READ, that is not absence: a note says the table was not
+ * examined, and nothing is planned.
+ */
+async function planPackageTable(
+  declared: PackageStorageDeclaration,
+  notes: string[],
+): Promise<{ storage: PackageStorageDeclaration; work: PendingSchemaWork } | null> {
   const present = await declared.present();
   if (present === true) return null;
   if (present === undefined) {
@@ -542,6 +595,129 @@ function defaultDriverOf(ctx: { getService?: (name: string) => unknown }): unkno
 }
 
 /**
+ * [#24120] The kernel service `AppPlugin` connects a deployment's declared
+ * datasources through — ADR-0062 D1's one "definition → live driver" path,
+ * `DatasourceConnectionService`. `os serve` publishes it from
+ * `DatasourceAdminServicePlugin`; without a publisher, `AppPlugin` leaves every
+ * declared datasource metadata-only, which is how a schema-migration boot came
+ * to register no driver for the datasource a `datasourceMapping` rule routes
+ * its objects to.
+ */
+const DATASOURCE_CONNECTION_SERVICE = 'datasource-connection';
+
+/**
+ * [#24120] The connect policy of a schema-migration boot: MANAGED datasources
+ * only. A datasource whose schema the remote owns (`schemaMode: 'external'` /
+ * `'validate-only'`) holds no table a migration diffs — its objects are
+ * federated, counted apart by the coverage pass — so a dry run opens no
+ * connection to it. Every managed datasource connects as on `os serve`.
+ */
+const MANAGED_DATASOURCES_ONLY = {
+  canConnect: (ds: { schemaMode?: string }): { allow: boolean; reason?: string } =>
+    ds.schemaMode === undefined || ds.schemaMode === 'managed'
+      ? { allow: true }
+      : {
+          allow: false,
+          reason: `schemaMode '${ds.schemaMode}': the remote owns this datasource's schema, `
+            + 'so a schema migration has no table to plan on it',
+        },
+};
+
+/**
+ * [#24120] Publishes {@link DATASOURCE_CONNECTION_SERVICE} on a schema-migration
+ * boot, so `AppPlugin` connects the deployment's declared datasources by the
+ * code `os serve` runs, under their declared names — ahead of the first schema
+ * sync, which is where `AppPlugin` connects a datasource its mapping routes
+ * registered objects to. Each connect reaches the engine through
+ * `registerDriver`, so {@link DeferSchemaDdlPlugin} arms it before it syncs and
+ * the declaration write guard refuses its row writes, exactly as for the
+ * primary.
+ *
+ * Two differences from `os serve`'s publisher, both because this boot is a
+ * migration and not a server: the policy is {@link MANAGED_DATASOURCES_ONLY},
+ * and a read-only probe's factory opens an absent SQLite file as an empty
+ * in-memory database (`sqliteAbsentFile`, #6743), as the primary's does. Not
+ * composed when the composition already brings a publisher (a host config
+ * listing `DatasourceAdminServicePlugin`): the kernel refuses a second.
+ */
+export class DeclaredDatasourceConnectionPlugin {
+  name = 'com.objectstack.cli.declared-datasource-connection';
+  version = '1.0.0';
+  /** ADR-0116: the service `init()` registers on every path. */
+  providesServices = [DATASOURCE_CONNECTION_SERVICE];
+
+  constructor(private readonly options: { readOnlyProbe?: boolean } = {}) {}
+
+  init = async (ctx: any) => {
+    // Lazy, as every driver-adjacent import in this module is (#5726).
+    const { DatasourceConnectionService, createDefaultDatasourceDriverFactory } =
+      await import('@objectstack/service-datasource');
+    const factory = createDefaultDatasourceDriverFactory(
+      this.options.readOnlyProbe ? { sqliteAbsentFile: 'empty-in-memory' } : {},
+    );
+    ctx.registerService(DATASOURCE_CONNECTION_SERVICE, new DatasourceConnectionService({
+      factory: () => factory,
+      engine: () => {
+        try { return ctx.getService('data'); } catch { return undefined; }
+      },
+      policy: MANAGED_DATASOURCES_ONLY,
+      logger: ctx.logger,
+    }));
+  };
+}
+
+/** Does any of `plugins` already publish {@link DATASOURCE_CONNECTION_SERVICE}? */
+function publishesDatasourceConnection(plugins: readonly unknown[]): boolean {
+  return plugins.some((p) => {
+    const provides = (p as { providesServices?: unknown } | null)?.providesServices;
+    return Array.isArray(provides) && provides.includes(DATASOURCE_CONNECTION_SERVICE);
+  });
+}
+
+/**
+ * [#24120] The declared datasources this boot connected that the deployment's
+ * objects live in: each SQL driver registered under a datasource name the
+ * {@link DATASOURCE_CONNECTION_SERVICE} reports `available` that a registered,
+ * non-federated object resolves to — the engine's own routing answers which,
+ * never a re-read of the rules. `planned` (the primary and the sibling) is not
+ * repeated. Sorted by name, so the plan reads in one order.
+ *
+ * `available`, not the `connected` status: `AppPlugin` connects a mapped
+ * datasource before the first schema sync and asks again in `start()`, and the
+ * service retains the LAST verdict — `already-registered` for the same live
+ * driver.
+ */
+function findDeclaredDatasourceDrivers(
+  kernel: unknown,
+  planned: readonly SqlDriverLike[],
+): Array<{ name: string; driver: SqlDriverLike }> {
+  const service = (name: string): any => {
+    try { return (kernel as { getService?: (n: string) => unknown })?.getService?.(name); } catch { return undefined; }
+  };
+  const states: unknown = service(DATASOURCE_CONNECTION_SERVICE)?.listConnectionStates?.();
+  const connected = new Set(
+    (Array.isArray(states) ? states : [])
+      .filter((s: { availability?: unknown }) => s?.availability === 'available')
+      .map((s: { name?: unknown }) => s.name),
+  );
+  if (connected.size === 0) return [];
+  const engine = service('objectql');
+  const objects: unknown = engine?.registry?.getAllObjects?.();
+  if (!Array.isArray(objects) || typeof engine?.getDriverForObject !== 'function') return [];
+  const found = new Map<string, SqlDriverLike>();
+  for (const obj of objects as Array<{ name?: unknown; external?: unknown }>) {
+    if (obj?.external != null || typeof obj?.name !== 'string') continue;
+    const driver = engine.getDriverForObject(obj.name);
+    const name = driver?.name;
+    if (typeof name !== 'string' || !connected.has(name) || found.has(name) || planned.includes(driver)) continue;
+    if (typeof driver.detectManagedDrift === 'function' && typeof driver.applyMigrationEntries === 'function') {
+      found.set(name, driver as SqlDriverLike);
+    }
+  }
+  return [...found].sort(([a], [b]) => a.localeCompare(b)).map(([name, driver]) => ({ name, driver }));
+}
+
+/**
  * [#23816] Does the transport the boot will open for `resolved` refuse
  * deferred schema DDL? Today exactly the Turso REMOTE transport. The
  * standalone stack builds a `turso` datasource as `{ url, authToken }`, so
@@ -577,6 +753,44 @@ function describeDb(driver: SqlDriverLike | null): string {
   const cfg: any = driver?.config;
   if (!cfg) return 'unknown';
   return describeDriverConnection(cfg) ?? String(cfg.client ?? 'unknown');
+}
+
+/**
+ * [#24120] One planned driver per DATABASE, for a reading of what each
+ * database holds (`os migrate plan`'s unmanaged-table sweep): the first driver
+ * of each, in {@link SchemaStack.drivers} order.
+ *
+ * Two planned drivers can address one database. A `datasourceMapping` default
+ * the primary resolves its location from is connected again under its declared
+ * name, exactly as `os serve` connects it — the primary's file and the declared
+ * datasource's are one file — and read twice, every table counted twice.
+ * Identity is the database file a SQLite driver names
+ * ({@link describeDriverSqliteFile}, resolved as SQLite opens it), otherwise
+ * the connection a driver describes; a driver with neither (an in-memory
+ * database, each connection its own) is never folded into another.
+ */
+export function distinctDatabaseDrivers(drivers: readonly SqlDriverLike[]): SqlDriverLike[] {
+  const seen = new Set<string>();
+  const out: SqlDriverLike[] = [];
+  for (const driver of drivers) {
+    const file = describeDriverSqliteFile(driver.config);
+    const identity = file !== undefined
+      ? `file:${path.resolve(file)}`
+      : hasSqliteFilename(driver.config) ? undefined : describeDriverConnection(driver.config);
+    if (identity !== undefined && seen.has(identity)) continue;
+    if (identity !== undefined) seen.add(identity);
+    out.push(driver);
+  }
+  return out;
+}
+
+/** Does a driver config name a SQLite target at all — a file, `:memory:`, or SQLite's private temporary database? */
+function hasSqliteFilename(config: unknown): boolean {
+  if (!config || typeof config !== 'object') return false;
+  const cfg = config as Record<string, unknown>;
+  const conn = cfg.connection;
+  const bag = conn && typeof conn === 'object' ? conn as Record<string, unknown> : cfg;
+  return typeof (bag.filename ?? cfg.filename) === 'string';
 }
 
 // ── The project's `.env*` files (#22581) ────────────────────────────
@@ -953,6 +1167,22 @@ export async function bootSchemaStack(
      * See `buildSchemaMigrationPlugins`'s `servedPlatform`.
      */
     composeServedPlatform?: boolean;
+    /**
+     * [#24120] Connect the deployment's declared MANAGED datasources as `os
+     * serve` connects them — through the `datasource-connection` service,
+     * under their declared names ({@link DeclaredDatasourceConnectionPlugin})
+     * — and plan each one the deployment's objects live in beside the primary
+     * ({@link SchemaStack.drivers}). Set by `os migrate plan` and `os migrate
+     * apply`, so the plan an operator reads and the apply that confirms it
+     * cover the same datasources, and by `os migrate unmapped-columns`, a
+     * filter over that plan's own findings; by nothing else.
+     *
+     * Without it a `datasourceMapping` rule routing objects to a declared
+     * datasource left them bound to no driver here, the declared DEFAULT's
+     * included: the boot opened that datasource's database as its primary and
+     * examined none of its tables.
+     */
+    composeDeclaredDatasources?: boolean;
   },
 ): Promise<SchemaStack> {
   // Taken BEFORE the first line the boot can print. `createStandaloneStack`
@@ -1110,6 +1340,14 @@ export async function bootSchemaStack(
   for (const plugin of opts.extraPlugins ?? []) {
     await kernel.use(plugin as any);
   }
+  // [#24120] The publisher `AppPlugin` connects declared datasources through,
+  // unless the composition already brought one.
+  if (
+    opts.composeDeclaredDatasources === true
+    && !publishesDatasourceConnection([...stack.plugins, ...composition.plugins, ...(opts.extraPlugins ?? [])])
+  ) {
+    await kernel.use(new DeclaredDatasourceConnectionPlugin({ readOnlyProbe: opts.readOnlyProbe === true }) as any);
+  }
   await runtime.start();
 
   // #13332 — the kernel bootstrap is over, and with it the window the
@@ -1131,11 +1369,16 @@ export async function bootSchemaStack(
 
   const driver = findSqlDriver(kernel);
   // [#22579] Every SQL driver this boot plans against: the primary, then the
-  // sibling it provisioned. Nothing else — a datasource an artifact declares
-  // or a mapping names stays outside the plan, reported by its coverage.
+  // sibling it provisioned, then [#24120] each declared datasource this boot
+  // connected that objects live in. Nothing else — a datasource registered
+  // by any other path stays outside the plan, reported by its coverage.
   const telemetryDriver = telemetryDatabase !== null ? findTelemetryDriver(kernel) : null;
-  const plannedDrivers: SqlDriverLike[] = [driver, telemetryDriver]
+  const servedDrivers: SqlDriverLike[] = [driver, telemetryDriver]
     .filter((d): d is SqlDriverLike => d !== null);
+  const declaredDrivers = opts.composeDeclaredDatasources === true
+    ? findDeclaredDatasourceDrivers(kernel, servedDrivers)
+    : [];
+  const plannedDrivers: SqlDriverLike[] = [...servedDrivers, ...declaredDrivers.map((d) => d.driver)];
 
   // #13028 — the composed host declared its objects in `init()`; the pass that
   // hands them to their driver lives in `ObjectQLPlugin.start()`, which the
@@ -1145,7 +1388,17 @@ export async function bootSchemaStack(
   // already armed, and record what it could NOT reach — so a partial plan says
   // so instead of reading as coverage. Runs only when this boot actually
   // composed a host; every other caller is untouched.
-  if (opts.composeHostStack === true && composition.notes.length > 0) {
+  const composedHost = opts.composeHostStack === true && composition.notes.length > 0;
+  // [#24120] Which database each declared datasource's objects are planned
+  // against, in both faces — `Database:` names the primary alone.
+  if (declaredDrivers.length > 0) {
+    composition.notes.push(
+      `Planned ${declaredDrivers.length} declared datasource(s) against the database os serve keeps their objects in — `
+      + `${declaredDrivers.map((d) => `${d.name} (${describeDb(d.driver)})`).join(', ')} — connected under the `
+      + 'declared name, as os serve connects them.',
+    );
+  }
+  if (composedHost) {
     const measured = await measureComposedCoverage(kernel, plannedDrivers, defer, { ddlFree: skipSchemaSync });
     composition.coverage = measured.coverage;
     composition.notes.push(...measured.notes);
@@ -1164,7 +1417,11 @@ export async function bootSchemaStack(
   // [#23022] …and the one table outside the object set, `sys_packages`, which
   // no driver deferral can see. Read-only here; `flushSchemaDdl` creates it.
   // Not on a skip-sync boot: the table lives on the primary, which held nothing back.
-  let packageTable = defer ? await planPackageTable(kernel, composition.notes) : null;
+  // [#24059] The declaration itself is read on every boot, a skip-sync one
+  // included: `nonObjectTables` below names the table from it whether or not
+  // anything is planned for it.
+  const packageStorage = findPackageStorage(kernel);
+  let packageTable = defer && packageStorage ? await planPackageTable(packageStorage, composition.notes) : null;
   if (packageTable) pendingSchemaWork.push(packageTable.work);
   sortPendingSchemaWork(pendingSchemaWork);
   // [#21529] The tables the held-back sync would create: measured absent.
@@ -1182,6 +1439,11 @@ export async function bootSchemaStack(
     schemaSync: defer ? 'deferred' : skipSchemaSync ? 'skipped' : 'performed',
     telemetryDatabase: telemetryDriver ? telemetryDatabase : null,
     drivers: plannedDrivers,
+    databaseOf: (d: SqlDriverLike): string | null => {
+      if (d === driver) return describeDb(driver);
+      if (d === telemetryDriver) return telemetryDatabase;
+      return declaredDrivers.some((x) => x.driver === d) ? describeDb(d) : null;
+    },
     detectManagedDrift: async (): Promise<ManagedDriftEntry[]> => {
       const drift: ManagedDriftEntry[] = [];
       for (const d of plannedDrivers) {
@@ -1227,6 +1489,7 @@ export async function bootSchemaStack(
     managedTableCount,
     kernel,
     pendingSchemaWork,
+    nonObjectTables: packageStorage ? [packageStorage.table] : [],
     // The driver keys its deferred work by physical table, so ask in the same
     // name (`StorageNameMapping`, the mapping the driver itself applies).
     tableAbsent: (objectName: string): boolean =>

@@ -12,6 +12,7 @@ import {
   RuntimeConfigPlugin,
   resolveCloudUrl,
 } from '@objectstack/cloud-connection';
+import { PrintServicePlugin } from '@objectstack/service-print';
 
 import * as objects from './src/data/objects/index.js';
 import { ShowcaseExternalDatasource } from './src/system/datasources/showcase-external.datasource.js';
@@ -24,7 +25,7 @@ import { ChartGalleryDashboard, OpsDashboard, RevenuePulseDashboard } from './sr
 import { ShowcaseTaskDataset, ShowcaseProjectDataset, ShowcaseInvoiceDataset, ShowcaseAccountDataset } from './src/ui/datasets/index.js';
 import { allReports } from './src/ui/reports/index.js';
 import { allActions } from './src/ui/actions/index.js';
-import { CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage, TaskBoardPage, TaskCalendarPage, TaskGalleryPage, TaskSchedulePage, TaskTimelinePage, TaskMapPage, TaskAllViewsPage, ActiveProjectsPage, TaskDetailPage, ReviewQueuePage, NewProjectWizardPage, MyWorkPage, SettingsPage, StylingGalleryPage, CommandCenterPage, CommandCenterJsxPage, CrmWorkbenchPage, TaskDeskPage, PageVariablesPage, ContactFormPage, RenewalsPipelinePage } from './src/ui/pages/index.js';
+import { CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage, TaskBoardPage, TaskCalendarPage, TaskGalleryPage, TaskSchedulePage, TaskTimelinePage, TaskMapPage, TaskAllViewsPage, ActiveProjectsPage, TaskDetailPage, InvoiceDocumentPage, ReviewQueuePage, NewProjectWizardPage, MyWorkPage, SettingsPage, StylingGalleryPage, CommandCenterPage, CommandCenterJsxPage, CrmWorkbenchPage, TaskDeskPage, PageVariablesPage, ContactFormPage, RenewalsPipelinePage } from './src/ui/pages/index.js';
 import { allFlows } from './src/automation/flows/index.js';
 import { allWebhooks } from './src/automation/webhooks/index.js';
 import { allHooks } from './src/data/hooks/index.js';
@@ -161,6 +162,12 @@ export default defineStack({
         ]
       : []),
     new RuntimeConfigPlugin({ controlPlaneUrl: '', singleEnvironment: true, installLocal: true }),
+    // The print service and its door, `POST /api/v1/print/records`, which the
+    // invoice's Generate PDF action calls (src/ui/actions/). The engine is
+    // headless Chromium, configured by environment: `OS_PRINT_CHROMIUM_PATH`
+    // (or `OS_PRINT_BROWSER_ENDPOINT`) and `OS_PRINT_CONSOLE_URL`. With none set
+    // the plugin says so once at startup, and every print is refused 503.
+    new PrintServicePlugin(),
   ],
 
   // Infrastructure
@@ -202,7 +209,7 @@ export default defineStack({
   // UI
   apps: [ShowcaseApp],
   views: [TaskViews, ProjectViews, InquiryViews, BusinessUnitViews, ContactViews, FieldZooViews],
-  pages: [CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage, TaskBoardPage, TaskCalendarPage, TaskGalleryPage, TaskSchedulePage, TaskTimelinePage, TaskMapPage, TaskAllViewsPage, ActiveProjectsPage, TaskDetailPage, ReviewQueuePage, NewProjectWizardPage, MyWorkPage, SettingsPage, StylingGalleryPage, CommandCenterPage, CommandCenterJsxPage, CrmWorkbenchPage, TaskDeskPage, PageVariablesPage, ContactFormPage, RenewalsPipelinePage],
+  pages: [CapabilityMapPage, StartHerePage, ComponentGalleryPage, ProjectWorkspacePage, ProjectDetailPage, TaskWorkbenchPage, TaskTriagePage, TaskBoardPage, TaskCalendarPage, TaskGalleryPage, TaskSchedulePage, TaskTimelinePage, TaskMapPage, TaskAllViewsPage, ActiveProjectsPage, TaskDetailPage, InvoiceDocumentPage, ReviewQueuePage, NewProjectWizardPage, MyWorkPage, SettingsPage, StylingGalleryPage, CommandCenterPage, CommandCenterJsxPage, CrmWorkbenchPage, TaskDeskPage, PageVariablesPage, ContactFormPage, RenewalsPipelinePage],
   dashboards: [ChartGalleryDashboard, OpsDashboard, RevenuePulseDashboard],
   books: allBooks,
   datasets: [ShowcaseTaskDataset, ShowcaseProjectDataset, ShowcaseInvoiceDataset, ShowcaseAccountDataset],

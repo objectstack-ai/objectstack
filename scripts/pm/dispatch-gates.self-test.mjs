@@ -162,6 +162,7 @@ import {
   firstPartyImportBindings,
   firstPartyImportTargets,
   followCompositeActions,
+  fullBatteryOnlyClause,
   gateFamilyFiles,
   generatedModuleSources,
   globCarriesLiteralSuffix,
@@ -184,8 +185,10 @@ import {
   isTypeCheckInvocation,
   jobFilterOutputRefs,
   jobFilterPopulation,
+  jobFilteredNotMeasuredLine,
   jobFilteredStepLines,
   jobFilteredSteps,
+  jobIfReading,
   jobPathPopulations,
   joinLineContinuations,
   judgedAsPattern,
@@ -3851,6 +3854,52 @@ export function selfTest({ tier = 'full' } = {}) {
     );
   }
 
+  // ── The name-fold loader gate's WALKED roots, declared (#24037) ───────────
+  //
+  // `check-position-name-fold-loaders.mjs` reads every text file under its
+  // roots, and kept them as a private list of bare words, which the extractor
+  // admits as nothing. A card editing a file under those roots therefore
+  // derived no command for it: PR #24028 reconciled its local union complete
+  // and met this gate red in CI, over a line it added to
+  // `scripts/cross-package-test-inputs.mjs`. The gate now declares the roots
+  // with the ROOT_DIR_WATCH_HINTS idiom and derives its walk from that literal,
+  // with no change to the extractor.
+  //
+  // Pinned against the LIVE tree, for the reason the scripts/** case above
+  // states. The probes are read off the family's own extracted hints rather
+  // than retyped here, so every root the gate declares gets one, and the first
+  // probe is the exact path the measured miss edited. The ablation strips the
+  // subtree hints and the verdict must leave MATCHED, so these cases cannot pass
+  // through another literal that happens to cover a probe.
+  const NAME_FOLD = 'scripts/check-position-name-fold-loaders.mjs';
+  const nameFoldFamilies = discoverFamilies().byCheck;
+  for (const key of [NAME_FOLD, `${NAME_FOLD} --self-test`]) {
+    const entry = nameFoldFamilies.get(key);
+    t(`${key} is discovered at all — the pins below mean nothing without this`, Boolean(entry));
+    const roots = (entry?.hints ?? []).filter((h) => h.endsWith('/**')).map((h) => h.slice(0, -'/**'.length));
+    // The floor: the five roots the walk reads at this commit. A loop over an
+    // emptied hint set runs zero cases and prints nothing, which reads as a pass.
+    t(`${key} declares at least the five subtree roots its walk reads — read: [${roots.join(', ')}]`, roots.length >= 5);
+    const probes = ['scripts/cross-package-test-inputs.mjs', ...roots.map((r) => `${r}/the-one-nobody-has-written-yet.ts`)];
+    for (const probe of probes) {
+      const verdict = entry ? classifyEntry(entry, [probe]).verdict : null;
+      t(`a change to ${probe}, under a root this gate walks, derives ${key} — read: ${verdict}`, verdict === 'matched');
+    }
+    const undeclared = entry ? { ...entry, hints: entry.hints.filter((h) => !h.endsWith('/**')) } : null;
+    const residual = undeclared
+      ? ['scripts/cross-package-test-inputs.mjs', 'packages/the-one-nobody-has-written-yet/src/index.ts']
+        .map((p) => classifyEntry(undeclared, [p]).verdict)
+      : [];
+    t(
+      `…and it is the subtree declaration doing it: strip it and ${key} is NOT MATCHED for the measured miss `
+        + `or a brand-new package file — read: [${residual.join(', ')}]`,
+      Boolean(undeclared)
+        && undeclared.hints.length < entry.hints.length
+        && residual.length === 2
+        && residual.every((v) => ['silent', 'undetermined'].includes(v)),
+    );
+  }
+
   // ── The MANIFEST population of check:merge-driver (#15501) ────────────────
   //
   // That family's `git-merge-regen --self-test` refuses a generator with no
@@ -5623,6 +5672,17 @@ export function selfTest({ tier = 'full' } = {}) {
   t(
     '...and the clause in front of the filter output is not the stripped spelling either',
     jobFilterOutputRefs(`\${{ ${FULL_BATTERY} && needs.f.outputs.a != 'false' }}`) === null,
+  );
+  // #24073: stripped is not FORGOTTEN. The reading returns the event fact beside
+  // the refs it shares with `jobFilterOutputRefs`, and only when it stripped it.
+  const fullBatteryReading = jobIfReading(`\${{ !cancelled() && needs.filter.outputs.console != 'false' && ${FULL_BATTERY} }}`);
+  t(
+    'jobIfReading: the stripped full-battery clause is RETURNED as fullBatteryOnly, beside the same refs',
+    fullBatteryReading?.fullBatteryOnly === true && fullBatteryReading?.refs.map((r) => `${r.job}.${r.output}`).join() === 'filter.console',
+  );
+  t(
+    '...and an if: with no event clause reads fullBatteryOnly FALSE — the fact is read off the text, never defaulted on',
+    jobIfReading("${{ !cancelled() && needs.filter.outputs.console != 'false' }}")?.fullBatteryOnly === false,
   );
 
   const fixturePops = jobPathPopulations(jobFilterWf, 'fixture.yml');
@@ -11880,6 +11940,63 @@ export function selfTest({ tier = 'full' } = {}) {
   t(
     'and the count reaches that enumeration off the ARRAY that renders the block, never a recount of it',
     outsideBlockCounts(familyReconciliation({ jobFilteredRows: [{}, {}] })).jobFilteredJobs === 2,
+  );
+
+  // ── WHEN a path-scheduled job runs, on the row the reader reads (#24073) ──
+  //
+  // The measured case: a `packages/runtime/src/route-ledger.ts` change derived
+  // the Dogfood Regression Gate as "scheduled BY YOUR PATHS", and nothing said
+  // its `if:` skips pull_request and merge_group — so the PR never ran the two
+  // dogfood pins that read that file, and their first run was `main`'s push
+  // battery, red. Pinned LIVE on ci.yml for both dogfood jobs (they carry the
+  // same `if:`), against a NEGATIVE control on a job that does run on the PR,
+  // and with an in-place ABLATION of the carried flag on every row, so the
+  // statement cannot pass as a string typed per job. If ci.yml moves either job
+  // back onto the PR, these go red: re-point them to whichever path-scheduled
+  // job still carries the clause — ⛔ do not delete them.
+  const ledgerCard = 'packages/runtime/src/route-ledger.ts';
+  const ledgerJobs = jobFilteredSteps(liveWorkflows, [ledgerCard]);
+  const ledgerRow = (prefix) => ledgerJobs.rows.find((r) => r.job.startsWith(prefix)) ?? null;
+  const NOT_ON_PR = 'does NOT run on this PR or in the merge queue';
+  // The plain rendering of ONE row, with counts that satisfy the renderer's own
+  // refusals, so the ablated copy below is rendered by the same function.
+  const plainRowLine = (row) => {
+    if (!row) return '';
+    const n = row.steps.length;
+    const lines = jobFilteredStepLines([row], { covering: 1, named: 1, steps: n, accounted: 0, unaccounted: n, conditionalSteps: 0 });
+    return lines.find((l) => l.startsWith(`  - [${row.workflow} · ${row.job}]`)) ?? '';
+  };
+  for (const prefix of ['Dogfood Regression Gate', 'Dogfood Verify CLI']) {
+    const row = ledgerRow(prefix);
+    t(
+      `LIVE: a route-ledger.ts change schedules '${prefix}', and its row carries the full-battery fact read off its own if:`,
+      row?.fullBatteryOnly === true,
+    );
+    t(
+      '...its --commands line SAYS the job does not run on this PR or in the merge queue, ahead of the step list',
+      Boolean(row) && jobFilteredNotMeasuredLine(row).indexOf(NOT_ON_PR) > -1
+        && jobFilteredNotMeasuredLine(row).indexOf(NOT_ON_PR) < jobFilteredNotMeasuredLine(row).indexOf(' step(s):'),
+    );
+    t("...and so does its row in the plain rendering, on the row's own line", plainRowLine(row).includes(NOT_ON_PR));
+    // ABLATION, in place: the same row with the carried fact stripped. The
+    // statement must vanish from both lines — rendered from the flag, or not at all.
+    const stripped = row ? Object.fromEntries(Object.entries(row).filter(([k]) => k !== 'fullBatteryOnly')) : null;
+    t(
+      '...ABLATED — the carried fact stripped from the row — the statement disappears from BOTH lines',
+      Boolean(stripped)
+        && fullBatteryOnlyClause(stripped) === ''
+        && !jobFilteredNotMeasuredLine(stripped).includes(NOT_ON_PR)
+        && plainRowLine(stripped) !== ''
+        && !plainRowLine(stripped).includes(NOT_ON_PR),
+    );
+  }
+  const prJobRow = ledgerRow('Build Core');
+  t(
+    'LIVE NEGATIVE CONTROL: Build Core, scheduled by the same path and run on the PR, carries the fact as FALSE and no statement',
+    prJobRow?.fullBatteryOnly === false
+      && !jobFilteredNotMeasuredLine(prJobRow).includes(NOT_ON_PR)
+      && plainRowLine(prJobRow) !== ''
+      && !plainRowLine(prJobRow).includes(NOT_ON_PR),
   );
 
   // ── Type-check lanes (#19172): the negatives are the live over-matches a SUBSTRING reading produces here ──

@@ -42,6 +42,22 @@
  * the host kernel's own `auth` service. Routes degrade gracefully when the
  * id is not (yet) configured: status reports `bound:false`; the others 404.
  *
+ * ## Who may manage the connection — `setup.access` (#24148)
+ *
+ * The Console's Cloud Connection panel sits on the Setup app, which declares
+ * `requiredPermissions: ['setup.access']` (`@objectstack/platform-objects`,
+ * `apps/setup.app.ts`). The three doors that change the connection —
+ * `bind/start`, `bind/poll` and `unbind` — refuse exactly who that page
+ * refuses: a signed-in caller who does not hold `setup.access` gets `403
+ * PERMISSION_DENIED` naming the capability, before any control-plane call.
+ * `status` stays session-less (it answers every caller, so a probe can tell
+ * the plugin is mounted) but narrows what it SERVES: the connection's details
+ * — who approved it, for which organization, in which environment — go only
+ * to a caller who passes the same check; everyone else is told `bound`,
+ * `runtimeId` and `provider`. What a caller holds is read through the
+ * platform's one authorization resolver (`resolveAuthzContext`), against the
+ * session this surface already read — see `holdsSetupAccess`.
+ *
  * ## Why a same-origin proxy at all
  *
  * The SPA cannot call the control plane from a tenant subdomain — that is a
@@ -58,6 +74,13 @@
 interface PluginContext {
     hook(event: string, handler: (...args: any[]) => any): void;
     getService<T = any>(name: string): T;
+    /**
+     * The host kernel — read only for its ASYNC registry, which is what tells a
+     * `tenancy` service that was never registered apart from one that broke
+     * (`classifyAdmissionTenancyPosture`). Optional: a `KernelBase`-shaped host
+     * has no async registry, and keeps the quiet answer.
+     */
+    getKernel?(): EnvironmentKernel | undefined;
     logger?: {
         info?: (msg: string) => void;
         /**
@@ -80,7 +103,20 @@ interface Plugin {
 }
 
 import { hostname } from 'node:os';
-import { evaluateAuthGate, type AuthGate } from '@objectstack/core';
+import {
+    evaluateAuthGate,
+    type AuthGate,
+    // [#24148] The platform's ONE authorization resolver, and its loud outage
+    // brand — the same pair `marketplace-install-local-plugin.ts` reads in this
+    // package, so the capability a caller holds is never re-derived here.
+    resolveAuthzContext,
+    isAuthzStoreUnavailableError,
+    userAuthGateSourceOf,
+    apiKeyLifecyclePolicySourceOf,
+    classifyAdmissionTenancyPosture,
+    type TenancyPostureSource,
+} from '@objectstack/core';
+import type { AuthSessionApi, IAuthService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
 import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { CLOUD_CONNECTION_UI_BUNDLE } from './cloud-connection-ui.js';
@@ -89,12 +125,79 @@ import { readJsonRequestBody } from './request-json-body.js';
 const CLOUD_CONNECTION_PREFIX = '/api/v1/cloud-connection';
 
 /**
+ * [#24148] The capability the connection-changing doors demand, and the one the
+ * connection's details are served behind on `status`.
+ *
+ * It is the permission that gates the page this surface serves: the Cloud
+ * Connection panel lives on the Setup app, whose `requiredPermissions` is
+ * `['setup.access']` (`@objectstack/platform-objects`, `apps/setup.app.ts`). So
+ * the API refuses exactly who the page refuses, and no new role concept is
+ * introduced. ⛔ Not a new cloud-specific capability: inventing one would lock
+ * every existing administrator out of a page they can already open.
+ */
+const SETUP_ACCESS_CAPABILITY = 'setup.access';
+
+/**
+ * [#24148] The refusal the three connection-changing doors give a signed-in
+ * caller who does not hold {@link SETUP_ACCESS_CAPABILITY}.
+ *
+ * `PERMISSION_DENIED` is the standard catalog's member for the condition: the
+ * ADR-0112 ledger sends a generic permission condition to the standard catalog
+ * rather than to a registered synonym (`error-code-ledger.zod.ts`, "Registering
+ * a new code"), so nothing is registered for it — and ⛔ not `FORBIDDEN`, which
+ * the install-local doors next door answer with: that spelling is a waived
+ * pre-gate synonym, kept on the wire and never endorsed for new code. The
+ * message names the capability, so the operator learns
+ * which grant they need rather than merely that they were refused. One literal
+ * for the three doors: they are one class (each changes this runtime's cloud
+ * connection), and a door added later cannot copy a weaker answer.
+ */
+const SETUP_ACCESS_REFUSAL = {
+    code: 'PERMISSION_DENIED',
+    status: 403,
+    message: `Managing this runtime's cloud connection requires the \`${SETUP_ACCESS_CAPABILITY}\` capability.`,
+} as const;
+
+/**
+ * The slice of a kernel this surface reads services from: the environment's
+ * own kernel (multi-tenant, through `kernel-manager`) or the host's.
+ */
+interface EnvironmentKernel {
+    getServiceAsync?<T = unknown>(name: string): Promise<T>;
+    getService?<T = unknown>(name: string): T;
+}
+
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
+
+/**
+ * [#24150] The slice of the `protocol` service this surface reads: the
+ * discovery document's `version`, which is the release `GET
+ * /api/v1/discovery` reports for this server.
+ */
+interface DiscoveryVersionSource {
+    getDiscovery?(): Promise<{ version?: unknown }>;
+}
+
+/**
  * A signed-in caller of this surface, and the ADR-0069 posture its session
  * carries (`authGate`, present only for a session the policy holds).
  */
 interface ResolvedSession {
     userId: string;
     authGate?: AuthGate;
+    /**
+     * [#24148] What the shared resolver needs to judge what THIS session holds:
+     * the session read itself (handed back to the resolver, so it judges the
+     * session this door admitted rather than reading a second one), the `auth`
+     * service that answered it, and — multi-tenant — the environment's own
+     * kernel, whose grants are the ones that apply.
+     */
+    readFrom: {
+        sessionData: SessionRead | null;
+        authService: IAuthService | undefined;
+        kernel?: EnvironmentKernel;
+    };
 }
 
 /**
@@ -179,6 +282,35 @@ export class CloudConnectionPlugin implements Plugin {
                 return cred ? { Authorization: `Bearer ${cred}` } : {};
             };
 
+            /**
+             * [#24150] The release this server reports to the cloud as
+             * `runtime_version`: on the approval link `bind/start` returns,
+             * and in the registration claim `bind/poll` sends to `/bind`.
+             *
+             * A set `OS_RUNTIME_VERSION` is the operator's stamp and wins, as
+             * it always has. Unset, the value is the one `GET
+             * /api/v1/discovery` reports, read from the discovery document
+             * itself through the `protocol` service when the handler runs —
+             * never a copy of discovery's resolver, so the two answers cannot
+             * drift. ⛔ Not this plugin's own `version`: that names the
+             * plugin, not the release the approver is authorizing.
+             *
+             * A read that yields nothing (no `protocol` service, or one that
+             * throws) sends nothing; both sites already drop an empty value.
+             * No version is honest, while a wrong one is what the approval
+             * page would show as fact.
+             */
+            const reportedRuntimeVersion = async (): Promise<string | undefined> => {
+                const stamped = process.env.OS_RUNTIME_VERSION;
+                if (stamped !== undefined) return stamped || undefined;
+                try {
+                    const discovery = await ctx.getService<DiscoveryVersionSource>('protocol')?.getDiscovery?.();
+                    return typeof discovery?.version === 'string' && discovery.version ? discovery.version : undefined;
+                } catch {
+                    return undefined;
+                }
+            };
+
             const hostOf = (c: any): string => {
                 try { return new URL(c.req.url).hostname; } catch { return ''; }
             };
@@ -214,12 +346,17 @@ export class CloudConnectionPlugin implements Plugin {
                 manifest?.register?.(CLOUD_CONNECTION_UI_BUNDLE);
             } catch { /* no manifest service — headless kernel */ }
 
-            const sessionFromAuthService = async (authSvc: any, rawReq: Request): Promise<ResolvedSession | null> => {
+            const sessionFromAuthService = async (
+                authSvc: any,
+                rawReq: Request,
+                kernel?: EnvironmentKernel,
+            ): Promise<ResolvedSession | null> => {
                 const api = typeof authSvc?.getApi === 'function' ? await authSvc.getApi() : authSvc?.api ?? authSvc;
                 // [#22258] The in-process session-read rule: a request carrying a
                 // session cookie reads without renewal, because this route's
-                // response never carries a renewed cookie.
-                const session = await api?.getSession?.(inProcessSessionReadInput(rawReq.headers));
+                // response never carries a renewed cookie. [#24222] Typed as
+                // `AuthSessionApi` declares the answer (`api` itself is `any`).
+                const session: SessionRead | null = await api?.getSession?.(inProcessSessionReadInput(rawReq.headers));
                 const userId = session?.user?.id ? String(session.user.id) : undefined;
                 if (!userId) return null;
                 // ADR-0069: the ONE consult of the authentication-policy gate for
@@ -233,7 +370,8 @@ export class CloudConnectionPlugin implements Plugin {
                 // exemption (an empty path earns none, #7898). Nothing this plugin
                 // mounts is a remediation or bootstrap route.
                 const authGate = evaluateAuthGate(session?.user, '');
-                return authGate ? { userId, authGate } : { userId };
+                const readFrom: ResolvedSession['readFrom'] = { sessionData: session, authService: authSvc, ...(kernel ? { kernel } : {}) };
+                return authGate ? { userId, authGate, readFrom } : { userId, readFrom };
             };
 
             /**
@@ -263,13 +401,129 @@ export class CloudConnectionPlugin implements Plugin {
                     try { authSvc = await kernel?.getServiceAsync?.('auth'); } catch { /* ignore */ }
                     if (!authSvc) { try { authSvc = kernel?.getService?.('auth'); } catch { /* ignore */ } }
                     if (!authSvc) return null;
-                    return await sessionFromAuthService(authSvc, rawReq);
+                    return await sessionFromAuthService(authSvc, rawReq, kernel ?? undefined);
                 } catch {
                     return null;
                 }
             };
 
-            // GET /status — is this runtime bound to a cloud account?
+            /**
+             * [#24148] Does the caller this surface admitted hold `setup.access`?
+             *
+             * ## Asked of the platform's one resolver, never re-derived
+             *
+             * `resolveAuthzContext` (`@objectstack/core`, guarded by
+             * `check:authz-resolver`) is the single place a request's grants are
+             * aggregated — `sys_member` → `sys_user_position` → permission sets,
+             * position-bound and user-bound alike, with a stale organization
+             * claim dropped under a walled posture. The install-local doors in
+             * this package and the datasource admin family gate on its
+             * `systemPermissions` the same way; this reads that field and nothing
+             * else.
+             *
+             * ## Judged on the session this surface already admitted
+             *
+             * The identity question stays where it was (`resolveSession`, the
+             * same read for all seven session doors), so WHO is admitted does
+             * not move — this only adds what they must hold. The resolver is
+             * handed that session read back (no second read) and the request's
+             * headers, and its answer counts only when it resolved the SAME
+             * principal through the SAME credential: an API key riding along
+             * resolves first inside the resolver, and its owner's grants are
+             * not this session's, so they never admit it. That keeps the change
+             * a pure narrowing — no credential this surface refused becomes one
+             * it accepts.
+             *
+             * ## Grants come from where the session came from
+             *
+             * Multi-tenant, the environment's own kernel answers (its `objectql`
+             * holds its grants, its `tenancy` its posture); single-environment,
+             * the host's. With no data engine there are no grants to hold, so
+             * the answer is `false` — fail closed.
+             *
+             * ## An outage is not a denial
+             *
+             * A permission store that could not be READ licenses no verdict, so
+             * `AuthzStoreUnavailableError` (from the resolver or the tenancy
+             * classification) is re-raised to the host's thrown-envelope render
+             * (`503 SERVICE_UNAVAILABLE`) rather than answered as "does not
+             * hold". Any other fault fails closed.
+             */
+            const holdsSetupAccess = async (rawReq: Request, caller: ResolvedSession): Promise<boolean> => {
+                const { sessionData, authService, kernel } = caller.readFrom;
+                let ql: IObjectQLEngine | undefined;
+                if (kernel) {
+                    try { ql = await kernel.getServiceAsync?.<IObjectQLEngine>('objectql'); } catch { /* not registered */ }
+                    if (!ql) { try { ql = kernel.getService?.<IObjectQLEngine>('objectql'); } catch { /* not registered */ } }
+                } else {
+                    try { ql = ctx.getService<IObjectQLEngine>('objectql'); } catch { /* no data engine */ }
+                }
+                // The posture is an authorization INPUT (the walled postures drop
+                // a stale organization claim). Read through the async registry
+                // only, so a `tenancy` service that BROKE is the loud outage and
+                // one never registered is the quiet `undefined`.
+                const tenancyKernel = kernel ?? ctx.getKernel?.();
+                const tenancyPosture = tenancyKernel && typeof tenancyKernel.getServiceAsync === 'function'
+                    ? await classifyAdmissionTenancyPosture(() => tenancyKernel.getServiceAsync!<TenancyPostureSource>('tenancy'))
+                    : undefined;
+                try {
+                    const authz = await resolveAuthzContext({
+                        ql,
+                        headers: rawReq.headers,
+                        getSession: async () => sessionData,
+                        tenancyPosture,
+                        userAuthGates: userAuthGateSourceOf(authService),
+                        apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
+                    });
+                    if (authz.credential !== 'session' || authz.userId !== caller.userId) return false;
+                    return Array.isArray(authz.systemPermissions) && authz.systemPermissions.includes(SETUP_ACCESS_CAPABILITY);
+                } catch (err) {
+                    if (isAuthzStoreUnavailableError(err)) throw err;
+                    return false;
+                }
+            };
+
+            /** [#24148] The one `403` the three connection-changing doors give a caller without `setup.access`. */
+            const refuseWithoutSetupAccess = (c: any) =>
+                c.json({ success: false, error: { code: SETUP_ACCESS_REFUSAL.code, message: SETUP_ACCESS_REFUSAL.message } }, SETUP_ACCESS_REFUSAL.status);
+
+            /**
+             * [#24148] What `status` serves this caller. Everyone is told whether
+             * the runtime is bound, its runtime id and the provider — enough for
+             * a probe, and for the Console to pick its panel. The rest (the
+             * environment id and the control plane's `connection` record: who
+             * approved the bind, for which organization) is served only to a
+             * caller who holds `setup.access`, the permission the panel that
+             * shows it sits behind.
+             *
+             * `status` never refuses: no session, a session the ADR-0069 policy
+             * holds, and a session without the capability all get the narrowed
+             * answer, never a `401`/`403` — the route stays session-less in what
+             * it answers, and narrows only what it serves. For the same reason a
+             * permission store that cannot be read does not turn `status` into
+             * a `503`: the details are withheld (nothing was established that
+             * would license serving them) and the outage is logged, while the
+             * three connection-changing doors re-raise it.
+             */
+            const servedStatus = async (
+                environmentId: string | undefined,
+                rawReq: Request,
+                full: { environmentId: string | null; runtimeId: string | null; bound: boolean; provider: string; connection: unknown },
+            ) => {
+                const caller = await resolveSession(environmentId ?? '', rawReq);
+                try {
+                    if (caller && !caller.authGate && await holdsSetupAccess(rawReq, caller)) return full;
+                } catch (err) {
+                    if (!isAuthzStoreUnavailableError(err)) throw err;
+                    ctx.logger?.warn?.(`[CloudConnectionPlugin] status served without the connection details — ${err.message}`);
+                }
+                return { bound: full.bound, runtimeId: full.runtimeId, provider: full.provider };
+            };
+
+            // GET /status — is this runtime bound to a cloud account? Answers
+            // every caller; what it SERVES narrows to `bound` / `runtimeId` /
+            // `provider` unless the caller holds `setup.access` (#24148,
+            // `servedStatus`).
             rawApp.get(`${CLOUD_CONNECTION_PREFIX}/status`, async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 const stored = this.store.read();
@@ -277,15 +531,20 @@ export class CloudConnectionPlugin implements Plugin {
                 if (!environmentId && !this.cfg.singleEnvironment) {
                     return c.json({ success: false, error: { code: 'ENVIRONMENT_NOT_FOUND', message: ENVIRONMENT_NOT_FOUND_MESSAGE } }, 404);
                 }
+                const serve = async (full: Parameters<typeof servedStatus>[2]) =>
+                    c.json({ success: true, data: await servedStatus(environmentId, c.req.raw, full) });
                 // A single-env runtime with no env id and no credential is
                 // simply not bound yet — valid state, not an error.
                 if (!environmentId && !credential()) {
-                    return c.json({ success: true, data: { environmentId: null, runtimeId: runtimeId ?? null, bound: false, provider: 'objectstack-cloud', connection: null } });
+                    return serve({ environmentId: null, runtimeId: runtimeId ?? null, bound: false, provider: 'objectstack-cloud', connection: null });
                 }
                 // Prefer the real sys_cloud_connection from the control plane.
                 // The oscc_ bearer self-identifies; service-key callers query
                 // by environment_id (cloud-hosted) or runtime_id (claim).
                 if (cloudUrl) {
+                    // Built inside the `try`, served outside it: the fetch's
+                    // fall-through must never swallow a fault of `servedStatus`.
+                    let fromControlPlane: Parameters<typeof servedStatus>[2] | undefined;
                     try {
                         const qs = environmentId
                             ? `?environment_id=${encodeURIComponent(environmentId)}`
@@ -297,18 +556,19 @@ export class CloudConnectionPlugin implements Plugin {
                             const json: any = await resp.json().catch(() => null);
                             const data = json?.data ?? {};
                             const bound = Boolean(data.bound) || Boolean(credential());
-                            return c.json({ success: true, data: {
+                            fromControlPlane = {
                                 environmentId: environmentId ?? null,
                                 runtimeId: data.runtime_id ?? runtimeId ?? null,
                                 bound,
                                 provider: 'objectstack-cloud',
                                 connection: data.connection ?? null,
-                            } });
+                            };
                         }
                     } catch { /* fall through to implicit */ }
+                    if (fromControlPlane) return serve(fromControlPlane);
                 }
                 const bound = Boolean(credential());
-                return c.json({ success: true, data: { environmentId: environmentId ?? null, runtimeId: runtimeId ?? null, bound, provider: 'objectstack-cloud', connection: null } });
+                return serve({ environmentId: environmentId ?? null, runtimeId: runtimeId ?? null, bound, provider: 'objectstack-cloud', connection: null });
             });
 
             // POST /bind/start — begin a device-code bind. The runtime is the
@@ -335,6 +595,9 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment to connect a cloud account.' } }, 401);
+                // [#24148] Refused before any work, so a caller without the
+                // capability cannot learn whether a control plane is configured.
+                if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
                 if (!cloudUrl) return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'No cloud control plane configured.' } }, 503);
                 try {
                     const resp = await fetch(`${cloudUrl}/api/v1/auth/device/code`, {
@@ -350,12 +613,12 @@ export class CloudConnectionPlugin implements Plugin {
                     // WHAT they are authorizing. Display-only — informed
                     // consent, not an authenticity proof (the page carries
                     // the "only approve if you started this" warning).
+                    const ver = await reportedRuntimeVersion();
                     const withContext = (uri: unknown): string | undefined => {
                         if (typeof uri !== 'string' || !uri) return undefined;
                         try {
                             const u = new URL(uri);
                             try { u.searchParams.set('runtime_name', hostname()); } catch { /* no hostname */ }
-                            const ver = (process.env.OS_RUNTIME_VERSION ?? this.version) || '';
                             if (ver) u.searchParams.set('runtime_version', ver);
                             return u.toString();
                         } catch { return uri; }
@@ -394,6 +657,8 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
+                // [#24148] This is the door that persists the binding.
+                if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
                 if (!cloudUrl) return c.json({ success: false, error: { code: 'CLOUD_UNCONFIGURED', message: 'No cloud control plane configured.' } }, 503);
 
                 const deviceCode = String(body?.device_code ?? body?.deviceCode ?? '').trim();
@@ -440,6 +705,7 @@ export class CloudConnectionPlugin implements Plugin {
                     // the device; a stored runtime_id keeps the identity
                     // stable across re-binds (claim verified cloud-side).
                     const stored = this.store.read();
+                    const runtimeVersion = await reportedRuntimeVersion();
                     const bindResp = await fetch(`${cloudUrl}/api/v1/cloud-connection/bind`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', ...(cloudApiKey ? { Authorization: `Bearer ${cloudApiKey}` } : {}) },
@@ -447,7 +713,7 @@ export class CloudConnectionPlugin implements Plugin {
                             ...(environmentId ? { environment_id: environmentId } : {}),
                             ...(stored?.runtimeId ? { runtime_id: stored.runtimeId } : {}),
                             name: (() => { try { return hostname(); } catch { return undefined; } })(),
-                            runtime_version: (process.env.OS_RUNTIME_VERSION ?? this.version) || undefined,
+                            runtime_version: runtimeVersion,
                             token: accessToken,
                             scope: deviceScope,
                         }),
@@ -483,8 +749,8 @@ export class CloudConnectionPlugin implements Plugin {
 
             // POST /unbind — disconnect this runtime from the control plane.
             // Revokes the connection server-side (best-effort) and clears the
-            // local credential. Requires an environment session, mirroring
-            // bind/start.
+            // local credential. Requires an environment session holding
+            // `setup.access`, mirroring bind/start.
             rawApp.post(`${CLOUD_CONNECTION_PREFIX}/unbind`, async (c: any) => {
                 const environmentId = await resolveEnvironmentId(c);
                 if (!environmentId && !this.cfg.singleEnvironment) {
@@ -493,6 +759,8 @@ export class CloudConnectionPlugin implements Plugin {
                 const session = await resolveSession(environmentId ?? '', c.req.raw);
                 if (session?.authGate) return refuseHeldSession(c, session.authGate);
                 if (!session?.userId) return c.json({ success: false, error: { code: 'UNAUTHENTICATED', message: 'Sign in to this environment.' } }, 401);
+                // [#24148] Refused before the revoke and before the local clear.
+                if (!(await holdsSetupAccess(c.req.raw, session))) return refuseWithoutSetupAccess(c);
 
                 // Revoke cloud-side FIRST (the oscc_ bearer self-identifies;
                 // env-keyed bindings name the environment), then clear the

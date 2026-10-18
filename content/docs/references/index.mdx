@@ -21,7 +21,7 @@ counts are sums of the rows they head. Regenerate with
 | Module | Pages | Schemas | Description |
 | :--- | ---: | ---: | :--- |
 | [AI Protocol](/docs/references/ai) | 12 | 68 | Agents, tools, skills, RAG and knowledge sources, model registry, conversations. |
-| [API Protocol](/docs/references/api) | 32 | 436 | REST contracts, endpoints, routing, realtime, batch, discovery. |
+| [API Protocol](/docs/references/api) | 32 | 437 | REST contracts, endpoints, routing, realtime, batch, discovery. |
 | [Automation Protocol](/docs/references/automation) | 13 | 71 | Flows and their nodes, approvals, ETL pipelines, webhooks, state machines, execution records. |
 | [Data Protocol](/docs/references/data) | 29 | 176 | Objects, fields, queries, filters, datasources and drivers — the ObjectQL layer. |
 | [Identity Protocol](/docs/references/identity) | 5 | 27 | Users and accounts, organizations, positions, SCIM provisioning. |
@@ -33,7 +33,7 @@ counts are sums of the rows they head. Regenerate with
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 36 | 284 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
-| [UI Protocol](/docs/references/ui) | 16 | 169 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
+| [UI Protocol](/docs/references/ui) | 16 | 168 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
 | **Total** | **197** | **1538** | 14 protocol modules |
 
 ---
@@ -63,7 +63,7 @@ Agents, tools, skills, RAG and knowledge sources, model registry, conversations.
 
 ## API Protocol
 
-**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **32 pages, 436 schemas**
+**Source:** `packages/spec/src/api/` · **Import:** `@objectstack/spec/api` · **32 pages, 437 schemas**
 
 REST contracts, endpoints, routing, realtime, batch, discovery.
 
@@ -87,7 +87,7 @@ REST contracts, endpoints, routing, realtime, batch, discovery.
 | [`metadata.zod.ts`](/docs/references/api/metadata) | `AppDefinitionResponse`, `ConceptListResponse`, `MetadataBulkRegisterRequest`, `MetadataBulkResponse`, `MetadataBulkUnregisterRequest`, `MetadataDeleteResponse`, `MetadataDependenciesResponse`, `MetadataDependentsResponse`, `MetadataExistsResponse`, `MetadataExportRequest`, `MetadataExportResponse`, `MetadataImportRequest`, `MetadataImportResponse`, `MetadataItemResponse`, `MetadataListResponse`, `MetadataNamesResponse`, `MetadataQueryRequest`, `MetadataQueryResponse`, `MetadataRegisterRequest`, `MetadataTypeInfoResponse`, `MetadataTypesResponse`, `MetadataValidateRequest`, `MetadataValidateResponse`, `ObjectDefinitionResponse` |
 | [`misc`](/docs/references/api/misc) *(no single source file)* | `ResolvedBook`, `ResolvedEntry`, `ResolvedGroup` |
 | [`odata.zod.ts`](/docs/references/api/odata) | `ODataConfig`, `ODataError`, `ODataFilterFunction`, `ODataMetadata`, `ODataQuery`, `ODataResponse` |
-| [`package-api.zod.ts`](/docs/references/api/package-api) | `GetInstalledPackageRequest`, `ListInstalledPackagesRequest`, `PackageApiErrorCode`, `PackageInstallBody`, `PackageInstallRequest`, `PackageInstallResponse`, `PackagePathParams`, `PackageRollbackRequest`, `PackageUpgradeRequest`, `PackageUpgradeResponse`, `ResolveDependenciesRequest`, `ResolveDependenciesResponse`, `UninstallPackageApiRequest`, `UninstallPackageApiResponse`, `UploadArtifactRequest`, `UploadArtifactResponse` |
+| [`package-api.zod.ts`](/docs/references/api/package-api) | `GetInstalledPackageRequest`, `ListInstalledPackagesRequest`, `PackageApiErrorCode`, `PackageInstallBody`, `PackageInstallManifest`, `PackageInstallRequest`, `PackageInstallResponse`, `PackagePathParams`, `PackageRollbackRequest`, `PackageUpgradeRequest`, `PackageUpgradeResponse`, `ResolveDependenciesRequest`, `ResolveDependenciesResponse`, `UninstallPackageApiRequest`, `UninstallPackageApiResponse`, `UploadArtifactRequest`, `UploadArtifactResponse` |
 | [`package-api-assembled.zod.ts`](/docs/references/api/package-api-assembled) | `AssembledInstalledPackage`, `GetInstalledPackageResponse`, `InstalledPackageAtEitherStage`, `ListInstalledPackagesResponse` |
 | [`package-lifecycle.zod.ts`](/docs/references/api/package-lifecycle) | `DiscardPackageDraftsResponse`, `DuplicatePackageResponse`, `ImportUnmanagedPackageRequest`, `ImportUnmanagedPackageResponse`, `ListPackageCommitsResponse`, `PackageExportManifest`, `PackagePublishResult`, `ReassignOrphanedMetadataResponse`, `RevertPackageCommitResponse`, `RollbackToPackageCommitResponse` |
 | [`plugin-rest-api.zod.ts`](/docs/references/api/plugin-rest-api) | `ErrorHandlingConfig`, `OpenApiGenerationConfig`, `RequestValidationConfig`, `ResponseEnvelopeConfig`, `RestApiEndpoint`, `RestApiPluginConfig`, `RestApiRouteCategory`, `RestApiRouteRegistration`, `ValidationMode` |
@@ -364,7 +364,7 @@ The runtime environment — logging, jobs, cache, metrics, notifications, i18n a
 
 ## UI Protocol
 
-**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 169 schemas**
+**Source:** `packages/spec/src/ui/` · **Import:** `@objectstack/spec/ui` · **16 pages, 168 schemas**
 
 Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer.
 
@@ -375,7 +375,7 @@ Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI lay
 | [`app.zod.ts`](/docs/references/ui/app) | `ActionNavItem`, `App`, `AppBranding`, `AppContextSelector`, `ComponentNavItem`, `DashboardNavItem`, `DocNavItem`, `GroupNavItem`, `NavigationArea`, `NavigationContribution`, `NavigationItem`, `ObjectNavItem`, `PageNavItem`, `ReportNavItem`, `UrlNavItem` |
 | [`bulk-action.zod.ts`](/docs/references/ui/bulk-action) | `BulkActionDef`, `BulkActionExecution`, `BulkActionOperation`, `BulkActionParam` |
 | [`chart.zod.ts`](/docs/references/ui/chart) | `ChartAggregate`, `ChartAggregateFunction`, `ChartAnnotation`, `ChartAxis`, `ChartConfig`, `ChartDrillDown`, `ChartGroupBy`, `ChartInteraction`, `ChartSeries`, `ChartType` |
-| [`component.zod.ts`](/docs/references/ui/component) | `ActionButtonProps`, `ActionGroupProps`, `ActionIconProps`, `ActionMenuProps`, `ElementButtonProps`, `ElementDefinitionListProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementRepeaterProps`, `ElementTextInputProps`, `ElementTextProps`, `ObjectCalendarProps`, `ObjectFormProps`, `ObjectGanttProps`, `ObjectGridProps`, `ObjectKanbanProps`, `ObjectMapProps`, `ObjectMasterDetailFormProps`, `ObjectMetricProps`, `ObjectTimelineProps`, `ObjectTreeProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordAlertAction`, `RecordAlertProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordHistoryProps`, `RecordJsonProps`, `RecordLineItemsProps`, `RecordPathProps`, `RecordQuickActionsProps`, `RecordReferenceRailProps`, `RecordRelatedListProps`, `ReferenceRailEntry` |
+| [`component.zod.ts`](/docs/references/ui/component) | `ActionButtonProps`, `ActionGroupProps`, `ActionIconProps`, `ActionMenuProps`, `ElementButtonProps`, `ElementDefinitionListProps`, `ElementFilterProps`, `ElementFormProps`, `ElementImageProps`, `ElementMetadataViewerProps`, `ElementNumberProps`, `ElementRecordPickerProps`, `ElementRepeaterProps`, `ElementTextInputProps`, `ElementTextProps`, `ObjectCalendarProps`, `ObjectFormProps`, `ObjectGanttProps`, `ObjectGridProps`, `ObjectKanbanProps`, `ObjectMapProps`, `ObjectMasterDetailFormProps`, `ObjectMetricProps`, `ObjectTimelineProps`, `ObjectTreeProps`, `PageAccordionProps`, `PageCardProps`, `PageContainerProps`, `PageHeaderProps`, `PageTabsProps`, `RecordActivityProps`, `RecordAlertAction`, `RecordAlertProps`, `RecordChatterProps`, `RecordDetailsProps`, `RecordHighlightsField`, `RecordHighlightsProps`, `RecordHistoryProps`, `RecordLineItemsProps`, `RecordPathProps`, `RecordQuickActionsProps`, `RecordReferenceRailProps`, `RecordRelatedListProps`, `ReferenceRailEntry` |
 | [`dashboard.zod.ts`](/docs/references/ui/dashboard) | `Dashboard`, `DashboardHeader`, `DashboardHeaderAction`, `DashboardWidget`, `DashboardWidgetChartConfig`, `DashboardWidgetOptions`, `GlobalFilter`, `GlobalFilterOptionsFrom`, `WidgetActionType`, `WidgetColorVariant` |
 | [`dataset.zod.ts`](/docs/references/ui/dataset) | `Dataset`, `DatasetDimension`, `DatasetMeasure`, `DerivedMeasureOp` |
 | [`expression-bindable-text-keys.zod.ts`](/docs/references/ui/expression-bindable-text-keys) | `ExpressionBindableTextKey` |

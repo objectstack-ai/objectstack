@@ -569,6 +569,21 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "邀请用户",
+        description: "按电子邮件地址邀请他人。对方接受邀请后，即以所选角色加入此组织。",
+        successMessage: "已向 ${result.email} 发送邀请",
+        params: {
+          role: {
+            options: {
+              owner: "所有者",
+              admin: "管理员",
+              delegated_admin: "受托管理员",
+              member: "成员"
+            }
+          }
+        }
+      },
       create_organization: {
         label: "创建组织",
         successMessage: "组织已创建"
@@ -586,15 +601,15 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "设为当前",
         successMessage: "当前组织已切换"
       },
-      leave_organization: {
-        label: "退出组织",
-        confirmText: "要退出该组织吗？退出后你将失去对其所有资源的访问权限。",
-        successMessage: "你已退出该组织"
-      },
       change_slug: {
         label: "修改标识符",
         description: "重命名标识符会重写该组织所有平台子域名，旧标识符将保留占用 90 天。继续吗？",
         successMessage: "组织标识符已修改"
+      },
+      leave_organization: {
+        label: "退出组织",
+        confirmText: "要退出该组织吗？退出后你将失去对其环境和成员的访问权限。",
+        successMessage: "你已退出该组织"
       }
     }
   },
@@ -1587,7 +1602,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "引用 ID",
-        help: "调用方提供的关联标识符"
+        help: "签发该令牌所依据的同意所绑定的组织；未绑定组织时为空"
       },
       authorization_code_id: {
         label: "授权码 ID",
@@ -1647,7 +1662,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "引用 ID",
-        help: "调用方提供的关联标识符"
+        help: "开启该刷新令牌族的同意所绑定的组织；未绑定组织时为空"
       },
       authorization_code_id: {
         label: "授权码 ID",
@@ -1715,7 +1730,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "引用 ID",
-        help: "调用方提供的关联标识符"
+        help: "该同意绑定的组织：同意时用户的当前活动组织；同意时无活动组织则为空"
       },
       resources: {
         label: "资源",

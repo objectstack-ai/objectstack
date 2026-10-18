@@ -333,7 +333,25 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // [#23050 slice 10] Nor does the UI view body (`ui-routes.ts`): it reads
         // only the two path parameters, as strings:
         // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 10 → 11.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
+        // [#23050 slice 11] Nor do the public form doors (`form-routes.ts`): they
+        // read only the slug path parameter, as a string:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 11 → 12.
+        // [#23050 slice 12] Nor do the six CRUD doors (`crud-routes.ts`): they
+        // hand the query to the protocol whole and coerce no number of it:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 12 → 13.
+        // [#23050 slice 13a] Nor do the first three `/meta` groups
+        // (`meta-collection-routes.ts`): the type list, the whole-store family and
+        // the per-type list coerce no number of the query:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 13 → 14.
+        // [#23050 slice 13b] Nor do the per-item reads (`meta-item-read-routes.ts`):
+        // the reference sweep, the layered read, the book tree and the item read
+        // coerce no number of the query:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 14 → 15.
+        // [#23050 slice 13c] Nor do the per-item writes (`meta-item-write-routes.ts`):
+        // the item save and the reset read their switches as strings and coerce no
+        // number of the query:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 15 → 16.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });

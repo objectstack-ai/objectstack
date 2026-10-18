@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import {
-    IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
+    IHttpServer, isAuthGateAllowlisted,
     // [commit 6a180e42d] Re-raise a permission-store OUTAGE through the fail-closed nets
     // below instead of degrading it into an anonymous/denied answer.
     rethrowAuthzStoreUnavailable,
@@ -9,19 +9,21 @@ import {
     // be RESOLVED leaves the caller's permissions equally undetermined, so it
     // takes the same loud answer rather than the quiet 403 it used to wear.
     AuthzStoreUnavailableError,
-    // [#13906 / #16013] The ONE classification the tenancy seam applies on
-    // BOTH of its wirings: the REGISTRY's own "never registered" brand absorbs
-    // the supported no-tenancy composition (never message text, #13905) while
-    // every other rejection stays loud. ⛔ The two wirings themselves are NOT
-    // the helper's — see `computeExecCtx`.
-    classifyAdmissionTenancyPosture,
+    // [ruling record 6227928430, letter A] The ONE request-to-ExecutionContext
+    // composition `computeExecCtx` calls, and the shape of the tenancy wiring
+    // it hands over: [#13906 / #16013] the composition classifies the
+    // `tenancy` read on BOTH wirings (the REGISTRY's own "never registered"
+    // brand absorbs the supported no-tenancy composition, never message text,
+    // #13905; every other rejection stays loud). ⛔ The two wirings themselves
+    // are NOT the composition's — see `computeExecCtx`.
+    resolveRequestExecutionContext,
+    type TenancyServiceResolver,
     effectiveTenancyPosture,
     // The registry's "never registered" brand, asked directly by the public
     // form doors' tenancy read (see `registerFormEndpoints`).
     isServiceNotRegisteredError,
-    assembleExecutionContext, normalizeAuthGate, userAuthGateSourceOf, type AuthGate,
-    // [#23367] The API-key lifecycle policy source, and its branded refusal.
-    apiKeyLifecyclePolicySourceOf, isApiKeyLifecycleRefusalError, type ApiKeyLifecycleRefusalError,
+    // [#23367] The API-key lifecycle's branded refusal.
+    isApiKeyLifecycleRefusalError, type ApiKeyLifecycleRefusalError,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // `isAudienceBindingSuggestionStatus` and `unknownAudienceBindingSuggestionStatusMessage`,
     // the suggested-binding `?status=` vocabulary (#7678), moved with `registerSecurityEndpoints`'
@@ -40,8 +42,6 @@ import {
     // [#20061] The thrown `VALIDATION_FAILED` + `fields[]` shape every catch in
     // this file already maps to `400` — see `readDeclaredQueryNumber` below.
     validationFailure,
-    // [#22258] The in-process session-read rule — see `computeExecCtx`.
-    inProcessSessionReadInput,
 } from '@objectstack/types';
 import {
     allowPerfDisclosure,
@@ -55,14 +55,14 @@ import {
 import {
     ObjectSchemaMaskEvaluationError,
     applyObjectSchemaMask,
-    foldVisibilityFingerprintIntoEtag,
     isObjectSchemaMaskExempt,
     isObjectSchemaMaskingEnabled,
-    normalizeIfNoneMatch,
     relateObjectSchemaMaskPosture,
     resolveObjectSchemaMaskPosture,
-    resolveObjectSchemaRuntimeView,
     OBJECT_SCHEMA_MASK_NOT_APPLICABLE,
+    // `foldVisibilityFingerprintIntoEtag`, `normalizeIfNoneMatch` and
+    // `resolveObjectSchemaRuntimeView`, read only by the item read's conditional
+    // answer, moved with that body to `meta-item-read-routes.ts` (#23050 slice 13b).
     type ObjectSchemaMaskPosture,
     // [#12702 · ADR-0131 D6] Which callers a `/meta` item write door admits:
     // `manage_metadata` (or `isSystem`). One predicate for every `/meta` item
@@ -78,8 +78,9 @@ import {
     // Which form candidates the anonymous form doors serve — the one rule the
     // metadata protocol also judges organization-scoped `view` writes by.
     anonymousFormIntakeCandidates,
-    // …and whether another body of the same view name withdraws a candidate.
-    anonymousFormIntakeWithdrawnIn,
+    // `anonymousFormIntakeWithdrawnIn` (whether another body of the same view name withdraws a
+    // candidate), read only by the anonymous form doors, moved with `registerFormEndpoints`'
+    // body to `form-routes.ts` (#23050 slice 11).
     // [#21476] Whether such a form can take intake on this posture, and why not
     // — the one predicate the runtime authoring gate's advisory reads too.
     anonymousFormIntakePosture,
@@ -87,9 +88,10 @@ import {
     anonymousFormIntakeUnavailableMessage,
     anonymousFormObjectName,
     anonymousFormSharingPath,
-    // [#21476] The ADR-0106 fingerprint the admin read folds the reason into
-    // — and [#22639] the list views the read gate withheld.
-    objectFieldVisibilityFingerprint,
+    // [#21476] `objectFieldVisibilityFingerprint`, the ADR-0106 fingerprint the admin
+    // read folds the reason into — and [#22639] the list views the read gate
+    // withheld — read only by the item read and its intake-reason helper, moved with
+    // them to `meta-item-read-routes.ts` (#23050 slice 13b).
 } from '@objectstack/metadata-core';
 import { RouteManager, type RouteEntry } from './route-manager.js';
 // [#6877] Query-parameter multiplicity. `IHttpRequest.query` declares
@@ -98,10 +100,9 @@ import { RouteManager, type RouteEntry } from './route-manager.js';
 // read points. Each handler below declares WHICH of its parameters are
 // single-valued; genuinely multi-valued ones (`select`, `expand`, `objects`,
 // `fields`, `searchFields`, `approverId`) are deliberately never listed.
-// [#7390] The filter slot is the one arity judgement the shared normalizer
-// structurally cannot make (a filter AST IS an array), so the querystring
-// ingress — the only layer that knows it is one — makes it instead.
-import { refuseRepeatedQueryParams, assertFilterParamSuppliedOnce } from './query-multiplicity.js';
+// `assertFilterParamSuppliedOnce` (#7390), the `/data` list's filter-slot arity rule, read only
+// by that door, moved with `registerCrudEndpoints`' body to `crud-routes.ts` (#23050 slice 12).
+import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 // [#7527] The other half of the same discipline: a parameter this route does
 // not KNOW is refused rather than dropped. See `query-allowlist.ts` for why an
 // ignored filter is the one wrong answer a caller cannot detect.
@@ -140,27 +141,22 @@ import { isAppPackageIdKey } from '@objectstack/spec/api';
 import type {
     GetMetaItemsRequest,
     GetMetaItemRequest,
-    GetMetaItemCachedRequest,
+    // `GetMetaItemCachedRequest`, the item read's cached-path request, moved with that
+    // body to `meta-item-read-routes.ts` (#23050 slice 13b).
     GetMetaItemLayeredRequest,
     PublishMetaItemRequest,
     AuditMetaItemRequest,
     HistoryMetaItemRequest,
-    SaveMetaItemRequest,
-    DeleteMetaItemRequest,
+    // `SaveMetaItemRequest` and `DeleteMetaItemRequest`, the item save's and the reset's
+    // declared requests, moved with those doors to `meta-item-write-routes.ts` (#23050
+    // slice 13c).
 } from '@objectstack/spec/api';
 // `GetUiViewRequest`, the UI view door's declared request, moved with that door to
 // `ui-routes.ts` (#23050 slice 10).
-// [#15866] The same discipline for the DATA doors. Every literal these routes
-// assemble is now compiled against the declared request type through
-// `ServerScopedDataRequest` below, so a member the contract does not declare is
-// a compile error at the call site instead of a payload no schema has seen.
-import type {
-    FindDataRequest,
-    GetDataRequest,
-    CreateDataRequest,
-    UpdateDataRequest,
-    DeleteDataRequest,
-} from '@objectstack/spec/api';
+// [#15866] The five data request types (`FindDataRequest`, `GetDataRequest`, `CreateDataRequest`,
+// `UpdateDataRequest`, `DeleteDataRequest`), which every CRUD door's literal is compiled against
+// through `ServerScopedDataRequest`, moved with `registerCrudEndpoints`' body to `crud-routes.ts`
+// (#23050 slice 12).
 // The four bulk request types (`BatchDataRequest`, `CreateManyDataRequest`,
 // `UpdateManyDataRequest`, `DeleteManyDataRequest`) moved with their doors to
 // `batch-routes.ts` (#23050 slice 2).
@@ -171,7 +167,8 @@ import type {
 // single-item read path rebuilds its body through, from the spec's own storage
 // predicates — so the signal the grid reads cannot drift from what the runtime
 // doors (#6994/#7095) refuse.
-import { PUBLIC_FORM_SERVER_MANAGED_FIELDS } from '@objectstack/spec/security';
+// `PUBLIC_FORM_SERVER_MANAGED_FIELDS`, read only by the anonymous form doors, moved with
+// `registerFormEndpoints`' body to `form-routes.ts` (#23050 slice 11).
 import { PLURAL_TO_SINGULAR, canonicalMetaUrlType } from '@objectstack/spec/shared';
 // `stripReadDecorations`, read only by the analytics dataset door, moved with that door to
 // `analytics-routes.ts` (#23050 slice 5).
@@ -212,15 +209,16 @@ export { filterAppForUser } from './meta-item-read-gate.js';
 // [#23072] What the by-name `/meta` doors read beside the query decision both
 // transports ask (`metaItemQueryRefusal`) — see the re-export above the sets.
 import {
-    META_ITEM_LAYERS_PARAMS,
+    // `META_ITEM_LAYERS_PARAMS` is read only by the `/layers` door, which moved to
+    // `meta-item-read-routes.ts` (#23050 slice 13b); the re-export below still names it.
+    // `META_ITEM_SAVE_PARAMS` is read only by the item save, which moved to
+    // `meta-item-write-routes.ts` (#23050 slice 13c); the re-export below still names it.
     META_ITEM_MEMBER_PARAM,
     META_ITEM_PUBLISHED_PARAMS,
-    META_ITEM_SAVE_PARAMS,
     metaMemberSelector,
 } from './meta-item-read-gate.js';
-// [#22141] The `PUT /meta/:type/:name` door's precondition and lifecycle, read
-// through the ONE mapping the runtime dispatcher's `/meta` domain asks too.
-import { metaSaveRequestOptions } from './meta-save-request.js';
+// [#22141] `metaSaveRequestOptions`, the `PUT /meta/:type/:name` door's precondition and
+// lifecycle mapping, moved with that door to `meta-item-write-routes.ts` (#23050 slice 13c).
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
@@ -259,13 +257,15 @@ import { sendError as sendEnvelopeError } from '@objectstack/types';
 export type RestProtocol = DataProtocol & MetadataProtocol;
 
 // [#23050 slice 10] `TransportScopedMetaRequest`, the meta doors' request envelope, moved to
-// `ui-routes.ts` (imported below) with the UI view door's body, its first reader outside this
-// file: exporting it from here changed the published `dist/*.d.ts` by one line, and a second
-// copy is not an option.
+// `ui-routes.ts` with the UI view door's body, its first reader outside this file: exporting
+// it from here changed the published `dist/*.d.ts` by one line, and a second copy is not an
+// option. [#23050 slice 13a] It moved on, verbatim, to `meta-collection-routes.ts` (imported
+// below), the module of the first `/meta` groups the split took out of this file.
 
 // [#23050 slice 1] `ServerScopedDataRequest`, the data doors' request envelope, moved to
-// `data-action-routes.ts` (imported below): exporting it from this file for that module
-// changed the published `dist/*.d.ts` by one line, and a second copy is not an option.
+// `data-action-routes.ts`: exporting it from this file for that module changed the published
+// `dist/*.d.ts` by one line, and a second copy is not an option. Its last reader here, the CRUD
+// doors' body, moved to `crud-routes.ts` (#23050 slice 12), which imports it from there.
 
 import {
     buildFieldMetaMap,
@@ -275,7 +275,7 @@ import {
     type ExportFieldMeta,
 } from './export-format.js';
 // [#23050 slice 1] The data-action routes' body moved to its own module — see its header.
-import { registerDataActionEndpoints, type DataActionRouteHost, type ServerScopedDataRequest } from './data-action-routes.js';
+import { registerDataActionEndpoints, type DataActionRouteHost } from './data-action-routes.js';
 // [#23050 slice 2] The batch routes' body moved to its own module — see its header.
 import { registerBatchEndpoints, type BatchRouteHost } from './batch-routes.js';
 // [#23050 slice 3] The approval routes' body moved to its own module — see its header.
@@ -309,7 +309,26 @@ import { registerEmailEndpoints, type EmailRouteHost } from './email-routes.js';
 // [#23050 slice 9] The global search route's body moved to its own module — see its header.
 import { registerSearchEndpoints, type SearchRouteHost } from './search-routes.js';
 // [#23050 slice 10] The UI view route's body moved to its own module — see its header.
-import { registerUiEndpoints, type TransportScopedMetaRequest, type UiRouteHost } from './ui-routes.js';
+import { registerUiEndpoints, type UiRouteHost } from './ui-routes.js';
+// [#23050 slice 11] The public form routes' body moved to its own module — see its header.
+import { registerFormEndpoints, type FormRouteHost } from './form-routes.js';
+// [#23050 slice 12] The CRUD routes' body moved to its own module — see its header.
+import { registerCrudEndpoints, type CrudRouteHost } from './crud-routes.js';
+// [#23050 slice 13a] The `/meta` type list, whole-store maintenance and per-type list
+// groups moved to their own module — see its header. That module is also the home of the
+// meta doors' request envelope `TransportScopedMetaRequest` and of `MetaRouteScope`.
+import {
+    registerMetaCollectionRoutes,
+    type MetaCollectionRouteHost,
+    type MetaRouteScope,
+    type TransportScopedMetaRequest,
+} from './meta-collection-routes.js';
+// [#23050 slice 13b] The `/meta` per-item reads (`/references`, `/layers`, the book tree
+// and the item read) moved to their own module — see its header.
+import { registerMetaItemReadRoutes, type MetaItemReadRouteHost } from './meta-item-read-routes.js';
+// [#23050 slice 13c] The `/meta` per-item writes (the item save and the reset) moved to
+// their own module — see its header.
+import { registerMetaItemWriteRoutes, type MetaItemWriteRouteHost } from './meta-item-write-routes.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -343,17 +362,22 @@ import {
     // `classifiedRefusalAnswer`, `nestedRefusalEnvelope` and `sandboxFaultAnswer`, read only
     // by the two security families' refusal and fault arms, moved with those bodies to
     // `security-routes.ts` (#23050 slice 6).
-    boundedDeclaredRefusalMessage,
-    declaredHttpStatus,
+    // `boundedDeclaredRefusalMessage` and `declaredHttpStatus`, read only by the
+    // `/references` door's declared-refusal re-dresser, moved with it to
+    // `meta-item-read-routes.ts` (#23050 slice 13b).
     // `sendThrownError`, the OpenAPI document's and viewer's catch-all answer, moved with
     // `registerOpenApiEndpoints`' body to `discovery-routes.ts` (#23050 slice 7).
     sendDeclaredFault,
     sendFieldVisibilityFault,
     handleRouteError,
+    // `thrownAnswerIsBareNotFound`: the item read's catch moved to `meta-item-read-routes.ts`
+    // (#23050 slice 13b); the event and diff doors here still read it (#24210).
     thrownAnswerIsBareNotFound,
-    logUnexpectedRouteError,
-    isExpectedRouteError,
-    applyDroppedFieldsHeader,
+    // `logUnexpectedRouteError` and `applyDroppedFieldsHeader`, read only by the CRUD doors' catches
+    // and their two write answers, moved with `registerCrudEndpoints`' body to `crud-routes.ts`
+    // (#23050 slice 12).
+    // `isExpectedRouteError`, read only by the public form submit door's catch, moved with
+    // `registerFormEndpoints`' body to `form-routes.ts` (#23050 slice 11).
 } from './error-response.js';
 export { mapDataError };
 
@@ -1546,120 +1570,10 @@ export async function wiredEngineOrLoud<T>(
     }
 }
 
-/**
- * [#15685] The `/meta/:type/:name/references` door's PROTOCOL-RAISED refusal,
- * re-dressed in the ADR-0112 NESTED envelope that door's other refusal exit
- * already publishes. Answers `undefined` for everything else, so the caller
- * keeps `handleRouteError` for the rest.
- *
- * ## The defect this closes
- *
- * The door can refuse in two ways and, measured on one boot, the two answers
- * agreed on neither the envelope nor the message:
- *
- * ```
- * A  protocol-raised, unanswerable TARGET type (#9327)
- *    501 {"error":"Internal server error","code":"NOT_IMPLEMENTED"}
- * B  the resolved kernel has no `findReferencesToMeta` at all (#9326)
- *    501 {"error":{"code":"NOT_IMPLEMENTED","message":"protocol.findReferencesToMeta() is not available in this kernel"}}
- * ```
- *
- * Two facts are lost on A, and both of them are the operator's:
- *
- *  1. **The PRESCRIPTION.** A's message is not decoration — `findReferencesToMeta`
- *     says so in as many words ("The message is prescriptive per ADR-0110 D3:
- *     it names the answerable question"). It tells the operator what to ask
- *     INSTEAD: `Ask the owning object instead: GET /api/v1/meta/object/<owner>/references`.
- *     That sentence is what keeps "the question was never asked" from being
- *     read as "nothing depends on this item" — the whole of ADR-0110 D3
- *     (#8896), in front of an operator whose next click is a delete, because
- *     the admin "Used by" panel renders its empty case as "Nothing in the
- *     metadata graph points at this item. Safe to delete." On the wire the
- *     sentence was replaced by "Internal server error".
- *  2. **The `code`'s POSITION.** `body.error.code` reads on B and `undefined`
- *     on A. This door's own comment on the B branch warns against precisely
- *     that dialect ("never the bare-string or sibling-`code` dialects, which
- *     make `body.error.code` read `undefined`") — so the route was violating
- *     its own written rule at its other exit, reached by a different path.
- *
- * ## Why the repair is HERE and not at the relay
- *
- * A reaches the wire through `handleRouteError` → {@link declaredServerFaultAnswer},
- * which keeps `status` and `code` and replaces the prose with
- * `INTERNAL_ERROR_MESSAGE`. That arm is correct and argued for a server FAULT
- * (#11718, #5582) — a fault message may carry driver internals, and withholding
- * it is the point. What it cannot see is that a producer-declared 5xx might be
- * a deliberate REFUSAL whose message is authored FOR the caller. Teaching it
- * that distinction would change platform-wide behaviour for every
- * producer-declared 5xx at every door; that is a maintainer's decision and is
- * handed back as its own finding, not taken here. This arm is the bounded half:
- * ONE door, re-dressing ONE refusal in the dialect it already publishes.
- *
- * ⛔ It is therefore NOT a general "5xx prose is relayed now" rule, and the
- * three conditions below are what keep it from becoming one.
- *
- * ## The three conditions, and why each is exactly this narrow
- *
- *  - **`501`**, read through {@link declaredHttpStatus} so both declaration
- *    spellings (`status` / `statusCode`, #7525) reach the same verdict rather
- *    than through a fourth local opinion about which field declares a status.
- *  - **`code === 'NOT_IMPLEMENTED'`**, the literal this route already publishes
- *    on its B exit. Matching the LITERAL rather than "any declared code" is
- *    also how the #9232 vocabulary narrowing is honoured by CONSTRUCTION: an
- *    unregistered producer spelling can never reach this exit, so no second
- *    copy of `thrownCodeFields`' demotion rule is needed and no new door ships
- *    an un-narrowed code. ⚠️ The cost is stated rather than hidden: a future
- *    SECOND refusal code on this route would fall back to the flat fault answer
- *    until whoever adds it comes here. That is a visible, one-line extension,
- *    not a silent gap.
- *  - **A DECLARED refusal.** [#16146] This was "a non-empty message", and it
- *    was this arm's own opinion about which producer-declared 5xx keeps its
- *    prose — the very question the relay could not answer when this was
- *    written. It can now: the director seat ruled the distinction a
- *    producer-side declaration on the published ADR-0112 envelope (decision
- *    batch #58, 2026-09-06, option C) and the producer sets it
- *    (`findReferencesToMeta`, `metadata-protocol`). So the condition is
- *    {@link boundedDeclaredRefusalMessage} — the shared relay's own answer,
- *    bound and all — and this route holds no refusal/fault opinion of its own
- *    any more.
- *
- * ## [#16146] What was RETIRED here, and the one half that could not be
- *
- * The ruling says to retire this route-local patch once the relay handles
- * `/references`, and its PROSE half is retired exactly as ruled: the sentence
- * now reaches the wire because the relay keeps it at EVERY door, the bound is
- * the shared one rather than this arm's unbounded pass-through, and deleting
- * the call below would change no message on this route.
- *
- * ⚠️ What deleting it WOULD change is the ENVELOPE, and that is a different
- * decision. This function also re-dresses the answer into the NESTED ADR-0112
- * envelope this door's B exit publishes; the relay is flat
- * (`{ error, code }` through `handleRouteError`), so removing this arm would
- * put `body.error.code` back to `undefined` on the A exit and re-open the
- * SECOND half of the defect #15685 measured and pinned positionally in
- * `rest-server-meta-references-refusal-envelope.test.ts`. Envelope POSITION is
- * owned by the `check:route-envelope` ratchet and is explicitly a separate
- * line from vocabulary (ADR-0112's #9232 amendment says so in as many words),
- * so it is not folded into a prose ruling. What remains here is therefore a
- * pure position adapter over the shared answer — ⛔ not a second withhold arm,
- * and ⛔ not a place to add a refusal rule.
- *
- * ⛔ And it does not re-derive `REFERENCE_SITES.unanswerableTargetTypes` to
- * decide whether the target was answerable. That set, its canonical-type fold
- * and its refusal all belong to `findReferencesToMeta`; a second copy at the
- * transport is the tolerant-consumer direction, and it would drift the moment
- * the set changed. The route reads what the protocol DECLARED, which is what a
- * transport is for.
- */
-function notImplementedRefusalAnswer(
-    error: any,
-): { status: number; body: { error: { code: string; message: string } } } | undefined {
-    if (declaredHttpStatus(error) !== 501) return undefined;
-    if (error?.code !== 'NOT_IMPLEMENTED') return undefined;
-    const message = boundedDeclaredRefusalMessage(error);
-    if (message === undefined) return undefined;
-    return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message } } };
-}
+// [#15685] `notImplementedRefusalAnswer`, the `/meta/:type/:name/references` door's re-dresser of
+// a protocol-raised, declared `501 NOT_IMPLEMENTED` refusal into the nested envelope that door
+// publishes, moved with its one caller to `meta-item-read-routes.ts` (#23050 slice 13b). Its
+// docblock moved with it: the defect it closes and its three conditions are there.
 
 /**
  * [#18066] THE one absence answer `GET /meta/:type/:name` gives — a single
@@ -1706,7 +1620,7 @@ function notImplementedRefusalAnswer(
  * app's answer does not is the enumeration signal all over again. The nested
  * `error.code` accessor is the same one objectui#4252 reads on both.
  */
-function sendMetaItemAbsent(res: any): void {
+export function sendMetaItemAbsent(res: any): void {
     res.status(404).json({
         error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' },
     });
@@ -1761,7 +1675,7 @@ function sendMetaItemAbsent(res: any): void {
  * token alike; `data-update-expected-version.test.ts` and
  * `data-delete-expected-version.test.ts` hold them to it.
  */
-function versionTokenRefusal(token: unknown, spelling: string): string | undefined {
+export function versionTokenRefusal(token: unknown, spelling: string): string | undefined {
     if (token === undefined || token === null) return undefined;
     if (typeof token === 'string' && token.trim() !== '') return undefined;
     const shape = typeof token === 'string' ? 'empty'
@@ -1944,7 +1858,7 @@ type MetaReadVerdict =
  * a derived view warning already goes (`stampRenameWarning`). A declared read
  * decoration, so a GET then PUT round trip never stores it.
  */
-function stampAnonymousFormIntakeWarnings(
+export function stampAnonymousFormIntakeWarnings(
     document: any,
     warnings: ReadonlyArray<{ path: string; message: string }>,
 ): any {
@@ -1955,10 +1869,8 @@ function stampAnonymousFormIntakeWarnings(
     return { ...document, _diagnostics: diagnostics };
 }
 
-/** [#21476] Those reasons' ETag dimension; empty when there is none (the ADR-0106 D3 fold). */
-function anonymousFormIntakeFingerprint(warnings: ReadonlyArray<{ path: string; message: string }>): string {
-    return objectFieldVisibilityFingerprint(warnings.map((w) => JSON.stringify([w.path, w.message])));
-}
+// [#21476] `anonymousFormIntakeFingerprint`, those reasons' ETag dimension, moved with its one
+// caller (the item read's intake-reason fold) to `meta-item-read-routes.ts` (#23050 slice 13b).
 
 /**
  * RestServer
@@ -2633,8 +2545,27 @@ export class RestServer {
     ): Promise<boolean> {
         const objectName = req?.params?.object;
         if (!objectName) return false;
-        const items = await this.loadObjectItems(p, environmentId);
-        const obj = items.find((o: any) => o?.name === objectName);
+        // [#24031] The ONE object this gate judges, read by name — never the
+        // whole object list, whose decoration diagnosed every object on every
+        // request. Same env-scoped request shape the list read sends
+        // (`metaListSource`); a protocol with no by-name read is asked the list.
+        const listSource = this.metaListSource(p, environmentId);
+        const obj = await metaReadGate.loadObjectItem(
+            typeof p.getMetaItem === 'function'
+                ? {
+                    ...listSource,
+                    getObjectItem: (name) => {
+                        const itemRequest: TransportScopedMetaRequest<GetMetaItemRequest> = {
+                            type: 'object',
+                            name,
+                            ...(environmentId ? { environmentId } : {}),
+                        };
+                        return p.getMetaItem(itemRequest);
+                    },
+                }
+                : listSource,
+            objectName,
+        );
         // [#3770] Unknown object → no declared exposure policy to enforce here;
         // the data path's registry gate 404s it. See the doc comment above.
         if (!obj) return false;
@@ -3117,14 +3048,16 @@ export class RestServer {
                 if (authService) authEnvironmentId = environmentId;
             }
             if (!authService) return undefined;
-            // The auth service may be the AuthManager wrapper (which exposes
-            // `getApi()`) or the raw better-auth instance (which exposes
-            // `.api` directly). Normalize to the raw API object.
-            let api: any = authService.api;
-            if (!api && typeof authService.getApi === 'function') {
-                api = await authService.getApi();
-            }
-            if (!api?.getSession) return undefined;
+            // [ruling record 6227928430, letter A] From here to the context is
+            // the ONE request-to-ExecutionContext composition
+            // (`resolveRequestExecutionContext`, @objectstack/core), called once
+            // below with this door's differences as its named parameters. What
+            // stays in this method is this door's own: the environment and the
+            // auth service above, the headers, the engine and the tenancy wiring
+            // below, and what the context carries out of here.
+            //
+            // The auth service may be the AuthManager wrapper (`getApi()`) or the
+            // raw better-auth instance (`.api`); the composition reads either.
 
             // better-auth's `getSession` requires a Web `Headers` instance
             // (it calls `headers.get('cookie')`). Adapter req.headers may
@@ -3143,7 +3076,7 @@ export class RestServer {
                 return undefined;
             }
 
-            // Resolve the data engine for this scope (shared by the resolver below).
+            // Resolve the data engine for this scope (handed to the composition below).
             //
             // [#13476] The PROVIDER branch reaches the seam through
             // `wiredEngineOrLoud`, so "no engine is wired" and "the engine could
@@ -3164,23 +3097,6 @@ export class RestServer {
                     () => this.objectQLProvider!(environmentId),
                 );
 
-            // Delegate ALL identity + role/permission/RLS aggregation to the SINGLE
-            // shared resolver (`resolveAuthzContext`, @objectstack/core) — the same one
-            // the runtime dispatcher uses, so the REST and dispatcher entry points can
-            // never drift on authorization. (This path previously kept its own copy that
-            // silently omitted sys_user_position / sys_position_permission_set / platform_admin /
-            // ai_seat — see the resolver's module doc.)
-            //
-            // [#22258] Read through the in-process session rule: this request
-            // answers with its OWN response, so a renewal here would move
-            // `sys_session.expires_at` while the renewed cookie is discarded —
-            // the browser's cookie then dies before its session. A request
-            // carrying a session cookie therefore reads without renewal (only
-            // `/get-session`, which re-issues the cookie, renews it); a
-            // bearer-only request renews as before.
-            const getSession = async (h: any) => {
-                try { return await api.getSession(inProcessSessionReadInput(h)); } catch { return undefined; }
-            };
             // [#8287] The EFFECTIVE tenancy posture, from the kernel's `tenancy`
             // service — the same source plugin-security reconciles for the Layer 0
             // wall, so API-key admission and the wall agree.
@@ -3260,8 +3176,9 @@ export class RestServer {
             // absence is the only fault it could report anyway. It keeps the
             // previous quiet answer, unchanged.
             //
-            // [#16013] The CLASSIFICATION below is one shared function, not two
-            // hand-written copies: `classifyAdmissionTenancyPosture` answers
+            // [#16013] The CLASSIFICATION is one shared function, not two
+            // hand-written copies: the composition hands the `tenancy` thunk
+            // built below to `classifyAdmissionTenancyPosture`, which answers
             // quiet `undefined` for the branded "never registered" (the
             // supported no-tenancy composition, no posture-conditional refusal)
             // and raises `AuthzStoreUnavailableError('tenancy', err)` for every
@@ -3270,12 +3187,11 @@ export class RestServer {
             // the posture is an authorization INPUT and admission was never
             // decided. ⛔ The WIRING branch is NOT shared and must not become
             // so: which of the two wirings may be asked is this file's fact
-            // alone, for the reason spelled out in the `else if` below.
-            let tenancyPosture;
+            // alone, for the reason spelled out in the `else if` below. No
+            // wiring here, no thunk: the composition then reads no posture.
+            let tenancy: TenancyServiceResolver | undefined;
             if (kernel && typeof kernel.getServiceAsync === 'function') {
-                tenancyPosture = await classifyAdmissionTenancyPosture(
-                    () => kernel.getServiceAsync('tenancy') as any,
-                );
+                tenancy = () => kernel.getServiceAsync('tenancy') as any;
             } else if (this.tenancyServiceProvider) {
                 // [#15256 / 1A] The SINGLE-KERNEL branch — the wiring every
                 // deployment the open core builds actually runs, and the one
@@ -3293,157 +3209,75 @@ export class RestServer {
                 // rejection is the outage it is. The provider re-raises
                 // unbranded rejections for precisely that reason — see
                 // `rest-api-plugin.ts`.
-                tenancyPosture = await classifyAdmissionTenancyPosture(
-                    () => this.tenancyServiceProvider!(environmentId) as any,
-                );
+                tenancy = () => this.tenancyServiceProvider!(environmentId) as any;
             }
-            // [#23287, ruling C′ item 3] The auth service's per-user posture
-            // computation rides into the shared resolver, where the API-key
-            // admission seam asks it for a key's owner: ONE judgment for every
-            // face, this one included.
-            const authz = await resolveAuthzContext({
-                ql,
+            // [#23287, ruling C′ item 3 · #23367] The auth service's per-user
+            // posture computation and its API-key lifecycle policy reach the
+            // shared resolver from `authService` itself, inside the composition:
+            // ONE judgment for every face, this one included. Identity, the
+            // role/permission/RLS aggregation, the localization and the envelope
+            // are the composition's; each parameter below is this door's answer
+            // from before the composition existed (its docblock tables them).
+            const base = await resolveRequestExecutionContext({
                 headers,
-                getSession,
-                tenancyPosture,
-                userAuthGates: userAuthGateSourceOf(authService),
-                // [#23367] The API-key lifecycle policy, from the same service.
-                apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
-            });
-            // [commit f586f1a89] The anonymous contract IS the shared assembler's default
-            // entry: no resolved principal → no context → 401. Taken early here
-            // only so an anonymous request does not pay for the localization and
-            // auth-gate reads it would never use; `assembleExecutionContext`
-            // below re-affirms the same rule.
-            if (!authz.userId) return undefined;
-
-            const settings = this.settingsServiceProvider
-                ? await seamOrUndefined(() => this.settingsServiceProvider!(environmentId))
-                : undefined;
-            const localization = await resolveLocalizationContext({
                 ql,
-                settings,
-                tenantId: authz.tenantId,
-                userId: authz.userId,
-            });
-
-            // ADR-0069 — authentication-policy gate posture. Only when a gate
-            // feature is active (cheap sync check) do we re-read the session for
-            // its `user.authGate` (computed in customSession). enforceAuth() then
-            // blocks protected resources for a gated user. Zero cost when off.
-            //
-            // [#7280] Normalized through the shared `normalizeAuthGate` instead
-            // of copied verbatim: the session user crosses an external boundary
-            // as `any`, and `ExecutionContext.authGate` now DECLARES the shape
-            // (`{ code, message }`), so this is where the declaration is met —
-            // a gate with a blank message no longer rides into a 403 body as
-            // `undefined`.
-            //
-            // [#13906 — maintainer ruling 2026-09-02, decision 2 option B] The
-            // gate is best-effort NO LONGER in one precisely measured window:
-            // `isAuthGateActive()` answered `true` AND the gate's session
-            // re-read then FAILED. Measured before the repair, same fixture,
-            // the wiring differing only in how the gate faulted:
-            //
-            // | gate wiring                        | before | after |
-            // |:--|:--|:--|
-            // | INACTIVE (the common, correct case)| admitted | admitted — unchanged |
-            // | ACTIVE, healthy re-read, gated user| 403 code+message | 403 — unchanged |
-            // | `isAuthGateActive()` THROWS        | admitted | admitted — unchanged |
-            // | ACTIVE, re-read FAILS              | **admitted** | **503** |
-            //
-            // ⇒ an enforcement the deployment DECLARED active used to vanish
-            // with no wire trace, deep-equal to gate-off. A declared promise
-            // that disappears silently is the fail-OPEN this card measured.
-            //
-            // ⛔ The probe-throws row stays absorbed DELIBERATELY, and it is the
-            // narrowness the ruling asked for: a host whose probe faults never
-            // answered `true`, so it never declared a gate, and refusing on it
-            // would block deployments that never asked for one.
-            //
-            // [#23287 — ruling C′ item 3] The cookie re-read below is the
-            // SESSION's gate, and it runs only for a principal a session
-            // admitted. A principal an API KEY admitted is judged by the key's
-            // own answer, decided once at the shared key-admission seam
-            // (`authz.authGate`: the key owner's account-scope posture). It
-            // used to re-read the cookie here whatever had admitted the
-            // caller, so a key sent beside a held cookie was refused with the
-            // COOKIE's posture — another credential's, possibly another user's
-            // — while the same key sent alone was admitted with no question
-            // asked of its owner at all.
-            let authGate: AuthGate | undefined;
-            let gateActive = false;
-            if (authz.credential === 'api_key') {
-                authGate = authz.authGate;
-            } else {
-                try {
-                    gateActive = typeof authService.isAuthGateActive === 'function'
-                        && authService.isAuthGateActive() === true;
-                } catch {
-                    gateActive = false;
-                }
-            }
-            if (gateActive) {
-                let gatedSession: any;
-                try {
-                    // ⛔ NOT the `getSession` closure above, and not its
-                    // `.catch(() => undefined)`: both convert a THROW into the
-                    // same `undefined` a gate-less user produces, which is
-                    // precisely the collapse being repaired. A session that
-                    // RESOLVES carrying no gate is not a failure — that user is
-                    // simply not gated, and still admits.
-                    // [#22258] Same in-process read rule as the closure above.
-                    gatedSession = await api.getSession(inProcessSessionReadInput(headers));
-                } catch (err) {
-                    throw new AuthzStoreUnavailableError('auth_gate', err);
-                }
-                authGate = normalizeAuthGate(gatedSession?.user) ?? undefined;
-            }
-
-            // [commit f586f1a89 — maintainer ruling 2026-08-08, Option A] The assembly of
-            // the ExecutionContext itself is now the SINGLE shared one
-            // (`assembleExecutionContext`, @objectstack/core), the same module
-            // the runtime / MCP dispatcher assembles through. Before this, the
-            // step AFTER `resolveAuthzContext` was two hand-written copies and
-            // the copies drifted: #6071 (this face never set `principalKind`,
-            // so every enforcement judgment reading it was silently never-true
-            // here) and commit 8e13ca876 / #6551 (a dropped `accessible_org_ids` produced
-            // real 403s on the share-link faces). The field set is closed by
-            // type there, so a new `ExecutionContext` field cannot land on one
-            // face and miss another.
-            //
-            // This face takes the FAIL-CLOSED DEFAULT entry — no resolved
-            // principal → no context → `enforceAuth` answers 401. The runtime
-            // face takes the explicit guest entry instead. Both behaviours are
-            // unchanged; the divergence is now named API rather than drift.
-            const base = assembleExecutionContext({
-                authz,
+                authService,
+                tenancy,
+                // [commit f586f1a89] The FAIL-CLOSED default entry: no resolved
+                // principal → no context → `enforceAuth` answers 401. The runtime
+                // face takes the guest entry; the divergence is named API, not
+                // drift. An anonymous request reads no localization and no gate.
+                anonymous: 'fail-closed',
+                // ADR-0069 — this face CARRIES the gate, and its consumer is
+                // `enforceAuth` (403 `{ code, message }`). [#23287] A key is judged
+                // by its owner's posture, decided at the shared key-admission
+                // seam, whatever cookie rides beside it; the request's own session
+                // is read again only while a gate feature is active (a cheap sync
+                // probe, zero cost when off). [#13906 — maintainer ruling
+                // 2026-09-02, decision 2 option B] fails closed in exactly one
+                // window:
+                //
+                // | gate wiring                         | answer |
+                // |:--|:--|
+                // | INACTIVE (the common, correct case) | admitted |
+                // | ACTIVE, healthy re-read, gated user | 403 code + message |
+                // | `isAuthGateActive()` THROWS         | admitted: a probe that faults never declared a gate |
+                // | ACTIVE, re-read FAILS               | 503: a declared enforcement never vanishes silently |
+                authGate: 'reread-when-active',
+                credentials: 'api-key-and-session',
+                // Without a session read this door authenticates nobody, the
+                // API-key door included.
+                sessionApi: 'required',
+                // [#22258] The request's own session, under the in-process read
+                // rule: this request answers with its OWN response, so a request
+                // carrying a session cookie reads without renewal (only
+                // `/get-session`, which re-issues the cookie, renews it).
+                session: 'request',
+                // The reference localization from this door's settings provider;
+                // a provider that throws or rejects reads as no service.
+                localization: {
+                    settings: () => (this.settingsServiceProvider
+                        ? seamOrUndefined(() => this.settingsServiceProvider!(environmentId))
+                        : undefined),
+                },
+                // [#3957] The request's OWN locale wins over the workspace
+                // default; the precedence lives in the shared assembler.
+                requestLocale: this.extractLocale(req),
+                // A NAMED divergence (commit f586f1a89): this transport has never
+                // carried the better-auth session bearer, and
+                // `ExecutionContext.accessToken` is a PUBLISHED hook surface
+                // (`session.accessToken`, hook.zod.ts). Widening it to a second
+                // transport is a product decision, not a refactor.
+                accessToken: 'withhold',
                 // OAuth access tokens are honoured on the `/mcp` door alone
                 // (`acceptOAuthAccessToken`), precisely so coarse tool-family
                 // scopes cannot ride onto REST — so `principalKind: 'agent'`,
                 // `onBehalfOf` and `oauthScopes` are not representable here.
                 oauth: undefined,
-                localization,
-                // [#3957] The request's OWN locale wins over the workspace
-                // default; the precedence itself lives in the shared assembler.
-                requestLocale: this.extractLocale(req),
-                // A NAMED divergence, deliberately preserved (commit f586f1a89): this
-                // transport has never carried the better-auth session bearer on
-                // the envelope, and `ExecutionContext.accessToken` is a
-                // PUBLISHED hook surface (`session.accessToken`, hook.zod.ts).
-                // Widening it to a second transport is a product decision, not
-                // a refactor — so REST withholds it on the record.
-                accessToken: undefined,
-                // [ADR-0069 / #7280] This face DOES carry the gate: its consumer
-                // is ten lines up (`enforceAuth` → 403 `{ code, message }`). It
-                // used to be spread on AFTER assembly behind an `as any`, which
-                // is precisely how it stayed outside the closed field set; it is
-                // a declared `ExecutionContext` field and an assembler input now.
-                authGate,
+                // The dispatcher's admission channel. This door enforces the gate
+                // off the envelope, at `enforceAuth`.
+                onAdmission: undefined,
             });
-            // Unreachable: the anonymous early-return above already took this
-            // branch. Kept because the shared entry — not this method — is the
-            // authority on what an anonymous request yields.
             if (!base) return undefined;
 
             const execCtx = {
@@ -3651,6 +3485,15 @@ export class RestServer {
      * which is not the item these doors read. Such a key is answered as no
      * current document, exactly as it was before the arm existed: no app name
      * is in the package-id grammar, so nothing is stored under it.
+     *
+     * [#7557, #24210] …and THROWS the plain read's absence (`404
+     * RESOURCE_NOT_FOUND`) when the plain read withholds an item that is
+     * there: a disabled package's item, which the by-name read answers as
+     * absent while its layers still resolve. Answered as no current document,
+     * it took these doors past their per-caller gate (events served ungated, a
+     * view's or dashboard's diff served ungated). The layered read, which keeps
+     * serving every layer, tells it apart from a deleted item, whose layers are
+     * all null: that one keeps its answer, `undefined`.
      */
     private async fetchCurrentMetaDocument(
         req: any,
@@ -3662,7 +3505,16 @@ export class RestServer {
             name: req.params.name,
         };
         const envelope = await p.getMetaItem(currentRequest) as Record<string, any>;
-        return envelope?.item ?? undefined;
+        const current = envelope?.item ?? undefined;
+        if (current !== undefined || typeof (p as any).getMetaItemLayered !== 'function') return current;
+        const layered = await (p as any).getMetaItemLayered(currentRequest);
+        if (layered?.effective != null) {
+            throw Object.assign(new Error('Metadata item not found or access denied.'), {
+                code: 'RESOURCE_NOT_FOUND',
+                status: 404,
+            });
+        }
+        return undefined;
     }
 
     /**
@@ -3675,6 +3527,12 @@ export class RestServer {
      * Only the types {@link metaItemReadGate} judges per caller are fetched at
      * all, so every other type's door is untouched: no extra read, no new
      * failure mode. Answers the refusal to send, or `undefined` to go on.
+     *
+     * [#7557, #24210] A withheld item's absence (a disabled package's item,
+     * which {@link fetchCurrentMetaDocument} throws) is answered in the plain
+     * read's own body, {@link sendMetaItemAbsent}, recognised as the plain
+     * read's catch recognises it ({@link thrownAnswerIsBareNotFound}), not in
+     * the classification door's flat one.
      */
     private async eventDoorRefusal(
         environmentId: string | undefined,
@@ -3684,7 +3542,13 @@ export class RestServer {
         const metaType = RestServer.metaTypeSingular(req.params.type);
         const policy: MetaReadGatePolicy = { arms: 'per-caller', app: 'gate' };
         if (!RestServer.gatesPerCaller(metaType)) return undefined;
-        const current = await this.fetchCurrentMetaDocument(req, p);
+        let current: any;
+        try {
+            current = await this.fetchCurrentMetaDocument(req, p);
+        } catch (error: any) {
+            if (thrownAnswerIsBareNotFound(error)) return sendMetaItemAbsent;
+            throw error;
+        }
         if (current == null) return undefined;
         const verdict = await this.metaItemReadGate(
             environmentId, req, p, metaType, req.params.name, [current], policy,
@@ -5276,1744 +5140,80 @@ export class RestServer {
             this.routeManager.register(entry);
         };
 
-        // GET /meta - List all metadata types
-        //
-        // Also mounted at `/meta/types`, the spelling the dispatcher's `/meta`
-        // branch has always implemented (`parts[0] === 'types'`) and the
-        // spelling `route-ledger.ts` has always declared. ONE handler, two
-        // paths, deliberately: the dispatcher's two branches return the same
-        // `protocol.getMetaTypes()` body, so a second REST handler would be a
-        // second thing to keep true.
-        if (metadata.endpoints.types !== false) {
-            const listMetaTypes = async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const p = await this.resolveProtocol(environmentId, req);
-                    const types = await p.getMetaTypes();
-                    const translated = await this.translateMetaTypesResponse(req, environmentId, types);
-                    res.header('Vary', 'Accept-Language');
-                    res.json(translated);
-                } catch (error: any) {
-                    handleRouteError(res, error);
-                }
-            };
-            this.routeManager.register({
-                method: 'GET',
-                path: metaPath,
-                handler: listMetaTypes,
-                metadata: {
-                    summary: 'List all metadata types',
-                    tags: ['metadata'],
-                },
-            });
+        // [#23050 slice 13a] The four head bindings above, handed to each moved
+        // `/meta` group as ONE parameter, built once here per base. See
+        // `MetaRouteScope` (`meta-collection-routes.ts`) for what each binding is
+        // and why all four stay in this head.
+        const scope: MetaRouteScope = { metadata, metaPath, isScoped, registerPerItemRoute };
 
-            // GET /meta/types — REGISTERED BEFORE `/meta/:type`, and that is
-            // the entire fix (#7526).
-            //
-            // The branch existed in the dispatcher and the row existed in the
-            // ledger; the REST mount is a THIRD place and nobody wrote it here.
-            // So `/meta/types` fell into the `:type` catch-all below and
-            // answered `{"type":"types","items":[]}` — byte-shaped like
-            // `/meta/zzz_not_a_type`, a 200 no client can tell from "that type
-            // is empty". Hono is first-match-wins (MEASURED, not assumed —
-            // `plugin-hono-server`'s `mounted-route-introspection.test.ts`
-            // registers a literal and a `:param` sibling in both orders and
-            // pins that the later one never runs), so moving this below
-            // `/meta/:type` silently re-breaks it — the same shape that already
-            // put `diagnostics` / `_drafts` / `_migrate-stored` above it. The
-            // order is pinned by `meta-route-registration-order.test.ts`.
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/types`,
-                handler: listMetaTypes,
-                metadata: {
-                    summary: 'List all metadata types (explicit `/types` spelling)',
-                    tags: ['metadata'],
-                },
-            });
-        }
+        // [#23050 slice 13a] The type list, the whole-store maintenance family and
+        // the per-type list (`GET {metaPath}`, `/types`, `/diagnostics`, `/_drafts`,
+        // `POST /_migrate-stored` and `GET /:type`) moved to
+        // `meta-collection-routes.ts`, and are registered HERE so they keep their
+        // place in the order. This literal hands that body every member it reads
+        // (see `MetaCollectionRouteHost`). It is built inside this method on
+        // purpose: the umbrella has swapped the route manager for its wrapping
+        // registrar for exactly the duration of this call, so the value captured
+        // here is the gated one. Read that module's header before moving it.
+        const collectionHost: MetaCollectionRouteHost = {
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            translateMetaTypesResponse: (...a) => this.translateMetaTypesResponse(...a),
+            routeManager: this.routeManager,
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            walledCatalogRefusal: (...a) => this.walledCatalogRefusal(...a),
+            resolveMetaWriteActor: (...a) => this.resolveMetaWriteActor(...a),
+            refuseUnknownMetaListType: (...a) => this.refuseUnknownMetaListType(...a),
+            metaListAnswerSources: (...a) => this.metaListAnswerSources(...a),
+            metaTypeSingular: (...a) => RestServer.metaTypeSingular(...a),
+        };
+        registerMetaCollectionRoutes.call(collectionHost, scope);
 
-        // GET /meta/diagnostics - Cross-type spec-validation sweep
-        //
-        // Returns every metadata entry that fails its registered Zod
-        // schema, scoped to the environment (and optionally org /
-        // package) of the request. Powers the Studio governance
-        // dashboard and `os doctor`-style CLI checks.
-        //
-        // Registered BEFORE `/meta/:type` so the `diagnostics` segment
-        // is not captured as a `:type` parameter.
-        //
-        // [#15542] First of the three WHOLE-STORE operations, and they share
-        // one switch of their own — `metadata.endpoints.maintenance`. They
-        // used to ride `endpoints.items`, whose declared meaning is the
-        // per-type list, so closing a listing read silently took this sweep,
-        // `/_drafts` and the `POST /_migrate-stored` write door with it.
-        if (metadata.endpoints.maintenance !== false) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/diagnostics`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        if (typeof (p as any).getMetaDiagnostics !== 'function') {
-                            res.status(501).json({
-                                error: { code: 'NOT_IMPLEMENTED', message: 'protocol.getMetaDiagnostics() is not available in this kernel' },
-                            });
-                            return;
-                        }
-                        // [#6877] All three narrow the diagnostics query to ONE
-                        // value each; the `as string` casts are exactly the
-                        // laundering that kept `tsc` silent about the array arm.
-                        if (refuseRepeatedQueryParams(req, res, ['severity', 'type', 'package'])) return;
-                        const severityParam = (req.query?.severity as string | undefined) ?? 'error';
-                        const severity = severityParam === 'warning' ? 'warning' : 'error';
-                        const diagnosticsType = (req.query?.type as string | undefined) || undefined;
-                        // [ADR-0131 D6] No organization: the sweep reads each
-                        // type environment → code, the partition every `/meta`
-                        // write now lands in. A legacy organization-scoped row
-                        // is not swept; its promotion is ADR-0131 C7's.
-                        const result = await (p as any).getMetaDiagnostics({
-                            type: diagnosticsType,
-                            severity,
-                            // [#22188] The list's reading ({@link metaItemPackageBinding}):
-                            // each swept type is a list read, so `all` names no package.
-                            packageId: metaItemPackageBinding(req.query?.package),
-                        });
-                        res.json(result);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'List metadata entries that fail spec validation',
-                    tags: ['metadata'],
-                },
-            });
-        }
+        // [#23050 slice 13b] The per-item reads (`GET {metaPath}/:type/:name/references`,
+        // `/layers`, `GET {metaPath}/book/:name/tree` and `GET {metaPath}/:type/:name`),
+        // with the per-item switch's `if` that gated them, moved to
+        // `meta-item-read-routes.ts`, and are registered HERE so they keep their place in
+        // the order: after the per-type list, above the item writes below. This literal
+        // hands that body every member it reads (see `MetaItemReadRouteHost`), built
+        // inside this method for the same reason as the one above: the route manager it
+        // captures is the umbrella's wrapping registrar. Read that module's header before
+        // moving it.
+        const itemReadHost: MetaItemReadRouteHost = {
+            routeManager: this.routeManager,
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            metaTypeSingular: (...a) => RestServer.metaTypeSingular(...a),
+            resolveObjectMasker: (...a) => this.resolveObjectMasker(...a),
+            serveMetaItemLayered: (...a) => this.serveMetaItemLayered(...a),
+            metaReadAudienceSources: (...a) => this.metaReadAudienceSources(...a),
+            extractLocale: (...a) => this.extractLocale(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            resolveI18nService: (...a) => this.resolveI18nService(...a),
+            metaItemReadGate: (...a) => this.metaItemReadGate(...a),
+            maskObjectDocument: (...a) => this.maskObjectDocument(...a),
+            anonymousFormIntakeWarnings: (...a) => this.anonymousFormIntakeWarnings(...a),
+            translateMetaEnvelope: (...a) => this.translateMetaEnvelope(...a),
+            STORED_VERSION_DOOR_POLICY: RestServer.STORED_VERSION_DOOR_POLICY,
+            metaItemAnswerSources: (...a) => this.metaItemAnswerSources(...a),
+            sendMetaReadRefusal: (...a) => RestServer.sendMetaReadRefusal(...a),
+        };
+        registerMetaItemReadRoutes.call(itemReadHost, scope);
 
-        // GET /meta/_drafts - Pending DRAFT items (ADR-0033)
-        //
-        // Surfaces draft-state metadata that the active-only `/meta/:type`
-        // list hides, so the console can show a "pending changes" view and
-        // draft-aware package contents (a just-built app package no longer
-        // looks empty). Optionally narrowed by `?packageId=` and/or `?type=`.
-        //
-        // Registered BEFORE `/meta/:type` so the `_drafts` segment is not
-        // captured as a `:type` parameter.
-        //
-        // [#15542] Whole-store operation — `metadata.endpoints.maintenance`.
-        if (metadata.endpoints.maintenance !== false) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/_drafts`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        // [ADR-0106 D5(4) / #6599] `_drafts` is an AUTHORING
-                        // surface — the console's pending-changes view and
-                        // draft-aware package reads — not a general read. A
-                        // pending object draft carries its full `fields` map, so
-                        // serving it unfiltered leaks every hidden field's
-                        // label, type, options, formula and `requiredPermissions`
-                        // to any authenticated caller, which is the disclosure
-                        // ADR-0106 closes one route over. The other `/meta`
-                        // exits MASK per field; this one GATES per caller, on the
-                        // SAME `systemPermissions` judgement D4 uses for its
-                        // read exemption (`isObjectSchemaMaskExempt`) — a caller
-                        // who could not see a field on `/meta/object` has no
-                        // authoring reason to see the draft that carries it. The
-                        // gate is intentionally independent of the D8 field-mask
-                        // escape hatch: opting out of per-field masking is not
-                        // consent to expose pending drafts to non-authors.
-                        //
-                        // Gate FIRST — before resolving the protocol — so an
-                        // unauthorized caller cannot use the 501-vs-200 answer to
-                        // probe which kernels support drafts (same posture as
-                        // `_migrate-stored` below).
-                        //
-                        // [#20338] Asked through {@link mayReadPendingDrafts},
-                        // the one question every draft door in this file asks.
-                        const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                        if (!mayReadPendingDrafts(ctx)) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: 'Reading pending metadata drafts requires an authoring capability (studio.access, setup.access or manage_metadata).',
-                                },
-                            });
-                            return;
-                        }
-                        const p = await this.resolveProtocol(environmentId, req);
-                        if (typeof (p as any).listDrafts !== 'function') {
-                            res.status(501).json({
-                                error: { code: 'NOT_IMPLEMENTED', message: 'protocol.listDrafts() is not available in this kernel' },
-                            });
-                            return;
-                        }
-                        // [#6877] Both narrow the draft list to one package /
-                        // one type; an array reached `listDrafts` untouched.
-                        // [#23214] The list lives beside the shared decision, so the
-                        // runtime dispatcher's twin refuses the same names.
-                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.drafts)) return;
-                        // [ADR-0131 D6] No organization: a draft is saved
-                        // environment-wide, so the list reads the environment
-                        // partition, symmetric with the save door. A legacy
-                        // organization-scoped draft is not listed; its
-                        // promotion is ADR-0131 C7's.
-                        const result = await (p as any).listDrafts({
-                            packageId: (req.query?.packageId as string | undefined) || undefined,
-                            type: (req.query?.type as string | undefined) || undefined,
-                        });
-                        res.json(result);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'List pending draft metadata items',
-                    tags: ['metadata'],
-                },
-            });
-        }
-
-        // POST /meta/_migrate-stored — rewrite stored sys_metadata rows into
-        // today's canonical shape (ADR-0087; #4327 / #4454 / #4498).
-        //
-        // The server-side form of `os migrate meta --stored`. The CLI form
-        // needs shell access to the deployment's database, which a hosted
-        // operator does not have — so without this route the stored-metadata
-        // chain has no finish line on a managed deployment, only the per-read
-        // conversion that runs forever. Flow rows are covered here for free:
-        // `migrateStoredMetadata` resolves the automation engine from the
-        // services registry (#4498), and a server always has a live one.
-        //
-        // Registered BEFORE `/meta/:type` so the leading-underscore segment is
-        // not captured as a `:type` parameter (same reason as `_drafts`).
-        //
-        // [#15542] Whole-store operation — `metadata.endpoints.maintenance`.
-        // This is the WRITE door the card was filed about: it used to be
-        // unmounted by `endpoints.items: false`, a switch declared as "list
-        // items of type".
-        if (metadata.endpoints.maintenance !== false) {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${metaPath}/_migrate-stored`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        // Gate FIRST — before resolving the protocol — so an
-                        // unauthorized caller cannot use the 501 vs 200 answer
-                        // to probe which kernels can be migrated.
-                        //
-                        // This rewrites every eligible row in the deployment,
-                        // so unlike the single-item `PUT /meta/:type/:name` it
-                        // demands an explicit capability rather than only a
-                        // session. `manage_metadata` is ADR-0066 D1's authoring
-                        // capability, and a canonicalization rewrite is
-                        // authoring; `isSystem` bypasses, matching every other
-                        // capability gate on the platform.
-                        //
-                        // [#12702] Deliberately NOT `metaWriteCapabilityVerdict`:
-                        // an install-wide stored-metadata rewrite is env-wide by
-                        // definition, so `manage_org_presentation`'s "org-scoped
-                        // to the caller's own active organization" condition can
-                        // never hold here. `manage_metadata`-only, unchanged —
-                        // do not copy the item doors' acceptance in.
-                        const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                        const held = new Set<string>(
-                            Array.isArray(ctx?.systemPermissions) ? ctx!.systemPermissions : [],
-                        );
-                        if (!ctx?.isSystem && !held.has('manage_metadata')) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: 'Rewriting stored metadata requires the `manage_metadata` capability.',
-                                },
-                            });
-                            return;
-                        }
-                        // [ADR-0131 D12 items 7–8] The walled refusal, after the
-                        // capability gate and before the protocol is resolved or
-                        // a row is read: this rewrites every stored row of the
-                        // environment's metadata, which under `isolated` /
-                        // `group` is the platform operator's (ruling A on
-                        // #23231). A preview is refused too: it is the same
-                        // install-wide pass, without the write. Inert under
-                        // `single`. See {@link walledCatalogRefusal}.
-                        {
-                            const walled = await this.walledCatalogRefusal('sys_metadata', ctx, environmentId, req);
-                            if (!walled.allowed) {
-                                res.status(403).json({
-                                    error: {
-                                        code: 'FORBIDDEN',
-                                        message: walled.message,
-                                    },
-                                });
-                                return;
-                            }
-                        }
-                        const p = await this.resolveProtocol(environmentId, req);
-                        if (typeof (p as any).migrateStoredMetadata !== 'function') {
-                            res.status(501).json({
-                                error: {
-                                    code: 'NOT_IMPLEMENTED',
-                                    message: 'protocol.migrateStoredMetadata() is not available in this kernel',
-                                },
-                            });
-                            return;
-                        }
-                        const rawTypes = (req.body as any)?.types;
-                        const types = Array.isArray(rawTypes)
-                            ? rawTypes.filter((t: unknown): t is string => typeof t === 'string' && t.length > 0)
-                            : [];
-                        // Preview by default — `apply` must be explicitly true,
-                        // the same posture the CLI takes. A caller who sends an
-                        // empty body gets a report and no writes.
-                        // Attributed to the caller: this writes history rows,
-                        // and "who ran the migration" is the question they
-                        // exist to answer. [#23068] By user id alone — the
-                        // identity this request was authorized as, read by the
-                        // producer every `/meta` write door shares — or by
-                        // nobody. It lands in `recorded_by` / `updated_by`,
-                        // `lookup('sys_user')` columns, so ⛔ never the route's
-                        // name: the pass records its origin on `source`.
-                        const actor = await this.resolveMetaWriteActor(environmentId, req);
-                        const report = await (p as any).migrateStoredMetadata({
-                            apply: (req.body as any)?.apply === true,
-                            ...(types.length > 0 ? { types } : {}),
-                            ...(actor ? { actor } : {}),
-                        });
-                        res.json(report);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'Rewrite stored metadata rows into the canonical protocol shape',
-                    tags: ['metadata'],
-                },
-            });
-        }
-
-        // GET /meta/:type - List items of a type
-        //
-        // [#15542] The whole of `metadata.endpoints.items` — this one mount,
-        // and nothing else, which is what its `describe()` has always said.
-        if (metadata.endpoints.items !== false) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/:type`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        // [#6877] Five single-valued parameters on this list
-                        // route, declared together at the top so the gate cannot
-                        // be missed by whichever branch reads its parameter
-                        // several hundred lines down: `?object=` (the view
-                        // switcher's `String(req.query.object)`, which turned
-                        // `['a','b']` into the object name `'a,b'` — a name no
-                        // view has, so the switcher silently emptied) and
-                        // `?include=` (repeated, it stopped equalling
-                        // `'content'`, so a caller who asked for doc bodies got
-                        // the slimmed list back with a 200).
-                        //
-                        // [#7566] `?id=` joined them when the app branch below
-                        // started honouring it. It is declared HERE, with the
-                        // rest, rather than beside the filter that reads it, for
-                        // the reason this block exists: a filter that arrives as
-                        // `['crm','account']` and is compared against one app
-                        // name matches nothing, and an empty app list is exactly
-                        // the plausible-looking wrong answer #7566 was filed
-                        // against. Refused, not resolved — see
-                        // `query-multiplicity.ts` for why picking one of two
-                        // conflicting intents is worse than a 400.
-                        // [#23214] The list lives beside the shared decision, so the
-                        // runtime dispatcher's twin refuses the same names.
-                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS.list)) return;
-                        // [#22188] Read through {@link metaItemPackageBinding}:
-                        // `all`, this list's "show everything" scope, names no package.
-                        const packageId = metaItemPackageBinding(req.query?.package);
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        // [#9488] …and BEFORE any listing work: a `:type` that
-                        // names no metadata type is refused here rather than
-                        // served as a real-but-empty collection, which the write
-                        // door has refused since #8421. See
-                        // {@link refuseUnknownMetaListType} for the union it
-                        // consults, why the static verdict alone is the wrong
-                        // rule on a READ door, and why it throws instead of
-                        // building a body.
-                        await this.refuseUnknownMetaListType(p, req.params?.type);
-                        // [#20338] The caller, for the draft-preview admission
-                        // below. The list names no organization (ADR-0131 D6):
-                        // it reads environment → code.
-                        const listCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(rethrowAuthzStoreUnavailable);
-                        // ADR-0033/0037 draft-overlay preview: `?preview=draft`
-                        // overlays pending drafts on the active list, exactly as
-                        // the runtime dispatcher's /metadata/:type route does —
-                        // the console's draft preview (Live Canvas) reads THIS
-                        // route, so dropping the flag here silently renders the
-                        // published-only world.
-                        //
-                        // [#20338] …for a caller who may read drafts. Anyone
-                        // else is answered the list as if the switch were
-                        // absent — {@link mayReadPendingDrafts} says why that,
-                        // and not a refusal. Declared WITH its admission so no
-                        // later branch of this handler can read the switch past it.
-                        const previewDrafts = typeof req.query?.preview === 'string'
-                            && req.query.preview.toLowerCase() === 'draft'
-                            && mayReadPendingDrafts(listCtx);
-                        // [commit 2a29caa53] Typed against the spec request shape plus the
-                        // transport-level `environmentId` — the `as any` this
-                        // literal used to carry is retired now that the spec
-                        // declares `previewDrafts`.
-                        const listRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                            type: req.params.type,
-                            packageId,
-                            ...(previewDrafts ? { previewDrafts: true } : {}),
-                            ...(environmentId ? { environmentId } : {}),
-                        };
-                        const items = await p.getMetaItems(listRequest);
-
-                        // [#20320] Everything this route does to the list after
-                        // the read — the #5224 `api` served-set face, THE
-                        // per-caller list gate (#20237), `?id=` for apps (#7566),
-                        // `?object=` for views, the ADR-0046 doc locale collapse
-                        // and content slim, the ADR-0106 object mask and the
-                        // translation step — is ONE chain,
-                        // `createMetaListAnswer` in `./meta-item-read-gate.ts`,
-                        // which the runtime dispatcher's `/meta` list branch
-                        // calls too. Its docblock carries each step's rule and
-                        // their order; ⛔ a list step is added there, never here
-                        // (`meta-list-projection-parity.test.ts` in
-                        // `@objectstack/runtime` derives its census from this
-                        // handler and fails on one added here). `getMetaItems`
-                        // answers a bare array or the `{ type, items }` envelope;
-                        // the chain answers the same shape.
-                        //
-                        // `previewDrafts` is handed in ADMITTED — the one
-                        // declaration above — and the chain never re-reads it.
-                        const answer = await metaReadGate.createMetaListAnswer(
-                            this.metaListAnswerSources(environmentId, req, p),
-                            { metaType: RestServer.metaTypeSingular(req.params.type), query: req.query, previewDrafts },
-                        )(items);
-                        if (!answer.ok) {
-                            sendFieldVisibilityFault(res, answer.object);
-                            return;
-                        }
-                        // [ADR-0106 D6 tier 2] The chain's cache posture — an
-                        // undetermined field visibility serves the list
-                        // `private, no-store`, exactly as this route always has.
-                        if (answer.cacheControl) res.header('Cache-Control', answer.cacheControl);
-                        res.header('Vary', 'Accept-Language');
-                        res.json(answer.data);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'List metadata items of a type',
-                    tags: ['metadata'],
-                },
-            });
-        }
-
-        // GET /meta/:type/:name - Get specific item
-        //
-        // [#15542 / #15854] The first four members of the per-item face. The
-        // rest of it — `PUT`, `DELETE` and the history family — is registered
-        // below this block's closing brace and goes through
-        // {@link registerPerItemRoute}, which carries the SAME switch. ⛔ The
-        // brace is not the radius: read the pin table in
-        // `rest-config-mount-table.pin.test.ts` for what `item` gates.
-        if (metadata.endpoints.item !== false) {
-            // Phase 3a-references: /meta/:type/:name/references must be
-            // registered BEFORE /meta/:type/:name so the more-specific
-            // path wins under any first-match router strategy.
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/:type/:name/references`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        // [#23072] Recognition first, over the measured closed
-                        // set — empty: the sweep reads no query parameter.
-                        if (refuseUnknownQueryParams(req, res, META_ITEM_REFERENCES_PARAMS)) return;
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        if (typeof (p as any).findReferencesToMeta !== 'function') {
-                            // [#9326 / ADR-0110 D3] A MISS and a FAULT are
-                            // different facts, and this branch is the second
-                            // one: the resolved protocol cannot compute the
-                            // reference graph AT ALL, so the question was never
-                            // asked. Answering `{ references: [] }` reported it
-                            // as the first — "nothing depends on this item" —
-                            // and the admin "Used by" panel renders that empty
-                            // case as "Nothing in the metadata graph points at
-                            // this item. Safe to delete.", shown to an operator
-                            // about to delete something.
-                            //
-                            // Refusing HERE rather than asserting at assembly is
-                            // deliberate. `findReferencesToMeta` is not a member
-                            // of `RestProtocol` (= `DataProtocol &
-                            // MetadataProtocol`) — it is an ADR-0076 D9
-                            // server-only extension, which is why it is reached
-                            // through a runtime cast at all. So a host that
-                            // implements the DECLARED contract exactly is a
-                            // CONFORMING deployment that lands here with no type
-                            // error, and a boot-time assertion would promote an
-                            // undeclared optional extension into a required one
-                            // — a `packages/spec` contract decision, not a
-                            // route one. What the route owes is that an
-                            // unanswerable question comes back unanswered.
-                            //
-                            // Envelope per #7035: the ADR-0112 NESTED
-                            // `{ error: { code, message } }` that the sibling
-                            // `/meta` 501 refusals converged on — never the
-                            // bare-string or sibling-`code` dialects, which make
-                            // `body.error.code` read `undefined`.
-                            res.status(501).json({
-                                error: {
-                                    code: 'NOT_IMPLEMENTED',
-                                    message: 'protocol.findReferencesToMeta() is not available in this kernel',
-                                },
-                            });
-                            return;
-                        }
-                        // [#13753 · ADR-0131 D6] The sweep reads the sources
-                        // environment → code, the world the `/meta` doors serve:
-                        // the per-organization overlay axis is retired, so no
-                        // organization is stated. A legacy organization-scoped
-                        // source row is served by no door until ADR-0131 C7
-                        // promotes it, and that ceremony re-judges what it
-                        // carries; it is not swept here.
-                        // [#15685] The protocol's OWN refusal is re-answered in
-                        // the nested envelope the branch above already uses —
-                        // see {@link notImplementedRefusalAnswer} for why the
-                        // repair is here and how narrow it is. The catch is
-                        // scoped to the protocol call ALONE, so what this arm
-                        // can re-dress is mechanically the set of things
-                        // `findReferencesToMeta` raised: neither
-                        // `resolveProtocol` nor the `resolveExecCtx` seam above
-                        // can reach it, whatever they declare.
-                        let result: unknown;
-                        try {
-                            result = await (p as any).findReferencesToMeta({
-                                type: req.params.type,
-                                name: req.params.name,
-                                ...(environmentId ? { environmentId } : {}),
-                            });
-                        } catch (raised: any) {
-                            const refusal = notImplementedRefusalAnswer(raised);
-                            // Anything else is the outage it always was — the
-                            // 503 `getMetaItems` raises for a `sys_metadata`
-                            // failure (#8896) still propagates to the terminal
-                            // below, message-withheld and logged, unchanged.
-                            if (refusal === undefined) throw raised;
-                            res.status(refusal.status).json(refusal.body);
-                            return;
-                        }
-                        res.json(result);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'List metadata items that reference this item',
-                    tags: ['metadata'],
-                },
-            });
-
-            // [#5882] GET /meta/:type/:name/layers — the three-layer diagnostic
-            // projection as its OWN resource. Registered BEFORE
-            // /meta/:type/:name for the same first-match reason as
-            // /references above. [commit 7986d973f] It also used to have to precede the
-            // compound `/:type/:section/:name`, which would otherwise capture
-            // this path with section=<name>, name="layers"; that catch-all is
-            // retired, so only the /references-style reason remains.
-            //
-            // This path exists because the projection used to be reachable only
-            // as `GET /meta/:type/:name?layers=true` — the same route answering
-            // a SECOND, undeclared body shape depending on a query flag, while
-            // `packages/spec` declared one `responseSchema` for it. The ruled
-            // fix (maintainer, 2026-08-06) was one path per response shape,
-            // deliberately NOT teaching the route declaration to express
-            // "two shapes chosen by a flag": that would add a primitive every
-            // future tool has to understand, and conditional response selection
-            // is exactly where codegen and AI-written clients go wrong.
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/:type/:name/layers`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        // [#23072] Recognition first, over the measured closed
-                        // set; `serveMetaItemLayered` keeps the multiplicity
-                        // rule it shares with the deprecated `?layers=` spelling.
-                        if (refuseUnknownQueryParams(req, res, META_ITEM_LAYERS_PARAMS)) return;
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        // [ADR-0106 D2/D5] The dedicated path is its own
-                        // schema-serving outlet — it resolves the caller's
-                        // field-visibility posture exactly like the plain meta
-                        // read does, with the NORMALIZED type (#3984 / commit 83a3b1f2e).
-                        const layeredMetaType = RestServer.metaTypeSingular(req.params.type);
-                        let maskPosture: ObjectSchemaMaskPosture;
-                        try {
-                            maskPosture = await (await this.resolveObjectMasker(environmentId, req, layeredMetaType))(req.params.name);
-                        } catch (maskError: any) {
-                            if (maskError instanceof ObjectSchemaMaskEvaluationError) {
-                                sendFieldVisibilityFault(res, req.params.name);
-                                return;
-                            }
-                            throw maskError;
-                        }
-                        if (typeof (p as any).getMetaItemLayered !== 'function') {
-                            // A dedicated path cannot fall through to the plain
-                            // read the way the `?layers=` flag did — answering
-                            // the merged `{ type, name, item }` envelope here
-                            // would be answering a different resource with a
-                            // shape this path never declares.
-                            res.status(501).json({
-                                error: 'Layered metadata view not supported by protocol implementation',
-                                code: 'NOT_IMPLEMENTED',
-                            });
-                            return;
-                        }
-                        await this.serveMetaItemLayered(req, res, environmentId, p, maskPosture);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'Get a metadata item as its three layers (code / overlay / effective)',
-                    tags: ['metadata'],
-                },
-            });
-
-            // ADR-0046 §6 — GET /meta/book/:name/tree
-            // Resolve a book spine against the docs that exist *now* into a
-            // rendered tree (membership is DERIVED, never stored — §6.2.1). An
-            // unknown name is treated as a package id and resolved against the
-            // implicit per-package book (§6.4). Anonymous requests only see a
-            // book whose `audience` is `public` (§6.7 read-layer gating).
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/book/:name/tree`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const prot = await this.resolveProtocol(environmentId, req);
-                        // [#6877] One package scopes the book lookup. [#23214] The
-                        // list lives beside the shared decision, as the list door's.
-                        if (refuseRepeatedQueryParams(req, res, metaReadGate.META_QUERY_ARITY_DOORS['book-tree'])) return;
-                        // [#22188] Read through {@link metaItemPackageBinding}: `all` names no package.
-                        const packageId = metaItemPackageBinding(req.query?.package);
-                        // [#20408] The route's whole answer is
-                        // `createMetaBookTreeAnswer` in `./meta-item-read-gate.ts`
-                        // — the book and doc reads, THE `DocsAudience` (#19790: one
-                        // resolution, four doors), the §6.7 gate on the book's own
-                        // audience, the doc locale collapse and the tree narrowed
-                        // per caller — which the runtime dispatcher serves this
-                        // route through too. ⛔ A step is added there, never here.
-                        const answer = await metaReadGate.createMetaBookTreeAnswer(
-                            {
-                                ...this.metaReadAudienceSources(environmentId, req),
-                                listTreeInput: (type, scopedPackageId) => {
-                                    const request: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                                        type,
-                                        ...(scopedPackageId ? { packageId: scopedPackageId } : {}),
-                                        ...(environmentId ? { environmentId } : {}),
-                                    };
-                                    return prot.getMetaItems(request);
-                                },
-                                requestLocale: (i18n) => this.extractLocale(req, i18n),
-                            },
-                            { name: req.params.name, packageId },
-                        );
-                        if (!answer.ok) {
-                            const { code, message, status } = answer.refusal;
-                            sendDeclaredFault(res, { code, message, status });
-                            return;
-                        }
-                        res.json(answer.tree);
-                    } catch (error: any) {
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'Resolve a documentation book spine into its rendered tree (ADR-0046 §6)',
-                    tags: ['metadata'],
-                },
-            });
-
-            this.routeManager.register({
-                method: 'GET',
-                path: `${metaPath}/:type/:name`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        // [#6877] Declared at the top for the same reason #3984
-                        // normalizes `:type` here: this handler reads its query
-                        // parameters from four different branches hundreds of
-                        // lines apart (`?layers=`, `?state=`, `?preview=`,
-                        // `?package=`), and a per-branch gate is one a new branch
-                        // inherits by accident rather than by construction.
-                        // [#22877] …and RECOGNITION first, over the route's
-                        // measured closed set (AGENTS.md route rule 5), which
-                        // the bundle member selector joined.
-                        // [#23072] All three of the route's query rules —
-                        // recognition, arity and a member on the layered view —
-                        // are ONE decision, `metaItemQueryRefusal` in
-                        // `./meta-item-read-gate.ts`, which the runtime
-                        // dispatcher's item read asks too (ruling 6138588561).
-                        // The first two are answered here, in the nested body
-                        // their gates always wrote; the third where the layered
-                        // view is chosen, below. ⛔ A rule is added there, never
-                        // here.
-                        const queryRefusal = metaReadGate.metaItemQueryRefusal('item', req.query);
-                        if (queryRefusal && queryRefusal.rule !== 'layered-member') {
-                            res.status(queryRefusal.status).json({
-                                error: { code: queryRefusal.code, message: queryRefusal.message },
-                            });
-                            return;
-                        }
-                        const memberSelector = metaMemberSelector(req.query);
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-
-                        // [#3984 / commit 83a3b1f2e] Normalize the `:type` segment ONCE,
-                        // here at the top, and let every gate below read THIS
-                        // value. The route serves both spellings and Prime
-                        // Directive #3 makes the plural one canonical
-                        // (`/meta/books/:name`), so any gate comparing the raw
-                        // param is a gate the canonical spelling walks past.
-                        //
-                        // #3984 ruled this shape for exactly that reason ("每个
-                        // handler 顶部归一一次,后续所有闸门都用归一后的值"), and
-                        // commit 83a3b1f2e is why the ruling is written into the code
-                        // rather than trusted to memory: eight days after
-                        // #3984 landed, the cache-branch condition below still
-                        // excluded `doc`/`book` by LITERAL comparison, so
-                        // `GET /meta/books/:name` took the cached branch and
-                        // the §6.7 audience gate — which lives in the uncached
-                        // branch — never ran at all. Measured on the real
-                        // server, one `{ permissionSet }`-gated book, one
-                        // signed-in caller holding no set:
-                        //
-                        //     singular "book"  :: cachedCalls=0 status=[403]
-                        //     plural   "books" :: cachedCalls=1 status=[]  ← full body served
-                        //
-                        // A new per-type gate added below inherits the
-                        // normalization by default now; there is no raw param
-                        // in scope for it to compare against by accident.
-                        const metaType = RestServer.metaTypeSingular(req.params.type);
-
-                        // [ADR-0106 D2/D5] Resolve the caller's field-visibility
-                        // posture ONCE, here, before any fetch — every exit
-                        // below (layered, cached, uncached) projects through
-                        // THIS value. Resolving per-branch is how an outlet gets
-                        // forgotten; resolving before the fetch is what makes
-                        // D3's `fetch → mask → send` ordering structural rather
-                        // than a convention.
-                        let maskPosture: ObjectSchemaMaskPosture;
-                        try {
-                            maskPosture = await (await this.resolveObjectMasker(environmentId, req, metaType))(req.params.name);
-                        } catch (maskError: any) {
-                            if (maskError instanceof ObjectSchemaMaskEvaluationError) {
-                                sendFieldVisibilityFault(res, req.params.name);
-                                return;
-                            }
-                            throw maskError;
-                        }
-
-                        // Phase 3a-layered-get: opt-in 3-state view when client
-                        // asks for `?layers=true` (or any non-empty value).
-                        // Skips the cache path entirely — layered view is a
-                        // diagnostic endpoint, not on the hot read path.
-                        //
-                        // [#5563 → #5882] DEPRECATED SPELLING. This flag makes one
-                        // route answer a SECOND resource representation — three
-                        // layers side by side (`code` / `overlay` / `effective`),
-                        // where `effective` is what the plain read returns — while
-                        // the route declares a single `responseSchema`. #5563
-                        // converged the ordinary read and left this half open
-                        // because collapsing the layers into
-                        // `GetMetaItemResponseSchema`'s single `item` would delete
-                        // the diagnostic outright.
-                        //
-                        // #5882 closed it the other way (maintainer ruling, 2026-08-06):
-                        // the projection is now its own path,
-                        // `GET /meta/:type/:name/layers`, declared by
-                        // `GetMetaItemLayeredResponseSchema`. One path, one shape.
-                        //
-                        // This branch stays for a deprecation window so existing
-                        // callers (Studio's metadata editor) are not broken by the
-                        // move. It answers the IDENTICAL body — same helper, not a
-                        // copy — and advertises the successor in the response
-                        // headers, so a client can discover the migration without
-                        // reading the changelog. Delete this branch (and the
-                        // headers with it) once the callers have moved.
-                        //
-                        // [#20478] The flag's parse (`wantsMetaItemLayers`) and its
-                        // headers (`metaItemLayersDeprecationHeaders`: RFC 9745
-                        // `Deprecation` + RFC 8288 `Link` to the successor) are the
-                        // ones the runtime dispatcher's item read asks too, so the
-                        // deprecated spelling is one answer on both transports.
-                        //
-                        // [#20508] The `Link` names the path THIS request arrived
-                        // on (`IHttpRequest.path`), read the way the dispatcher
-                        // reads its request URL (`requestedItemPath`, runtime
-                        // `domains/meta.ts`): parsed as a URL path, without its
-                        // trailing slash. ⛔ Never `metaPath` — on the
-                        // environment-scoped mount that is the route TEMPLATE, and
-                        // the successor read `/environments/:environmentId/…/layers`,
-                        // a path no client can request. The parse is what keeps the
-                        // path a valid URI reference: the Hono adapter hands over a
-                        // `decodeURI`'d path (`lead%20all` arrives as `lead all`),
-                        // and the parse percent-encodes it again. A request with no
-                        // path names no successor: `Deprecation` alone, as the
-                        // helper prescribes for a transport that cannot say where
-                        // it serves the item.
-                        const wantLayered = metaReadGate.wantsMetaItemLayers(req.query);
-                        // [#22877] The layered view reads no member, so a member
-                        // named on it is refused rather than answered with the
-                        // canonical member's layers. [#23072] The decision's
-                        // third rule (`layered-member`), the only one that can
-                        // still be pending here; thrown to `handleRouteError` as
-                        // it always was.
-                        if (queryRefusal) {
-                            throw Object.assign(new Error(queryRefusal.message), {
-                                code: queryRefusal.code,
-                                status: queryRefusal.status,
-                            });
-                        }
-                        if (wantLayered && typeof (p as any).getMetaItemLayered === 'function') {
-                            const requestPath: unknown = req.path;
-                            const deprecation = metaReadGate.metaItemLayersDeprecationHeaders(
-                                typeof requestPath === 'string' && requestPath.startsWith('/')
-                                    ? new URL(`http://rest-server.invalid${requestPath}`).pathname.replace(/\/+$/, '') || undefined
-                                    : undefined,
-                            );
-                            for (const [header, value] of Object.entries(deprecation)) res.header(header, value);
-                            await this.serveMetaItemLayered(req, res, environmentId, p, maskPosture);
-                            return;
-                        }
-
-                        // Check if cached version is available.
-                        // For `app` metadata we skip the cache path so the
-                        // per-user RBAC filter below can apply without
-                        // corrupting shared ETags across admin vs member
-                        // viewers of the same app schema. Drafts also
-                        // bypass cache: the cache is keyed on the
-                        // published checksum and drafts are out-of-band.
-                        const isAppType = metaType === 'app';
-                        // [#20338] The caller, resolved ABOVE the two draft
-                        // switches because each is admitted per caller.
-                        // Memoised per request — not a new seam.
-                        const readCtx = await this.resolveExecCtx(environmentId, req)
-                            .catch(rethrowAuthzStoreUnavailable);
-                        // [#20338] Both draft switches are declared WITH their
-                        // admission ({@link mayReadPendingDrafts}). A caller who
-                        // may not read drafts is answered this read as if
-                        // neither switch were present — the published item,
-                        // pruned as the plain read prunes it, or its absence —
-                        // and no later branch re-reads `?state=` past the gate
-                        // (the uncached arm used to parse it a second time).
-                        const isDraftRead = typeof req.query?.state === 'string'
-                            && req.query.state.toLowerCase() === 'draft'
-                            && mayReadPendingDrafts(readCtx);
-                        // ADR-0033/0037 — `?preview=draft` overlays a pending
-                        // draft on the active item (draft wins, falls back to
-                        // active). Must also bypass the cache: ETags are keyed
-                        // on the published checksum, so a cached 304 would pin
-                        // the preview to the stale published world.
-                        const previewDrafts = typeof req.query?.preview === 'string'
-                            && req.query.preview.toLowerCase() === 'draft'
-                            && mayReadPendingDrafts(readCtx);
-                        // ADR-0048 — a `?package=` read is package-scoped
-                        // (prefer-local). The cached path keys ETags on
-                        // type+name only and does NOT thread `packageId` into
-                        // `getMetaItemCached`, so two installed packages shipping
-                        // the same type/name would share one cache entry and the
-                        // scope hint would be silently dropped. Bypass the cache
-                        // when a package scope is requested so the disambiguating
-                        // `getMetaItem(type, name, packageId)` path runs.
-                        const packageScoped = typeof req.query?.package === 'string'
-                            && req.query.package.length > 0;
-                        // `doc` and `book` bypass the shared cache: their §6.7
-                        // audience gate is per-caller, and a shared ETag would
-                        // leak gated content across viewers.
-                        //
-                        // [commit 83a3b1f2e] That sentence was already here while the
-                        // exclusion beneath it compared the RAW param against
-                        // the literals `'doc'` / `'book'`, so the canonical
-                        // plural spelling took the cached branch and shipped
-                        // the gated body. The exclusion is not incidental
-                        // tidying — it is the stated security invariant above,
-                        // and it now reads the normalized `metaType`.
-                        //
-                        // The bypass exists only to make the per-caller gate in
-                        // the uncached branch reachable ({@link metaItemReadGate},
-                        // whose `book` / `doc` arm is the §6.7 gate). [#20156]
-                        // A type that gate judges and this exclusion misses is
-                        // served ungated from the cache: the census in
-                        // `meta-alternate-door-read-gates.test.ts` drives this
-                        // read with a cached protocol method present, so that
-                        // miss reddens its plain-read row.
-                        //
-                        // [#5881] `dashboard` bypasses it too, and the reason is
-                        // NOT the one above — worth writing down, because the
-                        // obvious reading says a dashboard needn't bypass at all.
-                        // Its ADR-0057 D10 widget gate (`filterDashboardForUser`,
-                        // below) is per-DEPLOYMENT — it asks which optional kernel
-                        // services are registered — never per-caller, so there is
-                        // no cross-viewer leak to avoid. What rules out sharing
-                        // the cached path is the validator itself: the ETag is
-                        // `simpleHash(locale + JSON.stringify(item))` over the
-                        // UNFILTERED document (metadata-protocol `getMetaItemCached`),
-                        // so it cannot express the gate dimension at all, and
-                        // `notModified` is decided inside the protocol before this
-                        // layer could re-judge it. Gating the cached body would
-                        // therefore ship a filtered body under a validator that
-                        // identifies the unfiltered one.
-                        //
-                        // That mismatch is not academic, because the two have
-                        // different lifetimes. Within one boot the registered-service
-                        // set is fixed (`Kernel.use()` throws once bootstrap has
-                        // started, and no deregistration API exists), so the gate
-                        // verdict is stable per process — but `Cache-Control:
-                        // private, no-cache` means the client STORES the body and
-                        // revalidates, and that stored body outlives the process.
-                        // A redeploy that turns the optional service off does not
-                        // change the document, so the ETag is unchanged, every
-                        // revalidation answers 304, and the stale unfiltered body
-                        // stands: the dead tile D10 exists to prevent, now cached
-                        // indefinitely. Bypassing costs nothing to weigh against
-                        // that — `getMetaItemCached` delegates to `getMetaItem`,
-                        // so the server does identical work either way and only
-                        // the 304's saved body bytes are given up.
-                        //
-                        // Compared on the NORMALIZED type, like every other
-                        // exclusion in this condition (`/meta/dashboards/x` is
-                        // the canonical plural spelling under Prime Directive
-                        // #3, and an exclusion it could be spelled around would
-                        // not be an exclusion). The `doc` / `book` literals
-                        // that stood at the end of this condition had exactly
-                        // that hole; commit 83a3b1f2e closed it.
-                        const isDashboardType = metaType === 'dashboard';
-                        // ADR-0046 §6.7 — the two audience-gated types, excluded
-                        // from the cache so {@link metaItemReadGate} judges them.
-                        const isAudienceGatedType = metaType === 'book' || metaType === 'doc';
-                        // [#22877] A member-addressed read bypasses the cache
-                        // too: the cached read takes no member and keys its
-                        // validator on type and name, so it can only answer the
-                        // canonical member.
-                        const memberScoped = memberSelector.member !== undefined;
-                        if (metadata.enableCache && p.getMetaItemCached && !isAppType && !isDashboardType && !isDraftRead && !previewDrafts && !packageScoped && !memberScoped && !isAudienceGatedType) {
-                            // [ADR-0106 D3] When a projection applies, the
-                            // protocol is NOT allowed to judge the conditional
-                            // request: `getMetaItemCached` hashes the UNFILTERED
-                            // document, so a `304` decided there would pin this
-                            // caller to a body no mask ever touched — the same
-                            // validator-vs-served-body mismatch #5881 recorded
-                            // for the dashboard gate. The comparison moves below,
-                            // against the fingerprinted ETag, which is the one
-                            // that identifies what we are actually sending.
-                            // [#22250] A D4-exempt caller's posture carrying
-                            // `runtime` is one: the definition is served whole,
-                            // but the `sortability` beside it follows that
-                            // caller's own field permission, which the
-                            // protocol's validator does not hash either.
-                            const maskApplies = maskPosture.kind !== 'passthrough' || maskPosture.runtime !== undefined;
-                            // [#21476] Same move for a `view`: its body can carry
-                            // the public-form intake reason, which derives from
-                            // the posture and the bound object, and the
-                            // protocol's validator hashes neither. With no reason
-                            // the folded ETag is byte-identical, so a view's
-                            // `304` answers exactly as before.
-                            const intakeFolds = metaType === 'view';
-                            // [#22639] And for the two types this arm serves that
-                            // the per-caller read gate judges — a list view (one
-                            // refused whole, a container pruned) and an object
-                            // (its own `listViews` pruned): the body varies per
-                            // caller by what the gate withheld, which the
-                            // protocol's validator does not hash. Nothing
-                            // withheld folds nothing, so the `304` answers as
-                            // before.
-                            const audienceFolds = metaType === 'view' || metaType === 'object';
-                            const cacheRequest = {
-                                ifNoneMatch: (maskApplies || intakeFolds || audienceFolds) ? undefined : (req.headers['if-none-match'] as string),
-                                ifModifiedSince: req.headers['if-modified-since'] as string,
-                            };
-
-                            // Resolve the response locale up-front and fold it
-                            // into the cache key. The body is translated below
-                            // (`translateMetaItem`) *after* this validator runs,
-                            // so without a locale-aware ETag a language switch
-                            // would return a stale-locale 304 (issue #1319).
-                            const cacheI18n = await this.resolveI18nService(environmentId, req);
-                            const cacheLocale = this.extractLocale(req, cacheI18n);
-
-                            // [commit 2a29caa53] Typed request — `as any` retired. The
-                            // cached read carries NO draft-visibility members
-                            // on purpose: this branch is unreachable when a
-                            // draft switch is ADMITTED (`previewDrafts` /
-                            // `isDraftRead` true — the fork above bypasses the
-                            // cache for both), and the implementation's
-                            // `getMetaItemCached` signature declares neither.
-                            // [#20320] The query PARAMETER still reaches here:
-                            // a caller `mayReadPendingDrafts` does not admit
-                            // sends `?state=draft` / `?preview=draft` and is
-                            // answered this arm, the plain read's (#20338).
-                            const cachedRequest: TransportScopedMetaRequest<GetMetaItemCachedRequest> = {
-                                type: req.params.type,
-                                name: req.params.name,
-                                cacheRequest,
-                                ...(cacheLocale ? { locale: cacheLocale } : {}),
-                                ...(environmentId ? { environmentId } : {}),
-                                // [#9454] The cached door is the `view` arm, and
-                            };
-                            const result = await p.getMetaItemCached(cachedRequest);
-                            // [#23316] The automation engine's verdict on a
-                            // FLOW, beside the document and never inside it:
-                            // this branch is the default door of
-                            // `GET /meta/flow/:name`, so without it a flow the
-                            // engine refused was served here as its stored
-                            // `status` alone. The protocol reads it live from
-                            // its delegate read on every call; it is in no
-                            // validator, so a read carrying it is never
-                            // answered 304 (`getMetaItemCached` says why).
-                            // Flow only — every other type's cached envelope
-                            // is unchanged.
-                            const cachedRegistration = metaType === 'flow' && result.registration !== undefined
-                                ? { registration: result.registration }
-                                : {};
-
-                            if (result.notModified) {
-                                res.status(304).send();
-                                return;
-                            }
-
-                            // [ADR-0106 D1/D3] fetch → mask → send. The shared
-                            // cache still stores ONE full schema per (type,
-                            // name, locale, environment) — no caller dimension
-                            // in the key — and what varies per caller is this
-                            // projection plus the validator below.
-                            let cachedDocument: any = result.data;
-                            // [#22639] THE per-caller read gate, before the mask —
-                            // the item chain's order (`createMetaItemAnswer`: gate,
-                            // then mask). This arm serves `view` and `object`, the
-                            // two types it judges here: a list view the caller
-                            // does not hold is refused whole, a container and an
-                            // object are served minus the list views withheld.
-                            // The same judge every other door asks — ⛔ no
-                            // decision of its own here. What it withheld is
-                            // folded into the validator below.
-                            let audienceFingerprint = '';
-                            if (audienceFolds) {
-                                const verdict = await this.metaItemReadGate(
-                                    environmentId, req, p, metaType, req.params.name, [cachedDocument],
-                                    { arms: 'all', app: 'gate' },
-                                )(cachedDocument);
-                                if (verdict.kind === 'refuse') {
-                                    verdict.send(res);
-                                    return;
-                                }
-                                audienceFingerprint = objectFieldVisibilityFingerprint(
-                                    metaReadGate.withheldListViewNames(cachedDocument, verdict.document),
-                                );
-                                cachedDocument = verdict.document;
-                            }
-                            let visibilityFingerprint = '';
-                            if (maskPosture.kind === 'project') {
-                                // [#21884] Related to the fetched document: its `objectOverride` params name other objects.
-                                const related = await relateObjectSchemaMaskPosture(maskPosture, cachedDocument);
-                                const masked = this.maskObjectDocument(res, related, req.params.name, cachedDocument);
-                                if (!masked) return;
-                                cachedDocument = masked.document;
-                                visibilityFingerprint = masked.fingerprint;
-                            }
-                            // [#21476] The administrator's read names why an open
-                            // public form is not offered on this posture.
-                            let intakeFingerprint = '';
-                            if (intakeFolds) {
-                                const warnings = await this.anonymousFormIntakeWarnings(environmentId, req, p, cachedDocument);
-                                cachedDocument = stampAnonymousFormIntakeWarnings(cachedDocument, warnings);
-                                intakeFingerprint = anonymousFormIntakeFingerprint(warnings);
-                            }
-                            // [#22250] The caller's runtime view of what is
-                            // served — the document itself unless the caller is
-                            // D4-exempt and their own field permission withholds
-                            // some of its fields — which `sortability` derives
-                            // from, and whose fingerprint the validator folds.
-                            const runtimeView = await resolveObjectSchemaRuntimeView(cachedDocument, maskPosture);
-
-                            // [ADR-0106 D6 tier 2] Visibility undetermined →
-                            // the body is unmasked, so it must not be stored or
-                            // revalidated under a SHARED validator: a later 304
-                            // would hand this body to a caller whose projection
-                            // did resolve. No ETag, no Last-Modified, no-store.
-                            if (maskPosture.kind === 'undetermined') {
-                                res.header('Cache-Control', 'private, no-store');
-                                res.header('Vary', 'Accept-Language');
-                                res.json(await this.translateMetaEnvelope(
-                                    req, req.params.type, environmentId,
-                                    { type: metaType, name: req.params.name, ...cachedRegistration },
-                                    cachedDocument, cacheI18n, runtimeView.document,
-                                ));
-                                return;
-                            }
-
-                            // Set cache headers
-                            if (result.etag) {
-                                // [ADR-0106 D3] Fold the caller's field-visibility
-                                // fingerprint into the shared validator. An
-                                // unrestricted caller denies nothing → the
-                                // fingerprint is empty → the ETag is byte-identical
-                                // to the pre-ADR one. A cohort shares 304s; a
-                                // permission change moves the fingerprint and
-                                // self-invalidates the stale 304. [#22250] So does
-                                // the runtime view's: a D4-exempt caller whose
-                                // permission withholds a field is served a
-                                // different `sortability`, never a 304 for another's.
-                                // [#22639] …and so does what the read gate
-                                // withheld: a caller who no longer holds a list
-                                // view's capability is never answered a `304`
-                                // for the body that carried it.
-                                const value = foldVisibilityFingerprintIntoEtag(
-                                    foldVisibilityFingerprintIntoEtag(
-                                        foldVisibilityFingerprintIntoEtag(
-                                            foldVisibilityFingerprintIntoEtag(result.etag.value, visibilityFingerprint),
-                                            runtimeView.fingerprint,
-                                        ),
-                                        intakeFingerprint,
-                                    ),
-                                    audienceFingerprint,
-                                );
-                                const etagValue = result.etag.weak
-                                    ? `W/"${value}"`
-                                    : `"${value}"`;
-                                res.header('ETag', etagValue);
-                                if ((maskApplies || intakeFolds || audienceFolds) && normalizeIfNoneMatch(req.headers['if-none-match']) === value) {
-                                    res.status(304).send();
-                                    return;
-                                }
-                            }
-                            if (result.lastModified) {
-                                res.header('Last-Modified', new Date(result.lastModified).toUTCString());
-                            }
-                            if (result.cacheControl) {
-                                // `max-age` is a placeholder directive in the
-                                // array; its real value is appended from the
-                                // `maxAge` field. Strip the bare token before
-                                // joining so the two never collide into the
-                                // malformed `public, max-age, max-age=3600`.
-                                const parts: string[] = result.cacheControl.directives
-                                    .filter((d: string) => d !== 'max-age');
-                                if (result.cacheControl.maxAge != null) {
-                                    parts.push(`max-age=${result.cacheControl.maxAge}`);
-                                }
-                                res.header('Cache-Control', parts.join(', '));
-                            }
-
-                            res.header('Vary', 'Accept-Language');
-                            // [#5563] `getMetaItemCached` hands back the metadata
-                            // document with the envelope already stripped
-                            // (`result.data`; it does `const item = result?.item`
-                            // internally). This branch is the DEFAULT — `enableCache`
-                            // defaults to `true` — so leaving it unwrapped made the
-                            // one shape `packages/spec` declares for this route the
-                            // one a default deployment could never obtain. Rebuild
-                            // the declared envelope here, in the REST layer that
-                            // owns the response contract.
-                            //
-                            // `type` is folded to the canonical singular exactly as
-                            // `metadata-protocol` folds it (#4432), so `/meta/objects/x`
-                            // and `/meta/object/x` cannot answer two different `type`
-                            // values across a configuration switch. The cached read
-                            // carries no `lock` — it is the fast published-value path
-                            // and never consulted the lock resolver; a caller that
-                            // needs the ADR-0008 OCC carriers reads the uncached path.
-                            // [#22114] That includes `version`, the read's token. Its
-                            // ETag above stays the CACHE validator and is not the token:
-                            // the validator varies by locale (#1319), by the caller's
-                            // field visibility (ADR-0106 D3) and by the served bytes
-                            // (`getMetaItemCached`, #16525), none of which moves the
-                            // stored row's version, and an item with no stored row has
-                            // a validator but no version at all.
-                            const cachedEnvelope = {
-                                type: metaType,
-                                name: req.params.name,
-                                ...cachedRegistration,
-                            };
-                            res.json(await this.translateMetaEnvelope(
-                                req, req.params.type, environmentId, cachedEnvelope, cachedDocument, cacheI18n,
-                                runtimeView.document,
-                            ));
-                        } else {
-                            // Non-cached version
-                            // [#22128] The save door's reading of `?package=`
-                            // ({@link metaItemPackageBinding}): the served
-                            // `version` is resolved at the address that save
-                            // writes, so `all` names no package here either.
-                            const packageId = metaItemPackageBinding(req.query?.package);
-                            // [commit 2a29caa53] Typed against the spec request shape —
-                            // the `as any` this literal used to carry is
-                            // retired now that the spec declares `state` and
-                            // `previewDrafts`.
-                            // No transport envelope: this door does not thread
-                            // `environmentId` (the kernel was already resolved
-                            // above), so the plain declared shape suffices.
-                            const itemRequest: GetMetaItemRequest = {
-                                type: req.params.type,
-                                name: req.params.name,
-                                packageId,
-                                // [#20338] The ADMITTED switches declared above,
-                                // never `req.query` re-read here.
-                                ...(isDraftRead ? { state: 'draft' as const } : {}),
-                                ...(previewDrafts ? { previewDrafts: true } : {}),
-                                // [#22877] The member, read once above.
-                                ...memberSelector,
-                            };
-                            const envelope = await p.getMetaItem(itemRequest) as Record<string, any>;
-
-                            // [#20408] Everything this read does to the envelope
-                            // after the store read is ONE chain,
-                            // `createMetaItemAnswer` in `./meta-item-read-gate.ts`,
-                            // which the runtime dispatcher's `/meta` item read calls
-                            // too. Its docblock carries each step's rule and their
-                            // order — [#18066] absence judged BEFORE the gate (a name
-                            // with nothing behind it can never become #8013's `403`),
-                            // [#20156] THE per-caller read gate, the ADR-0046 doc
-                            // locale collapse, the [ADR-0106 D1/D5(1)] mask under the
-                            // posture resolved above (this uncached exit serves
-                            // `?state=draft`, `?preview=draft`, `?package=` and every
-                            // `enableCache: false` deployment, so a mask living only
-                            // in the cached arm would be walked past by a query
-                            // parameter), and the body: the translation and #10235's
-                            // `sortability`. ⛔ An item step is added there, never
-                            // here (`meta-list-projection-parity.test.ts` in
-                            // `@objectstack/runtime` derives its census from this
-                            // handler and fails on one added here).
-                            //
-                            // The gate's policy is this read's: every arm and the app
-                            // PRUNED, to every caller, its authors included
-                            // (read-to-display is per user) — save [#20290] the
-                            // `?state=draft` branch, which serves a STORED version
-                            // (the pending draft row) and so reads under the
-                            // stored-version doors' policy
-                            // ({@link STORED_VERSION_DOOR_POLICY}): Studio's designers
-                            // merge this answer over the layered view and save it
-                            // back, so whoever may save the app reads its draft
-                            // whole, every other caller pruned per caller (ruling
-                            // 5856774816), and no per-DEPLOYMENT gate. [#20338] "Every
-                            // other caller" is every other caller who may READ
-                            // drafts: one who may not never reaches this branch
-                            // (`isDraftRead` is false for them).
-                            const readPolicy: MetaReadGatePolicy = isDraftRead
-                                ? RestServer.STORED_VERSION_DOOR_POLICY
-                                : { arms: 'all', app: 'gate' };
-                            const answer = await metaReadGate.createMetaItemAnswer(
-                                this.metaItemAnswerSources(environmentId, req, p, readPolicy),
-                                { metaType, name: req.params.name, policy: readPolicy, maskPosture },
-                            )(envelope);
-                            if (answer.kind === 'refuse') {
-                                // `absent` is {@link sendMetaItemAbsent}, byte for byte.
-                                RestServer.sendMetaReadRefusal(res, answer.refusal);
-                                return;
-                            }
-                            if (answer.kind === 'mask-fault') {
-                                sendFieldVisibilityFault(res, answer.object);
-                                return;
-                            }
-                            // [ADR-0106 D6 tier 2] Visibility undetermined → the
-                            // body is unmasked, so it must not be stored or
-                            // revalidated under a shared validator.
-                            if (answer.cacheControl) res.header('Cache-Control', answer.cacheControl);
-                            res.header('Vary', 'Accept-Language');
-                            res.json(answer.envelope);
-                        }
-                    } catch (error: any) {
-                        // [#18402] THE one absence answer, whichever arm
-                        // produced it — the last half of #18066.
-                        //
-                        // #18066 gave this route a single absence EMITTER
-                        // ({@link sendMetaItemAbsent}) and reached it from the
-                        // two conditions that RETURN nothing. The conditions
-                        // that THROW one were left on the classification door
-                        // below, which renders the flat `{ error: '<message>',
-                        // code }` — so `body.error.code`, the accessor #8013
-                        // settled on and objectui#4252 reads, was `undefined`
-                        // on exactly those. Which one a caller got was decided
-                        // by two things it cannot see:
-                        //
-                        //  - `metadata.enableCache` (default TRUE). The cached
-                        //    arm's `getMetaItemCached` THROWS
-                        //    `metadataItemNotFoundError` on a falsy `item`; the
-                        //    uncached arm resolves item-less and returns. One
-                        //    request, one missing name, two envelopes, chosen
-                        //    by a server setting — the #7035 failure class.
-                        //  - which protocol implementation is mounted. The
-                        //    in-repo `metadata-protocol` resolves item-less
-                        //    from `getMetaItem`, but a protocol that throws the
-                        //    miss instead reached the same flat door
-                        //    (pinned in `rest-meta-outage-vs-miss.test.ts`).
-                        //
-                        // Recognised by the ANSWER this repo's own
-                        // classification door would have given — see
-                        // {@link thrownAnswerIsBareNotFound}, which asks that
-                        // door rather than re-reading the error, so this fork
-                        // and the `handleRouteError` it forks away from cannot
-                        // drift apart about what a caught value means.
-                        //
-                        // ⛔ NOT "the status is 404", and that narrowing was
-                        // measured rather than assumed. `NO_DRAFT` is a 404 on
-                        // THIS route — the Studio designer's `?state=draft`
-                        // probe, pinned byte-for-byte two files over — and it
-                        // says the item IS there and its draft is not.
-                        // Answering it as absence would tell a designer the
-                        // object does not exist, which is #5532's flattening
-                        // reintroduced by the repair for a sibling of it. Same
-                        // reasoning excludes a producer-declared code the
-                        // ledger does not know: ADR-0112 keeps that spelling in
-                        // `declaredCode`, and converting would delete it.
-                        //
-                        // ⭐ It STRENGTHENS the ADR-0045 §3 property rather
-                        // than merely preserving it. The unpublished app and
-                        // the service-gated one answer through the emitter, so
-                        // an absence that kept the thrown dialect was a
-                        // response pair that told them apart — by envelope
-                        // shape, and by the producer's `Metadata item
-                        // <type>/<name> not found` prose where the emitter says
-                        // one fixed sentence. Four arms, one body now; the
-                        // byte-identity is pinned in
-                        // `meta-item-absent-404.test.ts` §2 and §5.
-                        //
-                        // ⛔ NOT a convergence of the flat dialect itself. The
-                        // audience gate's `sendDeclaredFault` 401/403 beside
-                        // this, and the door in `error-response.ts`, still
-                        // answer flat: that position is the live ratchet
-                        // #9559 owns repo-wide (`check:route-envelope`), and
-                        // converting two of its four emissions here would mint
-                        // a new divergence — the same refusal answering two
-                        // shapes depending on which ROUTE served it.
-                        if (thrownAnswerIsBareNotFound(error)) {
-                            sendMetaItemAbsent(res);
-                            return;
-                        }
-                        handleRouteError(res, error);
-                    }
-                },
-                metadata: {
-                    summary: 'Get specific metadata item',
-                    tags: ['metadata'],
-                },
-            });
-        }
-
-        // PUT /meta/:type/:name - Save metadata item
-        // We always register this route, but return 501 if protocol doesn't support it
-        // This makes it discoverable even if not implemented
-        registerPerItemRoute({
-            method: 'PUT',
-            path: `${metaPath}/:type/:name`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#6603] Authoring capability gate — the SAME mechanism
-                    // `POST /meta/_migrate-stored` uses next door, deliberately
-                    // not a second way of demanding the same capability.
-                    //
-                    // Two independent reasons, either sufficient:
-                    //
-                    //  1. **The ADR-0106 round-trip.** D1 removes an unreadable
-                    //     field WHOLE from a served object schema, and this
-                    //     route persists the body it is handed. So a non-exempt
-                    //     caller's ordinary GET → edit a label → PUT used to
-                    //     store the schema back MINUS the fields masked out of
-                    //     their own read — silent deletion of fields they were
-                    //     never allowed to see, with nothing in the exchange
-                    //     saying so. Refusing the write is the write-side answer
-                    //     the masking needs: it makes "whoever may write a
-                    //     schema is whoever sees all of it" an enforced
-                    //     invariant instead of a coincidence, rather than
-                    //     teaching `saveMetaItem` that absent means keep (which
-                    //     would make field DELETION inexpressible for everyone).
-                    //  2. It closes a hole that predates masking entirely: any
-                    //     authenticated session could clobber any metadata item.
-                    //
-                    // Gate FIRST — before the protocol is resolved — so an
-                    // unauthorized caller cannot use the 501-vs-200 answer to
-                    // probe which kernels implement saving, and so nothing is
-                    // written before the refusal. `manage_metadata` is
-                    // ADR-0066 D1's authoring capability and saving a metadata
-                    // item is authoring; `isSystem` bypasses, matching every
-                    // other capability gate on the platform.
-                    //
-                    // [#12702 · ADR-0131 D6] The gate is the shared
-                    // `metaWriteCapabilityVerdict` (`@objectstack/metadata-core`):
-                    // `manage_metadata` or `isSystem`. The org-scoped
-                    // `manage_org_presentation` arm retired with the
-                    // per-organization overlay axis — this door threads no
-                    // organization, so that arm would have admitted its holders
-                    // to environment-wide authoring.
-                    //
-                    // [#20156] Asked through {@link metaSaveVerdict}, the ONE
-                    // spelling the stored-version read doors' author exemption
-                    // asks too (ruling 5856774816): whoever this door admits
-                    // reads the stored version whole there, whatever the plain
-                    // read withholds from them — so what they save back is
-                    // everything that was stored.
-                    const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                    {
-                        const verdict = RestServer.metaSaveVerdict(ctx);
-                        if (!verdict.allowed) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: verdict.message,
-                                },
-                            });
-                            return;
-                        }
-                    }
-                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
-                    // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` every organization shares the
-                    // environment's metadata, so only the platform operator rung
-                    // (or the engine itself) writes it, whatever the type. Inert
-                    // under `single`. See {@link walledCatalogRefusal}.
-                    {
-                        const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
-                        if (!walled.allowed) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: walled.message,
-                                },
-                            });
-                            return;
-                        }
-                    }
-                    const p = await this.resolveProtocol(environmentId, req);
-                    if (!p.saveMetaItem) {
-                        // [#7035] ADR-0112 envelope: the semantic code lives at
-                        // `error.code`, NOT as a sibling of `error`. This site
-                        // used to answer `{ error: '<msg>', code: 'NOT_IMPLEMENTED' }`
-                        // while `POST /meta/_migrate-stored` a few hundred lines
-                        // up answered the nested shape for the same condition,
-                        // so a client reading `err.error.code` got `undefined`
-                        // here — and `undefined` takes the "no code" branch, not
-                        // an error branch. `NOT_IMPLEMENTED` is unchanged: it is
-                        // already the standard-catalog code ADR-0112 maps 501 to
-                        // (`spec/src/api/errors.zod.ts` — the catalog member and
-                        // `standardErrorCodeForHttpStatus(501)`).
-                        res.status(501).json({
-                            error: {
-                                code: 'NOT_IMPLEMENTED',
-                                message: 'Save operation not supported by protocol implementation',
-                            },
-                        });
-                        return;
-                    }
-
-                    // Accept both `{ ...itemFields }` (bare) and `{ metadata: {...} }`
-                    // / `{ item: {...} }` envelope shapes. Studio and direct API
-                    // callers historically use either; ADR-0005 settles on
-                    // unwrapping to a single payload before persistence.
-                    const body = req.body ?? {};
-                    const item = (body && typeof body === 'object' && 'metadata' in body)
-                        ? (body as any).metadata
-                        : (body && typeof body === 'object' && 'item' in body)
-                            ? (body as any).item
-                            : body;
-
-                    // Opt-in OCC under ADR-0008 PR-10d.3: callers (Studio,
-                    // CLI) may set `If-Match` to the version token a receipt
-                    // served, to enforce that the overlay row has not advanced
-                    // since they last read it. A `null`/empty body or no header
-                    // preserves the legacy last-write-wins behaviour. [#21207]
-                    // The token is the crypto provider's keyed digest of the
-                    // stored content hash, never the hash itself; the protocol
-                    // compares it in that form, so it passes through here as sent.
-                    // [#22114] The item read serves the same token as `version`,
-                    // and `If-None-Match: *` pins a save that expects no row.
-                    // [#22141] The pin and `?mode=draft` are read through
-                    // {@link metaSaveRequestOptions} — the ONE mapping the
-                    // runtime dispatcher's `/meta` door asks too, so the
-                    // `@objectstack/hono` catch-all cannot answer this request
-                    // differently. Its `request` members are spread into the
-                    // save below, each present only when the caller asked.
-                    //
-                    // The multiplicity guard runs FIRST: it refuses a repeated
-                    // `force`, `package` or `mode` (see the `force` read below
-                    // for why that one is sharp) and UNWRAPS one occurrence
-                    // encoded as an array, so `?mode=` reaches the mapping as
-                    // the string it reads.
-                    //
-                    // [#23072] …and RECOGNITION before it, over the measured
-                    // closed set: a name this door does not read — `member`
-                    // first among them, the save being body-addressed — is a
-                    // located 400 here, before anything is written, never
-                    // dropped while the body's own member is saved.
-                    if (refuseUnknownQueryParams(req, res, META_ITEM_SAVE_PARAMS)) return;
-                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
-                    const saveOptions = metaSaveRequestOptions({ headers: req.headers, query: req.query });
-                    if (!saveOptions.ok) {
-                        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: saveOptions.message } });
-                        return;
-                    }
-                    // [#7749 producer, #7941 precedence] The request's authenticated
-                    // identity — one producer, shared by every `/meta` write (see
-                    // resolveMetaWriteActor). `X-Actor` is not consulted.
-                    const actor = await this.resolveMetaWriteActor(environmentId, req);
-                    // Phase 3a-destructive: `?force=true` opts past the
-                    // destructive-change safety check. Accept any truthy
-                    // string ('true', '1', 'yes') for resilience.
-                    //
-                    // [#6877] THE sharp one on this surface. The `typeof` ternary
-                    // below falls to `!!forceRaw` for anything that is not a
-                    // string, and a non-empty array is truthy — so
-                    // `?force=false&force=false`, a caller repeating an explicit
-                    // OPT-OUT, turned the destructive-change guard ON. An
-                    // inversion, on a destructive verb, reported as 200. The
-                    // multiplicity guard above refuses it before this read.
-                    const forceRaw = req.query?.force;
-                    const force = typeof forceRaw === 'string'
-                        ? ['true', '1', 'yes', 'on'].includes(forceRaw.toLowerCase())
-                        : !!forceRaw;
-
-                    // Software-package binding (Studio package authoring).
-                    // `?package=<id>` binds the saved row to that package
-                    // (sys_metadata.package_id). 'all'/empty = env-local overlay
-                    // ({@link metaItemPackageBinding}, the item read's too).
-                    const packageId = metaItemPackageBinding(req.query?.package);
-
-                    // [ADR-0131 D6] THE WRITE NAMES NO ORGANIZATION. The
-                    // per-organization overlay axis is retired: every write this
-                    // door admits lands environment-wide (`organization_id`
-                    // NULL), its audit row included, whatever the caller's
-                    // active organization. Until this stage the door threaded
-                    // the active organization for the five types whose registry
-                    // flag opened an overlay (then spelled `allowOrgOverride`,
-                    // `allowEnvironmentOverlay` since 18, which decides no
-                    // organization); a single-posture Studio save
-                    // of those types therefore sits under the Default
-                    // Organization, and is not served again until ADR-0131 C7
-                    // promotes it to the environment layer.
-                    // [#12004] The `as any` cast this call carried came off
-                    // when `SaveMetaItemRequestSchema` caught up with the
-                    // members this door sends. `saveMetaItem` is a REQUIRED
-                    // protocol member, so unlike the publish door's old cast
-                    // (member existence, TS2339) this one was load-bearing on
-                    // REQUEST SHAPE alone: the schema declared only
-                    // `{ type, name, item }`, and removing the cast surfaced
-                    // TS2353 on every other key. The literal is now compiled
-                    // against the spec contract through the commit 2a29caa53
-                    // `TransportScopedMetaRequest` wrapper — `environmentId`
-                    // is the transport-level routing key that wrapper layers
-                    // on, ⛔ never a protocol key; every other key here is
-                    // checked against the declared request, so an undeclared
-                    // member is a compile error instead of a payload member no
-                    // contract has ever seen.
-                    const saveRequest: TransportScopedMetaRequest<SaveMetaItemRequest> = {
-                        type: req.params.type,
-                        name: req.params.name,
-                        item,
-                        // [commit d806081dd] This door answers with an ADR-0112 error
-                        // envelope that carries the refusal's `issues[]`
-                        // structurally beside the message (`sendError` threads a
-                        // top-level `issues`), so `saveMetaItem`'s 422 renders
-                        // its findings as a headline here instead of restating
-                        // the per-key prose a console would then show twice.
-                        // Server-stated: this object is built field by field
-                        // from named `req` values and never spreads the body, so
-                        // a client cannot smuggle a face in.
-                        writeFace: 'meta-envelope',
-                        ...(environmentId ? { environmentId } : {}),
-                        // `parentVersion` and `mode`, each only when asked —
-                        // a closed two-key object read off the headers and the
-                        // query, never the body.
-                        ...saveOptions.request,
-                        ...(actor ? { actor } : {}),
-                        ...(force ? { force: true } : {}),
-                        ...(packageId ? { packageId } : {}),
-                    };
-                    const result = await p.saveMetaItem(saveRequest);
-                    res.json(result);
-                } catch (error: any) {
-                    handleRouteError(res, error);
-                }
-            },
-            metadata: {
-                summary: 'Save specific metadata item',
-                tags: ['metadata'],
-            },
-        });
-
-        // DELETE /meta/:type/:name - Reset metadata item to artifact default
-        // Removes a customization overlay row from sys_metadata (ADR-0005).
-        // Returns 200 even when no overlay existed (idempotent reset).
-        registerPerItemRoute({
-            method: 'DELETE',
-            path: `${metaPath}/:type/:name`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#7019] Same gate, same mechanism as the `PUT` twins —
-                    // but the argument for it is NOT the ADR-0106 round trip,
-                    // and saying so matters. Nothing is masked here and nothing
-                    // is round-tripped: this route discards a customization
-                    // overlay outright, so before this gate an authenticated
-                    // session holding no authoring capability at all could
-                    // reset any customized metadata item in the deployment to
-                    // its artifact default — and with `?dropStorage=true`, drop
-                    // the object's physical table with it.
-                    //
-                    // It belongs with the two PUTs because deleting a
-                    // customization is authoring it (ADR-0066 D1), and because
-                    // the fix is the same four lines — not because it is the
-                    // same argument.
-                    //
-                    // Gate FIRST — before the protocol is resolved — so the
-                    // 501-vs-200 answer leaks no kernel capability, and, the
-                    // point here, so the refusal happens with the overlay row
-                    // still intact. A gate that answers 403 after
-                    // `deleteMetaItem` has run would still be the bug.
-                    // `isSystem` bypasses, as everywhere else.
-                    //
-                    // [#12702 · ADR-0131 D6] Same shared verdict as the PUT
-                    // door. The reset names no organization either, so it
-                    // discards the environment-wide row.
-                    const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                    {
-                        const verdict = metaWriteCapabilityVerdict({
-                            isSystem: ctx?.isSystem === true,
-                            systemPermissions: ctx?.systemPermissions,
-                            operation: 'reset',
-                        });
-                        if (!verdict.allowed) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: verdict.message,
-                                },
-                            });
-                            return;
-                        }
-                    }
-                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
-                    // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` every organization shares the
-                    // environment's metadata, so only the platform operator rung
-                    // (or the engine itself) writes it, whatever the type. Inert
-                    // under `single`. See {@link walledCatalogRefusal}.
-                    {
-                        const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
-                        if (!walled.allowed) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: walled.message,
-                                },
-                            });
-                            return;
-                        }
-                    }
-                    const p = await this.resolveProtocol(environmentId, req);
-                    if (!p.deleteMetaItem) {
-                        // [#7035] ADR-0112 envelope. This site was the worst of
-                        // the three shapes: a BARE STRING `error`, with no code
-                        // at all — so neither `err.error.code` nor `err.code`
-                        // resolved, and `err.error.message` read `undefined`
-                        // too. `NOT_IMPLEMENTED` is the standard-catalog code
-                        // for 501 (ADR-0112; `standardErrorCodeForHttpStatus`).
-                        res.status(501).json({
-                            error: {
-                                code: 'NOT_IMPLEMENTED',
-                                message: 'Reset operation not supported by protocol implementation',
-                            },
-                        });
-                        return;
-                    }
-                    // Mirror saveMetaItem's OCC + actor plumbing (ADR-0008
-                    // PR-10d wiring): `If-Match` pins the expected current
-                    // version so concurrent edits get a 409 instead of a
-                    // silent reset; the request's authenticated identity flows
-                    // into the history tombstone row (#7749 producer; #7941
-                    // dropped the `X-Actor` limb that used to outrank it).
-                    const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
-                    const parentVersion = typeof ifMatchHeader === 'string'
-                        ? ifMatchHeader.replace(/^"|"$/g, '')
-                        : undefined;
-                    // [#7749 producer, #7941 precedence] The request's authenticated
-                    // identity — one producer, shared by every `/meta` write (see
-                    // resolveMetaWriteActor). `X-Actor` is not consulted.
-                    const actor = await this.resolveMetaWriteActor(environmentId, req);
-
-                    // [#6877] `?state=` and the destructive `?dropStorage=`
-                    // both fail SAFE on an array today (the comparisons stop
-                    // matching), but "the wrong answer happens to be the
-                    // conservative one" is not a rule a caller can rely on and
-                    // is not what the request asked for.
-                    // [#22877] Recognition first, over the measured closed set.
-                    if (refuseUnknownQueryParams(req, res, META_ITEM_RESET_PARAMS)) return;
-                    if (refuseRepeatedQueryParams(req, res, ['state', 'dropStorage', 'package', META_ITEM_MEMBER_PARAM])) return;
-                    const stateParam = typeof req.query?.state === 'string'
-                        && req.query.state.toLowerCase() === 'draft'
-                        ? 'draft' as const
-                        : undefined;
-
-                    // `?dropStorage=true` also tears down the object's physical
-                    // table (object + active only). Used by the "discard a
-                    // previewed object" flow so a publish-to-preview leaves no
-                    // orphan table. Destructive — opt-in, defaults off.
-                    const dropStorage = req.query?.dropStorage === 'true' || req.query?.dropStorage === '1';
-                    const deletePackageId = metaItemPackageBinding(req.query?.package);
-
-                    // [ADR-0131 D6] No organization, as on the `PUT` twin: the
-                    // reset reaches the environment-wide row.
-                    // [#11679] The `(p as any)` cast this call carried came off
-                    // when `DeleteMetaItemRequestSchema` caught up with the
-                    // eight members this door sends. Unlike the publish door's
-                    // cast (member existence, TS2339), this one was load-bearing
-                    // on REQUEST SHAPE: the member was declared all along, but
-                    // the schema declared only `{ type, name }`, so removing the
-                    // cast surfaced TS2353 on six keys. The literal is now
-                    // compiled against the spec contract through the commit 2a29caa53
-                    // `TransportScopedMetaRequest` wrapper — `environmentId` is
-                    // the transport-level routing key that wrapper layers on,
-                    // ⛔ never a protocol key; every other key here is checked
-                    // against the declared request, so an undeclared member is a
-                    // compile error instead of a payload member no contract has
-                    // ever seen. The 501 guard above stays: the member is
-                    // declared OPTIONAL, and the guard is what narrows it to
-                    // callable here.
-                    const deleteRequest: TransportScopedMetaRequest<DeleteMetaItemRequest> = {
-                        type: req.params.type,
-                        name: req.params.name,
-                        ...(environmentId ? { environmentId } : {}),
-                        ...(parentVersion !== undefined ? { parentVersion } : {}),
-                        ...(actor ? { actor } : {}),
-                        ...(stateParam ? { state: stateParam } : {}),
-                        ...(dropStorage ? { dropStorage: true } : {}),
-                        // [#22877] Resets ONE member of a bundled type.
-                        ...metaMemberSelector(req.query),
-                        // [#23165, ADR-0048] The package whose row the delete
-                        // removes; `all` and an empty value name none, as on
-                        // the save door, and the protocol then resolves it.
-                        ...(deletePackageId ? { packageId: deletePackageId } : {}),
-                    };
-                    const result = await p.deleteMetaItem(deleteRequest);
-                    res.json(result);
-                } catch (error: any) {
-                    handleRouteError(res, error);
-                }
-            },
-            metadata: {
-                summary: 'Reset metadata item to artifact default (deletes customization overlay)',
-                tags: ['metadata'],
-            },
-        });
+        // [#23050 slice 13c] The per-item writes (`PUT` and `DELETE {metaPath}/:type/:name`,
+        // the item save and the reset) moved to `meta-item-write-routes.ts`, and are
+        // registered HERE so they keep their place in the order: after the per-item reads,
+        // above the history family below. They still register through the per-item
+        // registrar this head declares, which reaches that module in `scope` as the one
+        // closure it is and reads the route manager when it is called, during this call.
+        // This literal hands that body every other member it reads (see
+        // `MetaItemWriteRouteHost`); it carries no route manager, because that body
+        // registers nothing on one itself. Read that module's header before moving it.
+        const itemWriteHost: MetaItemWriteRouteHost = {
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            metaSaveVerdict: (...a) => RestServer.metaSaveVerdict(...a),
+            walledCatalogRefusal: (...a) => this.walledCatalogRefusal(...a),
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveMetaWriteActor: (...a) => this.resolveMetaWriteActor(...a),
+        };
+        registerMetaItemWriteRoutes.call(itemWriteHost, scope);
 
         // GET /meta/:type/:name/history — durable change-log for one item.
         // Returns the sys_metadata_history events that the Studio "History"
@@ -7723,9 +5923,21 @@ export class RestServer {
                         throw maskError;
                     }
                     const diffGated = RestServer.gatesPerCaller(diffMetaType);
-                    const diffCurrent = diffGated
-                        ? await this.fetchCurrentMetaDocument(req, p)
-                        : undefined;
+                    let diffCurrent: any;
+                    try {
+                        diffCurrent = diffGated
+                            ? await this.fetchCurrentMetaDocument(req, p)
+                            : undefined;
+                    } catch (currentError: any) {
+                        // [#7557, #24210] A withheld item (a disabled package's)
+                        // is answered in the plain read's body, as
+                        // {@link eventDoorRefusal} answers it.
+                        if (thrownAnswerIsBareNotFound(currentError)) {
+                            sendMetaItemAbsent(res);
+                            return;
+                        }
+                        throw currentError;
+                    }
                     // [#22639] A list view's and a dashboard's per-caller gate
                     // is the item's OWN `requiredPermissions`. With no
                     // published row there is no current document to judge, so
@@ -7906,7 +6118,23 @@ export class RestServer {
                         Boolean(this.objectQLProvider),
                         () => this.objectQLProvider!(environmentId),
                     );
-                    const schema = (ql as any)?.registry?.getObject?.(name);
+                    // [#7557, #24210] The registry is a resolution reader and
+                    // keeps serving a disabled package's object, so this API
+                    // door asks first and answers what `GET /meta/object/:name`
+                    // answers: the protocol's own refusal, `404
+                    // OBJECT_PACKAGE_DISABLED` (the dispatcher twin's
+                    // `disabledObjectAnswer`); any other throw of that read is
+                    // answered as itself, never as an absence. A protocol that
+                    // does not refuse it gets this door's own answer for no
+                    // object, below. The schema is never read for such a name.
+                    const registry = (ql as any)?.registry;
+                    const disabledObject = typeof registry?.isObjectPackageDisabled === 'function'
+                        && registry.isObjectPackageDisabled(name) === true;
+                    if (disabledObject) {
+                        const p = await this.resolveProtocol(environmentId, req);
+                        await p.getMetaItem({ type: 'object', name });
+                    }
+                    const schema = disabledObject ? undefined : registry?.getObject?.(name);
                     if (!schema) {
                         // `{ error: { code, message } }`, the envelope
                         // `BaseResponseSchema` declares — not the bare
@@ -8107,8 +6335,31 @@ export class RestServer {
                         // READ, and a gate fault raised while serving must reach
                         // `handleRouteError` as itself — never fall through to
                         // the snapshot as though no overlay existed.
+                        // [#7557, #24210] A disabled package's item is answered
+                        // as a name with nothing behind it, as the plain read
+                        // and the list answer it. Neither store below knows a
+                        // disable (the layered read keeps serving its resolution
+                        // reader, and the snapshot carries no owner), so the
+                        // owner is the one the plain read's kept protection
+                        // envelope names, `packageId`, asked of the registry's
+                        // `isPackageDisabled`: the predicate the protocol asks of
+                        // that same field. An object is the layered read's own
+                        // refusal below; `package` is never hidden.
+                        let withheld = false;
+                        if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
+                            && typeof publishedProtocol?.getMetaItem === 'function') {
+                            const ql = await wiredEngineOrLoud(
+                                Boolean(this.objectQLProvider),
+                                () => this.objectQLProvider!(environmentId),
+                            );
+                            const registry = (ql as any)?.registry;
+                            if (typeof registry?.isPackageDisabled === 'function') {
+                                const envelope = await publishedProtocol.getMetaItem({ type, name });
+                                withheld = registry.isPackageDisabled(envelope?.packageId) === true;
+                            }
+                        }
                         let publishedOverlay: unknown;
-                        if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
+                        if (!withheld && typeof publishedProtocol?.getMetaItemLayered === 'function') {
                             try {
                                 const layered = await publishedProtocol.getMetaItemLayered({
                                     type,
@@ -8196,7 +6447,9 @@ export class RestServer {
                         // CANONICAL types; handed the raw segment it answered
                         // 404 for a recognised plural and 200 for the singular
                         // twin of the same code-published item.
-                        const data = await (svc as any).getPublished(canonicalMetaUrlType(type), name);
+                        const data = withheld
+                            ? undefined
+                            : await (svc as any).getPublished(canonicalMetaUrlType(type), name);
                         // The 404 this route could never produce before. An
                         // item that exists but was never published still
                         // answers 200 with its current definition — that is
@@ -8297,441 +6550,19 @@ export class RestServer {
      * Register CRUD endpoints for data operations
      */
     private registerCrudEndpoints(basePath: string): void {
-        const { crud } = this.config;
-        const dataPath = `${basePath}${crud.dataPrefix}`;
-        const isScoped = basePath.includes('/environments/:environmentId');
-
-        const operations = crud.operations;
-
-        // GET /data/:object - List/query records
-        if (operations.list) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${dataPath}/:object`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'list')) return;
-                        // [#6877] Still NOT arity-gated as a whole, for the
-                        // reason it never was: this route hands the WHOLE query
-                        // record to `findData`, whose normalizer
-                        // (`metadata-protocol`) owns every parameter's arity — the
-                        // `$`-alias table, the implicit field-equality bucket, and
-                        // the `$select`/`$expand`/`$searchFields` params that are
-                        // legitimately multi-valued. Declaring an arity list here
-                        // would be this file guessing at another package's
-                        // contract.
-                        //
-                        // [#7390] ONE slot is the exception, and structurally so
-                        // rather than by taste. A filter AST *is* an array
-                        // (`['status','=','open']`), so #7386's arity gate cannot
-                        // read `Array.isArray` as evidence of repetition on the
-                        // filter slot: the normalizer serves this querystring and
-                        // `POST /data/:object/query`'s arbitrary-JSON body through
-                        // one door and cannot tell them apart. THIS layer can — on
-                        // a querystring an array is a repeated parameter and can be
-                        // nothing else — so the filter slot's arity is judged here,
-                        // and only here, leaving the normalizer free of a heuristic.
-                        //
-                        // Refused, never resolved (maintainer ruling 2026-08-11 on
-                        // #7390): last-wins and AND-merge are each a silent choice
-                        // between two intents a caller actually expressed. Before
-                        // this line the common shape was answered with the WRONG
-                        // diagnosis — `malformedFilterArrayError`, telling a caller
-                        // whose filters were both well-formed to check their AST
-                        // syntax — and the rarer `?filter=status&filter=%3D&filter=open`
-                        // spelled a valid AST and returned 200 with a filter nobody
-                        // expressed. It throws rather than responding so both keep
-                        // the envelope this route's other filter refusals already
-                        // use; see the helper for why.
-                        assertFilterParamSuppliedOnce(req.query);
-                        const listRequest: ServerScopedDataRequest<FindDataRequest> = {
-                            object: req.params.object,
-                            query: req.query,
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.findData(listRequest);
-                        res.json(result);
-                    } catch (error: any) {
-                        const mapped = mapDataError(error, req.params?.object);
-                        logUnexpectedRouteError(error, mapped);
-                        res.status(mapped.status).json(mapped.body);
-                    }
-                },
-                metadata: {
-                    summary: 'Query records',
-                    tags: ['data', 'crud'],
-                },
-            });
-        }
-
-        // GET /data/:object/:id - Get single record
-        if (operations.read) {
-            this.routeManager.register({
-                method: 'GET',
-                path: `${dataPath}/:object/:id`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        // [#6877] NOT gated, and this is a measured verdict
-                        // rather than a name-based one: `GetDataRequest.select` /
-                        // `.expand` are declared `z.array(z.string())`, and the
-                        // consumer signature is
-                        // `getData({ …, expand?: string | string[], select?: string | string[] })`
-                        // — it splits the comma form itself and passes an array
-                        // straight through. `?select=a&select=b` is therefore
-                        // ALREADY correct end to end, and refusing it (or
-                        // flattening it) would be the regression. The card listed
-                        // this line under "array flows downstream"; measurement
-                        // says the downstream was built for it.
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'get')) return;
-                        // [#7606] Closed parameter set, AFTER the capability
-                        // gates for the same reason #7527 put it there: which
-                        // parameters a route understands is information, and a
-                        // caller who may not read this object should not learn
-                        // the shape of its ingress before being refused.
-                        //
-                        // This gate RESPONDS rather than throwing, which on this
-                        // route is load-bearing and not a style choice: the catch
-                        // below rewrites every 400 into a 404 (a bad id is a
-                        // miss, not a malformed request). A refusal routed
-                        // through it would reach the caller as "no such record"
-                        // — the silent-drop defect wearing a different status.
-                        if (refuseUnknownQueryParams(req, res, DATA_RECORD_READ_PARAMS)) return;
-                        const { select, expand } = req.query || {};
-                        const getRequest: ServerScopedDataRequest<GetDataRequest> = {
-                            object: req.params.object,
-                            id: req.params.id,
-                            ...(select != null ? { select } : {}),
-                            ...(expand != null ? { expand } : {}),
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.getData(getRequest);
-                        res.json(result);
-                    } catch (error: any) {
-                        const mapped = mapDataError(error, req.params?.object);
-                        logUnexpectedRouteError(error, mapped);
-                        res.status(mapped.status === 400 ? 404 : mapped.status).json(mapped.body);
-                    }
-                },
-                metadata: {
-                    summary: 'Get record by ID',
-                    tags: ['data', 'crud'],
-                },
-            });
-        }
-
-        // POST /data/:object - Create record
-        if (operations.create) {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${dataPath}/:object`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'create')) return;
-                        // [#3899] The wire body IS the record. Validate the
-                        // assembled protocol request (`CreateDataRequestSchema`,
-                        // catalog `requestSchema`) so a non-record body — an
-                        // array, a string, a number — answers 400 instead of
-                        // reaching the engine as `data`. Per-field checks stay
-                        // downstream (object metadata / validation rules); this
-                        // gate is about the SHAPE the contract declares.
-                        //
-                        // [#23574] …the body AS THE CALLER SENT IT. It was
-                        // `req.body ?? {}`, so a JSON `null` body parsed as an
-                        // empty record and created an empty row (`201`). `null`
-                        // is not the record `data` declares, so it is refused
-                        // like an array, a string or a number, and the runtime
-                        // dispatcher's twin (`domains/data.ts`) asks this gate
-                        // over the same assembled request. An empty request
-                        // body is not `null`: the HTTP adapter hands it over
-                        // as `{}`, a record.
-                        const { CreateDataRequestSchema } = await import('@objectstack/spec/api');
-                        const createInput = { object: req.params.object, data: req.body };
-                        const parsedCreate = (CreateDataRequestSchema as any).safeParse(createInput);
-                        if (!parsedCreate.success) {
-                            res.status(400).json({
-                                error: 'Invalid create request',
-                                code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsedCreate.error?.issues, createInput),
-                                object: req.params?.object,
-                            });
-                            return;
-                        }
-                        const createRequest: ServerScopedDataRequest<CreateDataRequest> = {
-                            object: req.params.object,
-                            data: req.body,
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.createData(createRequest);
-                        // [#3431] Advertise fields the engine's create-side static-
-                        // `readonly` strip dropped (`engine.insert`, relayed by
-                        // `createData` as `droppedFields`) via the response header
-                        // (body also carries `droppedFields`). Status stays 201.
-                        applyDroppedFieldsHeader(res, result);
-                        res.status(201).json(result);
-                    } catch (error: any) {
-                        const mapped = mapDataError(error, req.params?.object);
-                        logUnexpectedRouteError(error, mapped);
-                        res.status(mapped.status).json(mapped.body);
-                    }
-                },
-                metadata: {
-                    summary: 'Create record',
-                    tags: ['data', 'crud'],
-                },
-            });
-        }
-
-        // POST /data/:object/query — Spec-shape advanced query (QueryAST in body).
-        // Supports server-side aggregation via { groupBy, aggregations, where, ... }
-        // per spec/data/query.zod.ts. Mirrors what `client.data.query()` posts.
-        // Returns FindDataResponse = { object, records, total? }.
-        if (operations.list) {
-            this.routeManager.register({
-                method: 'POST',
-                path: `${dataPath}/:object/query`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'list')) return;
-                        // [#3899] Validate the QueryAST body against the declared
-                        // contract (`FindDataRequestSchema`, catalog `requestSchema`).
-                        // A malformed body used to be forwarded as-is — and since a
-                        // dropped/mistyped clause does not narrow a query, it WIDENS
-                        // it, `{"filter": …}` degraded into an unfiltered full read
-                        // with a 200. The PATH object is written last (#3946) so a
-                        // body `object` can neither dodge the `enforceApiAccess`
-                        // gate above nor move the read. Validation only: the merged
-                        // ORIGINAL body is forwarded, not the parse output, so the
-                        // schema cannot inject defaults the engine did not receive
-                        // before (the analytics-entry precedent, #3878).
-                        //
-                        // [#23574] …the body AS THE CALLER SENT IT. It was
-                        // `req.body ?? {}`, so a JSON `null` body read as no
-                        // query and answered the full record set (`200`).
-                        // `query` declares a QueryAST or nothing, never `null`,
-                        // so `null` is refused like a string or a number, and
-                        // the runtime dispatcher's twin (`domains/data.ts`) now
-                        // asks this gate over the same assembled request. An
-                        // empty request body is not `null`: the HTTP adapter
-                        // hands it over as `{}`, an empty query.
-                        const { FindDataRequestSchema } = await import('@objectstack/spec/api');
-                        const rawQuery = req.body;
-                        const query = (rawQuery && typeof rawQuery === 'object' && !Array.isArray(rawQuery))
-                            ? { ...rawQuery, object: req.params.object }
-                            : rawQuery; // non-object bodies (`null` included) go to the schema as-is and fail with `query: invalid_type`
-                        const findInput = { object: req.params.object, query };
-                        const parsedFind = (FindDataRequestSchema as any).safeParse(findInput);
-                        if (!parsedFind.success) {
-                            res.status(400).json({
-                                error: 'Invalid query request',
-                                code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsedFind.error?.issues, findInput),
-                                object: req.params?.object,
-                            });
-                            return;
-                        }
-                        const queryRequest: ServerScopedDataRequest<FindDataRequest> = {
-                            object: req.params.object,
-                            query,
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.findData(queryRequest);
-                        res.json(result);
-                    } catch (error: any) {
-                        const mapped = mapDataError(error, req.params?.object);
-                        logUnexpectedRouteError(error, mapped);
-                        res.status(mapped.status).json(mapped.body);
-                    }
-                },
-                metadata: {
-                    summary: 'Advanced query (QueryAST in body)',
-                    tags: ['data', 'crud'],
-                },
-            });
-        }
-
-        // PATCH /data/:object/:id - Update record
-        if (operations.update) {
-            this.routeManager.register({
-                method: 'PATCH',
-                path: `${dataPath}/:object/:id`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        // OCC: clients opt in by sending either the standard
-                        // `If-Match` header or an `expectedVersion` field in
-                        // the JSON body. Body wins when both are present
-                        // (lets callers override per-request without
-                        // touching headers). See ConcurrentUpdateError in
-                        // packages/objectql/src/protocol.ts.
-                        const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
-                        const bodyVersion = (req.body && typeof req.body === 'object')
-                            ? (req.body as any).expectedVersion
-                            : undefined;
-                        const expectedVersion = bodyVersion ?? ifMatchHeader;
-                        // Strip the meta field out of the data payload so it
-                        // doesn't get written as a column.
-                        let data = req.body;
-                        if (data && typeof data === 'object' && 'expectedVersion' in (data as any)) {
-                            const { expectedVersion: _drop, ...rest } = data as any;
-                            data = rest;
-                        }
-                        // [#23492] A token that can never carry a version is
-                        // refused here, before anything is asked, and every
-                        // other present token is forwarded below: no token the
-                        // caller sent is read as "no token". THROWN as
-                        // `validationFailure`, so this route's catch answers it
-                        // through `mapDataError`, in the envelope it already
-                        // gives the protocol's own refusal of `""`.
-                        const versionRefusal = versionTokenRefusal(
-                            expectedVersion,
-                            bodyVersion != null ? 'The body\'s `expectedVersion`' : 'The `If-Match` header',
-                        );
-                        if (versionRefusal) throw validationFailure(versionRefusal, []);
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'update')) return;
-                        // [#3899] Same gate as create: the wire body is the bare
-                        // field patch (`expectedVersion` already stripped above),
-                        // validated as the assembled `UpdateDataRequestSchema`
-                        // request so a non-record body 400s instead of reaching
-                        // the engine.
-                        //
-                        // [#23491] …the patch AS THE CALLER SENT IT. It was
-                        // `data ?? {}`, so a JSON `null` body parsed as an empty
-                        // patch and answered `200`: an update that changed no
-                        // field and still moved the record's version. `null` is
-                        // not the record the contract declares, so it is refused
-                        // like an array, a string or a number, and the runtime
-                        // dispatcher's twin (`domains/data.ts`) asks this gate
-                        // over the same assembled request.
-                        //
-                        // [#23517] …and the token as the caller sent it, never
-                        // its `String()`: this gate parsed `String(5)`, so a
-                        // number `expectedVersion: z.string()` declares no room
-                        // for was forwarded and judged `409`.
-                        // `versionTokenRefusal` above already refuses it, so what
-                        // reaches this gate and the forward below is a non-blank
-                        // string.
-                        const { UpdateDataRequestSchema } = await import('@objectstack/spec/api');
-                        const updateInput = {
-                            object: req.params.object,
-                            id: req.params.id,
-                            data,
-                            ...(expectedVersion != null ? { expectedVersion } : {}),
-                        };
-                        const parsedUpdateOne = (UpdateDataRequestSchema as any).safeParse(updateInput);
-                        if (!parsedUpdateOne.success) {
-                            res.status(400).json({
-                                error: 'Invalid update request',
-                                code: 'VALIDATION_FAILED',
-                                fields: zodIssuesToFields(parsedUpdateOne.error?.issues, updateInput),
-                                object: req.params?.object,
-                            });
-                            return;
-                        }
-                        const updateRequest: ServerScopedDataRequest<UpdateDataRequest> = {
-                            object: req.params.object,
-                            id: req.params.id,
-                            data,
-                            ...(expectedVersion != null ? { expectedVersion } : {}),
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.updateData(updateRequest);
-                        // [#3431] Advertise any LEGALLY-stripped write fields via
-                        // the response header before serialising (the body also
-                        // carries `droppedFields`). Status stays 200.
-                        applyDroppedFieldsHeader(res, result);
-                        res.json(result);
-                    } catch (error: any) {
-                        const mapped = mapDataError(error, req.params?.object);
-                        logUnexpectedRouteError(error, mapped);
-                        res.status(mapped.status).json(mapped.body);
-                    }
-                },
-                metadata: {
-                    summary: 'Update record',
-                    tags: ['data', 'crud'],
-                },
-            });
-        }
-
-        // DELETE /data/:object/:id - Delete record
-        if (operations.delete) {
-            this.routeManager.register({
-                method: 'DELETE',
-                path: `${dataPath}/:object/:id`,
-                handler: async (req: any, res: any) => {
-                    try {
-                        const environmentId = isScoped ? req.params?.environmentId : undefined;
-                        const p = await this.resolveProtocol(environmentId, req);
-                        const context = await this.resolveExecCtx(environmentId, req);
-                        if (this.enforceAuth(req, res, context)) return;
-                        // OCC: same opt-in protocol as PATCH (`If-Match`
-                        // header or `expectedVersion` query string). DELETE
-                        // has no JSON body, so we only accept the header
-                        // and a query parameter.
-                        // [#6877] `String(['1','2'])` is `'1,2'` — an OCC token
-                        // no row carries, so a repeated `?expectedVersion=` turned
-                        // an optimistic-concurrency check into a guaranteed
-                        // conflict on a DESTRUCTIVE verb.
-                        if (refuseRepeatedQueryParams(req, res, ['expectedVersion'])) return;
-                        const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
-                        const queryVersion = (req.query && typeof req.query === 'object')
-                            ? (req.query as any).expectedVersion
-                            : undefined;
-                        const expectedVersion = queryVersion ?? ifMatchHeader;
-                        // [#23492] The `PATCH` above's rule, thrown the same
-                        // way: a token that can never carry a version is
-                        // refused, every other present token is forwarded.
-                        const versionRefusal = versionTokenRefusal(
-                            expectedVersion,
-                            queryVersion != null ? 'The `expectedVersion` query parameter' : 'The `If-Match` header',
-                        );
-                        if (versionRefusal) throw validationFailure(versionRefusal, []);
-                        if (await this.enforceApiAccess(req, res, p, environmentId, 'delete')) return;
-                        const deleteRequest: ServerScopedDataRequest<DeleteDataRequest> = {
-                            object: req.params.object,
-                            id: req.params.id,
-                            ...(expectedVersion != null ? { expectedVersion: String(expectedVersion) } : {}),
-                            ...(environmentId ? { environmentId } : {}),
-                            ...(context ? { context } : {}),
-                        };
-                        const result = await p.deleteData(deleteRequest);
-                        res.json(result);
-                    } catch (error: any) {
-                        const mapped = mapDataError(error, req.params?.object);
-                        logUnexpectedRouteError(error, mapped);
-                        res.status(mapped.status).json(mapped.body);
-                    }
-                },
-                metadata: {
-                    summary: 'Delete record',
-                    tags: ['data', 'crud'],
-                },
-            });
-        }
+        // [#23050 slice 12] The body moved to `crud-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `CrudRouteHost`, and that module's header for why no
+        // member is a getter).
+        const host: CrudRouteHost = {
+            config: this.config,
+            routeManager: this.routeManager,
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            enforceAuth: (...a) => this.enforceAuth(...a),
+            enforceApiAccess: (...a) => this.enforceApiAccess(...a),
+        };
+        registerCrudEndpoints.call(host, basePath);
     }
     
     /**
@@ -9062,15 +6893,23 @@ export class RestServer {
      *                                          answering `{ id }` only (#22437)
      *
      * Both routes bypass `enforceAuth` even though anonymous-deny is on for the
-     * deployment (e.g. ObjectOS multi-tenant). Security is delegated to the
-     * `guest_portal` permission set carried on the execution context — the
-     * SecurityPlugin enforces INSERT-only access to the target object. If
-     * the deployment hasn't registered a `guest_portal` profile, the
-     * security middleware falls open with `permissions: []` (no userId),
-     * matching the existing anonymous-access semantics; deployers must
-     * keep secure-by-default deployments paired with a `guest_portal`
-     * profile (the CRM example does this) to enforce the INSERT-only
-     * contract.
+     * deployment (e.g. ObjectOS multi-tenant). The submit is authorized by the
+     * form's own declaration (ADR-0056 Option A): it hands the engine a
+     * `publicFormGrant` scoped to the form's target object, and the
+     * SecurityPlugin admits on that grant alone, before any permission set
+     * resolves. It admits the create and the read-back (`find` / `findOne` /
+     * `count`) on that object only, refuses every other operation and object,
+     * and strips the server-managed anchors (`PUBLIC_FORM_SERVER_MANAGED_FIELDS`)
+     * from the payload; the route's allow-list of the form's declared fields is
+     * the first net. No deployment configures anything for this, and the grant
+     * never falls open: it admits the same operations whether or not a
+     * `guest_portal` set is registered.
+     *
+     * The submit's context also names `guest_portal` in `permissions`. That
+     * name admits nothing. Where a deployment registers a set under it, the
+     * SecurityPlugin resolves that set as the caller's for the grant's result
+     * masker over what the grant hands back (ADR-0138 records the name); the
+     * submit answers the created id only (#22437).
      *
      * The matched FormView's parent ViewSchema is found by scanning
      * `protocol.getMetaItems({ type: 'view' })`. For each entry we inspect
@@ -9081,450 +6920,23 @@ export class RestServer {
      * `mapViewSpecToEmbeddableConfig` expects.
      */
     private registerFormEndpoints(basePath: string): void {
-        const isScoped = basePath.includes('/environments/:environmentId');
-
-        // Which form candidates are open to anonymous intake is ONE rule,
-        // shared with the write-time judgement in `@objectstack/metadata-protocol`
-        // (`anonymousFormIntakeCandidates`): `sharing.enabled === true`,
-        // `sharing.allowAnonymous === true` and a `publicLink` naming the slug.
-        //
-        // A withdrawal is a kill switch: layering may only narrow anonymous
-        // intake, never re-open it. The doors read one list, the
-        // environment's (environment → code), which holds one item per
-        // package of a view name, and judge every candidate against that same
-        // list as the layer beneath it: a candidate is served only when no
-        // body of its view name explicitly withdraws the same form
-        // (`anonymousFormIntakeWithdrawnIn`: matched by slot or by slug, the
-        // link kept with a switch set to `false`), so a withdrawal in one
-        // package closes the name's form in every package (a known limit that
-        // fails closed). Another view publishing the same slug is a different
-        // form and closes nothing.
-        const findPublicFormView = (
-            views: any[],
-            slug: string,
-        ): { view: any; form: any; object: string } | null => {
-            for (const view of views ?? []) {
-                if (!view || typeof view !== 'object') continue;
-                for (const c of anonymousFormIntakeCandidates(view)) {
-                    if (c.slug !== slug) continue;
-                    if (anonymousFormIntakeWithdrawnIn(views, view, c)) continue;
-                    const objectName = anonymousFormObjectName(view, c.form);
-                    if (!objectName) continue;
-                    return { view, form: c.form, object: objectName };
-                }
-            }
-            return null;
+        // [#23050 slice 11] The body moved to `form-routes.ts`. This literal
+        // hands it every member it reads — the list IS its dependency on this
+        // class (see `FormRouteHost`, and that module's header for why no
+        // member is a getter and why the private static `translateOptionsFor`
+        // is handed over too).
+        const host: FormRouteHost = {
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveAnonymousFormTenancy: (...a) => this.resolveAnonymousFormTenancy(...a),
+            readFormObjectDefinitions: (...a) => this.readFormObjectDefinitions(...a),
+            routeManager: this.routeManager,
+            resolveI18nService: (...a) => this.resolveI18nService(...a),
+            buildTranslationBundle: (...a) => this.buildTranslationBundle(...a),
+            extractLocale: (...a) => this.extractLocale(...a),
+            translateOptionsFor: (...a) => RestServer.translateOptionsFor(...a),
+            packagedObjectBase: (...a) => this.packagedObjectBase(...a),
         };
-
-        // [ADR-0131 D6, C7] WHICH metadata an anonymous form request reads:
-        // the environment's, like every other metadata read. Until v18 the
-        // `view` read also kept the Default Organization's legacy layer, so an
-        // organization's withdrawal still closed the form. The v18 ceremony
-        // (`os migrate organization-ownership --apply`, its metadata-promotion
-        // step) carries every organization-layer withdrawal onto the
-        // environment, fail-closed (rulings A on #22008 and #22011), and that
-        // read is deleted with it.
-        //
-        // The tenancy service is still read: it answers the posture the
-        // intake-availability rule judges (#21476).
-        //
-        // Asked ONCE per request, in `resolveFormBySlug`. Every door below
-        // reads the form through that one resolution, so no door keeps its
-        // own copy of "is this form public" — nor, since #21476, of "can it
-        // take intake on this posture", which the same tenancy read answers.
-        //
-        // Fails CLOSED. A tenancy service that is registered but cannot be
-        // reached raises `AuthzStoreUnavailableError`, the classification
-        // `classifyAdmissionTenancyPosture` applies to the same seam. The
-        // door then refuses instead of judging intake without a posture.
-        // Only the registry's own "never registered" brand reads as the
-        // supported no-tenancy composition. The wiring mirrors
-        // `resolveProtocol`, so the tenancy service and the protocol always
-        // come from the same kernel.
-        const resolveFormBySlug = async (
-            environmentId: string | undefined,
-            req: any,
-            slug: string,
-        ): Promise<{ view: any; form: any; object: string } | null> => {
-            const p = await this.resolveProtocol(environmentId, req);
-            if (typeof (p as any).getMetaItems !== 'function') return null;
-            const tenancy = await this.resolveAnonymousFormTenancy(environmentId, req);
-            const viewsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                type: 'view',
-                ...(environmentId ? { environmentId } : {}),
-            };
-            const listOf = (result: any): any[] => (Array.isArray(result?.items)
-                ? result.items
-                : Array.isArray(result)
-                    ? result
-                    : []);
-            const items = listOf(await p.getMetaItems(viewsRequest));
-            const match = findPublicFormView(items, slug);
-            if (!match) return null;
-            // [#21476] A form that cannot take intake on this posture is not
-            // offered: `null` here IS the withdrawn form's answer on both
-            // doors, so an anonymous caller learns nothing about the tenancy.
-            const unavailable = await anonymousFormIntakeUnavailability(
-                match.object,
-                anonymousFormIntakePosture(tenancy),
-                async () => (await this.readFormObjectDefinitions(p, environmentId))
-                    .find((o: any) => o?.name === match.object),
-            );
-            return unavailable ? null : match;
-        };
-
-        // GET /forms/:slug — resolve and return the public form spec
-        this.routeManager.register({
-            method: 'GET',
-            path: `${basePath}/forms/:slug`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const slug = String(req.params?.slug ?? '').trim();
-                    if (!slug) {
-                        res.status(400).json({ code: 'INVALID_REQUEST', error: 'slug is required' });
-                        return;
-                    }
-                    const match = await resolveFormBySlug(environmentId, req, slug);
-                    if (!match) {
-                        res.status(404).json({
-                            code: 'FORM_NOT_FOUND',
-                            error: `No public form configured at /forms/${slug}`,
-                        });
-                        return;
-                    }
-                    // Embed the target object's schema — limited to exactly the
-                    // fields the form's sections DECLARE — so anonymous
-                    // front-ends can render the form without a separate,
-                    // auth-protected meta lookup.
-                    //
-                    // [#6601] "Exactly" is load-bearing and used not to be. The
-                    // narrowing read `allowed.size === 0 || allowed.has(name)`,
-                    // so a form with no sections (or sections declaring no
-                    // fields) fell through to EVERY non-server-managed field of
-                    // the object — published to an ANONYMOUS caller, with
-                    // labels, types, picklist option values and formula
-                    // expressions. A form created before its sections are wired
-                    // is an ordinary authoring mid-state, so that was reachable
-                    // without an exotic configuration, and this comment claimed
-                    // the opposite. Publication is a DECLARATION now: declare no
-                    // fields and nothing is published (AGENTS.md "Explicit
-                    // composition over default magic").
-                    //
-                    // Do NOT reach for the submit handler as the backstop here.
-                    // It enforces a field whitelist on WRITES, which cannot
-                    // bound a READ disclosure — and when #6601 landed, its own
-                    // accepted set still degenerated identically for a
-                    // section-less form (`allowedFields.size === 0 ||`), so
-                    // narrowing this schema to "what submit would accept" would
-                    // have republished precisely the set being removed. #6920
-                    // has since closed that write-side twin, so the two planes
-                    // now agree — but they agree by each enforcing the
-                    // declaration itself, NOT by one deferring to the other.
-                    let objectSchema: any = null;
-                    // [#23497] The form served below: the matched form, with its
-                    // sections' `label` / `description` localized beside the
-                    // schema's field labels (see the translation block).
-                    let servedForm: any = match.form;
-                    try {
-                        const p = await this.resolveProtocol(environmentId, req);
-                        if (typeof (p as any).getMetaItems === 'function') {
-                            // [#21331] The environment's object schema, as
-                            // every object read is (ADR-0131 D6).
-                            const objectsRequest: TransportScopedMetaRequest<GetMetaItemsRequest> = {
-                                type: 'object',
-                                ...(environmentId ? { environmentId } : {}),
-                            };
-                            const r: any = await p.getMetaItems(objectsRequest);
-                            const items: any[] = Array.isArray(r?.items) ? r.items : Array.isArray(r) ? r : [];
-                            const obj = items.find((o: any) => o?.name === match.object);
-                            if (obj && obj.fields && typeof obj.fields === 'object') {
-                                const allowed = new Set<string>();
-                                for (const sec of match.form?.sections ?? []) {
-                                    for (const f of sec?.fields ?? []) {
-                                        if (typeof f === 'string') allowed.add(f);
-                                        else if (f?.field) allowed.add(f.field);
-                                    }
-                                }
-                                const fields: Record<string, any> = {};
-                                for (const [name, def] of Object.entries(obj.fields)) {
-                                    // [#3022] Server-managed anchors are never
-                                    // renderable/writable on the anonymous form
-                                    // surface — the submit route refuses them, so
-                                    // don't advertise them here even when a form
-                                    // (mis)declares one in a section.
-                                    if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)) continue;
-                                    // [#6601] Declared or not published. An empty
-                                    // `allowed` yields an empty `fields`.
-                                    if (!allowed.has(name)) continue;
-                                    fields[name] = def;
-                                }
-                                objectSchema = { name: obj.name, label: obj.label, fields };
-                                // Localize labels / help text / option labels so anonymous
-                                // clients render in the visitor's preferred language.
-                                // `resolveFormBySlug` returns the raw view spec, so both
-                                // halves of the payload are hydrated here: the schema, and
-                                // the form's section headings ([#23497], below).
-                                try {
-                                    const i18n = await this.resolveI18nService(environmentId, req);
-                                    const bundle = this.buildTranslationBundle(i18n);
-                                    const locale = this.extractLocale(req, i18n);
-                                    if (bundle && locale) {
-                                        const { translateMetadataDocument } = await import('@objectstack/spec/system');
-                                        // [#8284] Same rule as the two `/meta/object`
-                                        // reads: the catalog yields to a scalar the
-                                        // package's own extension or the tenant
-                                        // authored. The public form must not be the
-                                        // one surface still serving the packaged
-                                        // string back at a tenant who renamed it.
-                                        objectSchema = translateMetadataDocument('object', objectSchema, bundle, {
-                                            ...RestServer.translateOptionsFor(i18n, locale),
-                                            packagedBase: this.packagedObjectBase(p, 'object', objectSchema?.name),
-                                        });
-                                        // [#23497] The section headings. An anonymous
-                                        // visitor cannot load the bundle client-side (the
-                                        // `/i18n` domain answers it 401), so a section's
-                                        // `objects.OBJECT._sections.NAME` copy reaches it
-                                        // here or not at all. ONE call into the spec's view
-                                        // translator, which owns every rule: the key is the
-                                        // section's `name` (a nameless section is returned
-                                        // as authored), a missing key keeps the authored
-                                        // text, only authored copy is translated, and an
-                                        // explicit override beats the catalog against the
-                                        // packaged view, handed over exactly as the object
-                                        // call above hands its own base. ⛔ No walk of
-                                        // `_sections` and no locale chain here.
-                                        //
-                                        // The protocol's view list serves view ITEMS only
-                                        // (a container is dropped and served as the
-                                        // `viewKind: 'form'` items it expands to), so the
-                                        // matched form is the item's `config`, the address
-                                        // `translateView` translates sections at. A form
-                                        // matched in any other slot is served as matched,
-                                        // never swapped for the item's `config`. It runs
-                                        // BEFORE the strip below and returns each section's
-                                        // `fields` untouched, so it cannot re-introduce a
-                                        // stripped field. The top-level `label` keeps its
-                                        // own reading: the translator falls back to the
-                                        // view's machine name where this route falls back
-                                        // to the form's label.
-                                        const view = translateMetadataDocument('view', match.view, bundle, {
-                                            ...RestServer.translateOptionsFor(i18n, locale),
-                                            packagedBase: this.packagedObjectBase(p, 'view', match.view?.name),
-                                        });
-                                        if (match.form === match.view?.config) servedForm = view?.config;
-                                    }
-                                } catch (e: any) {
-                                    logError('[REST] Public form schema translation failed:', e);
-                                }
-                            }
-                        }
-                    } catch (e: any) {
-                        logError('[REST] Public form schema load failed:', e);
-                    }
-                    // Anonymous public forms NEVER include a lookup, master-detail
-                    // or user field. [#21180] This used to be an opt-in — a
-                    // per-field picker block on the section entry kept the field
-                    // and opened an anonymous record-search route for it. Ruling
-                    // E on #21079 (comment 5933054144) retired the picker and
-                    // deleted that route, so the strip below is now
-                    // unconditional: no declaration can put record search on the
-                    // internet through a public form.
-                    const safeForm = (() => {
-                        if (!servedForm || !Array.isArray(servedForm.sections)) return servedForm;
-                        const allow = (name: string): boolean => {
-                            // [#3022] A declared server-managed anchor (e.g. a
-                            // FormView listing `owner_id`) is a spec mistake —
-                            // drop it from the rendered sections so the form
-                            // never collects a value the submit route refuses.
-                            if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(name)) return false;
-                            const def = objectSchema?.fields?.[name];
-                            const t = def?.type;
-                            // `user` is a lookup specialized to sys_user — same risk as a
-                            // raw lookup: surfacing it on an anonymous public form would
-                            // expose unrestricted user search to the internet.
-                            return t !== 'lookup' && t !== 'master_detail' && t !== 'user';
-                        };
-                        const sections = servedForm.sections.map((sec: any) => {
-                            const fields = (sec?.fields ?? []).filter((f: any) => {
-                                const name = typeof f === 'string' ? f : f?.field;
-                                if (!name) return false;
-                                return allow(name);
-                            });
-                            return { ...sec, fields };
-                        });
-                        return { ...servedForm, sections };
-                    })();
-                    res.header('Vary', 'Accept-Language');
-                    res.json({
-                        slug,
-                        object: match.object,
-                        label: match.view?.label ?? match.form?.label,
-                        form: safeForm,
-                        objectSchema,
-                    });
-                } catch (error: any) {
-                    logError('[REST] Public form resolve error:', error);
-                    res.status(500).json({
-                        code: 'FORM_RESOLVE_FAILED',
-                        error: String(error?.message ?? error ?? 'resolve failed').slice(0, 500),
-                    });
-                }
-            },
-            metadata: {
-                summary: 'Resolve a public form spec by slug (anonymous)',
-                tags: ['forms', 'public'],
-            },
-        });
-
-        // POST /forms/:slug/submit — INSERT a record on the target object
-        // with the `guest_portal` permission set attached.
-        this.routeManager.register({
-            method: 'POST',
-            path: `${basePath}/forms/:slug/submit`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    const slug = String(req.params?.slug ?? '').trim();
-                    if (!slug) {
-                        res.status(400).json({ code: 'INVALID_REQUEST', error: 'slug is required' });
-                        return;
-                    }
-                    const match = await resolveFormBySlug(environmentId, req, slug);
-                    if (!match) {
-                        res.status(404).json({
-                            code: 'FORM_NOT_FOUND',
-                            error: `No public form configured at /forms/${slug}`,
-                        });
-                        return;
-                    }
-
-                    // Only allow the fields declared on the matched FormView.
-                    // This prevents a public visitor from stuffing privileged
-                    // columns (owner_id, status, internal_notes, …) into the
-                    // row. Object hooks (`beforeInsert`) are still responsible
-                    // for stamping server-side defaults — see the CRM
-                    // `lead.hook.ts` / `case.hook.ts` for the canonical pattern.
-                    const allowedFields = new Set<string>();
-                    for (const section of match.form?.sections ?? []) {
-                        for (const f of section?.fields ?? []) {
-                            if (typeof f === 'string') allowedFields.add(f);
-                            else if (f?.field) allowedFields.add(f.field);
-                        }
-                    }
-                    // [#6920] A form that declares NO fields collects nothing, so
-                    // it has nothing to accept — refuse instead of inserting.
-                    //
-                    // The filter below used to read
-                    // `allowedFields.size === 0 || allowedFields.has(k)`, and that
-                    // fall-through was not "accept every field of the object": it
-                    // accepted every KEY THE CALLER SENT, minus the anchors and the
-                    // three prototype keys — measured as
-                    // `["email","internal_margin","internal_tier","not_even_a_field",
-                    // "status","subject"]` on a `sections: []` form, `not_even_a_field`
-                    // not being a field of the object at all. On an ANONYMOUS surface
-                    // that is unbounded mass assignment across the target object, and
-                    // the form created-before-its-sections-are-wired mid-state reaches
-                    // it without anything exotic.
-                    //
-                    // Symmetric with #6601 on the read side of the same pair: declare
-                    // it or it is not published / not accepted, one rule on both planes
-                    // (AGENTS.md "Explicit composition over default magic"). Post-#6601
-                    // such a form publishes `fields: {}`, so no legitimate client can
-                    // even learn what to send here.
-                    //
-                    // REFUSAL, not a silent discard: dropping the keys would leave the
-                    // `201` intact while swallowing data the caller believes it wrote —
-                    // exactly the silence AGENTS.md's warn-vs-error rule forbids. The
-                    // author's fix is to wire the sections, so the message says that;
-                    // the code is the standard ADR-0112 catalog's generic 400
-                    // (`HttpStatusErrorCodeMap[400]`), not a minted synonym, and the
-                    // message names no object, field or slug — this reply is readable
-                    // by anyone on the internet.
-                    //
-                    // NOTE the #3022 pin ('zero declared sections: business fields fall
-                    // through, anchors do NOT') asserted this fall-through as intended.
-                    // Re-judged by maintainer ruling 5229989845 (2026-08-09): the
-                    // anchor half is preserved and still pinned; the fall-through half
-                    // was the wrong invariant.
-                    if (allowedFields.size === 0) {
-                        res.status(400).json({
-                            code: 'VALIDATION_ERROR',
-                            error: 'This form declares no fields, so it cannot accept a submission. '
-                                + "Wire the fields it collects into the form's sections and publish it again.",
-                        });
-                        return;
-                    }
-                    // [#3022] System-managed anchors (owner_id, organization_id,
-                    // audit columns, id, …) are NEVER client-suppliable on this
-                    // anonymous surface, even when a FormView explicitly declares
-                    // one in a section (the insert-forge of #3004, with no
-                    // credentials at all). The SecurityPlugin's publicFormGrant
-                    // branch strips the same set at the data layer, so this filter
-                    // and the engine boundary cannot drift.
-                    const rawBody = (req.body && typeof req.body === 'object') ? req.body : {};
-                    const filteredData: Record<string, unknown> = {};
-                    for (const [k, v] of Object.entries(rawBody)) {
-                        if (PUBLIC_FORM_SERVER_MANAGED_FIELDS.has(k)) continue;
-                        // JSON.parse yields `__proto__` as an OWN key; assigning it
-                        // here would REPLACE filteredData's prototype and smuggle
-                        // inherited anchors past every own-property check downstream.
-                        if (k === '__proto__' || k === 'constructor' || k === 'prototype') continue;
-                        if (allowedFields.has(k)) filteredData[k] = v;
-                    }
-
-                    // ADR-0056 (Option A): authorization DERIVED from the declared
-                    // form — a narrow create grant scoped to exactly this form's target
-                    // object. The SecurityPlugin honors `publicFormGrant` (create + the
-                    // immediate read-back, that object ONLY), so public forms work under
-                    // secure-by-default (anonymous-deny) WITHOUT a deployment-configured
-                    // `guest_portal`. `guest_portal` + `anonymous` are kept for back-compat
-                    // with object hooks (guest detection via falsy `ctx.user?.id`).
-                    const context: any = {
-                        publicFormGrant: { object: match.object },
-                        permissions: ['guest_portal'],
-                        anonymous: true,
-                    };
-
-                    const p = await this.resolveProtocol(environmentId, req);
-                    const formCreateRequest: ServerScopedDataRequest<CreateDataRequest> = {
-                        object: match.object,
-                        data: filteredData,
-                        ...(environmentId ? { environmentId } : {}),
-                        context,
-                    };
-                    const result = await p.createData(formCreateRequest);
-                    // [#22437] The answer is the created record's id, and
-                    // nothing the insert stored. `createData` answers
-                    // `{ object, id, record, droppedFields? }`, and its `record`
-                    // is the row as stored AFTER the insert pipeline: defaults,
-                    // and whatever a `beforeInsert` / `afterInsert` hook stamped
-                    // — including a value an elevated (`runAs: 'system'`) hook
-                    // derived from existing records this anonymous caller's
-                    // grant may never read. The whitelist above filters what the
-                    // caller WRITES; this line is what filters what it is SHOWN.
-                    // The caller already knows what it submitted, so the one
-                    // fact it lacks is the id. Projecting the row to the form's
-                    // declared fields would not do: a hook may rewrite a
-                    // declared field too. The key stays the top-level `id` of a
-                    // bare body — where the console's public form page reads
-                    // the created id — and no second read builds this answer.
-                    res.status(201).json({ id: result.id });
-                } catch (error: any) {
-                    const mapped = mapDataError(error);
-                    // Distinct message (this is not the "unhandled" channel),
-                    // same shared verdict — see `isExpectedRouteError`.
-                    if (!isExpectedRouteError(mapped.status, mapped.body)) {
-                        logError('[REST] Public form submit error:', error);
-                    }
-                    res.status(mapped.status).json(mapped.body);
-                }
-            },
-            metadata: {
-                summary: 'Submit an anonymous public form',
-                tags: ['forms', 'public'],
-            },
-        });
+        registerFormEndpoints.call(host, basePath);
     }
 
     /**

@@ -13,7 +13,8 @@
  * below answers is the card's: does that artifact's `_packageId` (its
  * envelope) reach an answer whose body came from a different package?
  *
- * One row did: the by-name read's envelope merge in `getMetaItem`, which
+ * One row did: the by-name read's envelope merge in `getMetaItem` (since
+ * #24097 its body `readMetaItem`, which the rows below key on), which
  * served one package's stored copy under the first-registered package's
  * `_packageId`. It now looks its envelope up at the served item's own package
  * (`envelopePackageId`, the list's rule); the behaviour is pinned in
@@ -70,13 +71,13 @@ type Disposition = 'definition' | 'served-package envelope' | 'no';
 const SITES: ReadonlyArray<Site & { readonly noPackage: boolean; readonly disposition: Disposition; readonly why: string }> = [
     { member: 'lookupArtifactItem', args: 'type: string, name: string, currentPackageId?: string, member?: string', noPackage: false, disposition: 'definition',
         why: 'the definition itself' },
-    { member: 'getMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item)', noPackage: true, disposition: 'served-package envelope',
+    { member: 'readMetaItem', args: 'request.type, request.name, envelopePackageId(request.packageId, item), bundleMemberOf(request.type, item)', noPackage: true, disposition: 'served-package envelope',
         why: 'the by-name read\'s envelope: naming no package, the package of the item it serves (the list\'s rule); [#23074] at the served item\'s own bundle member' },
     { member: 'readFlattenedMetaItems', args: 'request.type, itemName, itemPackageId, bundleMemberOf(request.type, it)', noPackage: true, disposition: 'served-package envelope',
         why: 'the list\'s envelope: each item\'s own package, the rule the by-name read shares; [#23074] at each item\'s own bundle member' },
-    { member: 'getMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
+    { member: 'readMetaItem', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the shipped-flow arm: the served body IS this artifact, and the envelope is looked up at its own package' },
-    { member: 'getMetaItem', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
+    { member: 'readMetaItem', args: 'request.type, request.name, request.packageId, wantedMember', noPackage: true, disposition: 'no',
         why: '[#22877] a bundled type\'s addressed member (the selector\'s, else the canonical one) when no stored row of it exists: the served body IS this artifact, and the envelope is looked up at its own package' },
     { member: 'getMetaItemLayered', args: 'request.type, request.name, request.packageId', noPackage: true, disposition: 'no',
         why: 'the layered read\'s code LAYER: body and envelope are one artifact, and its provenance fields are read off that layer' },
@@ -151,6 +152,6 @@ describe('[#22024] every lookupArtifactItem( in protocol.ts has a recorded dispo
         expect(SOURCE).toMatch(/\nfunction envelopePackageId\(requestedPackageId: string \| undefined, served: unknown\): string \| undefined \{/);
         expect(SOURCE).toContain('const itemPackageId = envelopePackageId(packageId, it);');
         expect(SITES.filter((site) => site.disposition === 'served-package envelope').map((site) => site.member).sort())
-            .toEqual(['getMetaItem', 'readFlattenedMetaItems']);
+            .toEqual(['readFlattenedMetaItems', 'readMetaItem']);
     });
 });

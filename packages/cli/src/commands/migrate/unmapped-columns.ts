@@ -297,6 +297,10 @@ export default class MigrateUnmappedColumns extends Command {
         readOnlyProbe: true,
         composeHostStack: true,
         composeServedPlatform: true,
+        // [#24120] …and the declared datasources the plan connects, so an
+        // object a `datasourceMapping` rule routes to one — the declared
+        // default's platform objects included — is in this set as in the plan's.
+        composeDeclaredDatasources: true,
       });
     } catch (error: any) {
       if (flags.json) {
@@ -340,9 +344,10 @@ export default class MigrateUnmappedColumns extends Command {
         'objectql',
       ) as { getDriverForObject?: (name: string) => unknown } | undefined;
       const bound = engine?.getDriverForObject?.(object);
-      // [#22579] Any driver the plan diffs: the primary, or the `telemetry`
+      // [#22579] Any driver the plan diffs: the primary, the `telemetry`
       // sibling a lifecycle-classed object lives in when the serving boot
-      // keeps one. The read goes to that driver, and the document names it.
+      // keeps one, or [#24120] the declared datasource a mapping rule routes
+      // it to. The read goes to that driver, and the document names it.
       const objectDriver = stack.drivers.find((d) => d === bound) ?? null;
       const outside =
         declared.external != null
@@ -358,9 +363,9 @@ export default class MigrateUnmappedColumns extends Command {
             'for it, and that is unmeasured, not clean. Refusing rather than answering empty work.',
         );
       }
-      // The sibling is the one other planned driver, and it is planned only
-      // with its file: a driver that is not the primary has a database named.
-      const database = objectDriver === stack.driver ? stack.dbLabel : stack.telemetryDatabase!;
+      // Every planned driver has a database named (`SchemaStack.databaseOf`),
+      // and `objectDriver` is one of them by the lookup above.
+      const database = stack.databaseOf(objectDriver)!;
 
       const reader = objectDriver as unknown as Partial<UnmappedColumnReader>;
       if (typeof reader.find !== 'function') {

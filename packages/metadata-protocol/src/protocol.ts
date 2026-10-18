@@ -177,7 +177,7 @@ import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSp
 // depends on `@objectstack/service-cluster`; a bridge plugin there hands the
 // live transport in through `attachMetadataMutationPubSub`.
 import type { IObjectQLEngine, IPubSub, ISecurityService } from '@objectstack/spec/contracts';
-import { applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { ALL_CONVERSIONS, applyConversionsToFlow, applyConversionsToStoredItem, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 import { type FormView, type I18nLabel, isAggregatedViewContainer, expandViewContainer, resolveI18nLabel, defaultRecordPageObject } from '@objectstack/spec/ui';
 // [commit ece4dad31] Emitted-specifier pin. This module's inferred public declarations
 // structurally mention `FormFieldInput` (FormView `sections[].fields`), and
@@ -213,6 +213,9 @@ import { validateObjectNamespacePrefix, deriveNamespaceFromPackageId } from '@ob
 // [#19417] The package-id declaration and its remedy text, imported to be
 // SURFACED rather than restated — see the gate at the top of `installPackage`.
 import { ManifestSchema, manifestIdRefusal } from '@objectstack/spec/kernel';
+// [#24086] The install door's own manifest declaration — `ManifestSchema` with
+// `scope` narrowed to `project` — judged whole at the top of `installPackage`.
+import { PackageInstallManifestSchema } from '@objectstack/spec/api';
 import { stripReadDecorations } from '@objectstack/spec/kernel';
 import { REFERENCE_SITES } from './reference-sites.js';
 // [#5488] The `@objectstack/spec/api` import that stood here — `ApiEndpointSchema`,
@@ -500,6 +503,64 @@ function stripServedSystemColumns<T>(type: string, item: T): T {
  * constant for the process — warn once, not once per request.
  */
 let warnedNoRegistryForDataGate = false;
+
+/**
+ * [#7557, #24097] The ONE refusal for an object whose owning package is
+ * disabled, raised by every API reader of that object: the data plane
+ * ({@link ObjectStackProtocolImplementation.assertObjectRegistered}) and the
+ * by-name `/meta` reads (`getMetaItem`, `getMetaItemLayered`). One constructor,
+ * so the two halves of the answer cannot drift apart in code, status or text.
+ */
+function objectPackageDisabledError(object: string): Error {
+    const disabled: any = new Error(
+        `Object '${object}' belongs to a disabled package and is not being served. `
+        + 'Re-enable the package to restore access.',
+    );
+    disabled.code = 'OBJECT_PACKAGE_DISABLED';
+    disabled.status = 404;
+    disabled.object = object;
+    return disabled;
+}
+
+/**
+ * [#7557, #24097] Whether `registry` says `name` is an object of a disabled
+ * package. Optional-called: registry doubles across the test suites implement
+ * `isPackageDisabled` but not this, and a host whose registry cannot answer
+ * must not have every read refused.
+ */
+function isObjectOfDisabledPackage(registry: any, name: string): boolean {
+    return typeof registry?.isObjectPackageDisabled === 'function'
+        && registry.isObjectPackageDisabled(name) === true;
+}
+
+/**
+ * [#7557, #24210] Whether `item` belongs to a disabled package: its
+ * `_packageId`, asked of `registry.isPackageDisabled`. The ONE predicate for a
+ * non-object item, asked by the list read ({@link
+ * ObjectStackProtocolImplementation.getMetaItems}, which omits the item) and
+ * the by-name read ({@link ObjectStackProtocolImplementation.getMetaItem},
+ * which answers as for a name with nothing behind it), so the two cannot
+ * disagree about which items a disable hides. Optional-called, as {@link
+ * isObjectOfDisabledPackage} is: a host whose registry cannot answer has no
+ * item hidden.
+ */
+function isItemOfDisabledPackage(registry: any, item: unknown): boolean {
+    return typeof registry?.isPackageDisabled === 'function'
+        && registry.isPackageDisabled((item as { _packageId?: unknown } | null | undefined)?._packageId) === true;
+}
+
+/**
+ * The strict draft read's `404 NO_DRAFT`: no pending draft at this address
+ * (ADR-0005 §draft-lifecycle). [#24210] One constructor for the read that
+ * finds no draft row and the read of a disabled package's draft, so the two
+ * answers are byte-identical.
+ */
+function noPendingDraftError(type: string, name: string): Error & { code: 'NO_DRAFT'; status: 404 } {
+    const err = new Error(`No pending draft exists for ${type}/${name}.`) as Error & { code: 'NO_DRAFT'; status: 404 };
+    err.code = 'NO_DRAFT';
+    err.status = 404;
+    return err;
+}
 
 /**
  * [#17501] Does a converted JSON Schema carry any authorable surface at all?
@@ -6612,6 +6673,32 @@ export class ObjectStackProtocolImplementation implements
      *
      * Read with no `try`/`catch`, as the lock family's baseline is: a stored row
      * that could not be read is not an absent one.
+     *
+     * [#23903, ruling B′] A re-save is authored input too where its body NEWLY
+     * INTRODUCES a retired spelling — an author or an AI adding a node with an
+     * old spelling to a legacy flow. The rule compares conversion hits: a
+     * retired entry that fires on the request at a site where it does not fire
+     * on a stored row answers `false`, exactly as a new flow does; a request
+     * whose every retired hit a stored row carries keeps the full chain, so a
+     * served legacy body re-saves and is healed as before.
+     *
+     * A hit is one firing of a retired entry, named by the entry, the spelling
+     * it rewrote (the notice's `from`) and its site: the notice's `path`, with
+     * each array element on the way that carries an `id` (a node, a region's
+     * node, an edge) named by that id instead of its index. So the same retired
+     * spelling on a node the stored row does not have is a new hit even when
+     * another node carries it, and adding, removing or moving a node never turns
+     * a carried hit into a new one. Both bodies are scanned by the spec's own
+     * pass (`applyConversionsToFlow`, the full chain minus
+     * {@link FLOW_FALLBACK_VERDICT_NOT_REPLAYED}), never by the engine, so a
+     * host with no automation service reaches the same answer (#21982).
+     *
+     * The rows that may carry a hit are the save's baseline above, and for a
+     * DRAFT save the active row the draft overlays even when a draft row
+     * exists. Studio keeps its buffer after a draft save: on an engine host the
+     * first save heals the draft row, so the next autosave re-sends spellings
+     * only the active row still carries, and judged against the draft row
+     * alone Studio's second save of a legacy flow would be refused.
      */
     private async flowSaveReplaysRetired(request: {
         name: string;
@@ -6622,14 +6709,57 @@ export class ObjectStackProtocolImplementation implements
     }, mode: 'draft' | 'publish'): Promise<boolean> {
         if (request.source !== undefined) return true;
         if (request.writeFace === 'package-duplicate' || request.writeFace === 'package-unmanaged-import') return true;
+        const retired = new Set(ALL_CONVERSIONS.filter((c) => c.retiredFromLoadPath).map((c) => c.id));
+        // The site of a notice's path, ids standing in for the indexes of the
+        // array elements that carry one, read on the converted body it names.
+        const siteOf = (root: unknown, path: string): string => {
+            let at: unknown = root;
+            let site = '';
+            for (const [, key, index] of path.matchAll(/([^.[\]]+)|\[(\d+)\]/g)) {
+                if (key !== undefined) {
+                    site += site === '' ? key : `.${key}`;
+                    at = at !== null && typeof at === 'object' ? (at as Record<string, unknown>)[key] : undefined;
+                    continue;
+                }
+                const element: unknown = Array.isArray(at) ? at[Number(index)] : undefined;
+                const id = element !== null && typeof element === 'object' ? (element as { id?: unknown }).id : undefined;
+                site += typeof id === 'string' && id !== '' ? `[#${id}]` : '[' + index + ']';
+                at = element;
+            }
+            return site;
+        };
+        const retiredHits = (body: unknown): Set<string> => {
+            const fired: ConversionNotice[] = [];
+            const converted = applyConversionsToFlow(body, {
+                includeRetired: true,
+                excludeConversionIds: FLOW_FALLBACK_VERDICT_NOT_REPLAYED,
+                onNotice: (n) => { if (retired.has(n.conversionId)) fired.push(n); },
+            });
+            const root = { flows: [converted] };
+            return new Set(fired.map((n) => `${n.conversionId}|${n.from}|${siteOf(root, n.path)}`));
+        };
+        // The request's retired hits; each one a stored row carries is struck off.
+        const uncarried = retiredHits(request.item);
+        const strikeCarried = (body: unknown): void => {
+            if (uncarried.size === 0) return;
+            for (const hit of retiredHits(body)) uncarried.delete(hit);
+        };
         const repo = this.getOverlayRepo();
         const ref = { type: 'flow', name: request.name, org: 'env' } as Parameters<typeof repo.headAt>[0];
         const member = itemDiscriminator('flow', request.item);
         const state: 'active' | 'draft' = mode === 'draft' ? 'draft' : 'active';
         const target = await repo.headAt(ref, { state, packageId: request.packageId ?? null, member });
-        if (target.head) return true;
-        if (state !== 'draft') return false;
-        return (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head !== null;
+        if (target.head) {
+            strikeCarried(target.head.body);
+            if (uncarried.size === 0) return true;
+            if (state !== 'draft') return false;
+        } else if (state !== 'draft') {
+            return false;
+        }
+        const active = (await repo.headAt(ref, { state: 'active', packageId: target.packageId, member })).head;
+        if (!active) return false;
+        strikeCarried(active.body);
+        return uncarried.size === 0;
     }
 
     /**
@@ -10274,10 +10404,11 @@ export class ObjectStackProtocolImplementation implements
         // `assertObjectRegistered` (`OBJECT_PACKAGE_DISABLED`) — absence here
         // and refusal there are the two halves of one answer, pinned together
         // by `protocol.package-disable-enforcement.test.ts`.
+        //
+        // [#24210] The predicate is {@link isItemOfDisabledPackage}, the one the
+        // by-name read asks, so the list and the by-name read hide the same items.
         if (request.type !== 'package') {
-            items = (items as any[]).filter(
-                (it) => !this.engine.registry.isPackageDisabled((it as any)?._packageId),
-            );
+            items = (items as any[]).filter((it) => !isItemOfDisabledPackage(this.engine.registry, it));
         }
 
         // Canonical-shape exposure (ADR-0017, "Object has-many View"): a
@@ -10934,9 +11065,59 @@ export class ObjectStackProtocolImplementation implements
         return request;
     }
 
+    /**
+     * The by-name `/meta` read (`GET /meta/:type/:name`): an API reader.
+     *
+     * [#7557, #24097] An object whose owning package is disabled is refused
+     * here, `404 OBJECT_PACKAGE_DISABLED`, in every state this read serves
+     * (active, `state: 'draft'`, `previewDrafts`), checked once before any
+     * layer is read: the listing omits that object and the data plane refuses
+     * it, and this read answers with them. Authoring callers inside this class
+     * that must still see the object (the save's destructive-change check)
+     * read {@link readMetaItem}, the shared body, instead: the reader-class
+     * split `package-disable-enforcement.test.ts` pins.
+     *
+     * [#7557, #24210] Every other type but `package` has no data plane, so a
+     * disabled package's item is answered as ABSENT, the answer a name with
+     * nothing behind it gets: the list read omits that item, by the same
+     * predicate ({@link isItemOfDisabledPackage}) asked of the item this read
+     * resolved, in every state. The strict draft read throws the missing
+     * draft's `404 NO_DRAFT`. The other reads serve no `item`, which both
+     * transports answer `404 RESOURCE_NOT_FOUND`, byte for byte the missing
+     * name's answer, and drop `registration`, the engine's verdict on a served
+     * flow. The protection envelope stays: it reports the write doors'
+     * verdicts about this address (#21670), and a disable does not change how
+     * the lock gate judges a save there. `package` is never hidden, so a
+     * disabled package can still be read and re-enabled.
+     */
     async getMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
+        member?: string,
+    }) {
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
+        request = canonicalizeMetaRequestType(request);
+        if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
+            throw objectPackageDisabledError(request.name);
+        }
+        const answer = await this.readMetaItem(request);
+        if (request.type === 'object' || request.type === 'package'
+            || !isItemOfDisabledPackage(this.engine?.registry, answer?.item)) {
+            return answer;
+        }
+        if (request.state === 'draft') throw noPendingDraftError(request.type, request.name);
+        const { item: _withheld, registration: _servedOnly, ...envelope } = answer as typeof answer & { registration?: unknown };
+        return { ...envelope, item: undefined };
+    }
+
+    /**
+     * The body of {@link getMetaItem} without its disabled-package refusal:
+     * the object as the layers resolve it, whether or not its package is
+     * disabled. Private on purpose; only this class's authoring callers read
+     * it.
+     */
+    private async readMetaItem(request: {
+        type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
     }) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
@@ -11161,14 +11342,7 @@ export class ObjectStackProtocolImplementation implements
         // status code to decide "no pending edit" without sniffing
         // envelope shape. See ADR-0005 §draft-lifecycle.
         if (readState === 'draft') {
-            if (item === undefined) {
-                const err: any = new Error(
-                    `No pending draft exists for ${request.type}/${request.name}.`,
-                );
-                err.code = 'NO_DRAFT';
-                err.status = 404;
-                throw err;
-            }
+            if (item === undefined) throw noPendingDraftError(request.type, request.name);
             return {
                 type: request.type,
                 name: request.name,
@@ -11571,6 +11745,12 @@ export class ObjectStackProtocolImplementation implements
         // three-layer diagnostic must answer for ONE namespace, or `code` and
         // `overlay` can be read from two.
         request = canonicalizeMetaRequestType(request);
+        // [#7557, #24097] A by-name API face of its own (`?layers=true`), which
+        // reads its layers without going through {@link getMetaItem}, so it
+        // refuses a disabled package's object itself: one answer per door.
+        if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
+            throw objectPackageDisabledError(request.name);
+        }
 
         // [ADR-0131 D6] Environment → code: the overlay layer is the
         // environment's stored row; no organization's row is read.
@@ -12349,20 +12529,9 @@ export class ObjectStackProtocolImplementation implements
             // object that is merely switched off, while this one names the cause
             // and therefore the fix (re-enable the package).
             //
-            // Optional-called: registry doubles across the test suites implement
-            // `isPackageDisabled` but not this, and a host whose registry cannot
-            // answer must not have every read refused.
-            if (typeof registry.isObjectPackageDisabled === 'function'
-                && registry.isObjectPackageDisabled(object)) {
-                const disabled: any = new Error(
-                    `Object '${object}' belongs to a disabled package and is not being served. `
-                    + 'Re-enable the package to restore access.',
-                );
-                disabled.code = 'OBJECT_PACKAGE_DISABLED';
-                disabled.status = 404;
-                disabled.object = object;
-                throw disabled;
-            }
+            // [#24097] The by-name `/meta` reads raise the same refusal, from
+            // the same constructor ({@link objectPackageDisabledError}).
+            if (isObjectOfDisabledPackage(registry, object)) throw objectPackageDisabledError(object);
             return;
         }
         // The one envelope, shared with the engine's in-process verbs, which
@@ -15490,14 +15659,39 @@ export class ObjectStackProtocolImplementation implements
                         : []);
             const fieldByName = new Map(fields.map(f => [f.name, f]));
             const hasField = (n: string) => fieldByName.has(n);
-            // Resolve title for a record using titleFormat → the declared
-            // primary-title pointer → common conventional fields → id.
+            // Resolve title for a record: the declared primary-title pointer →
+            // titleFormat → common conventional fields → id. [ADR-0079 D3]
+            // `nameField` takes precedence over the deprecated `titleFormat`
+            // (the spec's own describe says so), the same order as
+            // `resolveDisplayField`, which never consults `titleFormat` at all.
+            // The registry's `provisionPrimary` stamps a derived `nameField`
+            // at registration, and authorship is not recoverable after that
+            // stamp (see `ObjectTitleCompleteness.status`), so a stamped
+            // pointer outranks the template too: `titleFormat` titles a row
+            // only when the object has no pointer, or its value is empty.
             // titleFormat supports simple `{field}` placeholders (the
             // `template` dialect); unresolved placeholders fall through to the
             // next strategy.
             const titleFormatSource = (obj.titleFormat && (obj.titleFormat.source || obj.titleFormat))
                 || undefined;
+            // [ADR-0079] `nameField` is the canonical primary-title pointer;
+            // `displayNameField` is the deprecated alias (still honored).
+            // Reading the alias ALONE made this the one consumer a canonical
+            // designation could not reach: `provisionPrimary` — the
+            // designation seat the registry runs on every object at
+            // registration — stamps `nameField` only
+            // (`spec/src/data/display-name.ts`), so an object that declares its
+            // title canonically and does not also carry the alias fell through
+            // to `String(row.id)` and the palette showed a raw id. Same
+            // precedence as `resolveDisplayField`, the #4254 ingress gate, and
+            // this function's own search-field resolution below — a fourth
+            // spelling here would re-split what those merged.
+            const titlePointer = obj.nameField ?? obj.displayNameField;
             const renderTitle = (row: any): string => {
+                if (typeof titlePointer === 'string' && hasField(titlePointer)) {
+                    const v = row[titlePointer];
+                    if (v != null && String(v).trim()) return String(v);
+                }
                 if (typeof titleFormatSource === 'string') {
                     let allResolved = true;
                     const rendered = titleFormatSource.replace(/\{\{?\s*([a-zA-Z0-9_.]+)\s*\}?\}/g, (_m, key) => {
@@ -15509,23 +15703,8 @@ export class ObjectStackProtocolImplementation implements
                     if (rendered) return rendered.replace(/\s+-\s+$/, '').replace(/^\s+-\s+/, '').trim() || row.id;
                 }
                 const candidates = [
-                    // [ADR-0079] `nameField` is the canonical primary-title
-                    // pointer; `displayNameField` is the deprecated alias
-                    // (still honored). Reading the alias ALONE made this the
-                    // one consumer a canonical designation could not reach:
-                    // `provisionPrimary` — the designation seat the registry
-                    // runs on every object at registration — stamps
-                    // `nameField` only (`spec/src/data/display-name.ts`), so
-                    // an object that declares its title canonically and does
-                    // not also carry the alias fell through this list to
-                    // `String(row.id)` and the palette showed a raw id. Same
-                    // precedence as `resolveDisplayField`, the #4254 ingress
-                    // gate, and this function's own search-field resolution 44
-                    // lines below — a fourth spelling here would re-split what
-                    // those merged.
-                    obj.nameField ?? obj.displayNameField,
                     'name', 'full_name', 'title', 'subject', 'label', 'company',
-                ].filter((c): c is string => typeof c === 'string' && hasField(c));
+                ].filter(hasField);
                 for (const c of candidates) {
                     const v = row[c];
                     if (v != null && String(v).trim()) return String(v);
@@ -22819,7 +22998,12 @@ export class ObjectStackProtocolImplementation implements
                 // package's it judged a row no package-less save writes, and a
                 // save naming a third package was judged against another
                 // package's row.
-                const existing = await this.getMetaItem({
+                // [#24097] Read through {@link readMetaItem}, not the API face:
+                // this check must still see an object of a disabled package.
+                // The API face refuses one, and the `catch` below would read
+                // that refusal as "skip the check", so a field drop would land
+                // without its 409.
+                const existing = await this.readMetaItem({
                     type: request.type,
                     name: request.name,
                     ...(request.packageId ? { packageId: request.packageId } : {}),
@@ -23024,6 +23208,12 @@ export class ObjectStackProtocolImplementation implements
         // so a spelling retired from the authoring funnel (#23487, #23543) is
         // not lifted here either and meets the parse refusal below, with the
         // prescription `os validate` prints, on both hosts alike.
+        //
+        // [#23903, ruling B′] So does a re-save whose body NEWLY INTRODUCES a
+        // retired spelling — a retired entry firing at a site where no stored
+        // row carries it (a node added with an old spelling): authored input,
+        // judged whole without the retired entries. A re-save whose retired
+        // hits the stored row all carries keeps the full chain, as above.
         let flowGateVerdictBody: unknown;
         // [#4580, #23775] The fallback's warning, said once the gate below has
         // accepted the body it falls back to — never for a save it refuses.
@@ -23033,8 +23223,9 @@ export class ObjectStackProtocolImplementation implements
             // No automation service reachable (control-plane / metadata-only
             // host): the fallback below judges the body and it is saved as
             // written — a host must not start refusing flow writes it accepted
-            // yesterday, save the retired spelling on a new flow (#23775), which
-            // an engine host refuses too.
+            // yesterday, save the retired spelling on a new flow (#23775) or one
+            // a re-save newly introduces (#23903), which an engine host refuses
+            // too.
             const canonicalizeFlow = this.resolveFlowCanonicalizer();
             let canonicalized = false;
             if (canonicalizeFlow) {
@@ -25340,6 +25531,14 @@ export class ObjectStackProtocolImplementation implements
      * promote and discard by, with the canonical member spelled out, as the
      * by-name doors' `member` selector takes it back
      * ({@link bundleMemberDiscriminator}); absent for a type with no members.
+     *
+     * [#7557, #24210] A disabled package's drafts are omitted, as the list
+     * read omits its items and the by-name draft read answers them `404
+     * NO_DRAFT`: each row's `packageId`, asked of the same predicate ({@link
+     * isItemOfDisabledPackage}); `package` is never hidden. This method serves
+     * the `_drafts` doors only. The package batch doors (publish, discard, the
+     * batch closure) read the repository's `listDrafts` directly, so a
+     * disabled package's drafts still publish and discard.
      */
     async listDrafts(request?: {
         packageId?: string;
@@ -25367,8 +25566,10 @@ export class ObjectStackProtocolImplementation implements
         // [#23073] The declared header (`ListDraftsResponseSchema`), with the
         // row's stored member on every draft of a bundled type: absent there
         // means the canonical member, which is spelled out here.
+        const served = drafts.filter((draft) => draft.type === 'package'
+            || !isItemOfDisabledPackage(this.engine?.registry, { _packageId: draft.packageId }));
         return {
-            drafts: drafts.map(({ member: stored, ...header }) => {
+            drafts: served.map(({ member: stored, ...header }) => {
                 const member = bundleMemberDiscriminator(header.type, stored);
                 return member === undefined ? header : { ...header, member };
             }),
@@ -27002,7 +27203,9 @@ export class ObjectStackProtocolImplementation implements
      * `sys_metadata` keys on (type,name,org), so a same-name copy would collide
      * with the source — and rewriting every intra-package reference (lookup
      * `reference`, view `object`, expressions, etc.) to the new names. Per-item
-     * best-effort; one failure never aborts the whole clone.
+     * best-effort; one failure never aborts the whole clone. The copy's package
+     * record is not an item: when its install is refused, that refusal refuses
+     * the whole duplicate, before any item is written.
      *
      * Every copied object is named in the target namespace: `iojn_customer`
      * becomes `iojn2_customer`, and an object whose name lacks the source
@@ -27056,12 +27259,10 @@ export class ObjectStackProtocolImplementation implements
         // covers the WRITE. It does not cover this method, for two reasons that
         // are both about where the refusal lands:
         //
-        //   ① the `installPackage` call below sits inside a `catch {}` that is
-        //     deliberately best-effort (a manifest row is not worth aborting a
-        //     copy for), so a refusal raised THERE would be swallowed here and
-        //     the caller would read `success: true` on a package with no
-        //     manifest row — a silent partial state, strictly worse than the
-        //     201 this card set out to close;
+        //   ① a refusal of the `installPackage` call below is rethrown before
+        //     any item is copied, so it would not be lost — but it names
+        //     `manifest.id`, the key of a manifest this door builds, never the
+        //     `targetPackageId` the caller wrote (the closing paragraph below);
         //   ② the refusal has to precede the MUTATIONS, and the manifest write
         //     is not the first of them. #14451 already established the position
         //     for this door's other precondition: `duplicatePackage` mints the
@@ -27451,8 +27652,41 @@ export class ObjectStackProtocolImplementation implements
                 };
                 delete dupManifest.scope;
                 await this.installPackage({ manifest: dupManifest } as InstallPackageRequest);
-            } catch {
-                /* best-effort — the per-item package binding still works without a manifest row */
+            } catch (e: any) {
+                // [#24041] ⭐ A REFUSED PACKAGE RECORD REFUSES THE DUPLICATE —
+                // the refusal itself, rethrown unchanged, before any item is
+                // copied (ruling B, claim amendment 6227008947).
+                //
+                // This catch used to drop it and copy anyway. A refused install
+                // leaves no registry record and no `sys_packages` row, so the
+                // copy's items were live, bound to an id no package record
+                // holds, absent from `GET /packages`. After a namespace conflict
+                // they also sat inside a namespace another package owns — the
+                // very state ADR-0048 Phase 1's install-time gate in
+                // `SchemaRegistry.installPackage` exists to refuse. The sibling
+                // verb {@link importUnmanagedPackage} states the rule this door
+                // now keeps: "There is no half-copied app."
+                //
+                // Nothing needs undoing: this call is the duplicate's FIRST
+                // mutation (everything above it reads), and a refused install
+                // leaves nothing behind — the registry judges before it writes,
+                // and a failed persist undoes the registry write before it
+                // throws (#21243). So the door answers the refusal's own status:
+                // `422 NAMESPACE_CONFLICT` with the registry's remedy (choose
+                // another namespace), or the primitive's `500` for a store fault.
+                //
+                // Logged once, because neither the primitive nor the HTTP door
+                // logs it. A store fault's driver text rides only on the error's
+                // `cause`, which no answer quotes, so the error itself is handed
+                // to the log for that one; a client refusal's sentence is
+                // already the whole story.
+                console.warn(
+                    `[protocol.duplicatePackage] refused: the package record for '${request.targetPackageId}' `
+                    + `(copy of '${request.sourcePackageId}') was not installed, so nothing was copied: `
+                    + `${typeof e?.code === 'string' ? `${e.code}: ` : ''}${e?.message ?? e}`,
+                    ...(declaresClientRefusal(e) ? [] : [e]),
+                );
+                throw e;
             }
         }
 
@@ -31263,10 +31497,9 @@ export class ObjectStackProtocolImplementation implements
         // reach `deriveNamespaceFromPackageId` below, which already ASSUMES the
         // reverse-domain shape it was never given a chance to enforce.
         //
-        // ⛔ SCOPE — THE `id` LEG ALONE. `InstallPackageRequestSchema` /
-        // `ManifestSchema` are still not parsed whole here; the residual
-        // classes the HTTP door's own docblock records are untouched by this
-        // and are each their own narrowing of a published contract.
+        // The id leg keeps its own gate, ahead of the whole-manifest parse
+        // below (#24086), so its sentence and its repair arm are not
+        // displaced by a generic issue list.
         const rawId = (request.manifest as { id?: unknown } | undefined)?.id;
         const declaredId = ManifestSchema.shape.id.safeParse(rawId);
         if (!declaredId.success) {
@@ -31287,6 +31520,43 @@ export class ObjectStackProtocolImplementation implements
         const manifest: any = { ...(request.manifest as any) };
         if (typeof manifest.version !== 'string' || !manifest.version) {
             manifest.version = '0.1.0';
+        }
+
+        // [#24086] ⭐ THE WHOLE MANIFEST IS JUDGED BY THE DOOR'S DECLARATION —
+        // `PackageInstallManifestSchema`, the one `POST /api/v1/packages`
+        // parses its body through, ⛔ not `ManifestSchema`, which still admits
+        // the platform scopes (`cloud` / `system`) that declaration refuses
+        // for an authored install. The id leg above was the only leg judged
+        // here, so an in-process caller could store what the door answers
+        // `400` for — an off-spec `type` such as `'application'`, an off-spec
+        // `scope` such as `'environment'`, an unknown key — and the row was
+        // read back on every boot.
+        //
+        // Placed AFTER the version default and BEFORE the namespace one, on
+        // purpose: the declaration REQUIRES `version`, and the versionless
+        // manifest this primitive has completed since #2532 keeps installing;
+        // `namespace` is optional in the declaration, so its derivation needs
+        // nothing from the parse. Nothing else is supplied — a manifest with
+        // no `type` is refused, as the door refuses it.
+        //
+        // A GATE, not a normaliser, as at the door: the parse's defaults
+        // (`scope`, `defaultDatasource`) are not copied onto the manifest that
+        // is stored. Each issue is surfaced as the declaration words it, under
+        // its `manifest.<key>` path — no sentence of this file's own for a rule.
+        //
+        // ⛔ Rows already in `sys_packages` are not judged by this: they are
+        // data at rest, and the boot hydration (`PackageServicePlugin.start`,
+        // `@objectstack/service-package`) replays them as stored — see the
+        // tolerance stated there.
+        const declaredManifest = PackageInstallManifestSchema.safeParse(manifest);
+        if (!declaredManifest.success) {
+            const located = declaredManifest.error.issues
+                .map((issue) => `${['manifest', ...issue.path.map(String)].join('.')}: ${issue.message}`)
+                .join('; ');
+            throw Object.assign(
+                new Error(`Invalid package manifest — ${located}`),
+                { statusCode: 400 },
+            );
         }
 
         // Studio-authored writable packages arrive WITHOUT a namespace. The
@@ -31318,6 +31588,20 @@ export class ObjectStackProtocolImplementation implements
 
         // [#23972] Every package this primitive installs is AUTHORED — a Studio
         // base, a duplicate, an HTTP install — persisted to `sys_packages` below.
+        //
+        // ADR-0087 D2 — this door is AUTHORING-side, so the registry judges the
+        // manifest exactly as handed, and no forward conversion runs here (the
+        // window the registration door, the `sys_packages` hydration and the
+        // marketplace install open is for bodies at rest). Its callers hand it
+        // a manifest being written now, and the declaration parse above
+        // (#24086, the one `POST /api/v1/packages` also runs) has already
+        // refused a metadata collection such as `pages` outright; `duplicatePackage`
+        // copies the registry's own record, already judged; the unmanaged
+        // install's base carries identity keys only; and AI Studio's blueprint
+        // tools author in-process. A retired declaration there is the author's
+        // to fix, refused loudly at the moment of writing. Once the body sits
+        // in `sys_packages` it is data at rest, and the boot hydration
+        // (`@objectstack/service-package`) converts it at every load.
         let pkg = this.engine.registry.installPackage(manifest as any, 'authored', request.settings);
 
         // [#19277] HONOUR `enableOnInstall` — the key THIS request contract

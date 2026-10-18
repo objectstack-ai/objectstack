@@ -98,13 +98,162 @@ export function compileRoute(pattern: string): { regex: RegExp; keys: string[] }
     return { regex: new RegExp(`^${body}$`), keys };
 }
 
-/** Body-parsing content types we consume eagerly; everything else stays raw. */
-function isEagerlyParsed(contentType: string): boolean {
-    return (
-        contentType.includes('application/json') ||
-        contentType.includes('application/x-www-form-urlencoded') ||
-        contentType.startsWith('text/')
-    );
+/*
+ * ── The request body: parsed by its declared content type, or REFUSED ────────
+ *
+ * [#24083] `IHttpRequest.body` (`@objectstack/spec/contracts`) is the parsed
+ * JSON document for `application/json`, the parsed fields of a form
+ * (`multipart/form-data`, `application/x-www-form-urlencoded`), `{}` when the
+ * request carries no body, and otherwise a REFUSAL thrown from the read, never
+ * an invented value. This adapter used to read malformed declared JSON as `{}`,
+ * a multipart body as `{}`, and a `text/*` body as a string.
+ *
+ * What follows MIRRORS the standard transport's decision
+ * (`readRequestBody` in plugin-hono-server's `src/request-body.ts`, whose
+ * module note says why each arm answers what it does), and does not import
+ * it: this adapter is the instrument that measures that transport, and a
+ * reference that ran the subject's code could not see the subject drift. The
+ * two are held equal from outside instead, byte for byte, by
+ * `request-body.conformance.test.ts`. So a change to either side's wording or
+ * arms is a change to both.
+ *
+ * - Declared JSON (`application/json`, matched case-insensitively): read as
+ *   text and parsed. Empty or whitespace-only is `{}`; anything else that does
+ *   not parse is a refusal.
+ * - A form: parsed into fields by the Fetch `Response.formData()` that Node
+ *   ships (the very parser the standard transport's framework calls), in its
+ *   field shape: one value per key, the last one winning, except a key that
+ *   ends in `[]`, which collects every value into an array; a file part is a
+ *   `File`. A parse failure is a refusal.
+ * - Any other media type, or none: nothing is read, so the bytes stay on the
+ *   socket for `rawBody()`. A request that carries a body by its framing
+ *   headers (RFC 9112 §6.3) is a refusal on read; one that carries none is
+ *   `{}`.
+ *
+ * GET and HEAD carry no body here, as on the standard transport, whose
+ * framework hands those methods a request with no body: nothing is read from
+ * the socket for them, and the decision above runs on empty bytes.
+ */
+
+/**
+ * The refusal, as a DECLARED ADR-0112 throw: `status` and a registered `code`
+ * (`INVALID_REQUEST` is on the error-code ledger). Module-private.
+ */
+class RequestBodyRefusal extends Error {
+    readonly status = 400;
+    readonly code = 'INVALID_REQUEST';
+
+    constructor(message: string) {
+        super(message);
+        this.name = 'RequestBodyRefusal';
+    }
+}
+
+type RequestBodyReading =
+    | { readonly body: unknown; readonly refusal?: undefined }
+    | { readonly refusal: RequestBodyRefusal };
+
+/** The refusal tail every message ends with: what the transport did NOT do. */
+const NOT_EMPTY = 'It was refused rather than read as an empty body';
+
+const MALFORMED_JSON_BODY_MESSAGE =
+    `The request body could not be parsed as JSON (it was sent as application/json). ${NOT_EMPTY}: `
+    + 'send a well-formed JSON document, or no body at all.';
+
+const UNREADABLE_BODY_MESSAGE = `The request body could not be read. ${NOT_EMPTY}.`;
+
+/** A media type as the client spelled it, echoed only when it is a plain token pair. */
+function namedMediaType(mediaType: string): string {
+    if (mediaType === '') return 'with no Content-Type';
+    return /^[a-z0-9][a-z0-9!#$&^_.+-]{0,63}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,63}$/.test(mediaType)
+        ? `as ${mediaType}`
+        : 'with an unrecognised Content-Type';
+}
+
+function malformedFormMessage(mediaType: string): string {
+    return `The request body could not be parsed as form data (it was sent ${namedMediaType(mediaType)}). ${NOT_EMPTY}.`;
+}
+
+function unreadMediaTypeMessage(mediaType: string): string {
+    return `The request body was sent ${namedMediaType(mediaType)}, which this server does not read into a `
+        + `request body. ${NOT_EMPTY}: send it as application/json.`;
+}
+
+/** RFC 9112 §6.3: a `Content-Length` that is not `0`, or any `Transfer-Encoding`, is a body. */
+function declaresBody(headers: IncomingMessage['headers']): boolean {
+    const length = headers['content-length'];
+    if (length !== undefined && length.trim() !== '') return Number(length) !== 0;
+    return headers['transfer-encoding'] !== undefined;
+}
+
+/**
+ * A form's fields in the standard transport's shape (see the block above).
+ * Built through `Object.fromEntries`, so a field named `__proto__` is an own
+ * key and never reaches the prototype chain, and then left with no prototype,
+ * as the standard transport's object has none.
+ */
+function formFields(form: FormData): Record<string, unknown> {
+    const fields = new Map<string, unknown>();
+    form.forEach((value, key) => {
+        if (!key.endsWith('[]')) {
+            fields.set(key, value);
+            return;
+        }
+        const values = fields.get(key);
+        if (Array.isArray(values)) values.push(value);
+        else fields.set(key, [value]);
+    });
+    return Object.setPrototypeOf(Object.fromEntries(fields), null) as Record<string, unknown>;
+}
+
+/**
+ * Decide the body (see the block above). `bytes` is the read of the request
+ * stream when this decision consumed it, so `rawBody()` hands back those same
+ * bytes, or that same failure, instead of reading a drained socket.
+ */
+async function readRequestBody(
+    nodeReq: IncomingMessage,
+    method: string,
+): Promise<{ reading: RequestBodyReading; bytes?: Promise<Buffer> }> {
+    const contentType = String(nodeReq.headers['content-type'] ?? '');
+    const lowered = contentType.toLowerCase();
+    const readStream = (): Promise<Buffer> =>
+        method === 'GET' || method === 'HEAD' ? Promise.resolve(Buffer.alloc(0)) : readBody(nodeReq);
+
+    if (lowered.includes('application/json')) {
+        const bytes = readStream();
+        let text: string;
+        try {
+            text = (await bytes).toString('utf8');
+        } catch {
+            return { reading: { refusal: new RequestBodyRefusal(UNREADABLE_BODY_MESSAGE) }, bytes };
+        }
+        if (text.trim() === '') return { reading: { body: {} }, bytes };
+        try {
+            return { reading: { body: JSON.parse(text) }, bytes };
+        } catch {
+            return { reading: { refusal: new RequestBodyRefusal(MALFORMED_JSON_BODY_MESSAGE) }, bytes };
+        }
+    }
+
+    const mediaType = lowered.split(';')[0]!.trim();
+    if (mediaType === 'multipart/form-data' || mediaType === 'application/x-www-form-urlencoded') {
+        const bytes = readStream();
+        try {
+            const form = await new Response(await bytes, {
+                headers: { 'Content-Type': contentType.replace(/^[^;]+/, (type) => type.toLowerCase()) },
+            }).formData();
+            return { reading: { body: formFields(form) }, bytes };
+        } catch {
+            return { reading: { refusal: new RequestBodyRefusal(malformedFormMessage(mediaType)) }, bytes };
+        }
+    }
+
+    return {
+        reading: declaresBody(nodeReq.headers)
+            ? { refusal: new RequestBodyRefusal(unreadMediaTypeMessage(mediaType)) }
+            : { body: {} },
+    };
 }
 
 function readBody(req: IncomingMessage): Promise<Buffer> {
@@ -211,7 +360,9 @@ export class NodeHttpServer implements IHttpServer {
      *  4. **A handler that writes nothing leaves the standard answer.** The
      *     branch falls through to {@link writeUnmatchedResponse} — the 404, or
      *     the 405 + `Allow`, unchanged. Writing nothing is the documented way
-     *     to say "not mine".
+     *     to say "not mine". The one exception is a fallback that read a body
+     *     this adapter refused: as on the primary adapter, the refusal is then
+     *     the answer, whether the fallback threw, answered or wrote nothing.
      *
      * Locked cross-adapter by this package's own
      * `fallback-seam.conformance.test.ts`, which runs the same cases against
@@ -282,6 +433,31 @@ export class NodeHttpServer implements IHttpServer {
         nodeRes.end(JSON.stringify({
             success: false,
             error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' },
+        }));
+    }
+
+    /**
+     * [#24083] The answer to a request whose handler (a matched route's, or
+     * the fallback's) read a body this adapter refused: `400 INVALID_REQUEST`
+     * in the ADR-0112 envelope, the same two keys the primary adapter renders
+     * for this throw. The request's body was never readable, so no other
+     * answer describes it.
+     *
+     * One shape cannot be matched on `node:http`: a handler that WROTE before
+     * it read has put bytes on the wire, which the primary adapter (it holds
+     * the handler's answer until the handler returns) still replaces. Here
+     * what was sent stands, and the response is closed.
+     */
+    private writeBodyRefusal(nodeRes: ServerResponse, refusal: RequestBodyRefusal) {
+        if (nodeRes.headersSent) {
+            if (!nodeRes.writableEnded) nodeRes.end();
+            return;
+        }
+        nodeRes.statusCode = refusal.status;
+        nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
+        nodeRes.end(JSON.stringify({
+            success: false,
+            error: { code: refusal.code, message: refusal.message },
         }));
     }
 
@@ -373,24 +549,15 @@ export class NodeHttpServer implements IHttpServer {
         const query = Object.fromEntries(queryEntries) as Record<string, string | string[]>;
 
         // ── Body ────────────────────────────────────────────────────────────
-        // JSON / urlencoded / text bodies are consumed eagerly (like the
-        // primary adapter); anything else (octet-stream, multipart) stays on
-        // the socket for the lazy `rawBody()` accessor so binary uploads pay
-        // no parsing cost.
-        const contentType = String(nodeReq.headers['content-type'] || '');
-        let body: any = {};
-        let bufferedBody: Buffer | undefined;
-        if (method !== 'GET' && method !== 'HEAD' && isEagerlyParsed(contentType)) {
-            bufferedBody = await readBody(nodeReq);
-            const text = bufferedBody.toString('utf8');
-            if (contentType.includes('application/json')) {
-                try { body = text ? JSON.parse(text) : {}; } catch { body = {}; }
-            } else if (contentType.includes('application/x-www-form-urlencoded')) {
-                body = Object.fromEntries(new URLSearchParams(text));
-            } else {
-                body = text;
-            }
-        }
+        // [#24083] Declared JSON and forms are read eagerly, as on the primary
+        // adapter; every other media type stays on the socket for the lazy
+        // `rawBody()` accessor, so a binary upload pays no parsing cost. What
+        // each media type answers is `readRequestBody`'s (above).
+        const { reading, bytes } = await readRequestBody(nodeReq, method);
+        let bodyReading: RequestBodyReading = reading;
+        let bufferedBody: Promise<Buffer> | undefined = bytes;
+        /** Set once a READ of `req.body` met the refusal; see the route branch below. */
+        let refusedBodyRead: RequestBodyRefusal | undefined;
 
         // node:http exposes headers as a lowercased record already, Host
         // included — no backfill needed (the Fetch-API Host backfill in the
@@ -400,12 +567,37 @@ export class NodeHttpServer implements IHttpServer {
             // primary adapter hands its fallback (its `readRouteParams` guard).
             params: matched?.params ?? {},
             query,
-            body,
+            /**
+             * [#24083] An accessor rather than a value, as on the primary
+             * adapter: reading a body this adapter refused throws the refusal,
+             * which stops the handler at the read. A route that reads
+             * `rawBody()` instead never reaches it. Writable as before.
+             */
+            get body(): any {
+                if (bodyReading.refusal) {
+                    refusedBodyRead = bodyReading.refusal;
+                    throw bodyReading.refusal;
+                }
+                return bodyReading.body;
+            },
+            set body(value: any) {
+                bodyReading = { body: value };
+            },
             headers: nodeReq.headers as Record<string, string | string[]>,
             method,
             path,
-            rawBody: async () => bufferedBody ?? (bufferedBody = await readBody(nodeReq)),
+            // The bytes of every body, a refused one included.
+            rawBody: () => (bufferedBody ??= readBody(nodeReq)),
         };
+
+        /**
+         * [#24083] A read of a refused body makes the refusal THE answer,
+         * whatever the handler made of the throw, on a matched route and in
+         * the fallback alike, as on the primary adapter: anything the handler
+         * writes after the read is dropped, and {@link writeBodyRefusal}
+         * answers once it returns.
+         */
+        const refusalStands = (): boolean => refusedBodyRead !== undefined;
 
         // ── Response wrapper (contract + streaming extension) ───────────────
         const isHead = method === 'HEAD';
@@ -414,12 +606,12 @@ export class NodeHttpServer implements IHttpServer {
             status: (code: number) => { nodeRes.statusCode = code; return res; },
             header: (name: string, value: string | string[]) => { nodeRes.setHeader(name, value); return res; },
             json: (data: any) => {
-                if (nodeRes.writableEnded) return;
+                if (nodeRes.writableEnded || refusalStands()) return;
                 if (!nodeRes.headersSent) nodeRes.setHeader('Content-Type', 'application/json; charset=utf-8');
                 nodeRes.end(isHead ? undefined : JSON.stringify(data));
             },
             send: (data: string | Uint8Array | ArrayBuffer) => {
-                if (nodeRes.writableEnded) return;
+                if (nodeRes.writableEnded || refusalStands()) return;
                 if (typeof data === 'string') {
                     if (!nodeRes.headersSent) nodeRes.setHeader('Content-Type', 'text/html; charset=utf-8');
                     nodeRes.end(isHead ? undefined : data);
@@ -432,10 +624,12 @@ export class NodeHttpServer implements IHttpServer {
             },
             // Streaming extension (SSE): map straight onto the native stream.
             write: (chunk: string | Uint8Array) => {
+                if (refusalStands()) return;
                 streaming = true;
                 if (!nodeRes.writableEnded) nodeRes.write(chunk);
             },
             end: () => {
+                if (refusalStands()) return;
                 if (!nodeRes.writableEnded) nodeRes.end();
             },
         };
@@ -447,9 +641,18 @@ export class NodeHttpServer implements IHttpServer {
             // an unmatched request on this adapter today either, and changing
             // that is a separate decision from installing this seam.
             const handler = fallback as RouteHandler;
+            let threw = false;
             try {
                 await handler(req, res as IHttpResponse);
             } catch {
+                threw = true;
+            }
+            // [#24083] The fallback read a body this adapter refused: the
+            // refusal is the answer on every arm (thrown, caught and answered,
+            // caught and silent), as on the primary adapter, whose fallback
+            // runs through the same `runHandler` as its routes.
+            if (refusedBodyRead) return this.writeBodyRefusal(nodeRes, refusedBodyRead);
+            if (threw) {
                 // Prefer failing to falling back: a fallback that THREW is a
                 // broken consumer, and reporting its failure as this adapter's
                 // ordinary 404 would hide it behind the most unremarkable
@@ -481,6 +684,10 @@ export class NodeHttpServer implements IHttpServer {
                 void advanced; // chain always continues — parity with the primary adapter
             }
             await matched.route.handler(req, res as IHttpResponse);
+            if (refusedBodyRead) {
+                this.writeBodyRefusal(nodeRes, refusedBodyRead);
+                return;
+            }
             // Handler resolved without producing a response and without
             // starting a stream (SSE handlers legitimately resolve while the
             // stream is still open — dispatcher drains it in the background).
@@ -493,6 +700,10 @@ export class NodeHttpServer implements IHttpServer {
                 }));
             }
         } catch (err: any) {
+            if (refusedBodyRead) {
+                this.writeBodyRefusal(nodeRes, refusedBodyRead);
+                return;
+            }
             if (!nodeRes.writableEnded) {
                 if (!nodeRes.headersSent) {
                     nodeRes.statusCode = typeof err?.statusCode === 'number' ? err.statusCode : 500;

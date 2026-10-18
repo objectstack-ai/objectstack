@@ -231,6 +231,18 @@ describe('ErrorCode (standard ∪ registered)', () => {
     expect(standardSynonymOf('FLOW_INPUT_SCHEMA_INVALID')).toBeUndefined();
   });
 
+  it('accepts the invitation role cap refusal codes, registered ahead of their plugin-auth producer', () => {
+    // #24082 is the spec half of #23945's split: the cap's three refusals are
+    // a bare `FORBIDDEN` today, so a client cannot tell them apart. #23945
+    // stamps them and asserts these exact strings by value — pinned here too.
+    for (const code of ['INVITE_ROLE_ABOVE_ISSUER', 'INVITE_ISSUER_MEMBER_ONLY', 'INVITE_ISSUER_UNVERIFIED']) {
+      expect(ErrorCode.parse(code)).toBe(code);
+      expect(ERROR_CODE_LEDGER['@objectstack/plugin-auth'], `${code} registered under plugin-auth`).toContain(code);
+      // INVITE is a token no standard member carries — no waiver needed.
+      expect(standardSynonymOf(code), `${code} needs no waiver`).toBeUndefined();
+    }
+  });
+
   it('accepts the nine-code batch — every code that ships in dist, door or no door (ruled: the ledger is the published face)', () => {
     // The #16404 ruling (director seat, decision batch #62, 2026-09-07, option
     // D): the published face is this ledger, so a code that ships in `dist` is

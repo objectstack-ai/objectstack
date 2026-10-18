@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
 
 /**
  * sys_organization — System Organization Object
@@ -138,6 +139,52 @@ export const SysOrganization = ObjectSchema.create({
       refreshAfter: true,
     },
     {
+      // FOURTH mirror of `invite_user` (sys_user, sys_invitation, sys_member
+      // carry the other three — keep all four consistent), here because a
+      // `page:header`'s `actions` are ids resolved against the page object's
+      // OWN actions only (spec `component.zod.ts`, page:header), so the
+      // organization record page cannot offer an invite from a mirror on
+      // another object. Ruling 6228318638 (B′ on #24034): declared at
+      // `record_header`, primary, first by `order`.
+      //
+      // The record IS the organization, so its id rides as `organizationId`
+      // instead of better-auth's active-org fallback — an admin on another
+      // org's page invites into that org, not into whichever one is active.
+      name: 'invite_user',
+      label: 'Invite User',
+      // Same wording as the sys_user / sys_invitation / sys_member mirrors.
+      description:
+        'Invite someone by email address. They join this organization with the chosen role when they accept the invitation.',
+      icon: 'user-plus',
+      variant: 'primary',
+      // Lower than every sibling (unset = 0), so the stable `order` sort puts
+      // it first in the record header.
+      order: -1,
+      locations: ['record_header'],
+      type: 'api',
+      target: '/api/v1/auth/organization/invite-member',
+      recordIdParam: 'organizationId',
+      // Same gates as the other three mirrors: the org CAPABILITY (not
+      // multi-org, ADR-0093 D9) and the grades that reach the endpoint
+      // (ADR-0108 D1) — owner, admin and delegated_admin.
+      requiresFeature: 'organization',
+      requiresMembershipReach: 'invite_member',
+      // `${result.email}`: the invitee's address from the invitation row
+      // invite-member answers (see sys_user's mirror).
+      successMessage: 'Invitation sent to ${result.email}',
+      refreshAfter: true,
+      params: [
+        // ⚠️ Neither `email` nor `role` is a field of sys_organization, so
+        // both params name their owner via `objectOverride` — an unresolvable
+        // field-backed param degrades to an unlabelled text input with
+        // nothing red anywhere (see sys_member's mirror). Otherwise the shape
+        // is sys_invitation's: both required, and the role picker offers only
+        // what this caller may grant ([ADR-0105 D8] `INVITATION_ROLE_OPTIONS`).
+        { field: 'email', objectOverride: 'sys_invitation', required: true },
+        { field: 'role', objectOverride: 'sys_invitation', required: true, options: [...INVITATION_ROLE_OPTIONS] },
+      ],
+    },
+    {
       // Current user leaves the org. Distinct from `delete_organization`
       // (admin-only, destroys the org) — `leave` only removes the caller's
       // own membership. Better-auth: `organization/leave { organizationId }`.
@@ -145,13 +192,21 @@ export const SysOrganization = ObjectSchema.create({
       label: 'Leave Organization',
       icon: 'log-out',
       variant: 'danger',
+      // Higher than every sibling (unset = 0), so it sorts LAST: with
+      // `invite_user` leading, the header's three inline slots go to the
+      // invite, `set_active_organization` and `change_slug`, and this one
+      // folds into the `⋯` overflow's destructive band (objectui's
+      // page:header split, default `maxVisible` 3). Without it, registration
+      // order kept it inline as the third button.
+      order: 1,
       mode: 'custom',
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/organization/leave',
       recordIdParam: 'organizationId',
       requiresFeature: 'multiOrgEnabled',
-      confirmText: 'Leave this organization? You will lose access to all of its resources.',
+      // Names what is lost (#24021's copy half, ruling 6228318638 item 2).
+      confirmText: 'Leave this organization? You will lose access to its environments and members.',
       successMessage: 'You have left the organization',
       refreshAfter: true,
     },

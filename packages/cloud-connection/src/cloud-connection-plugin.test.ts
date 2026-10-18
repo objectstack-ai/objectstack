@@ -11,6 +11,7 @@
 
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { CloudConnectionPlugin, createCloudConnectionPlugin } from './cloud-connection-plugin.js';
+import { bindCatalogFromTables } from './__tests__/security-catalog.testkit.js';
 
 type Handler = (c: any) => Promise<Response | any>;
 
@@ -58,6 +59,23 @@ function makeC(url: string, body?: any) {
 const sessionAuth = (userId?: string) => ({
     api: { getSession: async () => (userId ? { user: { id: userId } } : null) },
 });
+
+/**
+ * [#24148] A data engine under which `userId` holds `setup.access` — what
+ * `/status` serves its full answer behind. Real permission-set rows, read by
+ * the shared resolver through `find`.
+ */
+const setupAccessEngine = (userId: string) => {
+    const rows: Record<string, any[]> = {
+        sys_user: [{ id: userId, email: `${userId}@example.test` }],
+        sys_user_permission_set: [{ id: 'ups_1', user_id: userId, permission_set_id: 'ps_1', permission_set: 'setup_admin', organization_id: null }],
+        sys_permission_set: [{ id: 'ps_1', name: 'setup_admin', system_permissions: ['setup.access'] }],
+    };
+    return bindCatalogFromTables({ find: async (object: string) => rows[object] ?? [] }, rows);
+};
+
+/** [#24148] What `/status` serves a caller without `setup.access`. */
+const narrowed = (data: { bound: boolean; runtimeId: string | null }) => ({ ...data, provider: 'objectstack-cloud' });
 
 beforeEach(() => {
     delete process.env.OS_ENVIRONMENT_ID;
@@ -118,7 +136,7 @@ describe('multi-tenant mode (env-registry + per-env kernel auth)', () => {
         await new CloudConnectionPlugin({ controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: 'svc-key' }).start(ctx as any);
         await fireKernelReady();
         const res = await rawApp.routes.get('GET /api/v1/cloud-connection/status')!(makeC('https://t1.example.com/api/v1/cloud-connection/status'));
-        expect(res.payload).toEqual({ success: true, data: { environmentId: ENV, runtimeId: null, bound: true, provider: 'objectstack-cloud', connection: null } });
+        expect(res.payload).toEqual({ success: true, data: narrowed({ runtimeId: null, bound: true }) });
     });
 
     it('status 404s for an unknown hostname', async () => {
@@ -200,7 +218,7 @@ describe('single-environment mode (host auth, fixed env id)', () => {
         await fireKernelReady();
         const res = await rawApp.routes.get('GET /api/v1/cloud-connection/status')!(makeC('http://localhost:3000/x'));
         expect(res.status).toBe(200);
-        expect(res.payload.data).toEqual({ environmentId: null, runtimeId: null, bound: false, provider: 'objectstack-cloud', connection: null });
+        expect(res.payload.data).toEqual(narrowed({ runtimeId: null, bound: false }));
     });
 
     it('uses the configured environment id + the host kernel auth session', async () => {
@@ -223,7 +241,8 @@ describe('single-environment mode (host auth, fixed env id)', () => {
     it("ignores the CLI's local sentinel env ids (env_local / proj_local)", async () => {
         process.env.OS_ENVIRONMENT_ID = 'env_local';
         const rawApp = makeRawApp();
-        const { ctx, fireKernelReady } = makeCtx({ rawApp });
+        // A caller holding `setup.access`, who is served the environment id.
+        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: { auth: sessionAuth('admin-1'), objectql: setupAccessEngine('admin-1') } });
         await new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: 'http://cloud.test' }).start(ctx as any);
         await fireKernelReady();
         const res = await rawApp.routes.get('GET /api/v1/cloud-connection/status')!(makeC('http://localhost:3000/x'));
@@ -236,7 +255,7 @@ describe('single-environment mode (host auth, fixed env id)', () => {
     it('falls back to OS_ENVIRONMENT_ID when no config id is given', async () => {
         process.env.OS_ENVIRONMENT_ID = 'env-from-env-var';
         const rawApp = makeRawApp();
-        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: { auth: sessionAuth('admin-1') } });
+        const { ctx, fireKernelReady } = makeCtx({ rawApp, services: { auth: sessionAuth('admin-1'), objectql: setupAccessEngine('admin-1') } });
         vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ success: true, data: {} }), { status: 200 })));
         await new CloudConnectionPlugin({ singleEnvironment: true, controlPlaneUrl: 'http://cloud.test', controlPlaneApiKey: 'k' }).start(ctx as any);
         await fireKernelReady();

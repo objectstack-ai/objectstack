@@ -106,7 +106,7 @@
 //     `RestServer.getRoutes()` on a booted server and guarded per route by
 //     `rest-route-ledger.conformance.test.ts`. It reaches all 17 registrars;
 //     this table reaches 1.
-//   `packages/runtime/src/route-ledger.ts`: 88 rows over 23 domains. Its
+//   `packages/runtime/src/route-ledger.ts`: 105 rows over 23 domains. Its
 //     machine contract is DOMAIN-level, by live registry introspection
 //     (`domainRegistry.list()`), the per-route rows being documentation. It
 //     covers all 15 `async handle*(` methods in `http-dispatcher.ts` and all
@@ -240,7 +240,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 // [#23050 slice 3] THE list of the files `RestServer`'s registrars live in —
 // see the `rest-server.ts` row's population rule.
+// [#23050 slice 13a] …and its named subset of the modules that hold a moved
+// `/meta` group — see the same row's `reachable` rule.
 import {
+  REST_SERVER_META_ROUTE_FILES,
   REST_SERVER_REGISTRAR_DIR,
   REST_SERVER_REGISTRAR_FILES,
 } from '../../../rest/src/rest-server-registrar-files.js';
@@ -469,11 +472,27 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `/security` domain dispatches to it — so the domain-file counts in the
     // note below are unchanged. Controls moved with the row ("route: '" and
     // "domain: '" 87 -> 88, RouteLedgerEntry unchanged at 2).
-    population: 88,
-    reachable: 88,
+    // [#23909] 88 -> 92: the `GET`, `PUT`, `PATCH` and `DELETE /keys` rows
+    // arrived with their mounts (every `/api/v1/keys` verb is mounted, so an
+    // anonymous caller is answered 401 on the standalone server). All four
+    // carry `domain: '/keys'`, the EXISTING key the `POST /keys` row already
+    // carries, so `reachable` moves with `population`, `blindSpot` stays 0 and
+    // `keys` stays 23 (23 distinct domains before and after, re-derived).
+    // Controls moved with the rows ("route: '" and "domain: '" 88 -> 92,
+    // RouteLedgerEntry unchanged at 2).
+    // [#24024] 92 -> 105: twelve refusal-only `/notifications` rows (the four
+    // verbs each of the three faces does not serve) and the `* /share-links/**`
+    // catch-all row arrived with their mounts (an anonymous caller is answered
+    // 401 on the standalone server). They carry `domain: '/notifications'` and
+    // `domain: '/share-links'`, EXISTING keys, so `reachable` moves with
+    // `population`, `blindSpot` stays 0 and `keys` stays 23 (23 distinct
+    // domains before and after, re-derived). Controls moved with the rows
+    // ("route: '" and "domain: '" 92 -> 105, RouteLedgerEntry unchanged at 2).
+    population: 105,
+    reachable: 105,
     blindSpot: 0,
     populationRule: 'ledger rows inside ROUTE_LEDGER; reachable = rows carrying a `domain` (each distinct value mints a key)',
-    controls: { "route: '": 88, "domain: '": 88, RouteLedgerEntry: 2 },
+    controls: { "route: '": 105, "domain: '": 105, RouteLedgerEntry: 2 },
     // [#22432] Re-derived on the merged ref: the note's two counts had stood at
     // 11 files / 5 classified / 16 baselined since before the `/analytics`
     // domain was classified (#21061), which named one more file and moved one
@@ -521,12 +540,20 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'module on the registrar list (`packages/rest/src/rest-server-registrar-files.ts`) — ' +
       '`data-action-routes.ts`, `batch-routes.ts`, `approvals-routes.ts`, `sharing-routes.ts`, ' +
       '`analytics-routes.ts`, `security-routes.ts`, `discovery-routes.ts`, `email-routes.ts`, ' +
-      '`search-routes.ts` and `ui-routes.ts`, the modules the bodies of `registerDataActionEndpoints`, ' +
-      '`registerBatchEndpoints`, `registerApprovalsEndpoints`, `registerSharingEndpoints`, ' +
-      '`registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, `registerSecurityExplainEndpoints`, ' +
-      '`registerSecurityEndpoints`, `registerDiscoveryEndpoints`, `registerOpenApiEndpoints`, ' +
-      '`registerEmailEndpoints`, `registerSearchEndpoints` and `registerUiEndpoints` moved to; ' +
-      'reachable = those inside registerMetadataEndpoints',
+      '`search-routes.ts`, `ui-routes.ts`, `form-routes.ts`, `crud-routes.ts`, `meta-collection-routes.ts`, ' +
+      '`meta-item-read-routes.ts` and `meta-item-write-routes.ts`, ' +
+      'the modules the bodies of ' +
+      '`registerDataActionEndpoints`, `registerBatchEndpoints`, `registerApprovalsEndpoints`, ' +
+      '`registerSharingEndpoints`, `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, ' +
+      '`registerSecurityExplainEndpoints`, `registerSecurityEndpoints`, `registerDiscoveryEndpoints`, ' +
+      '`registerOpenApiEndpoints`, `registerEmailEndpoints`, `registerSearchEndpoints`, ' +
+      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints`, and the first five `/meta` ' +
+      'groups of `registerMetadataEndpointsInner`, moved to; ' +
+      'reachable = those inside registerMetadataEndpoints, PLUS every site in the registrar list\'s named `/meta` ' +
+      'subset (`REST_SERVER_META_ROUTE_FILES`: `meta-collection-routes.ts`, `meta-item-read-routes.ts` and ' +
+      '`meta-item-write-routes.ts`), whose ' +
+      'registrations the inner method ' +
+      'runs inside the umbrella\'s swap',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
     // the numbers it produces did NOT move: 80 / 19 / 61, exactly as before.
     //
@@ -770,10 +797,104 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // new occurrences are this slice's seam, the same two spellings once (the
     // host literal's forwarder, two; the host interface's member, two). No call
     // site was added.
+    // [#23050 slice 11] 70 / 19 / 51 UNCHANGED, the same measurement again:
+    // `registerFormEndpoints`' body (two registration sites, `GET
+    // {base}/forms/:slug` and `POST {base}/forms/:slug/submit`, outside
+    // `registerMetadataEndpoints`, so in the blind spot) moved to
+    // `form-routes.ts`, which joins the list (length 11 -> 12) with its own
+    // control. `this.routeManager.register(` stays 63 over the twelve files
+    // (18 here + 9 + 5 + 7 + 8 + 1 + 6 + 4 + 1 + 1 + 1 + 2),
+    // `private register*Endpoints(` stays 16 (the registrar is still declared
+    // here), and `enforceAuth` stays 108: the two doors never call it (their
+    // authorization is the form's own declaration), so no call site moved, and
+    // this slice's host literal and interface name no such member. Measured at
+    // the move commit, before the list learned the module: population 68 and
+    // `this.routeManager.register(` 61 over eleven files, the two sites out of
+    // reach.
+    // [#23050 slice 12] 70 / 19 / 51 UNCHANGED, the same measurement again:
+    // `registerCrudEndpoints`' body (six registration sites, the list, read,
+    // create, QueryAST query, update and delete doors under
+    // `{base}{crud.dataPrefix}`, all outside `registerMetadataEndpoints`, so
+    // all six in the blind spot) moved to `crud-routes.ts`, which joins the list
+    // (length 12 -> 13) with its own control. `this.routeManager.register(`
+    // stays 63 over the thirteen files
+    // (12 here + 9 + 5 + 7 + 8 + 1 + 6 + 4 + 1 + 1 + 1 + 2 + 6),
+    // `private register*Endpoints(` stays 16 (the registrar is still declared
+    // here), and `enforceAuth` 108 -> 112 is RE-ANCHORED, not relaxed: the six
+    // call sites moved with their routes and are counted in both readings; the
+    // four new occurrences are this slice's seam, the same two spellings once
+    // (the host literal's forwarder, two; the host interface's member, two). No
+    // call site was added.
+    // [#23050 slice 13a] 70 / 19 / 51 UNCHANGED, and this time `reachable` is the
+    // reading that had to be taught: the first three `/meta` groups of
+    // `registerMetadataEndpointsInner` (six direct registration sites: `GET
+    // {metaPath}` and `/types`, `/diagnostics`, `/_drafts`, `POST
+    // /_migrate-stored` and `GET /:type`, all REACHABLE through the umbrella key
+    // `meta:rest-server.ts:registerMetadataEndpoints`) moved to
+    // `meta-collection-routes.ts`, which joins the list (length 13 -> 14) with
+    // its own control. The six still register inside the umbrella's swap — the
+    // inner method builds their host literal, capturing the wrapping registrar
+    // by value, and calls the module at their old position — but no line of
+    // them is lexically inside `registerMetadataEndpoints` any more, so the
+    // lexical rule alone read 70 / 13 / 57: six guarded routes counted as blind
+    // spots, a false reading. Measured, not argued, before the rule widened: an
+    // anonymous request at each of the six (both bases) answers `401` with the
+    // module in place, and hoisting the route manager's capture above the swap
+    // makes every one of them answer without the gate. The rule therefore adds
+    // every site in `REST_SERVER_META_ROUTE_FILES`, the list's NAMED `/meta`
+    // subset — ⛔ never a file-name convention — and the new control
+    // `/meta subset ↔ .call( inside registerMetadataEndpointsInner` holds that
+    // subset's length against the module calls inside the inner method, so a
+    // `/meta` module called without joining the subset (or a subset entry the
+    // inner method no longer calls) moves it. `this.routeManager.register(`
+    // stays 63 over the fourteen files
+    // (6 here + 9 + 5 + 7 + 8 + 1 + 6 + 4 + 1 + 1 + 1 + 2 + 6 + 6),
+    // `private register*Endpoints(` stays 16, `registerPerItemRoute(` stays 8 and
+    // `enforceAuth` stays 112: the moved groups spell neither term, and the seam
+    // spells neither (the umbrella's wrapper is what gates them).
+    // [#23050 slice 13b] 70 / 19 / 51 UNCHANGED, and `reachable` holds by the rule
+    // 13a taught, with no rule change: the fourth `/meta` group, the per-item reads
+    // (four direct registration sites: `/references`, `/layers`, the book tree and
+    // the item read, all REACHABLE through the same umbrella key), moved to
+    // `meta-item-read-routes.ts`, which joins the list (length 14 -> 15) and the
+    // named `/meta` subset (1 -> 2) with its own control. The inner method builds
+    // its host literal inside the umbrella's swap and calls the module at the
+    // group's old position, so the subset's length and the module calls inside the
+    // inner method move together (both 2). Measured at the move commit, before the
+    // list learned the module: population 66 and `this.routeManager.register(` 59
+    // over fourteen files, the four sites out of reach. `this.routeManager.register(` stays 63
+    // over the fifteen files (2 here + 9 + 5 + 7 + 8 + 1 + 6 + 4 + 1 + 1 + 1 + 2 +
+    // 6 + 6 + 4), `private register*Endpoints(` stays 16, `registerPerItemRoute(`
+    // stays 8 and `enforceAuth` stays 112: the moved group spells neither term,
+    // and neither does the seam.
+    // [#23050 slice 13c] 70 / 19 / 51 UNCHANGED, `reachable` again held by 13a's
+    // rule with no rule change, and TWO controls re-keyed, as ruled for this
+    // slice. The fifth `/meta` group, the per-item writes (`PUT` and `DELETE
+    // {metaPath}/:type/:name`, two helper-routed registration sites, REACHABLE
+    // through the same umbrella key), moved to `meta-item-write-routes.ts`, which
+    // joins the list (length 15 -> 16) and the named `/meta` subset (2 -> 3). It
+    // is the first module on the list with NO direct site: both of its routes
+    // register through the inner method's per-item registrar, which reaches it in
+    // the `/meta` scope as the one closure the inner head declares and which
+    // still reads the route manager at call time, inside the swap. So (1) its own
+    // control counts `registerPerItemRoute(` (2), the population rule's second
+    // spelling, instead of `this.routeManager.register(`, which reads 0 there and
+    // would be a zero read as a reading; and (2) the `registerPerItemRoute(`
+    // control is RE-ANCHORED, not relaxed, over the same haystack as
+    // `this.routeManager.register(` and the population rule (this file plus every
+    // module on the list), where it stays 8 (6 here + 2 in the module); over this
+    // file alone it would read 6. The subset's length and the module calls
+    // inside the inner method move together (both 3). Measured at the move
+    // commit, before the list learned the module: population 68, the two sites
+    // out of reach, and the `.call(` control at 3 against a subset of 2.
+    // `this.routeManager.register(` stays 63 over the sixteen files (the module
+    // spells it nowhere), `private register*Endpoints(` stays 16,
+    // `const registerPerItemRoute =` stays 1 and `enforceAuth` stays 112: the
+    // moved group spells none of them, and neither does the seam.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
-      'registrar list length': 11,
+      'registrar list length': 16,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
       'approvals-routes.ts: this.routeManager.register(': 7,
@@ -784,6 +905,17 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'email-routes.ts: this.routeManager.register(': 1,
       'search-routes.ts: this.routeManager.register(': 1,
       'ui-routes.ts: this.routeManager.register(': 1,
+      'form-routes.ts: this.routeManager.register(': 2,
+      'crud-routes.ts: this.routeManager.register(': 6,
+      'meta-collection-routes.ts: this.routeManager.register(': 6,
+      'meta-item-read-routes.ts: this.routeManager.register(': 4,
+      // [#23050 slice 13c] Controlled on the helper's call spelling: this module
+      // has no direct site (see above).
+      'meta-item-write-routes.ts: registerPerItemRoute(': 2,
+      // [#23050 slice 13a] Recorded AS the subset's length, not as a literal: the
+      // measured side is the module calls inside the inner method, so the two
+      // can only move together.
+      '/meta subset ↔ .call( inside registerMetadataEndpointsInner': REST_SERVER_META_ROUTE_FILES.length,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -791,7 +923,7 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'registerPerItemRoute(': 8,
       'const registerPerItemRoute =': 1,
       'forwarder slice: this.routeManager.register(': 1,
-      enforceAuth: 108,
+      enforceAuth: 112,
     },
     note:
       'The single non-tripwire probe names ONE registrar of 16. The other 15 can never mint a key: ' +
@@ -1277,9 +1409,21 @@ export function deriveProbeFileCensus(): {
     const metaIdx = decls.findIndex((d) => d.text.includes('registerMetadataEndpoints'));
     const start = decls[metaIdx]?.at ?? 0;
     const end = decls[metaIdx + 1]?.at ?? src.length;
+    // [#23050 slice 13a] ONE REACH, NOW TWO PLACES. A `/meta` group moved out of
+    // `registerMetadataEndpointsInner` still registers inside the umbrella's
+    // swap — the inner method builds its host literal (the wrapping registrar
+    // captured by value) and calls its module from inside its own body — so its
+    // sites are as reachable as the ones still lexically inside the slice above.
+    // They are read off the registrar list's NAMED `/meta` subset, never off a
+    // file-name convention, and its control below holds that subset against the
+    // module calls inside the inner method (that method's own extent: from its
+    // declaration to the umbrella slice's end).
+    const metaModules = movedModules.filter(([file]) => REST_SERVER_META_ROUTE_FILES.includes(file));
+    const innerAt = src.search(/private\s+registerMetadataEndpointsInner\s*\(/);
+    const inner = innerAt < start || innerAt >= end ? '' : src.slice(innerAt, end);
     files.set('packages/rest/src/rest-server.ts', {
       population: sites(all),
-      reachable: sites(src.slice(start, end)),
+      reachable: sites(src.slice(start, end)) + metaModules.reduce((n, [, text]) => n + sites(text), 0),
       controls: {
         'private register*Endpoints(': occurrences(src, /private\s+register[A-Za-z]*Endpoints\s*\(/g),
         'this.routeManager.register(': occurrences(all, /this\.routeManager\.register\(/g),
@@ -1289,9 +1433,21 @@ export function deriveProbeFileCensus(): {
         // [#23050 slice 1] The moved module's own share, so a reading that
         // silently stopped appending it cannot hide behind the total above.
         // [#23050 slice 3] One such control per module on the list.
-        ...Object.fromEntries(movedModules.map(([file, text]) =>
-          [`${file}: this.routeManager.register(`, occurrences(text, /this\.routeManager\.register\(/g)])),
-        'registerPerItemRoute(': occurrences(src, /registerPerItemRoute\(/g),
+        // [#23050 slice 13c] …one per SPELLING the module registers through, as
+        // the population rule counts both: a module whose routes all go through
+        // the per-item registrar has no direct site, and a control that read 0
+        // there would be instrument failure by this census's own rule. A
+        // spelling a module does not spell mints no control, so a module that
+        // stops spelling the one its control was recorded on makes that control
+        // VANISH, which is as loud as moving it.
+        ...Object.fromEntries(movedModules.flatMap(([file, text]) => [
+          [`${file}: this.routeManager.register(`, occurrences(text, /this\.routeManager\.register\(/g)] as const,
+          [`${file}: registerPerItemRoute(`, occurrences(text, /registerPerItemRoute\(/g)] as const,
+        ].filter(([, count]) => count > 0))),
+        // [#23050 slice 13c] Over `all`, the population rule's own haystack, since
+        // a `/meta` module now carries helper call sites too (re-anchored, not
+        // relaxed: 6 here + 2 in `meta-item-write-routes.ts` = 8).
+        'registerPerItemRoute(': occurrences(all, /registerPerItemRoute\(/g),
         'const registerPerItemRoute =': occurrences(src, /const\s+registerPerItemRoute\s*=/g),
         // ⭐ The one control here that is NOT a whole-file count, deliberately:
         // it is the SHAPE of the slice the population rule subtracts, and it is
@@ -1299,6 +1455,9 @@ export function deriveProbeFileCensus(): {
         // real population drop. The four counts around it cannot — all four are
         // green while the slice is running 3873 lines long.
         'forwarder slice: this.routeManager.register(': occurrences(forwarderSlice(src), mountRe),
+        // [#23050 slice 13a] The module calls inside the inner method — one per
+        // moved `/meta` group's module — recorded against the subset's length.
+        '/meta subset ↔ .call( inside registerMetadataEndpointsInner': occurrences(inner, /\.call\(/g),
         enforceAuth: occurrences(all, /enforceAuth/g),
       },
     });

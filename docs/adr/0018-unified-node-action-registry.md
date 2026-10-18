@@ -234,3 +234,15 @@ Managed credentials/secret vault, OAuth2 token refresh, multi-tenant connection 
 - [x] `builtin/connector-nodes.ts`: `connector_action` executor + descriptor (`category: 'io'`, `source: 'builtin'`, `paradigms: ['flow','approval']`), wired into `installBuiltinNodes()`. The core plugin now seeds 11 baseline node types (was 10).
 - [x] First concrete plugin `@objectstack/connector-rest` (the reference connector) validating the registry — `request` action, static auth (`none`/`api-key`/`basic`/`bearer`), no OAuth2 refresh.
 - [x] Tests: baseline dispatch (fake connector) + REST plugin auth-header injection + end-to-end kernel boot (both plugins → `connector_action` flow → REST handler).
+
+---
+
+## Addendum (2026-10-16): the three retired callout names are reserved
+
+> Status of this addendum: **ruled** (ruling `6182001882` on #23543, item 6). It narrows §2 ("Open the protocol's node type") by exactly three names and closes §4's alias window, which 11.0 ended without a refusal.
+
+The node-type namespace stays open, with one closed exception: `http_request`, `http_call` and `webhook` — the three outbound callout names §4 unified into `http` — are **reserved retired names**. No flow may type a node with one, and no plugin may register an executor under one.
+
+- **Authoring refuses them, naming `http`.** The flow parse refuses each as a node's `type` (top level and inside a region body), with the prescription to rename the node to `http`. The ADR-0087 D2 conversion `flow-node-http-callout-rename`, which rewrote them at load through 17, leaves the load path at 18; it still runs at every data-at-rest seam, so a stored flow written with an old name keeps loading as `http`.
+- **Registration refuses them too.** `AutomationEngine.registerNodeExecutor` throws for an executor or descriptor typed with a reserved name: no node could ever reach it, because an authored node is refused and a stored one is rewritten first. This retires the conversion's ADR-0078 conflict guard, which existed only for a third-party executor under one of these names.
+- **Not affected:** a wait node's `waitEventConfig.eventType: 'webhook'` is a different field and stays legal.

@@ -280,7 +280,7 @@
       "title": "Every ChartTypeSchema member renders a real chart with the correct marks and series count",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -291,7 +291,7 @@
         "requires": [
           "the Chart Gallery dashboard (showcase_chart_gallery) — one widget per DISTINCTLY-rendered family, bound to showcase_task_metrics / showcase_project_metrics (ADR-0021)",
           "a scratch draft dashboard (via PUT /api/v1/meta/dashboard/qa_single_value_gallery?mode=draft) for the four single-value synonym types the gallery deliberately does not duplicate",
-          "a scratch draft dashboard for the period-over-period compareTo probe (via PUT /api/v1/meta/dashboard/qa_compareto_probe?mode=draft) — NO showcase widget authors compareTo, so this is authored fresh exactly like the strict-widget probes; bind a metric/line widget to showcase_task_metrics with a time dimension (a month-bucketed created_at) and carry compareTo: { kind: 'previousPeriod' }"
+          "a scratch draft dashboard for the period-over-period compareTo probe (via PUT /api/v1/meta/dashboard/qa_compareto_probe?mode=draft) — NO showcase widget authors compareTo, so this is authored fresh exactly like the strict-widget probes. Two things the probe needs, both measured by QA run #23927: (a) a DATED WINDOW — compareTo shifts the selection's date range, so the dashboard declares one, dateRange: { field: 'issued_on', defaultRange: 'last_90_days' }; without it the dataset query answers a loud, correct 400 'compareTo needs a dated window to shift…' (packages/services/service-analytics/src/dataset-executor.ts) instead of a render; (b) data in BOTH windows — bind a line widget on the issued_on time dimension and a metric widget, each to dataset showcase_invoice_metrics with values ['invoice_count'] and compareTo: { kind: 'previousPeriod' }. The invoice seed spreads issued_on across ~6 months (examples/app-showcase/src/data/seed/index.ts: 7 dated invoices in the last 90 days, 3 in the 90 days before), so the comparison is non-zero and differs from the base. ⛔ Not showcase_task_metrics on created_at: every seeded task is created inside the current window, so the previous period is empty and a flat-zero comparison barely discriminates"
         ],
         "knownGaps": [
           "kpi / gauge / solid-gauge / bullet have NO distinct renderer today — all four route to the SAME single-value renderer as `metric` (chart.zod.ts NOTE: '`metric`/`kpi` are kept as honest single-value synonyms; `gauge`/`solid-gauge`/`bullet` render a value today and gain a dial when a gauge renderer lands'; examples/app-showcase/test/coverage.test.ts SAME_AS_METRIC = {kpi, gauge, solid-gauge, bullet}). Two consequences a run must hold BOTH of: (a) the demonstrable claim is 'renders the value, not blank', NOT 'renders a dial' — do not tick a dial that does not exist; and (b) ⚠️ the four scratch tiles are expected to be VISUALLY IDENTICAL to each other and to the metric tile. Four indistinguishable tiles is the CORRECT observation, not evidence that the renderer ignored the declared type and not a per-variant FAIL — re-confirmed on 17.1.0 (#10560). The type IS being honoured; there is simply one renderer behind five names, which is what makes them synonyms rather than families"
@@ -307,7 +307,7 @@
         "for table and pivot, verify real grouped tables: Projects by Account rows == distinct accounts with 3 measure columns; Tasks by Status × Priority cross-tab dimensions match distinct status × priority",
         "author the scratch draft dashboard with four widgets of types kpi, gauge, solid-gauge, bullet, each bound to dataset showcase_task_metrics, values ['task_count'], publish it, and load it",
         "verify each of the four renders the same numeric value the metric tile shows — a number, never a blank tile",
-        "author qa_compareto_probe with a time-dimensioned widget carrying compareTo: { kind: 'previousPeriod' }, publish it, and load it — verify a comparison series/delta actually RENDERS (not the base numbers alone with the comparison silently dropped, the pre-#5011 ADR-0021 dataset-path bug)",
+        "author qa_compareto_probe as fixtures.requires[2] describes (dashboard dateRange on issued_on, last_90_days; a line on issued_on and a metric, both on showcase_invoice_metrics invoice_count, both carrying compareTo: { kind: 'previousPeriod' }), publish it, and load it — verify a comparison series/delta actually RENDERS (not the base numbers alone with the comparison silently dropped, the pre-#5011 ADR-0021 dataset-path bug). Derive the expected base and comparison counts first from two literal-window reads of showcase_invoice on issued_on (the last 90 days, and the 90 days before), from the same clock",
         "capture the per-variant verdict table"
       ],
       "acceptance": [
@@ -356,7 +356,7 @@
         {
           "clause": "period-over-period compareTo renders the comparison: a widget authoring compareTo: { kind: 'previousPeriod' } on the scratch draft draws a comparison series/delta beside its base measure — the ADR-0021 dataset path that used to silently DROP the string arm now carries the converged { kind, dimension? } shape (#5011)",
           "oracle": "screenshot",
-          "verify": "the qa_compareto_probe widget shows a base value AND a previous-period comparison (series/delta), not the base alone; DOM read only after the screenshot confirms render",
+          "verify": "the qa_compareto_probe widgets show a base value AND a previous-period comparison (series/delta), not the base alone, and the comparison matches the previous window's literal-window count (non-zero on the stock invoice seed); DOM read only after the screenshot confirms render",
           "evidence": "the compareTo widget screenshot"
         },
         {
@@ -430,6 +430,12 @@
           "date": "2026-08-21",
           "change": "made the single-value-synonym carve-out say what a runner will actually SEE. The item already recorded that kpi/gauge/solid-gauge/bullet render 'the same single value as metric', which stops the wrong tick (a dial) but not the wrong FAIL: a runner putting the four scratch tiles side by side sees four indistinguishable tiles and can read that as the renderer ignoring the declared type — i.e. as the wrong-family negative two lines down. Re-confirmed at source (chart.zod.ts's synonym NOTE; coverage.test.ts's SAME_AS_METRIC = {kpi, gauge, solid-gauge, bullet}): there is ONE renderer behind five names. The knownGap now states that identical tiles are the expected observation, clause 4's verify says so at the point of scoring, and the wrong-family negative carries an explicit exemption so the two failures cannot be confused (#10236 A5, observed #10560)",
           "ref": "#10236"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-16",
+          "change": "fixtures.requires[2], steps[9] and acceptance[7].verify re-pointed so the compareTo probe can render and discriminate (fixture gaps F1 and F2 of QA run #23927, wave #23878). F1: as written the probe declared no dateRange, and the dataset query refused it with a loud, correct 400 'compareTo needs a dated window to shift' — #23927 had to add one to get a render. F2: bound to showcase_task_metrics on created_at, the previous 90-day window held no tasks on the stock seed, so the comparison series was flat at 0. The probe now declares dateRange { field: 'issued_on', defaultRange: 'last_90_days' } and binds to showcase_invoice_metrics, whose seeded issued_on dates fall in both windows (7 and 3), and the verify text reconciles the comparison against the previous window's literal-window count. Not loosened: a comparison silently absent, or one that disagrees with the previous window's count, still FAILS",
+          "ref": "#24036"
         }
       ],
       "enumSource": {
@@ -443,7 +449,7 @@
       "title": "Dataset-only authoring works end to end: layout-less designer drafts save/publish, and every ReportType renders from the same semantic datasets",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -465,7 +471,7 @@
         "open each seeded report from the Analytics nav: Hours by Status (summary), Status × Priority (matrix), Task Overview (joined), Hours by Status (Chart)",
         "for the summary report, compare each row's est_hours sum to a direct dataset/aggregate query for that status",
         "for the matrix report, verify the rows × columns cross-tab (status down, priority across) and reconcile 3 cells to the aggregate",
-        "for the joined report, verify BOTH blocks render (open_block with runtimeFilter done:false, done_block with done:true) and that their totals partition the task population",
+        "for the joined report, verify BOTH blocks render (open_block with runtimeFilter done:false, done_block with done:true) and that their runtimeFilters partition the task population. The two blocks carry DIFFERENT measures — open_block est_hours, done_block task_count (examples/app-showcase/src/ui/reports/index.ts) — so the partition is reconciled per measure through the API: for est_hours and for task_count, the done:false aggregate plus the done:true aggregate equals the unfiltered aggregate; and each block's rendered total equals its own measure under its own runtimeFilter (open_block est_hours under done:false, done_block task_count under done:true)",
         "for the chart report, verify the embedded DatasetReportChart plots the same measure the table shows (bar over status × est_hours, a second queryDataset call per ADR-0021)",
         "verify the tabular variant via the showcase_task `tabular` ListView ('Task List' nav node)",
         "attempt the negative: author a joined report whose blocks[] contains a block of type 'joined' and capture the rejection"
@@ -502,10 +508,10 @@
           "evidence": "matrix screenshot + cell comparison"
         },
         {
-          "clause": "joined report renders both blocks and their runtimeFilters actually partition: open_block totals + done_block totals == unfiltered totals",
+          "clause": "joined report renders both blocks and their runtimeFilters actually partition the task population: each block's rendered total equals the aggregate of ITS measure under ITS runtimeFilter, and, per measure, the done:false and done:true aggregates sum to the unfiltered aggregate. The blocks carry different measures (open_block est_hours, done_block task_count), so one block's hours are never added to the other's count",
           "oracle": "api",
-          "verify": "sum comparison across the two blocks vs the unfiltered aggregate",
-          "evidence": "the three totals"
+          "verify": "(1) open_block's rendered est_hours total == SUM(estimate_hours) WHERE done = false, and done_block's rendered task_count == COUNT WHERE done = true, each from a direct aggregate taken in the same run; (2) for est_hours AND for task_count, the done:false aggregate + the done:true aggregate == the unfiltered aggregate. A block total equal to its measure's UNFILTERED aggregate (its runtimeFilter ignored) is a FAIL",
+          "evidence": "per measure: the two filtered aggregates and the unfiltered one, beside the two rendered block totals"
         },
         {
           "clause": "the embedded report chart plots the bound dataset's measure — same numbers as the table above it",
@@ -552,6 +558,12 @@
           "date": "2026-08-07",
           "change": "new item: dataset-only authoring contract (ADR-0021) + ReportType variant matrix, pinned to the designer-roundtrip golden test",
           "ref": "claude/platform-test-checklist-ocwugl"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-16",
+          "change": "acceptance[5] (clause, verify, evidence) and steps[6] made computable (checklist-accuracy finding C2 of QA run #23927, wave #23878). The clause asked for 'open_block totals + done_block totals == unfiltered totals', but the two blocks carry different measures — open_block est_hours, done_block task_count (examples/app-showcase/src/ui/reports/index.ts) — so the sum mixed hours with a count and could not be computed; #23927 reconciled it per measure through the API. The clause now checks each block's rendered total against its own measure under its own runtimeFilter, and the per-measure partition (done:false + done:true == unfiltered) for both measures. Not loosened: a block whose runtimeFilter is ignored still renders its measure's unfiltered total and FAILS",
+          "ref": "#24036"
         }
       ]
     },
@@ -882,7 +894,7 @@
       "title": "The built-in System Overview dashboard renders as admin with LIVE sys_* counts, two widget values reconcile against direct API counts, single-environment-only widgets hide gracefully, and no widget renders blank",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "mixed",
       "personas": [
@@ -902,7 +914,7 @@
       "steps": [
         "sign in as admin, open the Setup app, and navigate to System Overview (nav_system_overview → dashboard system_overview); let the board settle and screenshot the whole dashboard BEFORE reading any DOM",
         "capture the dataset queries the widgets issue on load (the network trace) — each metric tile queries its sys_*_metrics dataset (count aggregate)",
-        "establish ground truth via the data API: a count aggregate on sys_user, and a count aggregate on sys_session restricted to LIVE sessions (revoked_at is null AND expires_at after now — the Active Sessions widget's own filter), recording both numbers",
+        "first make the live-session predicate discriminate — a fresh boot holds no revoked or expired sys_session row, so the live count and the table count are equal and clause 1 proves nothing (QA run #23927 F3): sign the admin in a SECOND time (POST /api/v1/auth/sign-in/email; keep the returned token) and, from the first session, revoke the second one (POST /api/v1/auth/revoke-session {\"token\": the second token}). An interactive revoke TOMBSTONES the row in place — revoked_at and revoke_reason 'user_revoked' stamped, expires_at moved into the past (packages/plugins/plugin-auth/src/session-tombstone.ts#INTERACTIVE_REVOKE_REASON) — whereas sign-out deletes it, so use the revoke. Confirm the unfiltered sys_session count now exceeds the live-predicate count, then reload the board. THEN establish ground truth via the data API: a count aggregate on sys_user, and a count aggregate on sys_session restricted to LIVE sessions (revoked_at is null AND expires_at after now — the Active Sessions widget's own filter), recording both numbers and the unfiltered sys_session count",
         "read the rendered value of widget_total_users (Total Users) and widget_active_sessions (Active Sessions) from the DOM (only after the screenshot confirmed render) and compare each to its API count",
         "confirm widget_organizations and widget_packages_installed are ABSENT from the rendered board (runtime-gated in single-tenant), not showing a broken/empty tile; read the served dashboard too — widget_organizations is already missing from GET /api/v1/meta/dashboard/system_overview (the server's requiresService strip), widget_packages_installed is present there and hidden by the console",
         "walk every remaining widget: the two security KPI tiles (Login Events and Config Changes, event counts over sys_audit_log_metrics — the board carries no permission-events tile; system_overview.dashboard.ts records why the 'Permission Changes' tile was removed), the Audit Events by Action pie, the Events by User bar, and the Event Volume by Action table — confirm each draws a real mark or a named error state, none blank",
@@ -918,7 +930,7 @@
         {
           "clause": "widget_active_sessions shows the live session count — its value equals a direct count aggregate on sys_session under the widget's OWN predicate: the tile declares filter {revoked_at: null, expires_at: {$gt: '{now}'}} (#7531; '{now}' resolved per request by resolveFilterTokens) and opts out of the date bar, so 'Active' is honest and the oracle is the count of live sessions, not the full table",
           "oracle": "api",
-          "verify": "the rendered Active Sessions tile == COUNT(sys_session WHERE revoked_at is null AND expires_at > now) from a direct /api/v1/data aggregate taken in the same run; a value equal to the unfiltered table count while revoked or expired rows exist is a FAIL",
+          "verify": "the rendered Active Sessions tile == COUNT(sys_session WHERE revoked_at is null AND expires_at > now) from a direct /api/v1/data aggregate taken in the same run; a value equal to the unfiltered table count while revoked or expired rows exist is a FAIL. The run must hold at least one tombstoned row (steps[2]), so that the live and unfiltered counts differ; while they are equal the clause has not discriminated and is not a pass",
           "evidence": "the tile value + the predicate-restricted API count (and the unfiltered count beside it, when they differ)"
         },
         {
@@ -975,6 +987,12 @@
           "date": "2026-10-13",
           "change": "acceptance[1] (clause, verify, evidence), acceptance[3].verify, knownGaps[0], steps[2], [4] and [5] and source[0] (stale spec, #23166 A1 / A3; parked on #23121, carried by #23169). The Active Sessions widget filters revoked_at null and expires_at > now (#7531), so the caveat 'no active-only filter' is gone and the oracle is the live-session count. The board has two security KPI tiles, Login Events and Config Changes: the Permission Changes tile was removed. system_overview declares 9 widgets, and the server strips widget_organizations from the served body on an unmet requiresService (filterDashboardForUser, ADR-0057 D10), so a single-tenant boot serves 8. QA run #23166 read 8 served widgets and no permission KPI at objectstack 36b2889c; the source reads the same at 6d7f4df3c",
           "ref": "#23169"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-16",
+          "change": "steps[2] and acceptance[1].verify gain the discriminating fixture (fixture gap F3 of QA run #23927, wave #23878). On a fresh boot no sys_session row is revoked or expired, so the live-session predicate and the table count were both 34 and clause 1 could not show the tile applies the predicate. The step now tombstones one session first — a second admin sign-in revoked through POST /api/v1/auth/revoke-session, which stamps revoked_at in place (session-tombstone.ts) where sign-out would delete the row — and confirms the two counts differ before reading the tile; the verify text records that equal counts are not a pass",
+          "ref": "#24036"
         }
       ]
     },
@@ -983,7 +1001,7 @@
       "title": "The showcase_delivery analytics cube serves /api/v1/analytics/*: meta discovers its measures/dimensions, a query answers a known aggregate that reconciles against a direct /data aggregate, and an unwired analytics slot degrades honestly to 404",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1009,7 +1027,7 @@
         {
           "clause": "meta discovers the cube: GET /analytics/meta lists showcase_delivery with exactly its measures (namespaced showcase_delivery.count / .total_estimate_hours / .avg_estimate_hours) and four dimensions (showcase_delivery.status / .priority / .due_date / .assignee)",
           "oracle": "api",
-          "verify": "the meta response's cubes[] entry for showcase_delivery names each measure and dimension the clause lists (getMeta keys them `${cube}.${key}`, and lists a cube only when its `public` is not `false`: a cube declaring `public: false` is omitted from meta and refused by query()/generateSql() with 404 CUBE_NOT_FOUND. showcase_delivery declares no `public`, so it is visible by the schema default `true`)",
+          "verify": "the meta response's showcase_delivery entry names each measure and dimension the clause lists. Read it from `data`, which is a BARE array of CubeMeta projections, one per cube (`?cube=showcase_delivery` answers a one-element array): there is no `cubes` wrapper object, so `data.cubes` reads nothing on a correct body (packages/spec/src/api/analytics.zod.ts#AnalyticsMetadataResponseSchema, #6442) (getMeta keys them `${cube}.${key}`, and lists a cube only when its `public` is not `false`: a cube declaring `public: false` is omitted from meta and refused by query()/generateSql() with 404 CUBE_NOT_FOUND. showcase_delivery declares no `public`, so it is visible by the schema default `true`)",
           "evidence": "the /analytics/meta?cube=showcase_delivery body"
         },
         {
@@ -1063,7 +1081,8 @@
         "examples/app-showcase/src/data/analytics/showcase.cube.ts#showcase_project (the showcase_delivery cube — measures, dimensions, base table, showcase_project join; no `public` key, so visible by the default `true`)",
         "examples/app-showcase/src/coverage.ts#analyticsCubes (analyticsCubes registration → src/data/analytics/showcase.cube.ts, served by /api/v1/analytics/*)",
         "packages/runtime/src/domains/analytics.ts#cube (route contract: POST /analytics/query, GET /analytics/meta[?cube], entry validation, ExecutionContext scoping #2852, handled:false 404 for an absent/stub slot #3891/#4000)",
-        "packages/spec/src/api/analytics.zod.ts#AnalyticsQueryRequestSchema (AnalyticsQueryRequestSchema bare shape + retiredKey query/format; meta response cubes[])",
+        "packages/spec/src/api/analytics.zod.ts#AnalyticsQueryRequestSchema (AnalyticsQueryRequestSchema bare shape + retiredKey query/format)",
+        "packages/spec/src/api/analytics.zod.ts#AnalyticsMetadataResponseSchema (the GET /analytics/meta body: data is a bare array of CubeMeta projections — name, title, description, measures, dimensions — with no cubes wrapper and no cube sql, #6442)",
         "packages/services/service-analytics/src/analytics-service.ts#getMeta (getMeta keys measures/dimensions as `${cube}.${key}` and omits a registry cube whose `public` is `false` (cube-visibility.ts#isCubePublic); query()/generateSql() refuse such a cube with 404 CUBE_NOT_FOUND through assertCubePublic)",
         "packages/cli/src/commands/serve.ts#CAPABILITY_PROVIDERS (CAPABILITY_PROVIDERS.analytics → @objectstack/service-analytics, configKey analyticsCubes)"
       ],
@@ -1085,6 +1104,12 @@
           "date": "2026-10-01",
           "change": "dropped done_rate from the fixture line and the meta clause, re-spelled the verify text that counted it, and removed its variant: a cube member's `sql` is now a column reference (MetricSchema in packages/spec/src/data/analytics.zod.ts refuses a SQL expression at parse), so the showcase_delivery cube no longer declares the CASE-expression done_rate measure, and the done rate is declared on the showcase_task_metrics dataset (examples/app-showcase/src/ui/datasets/chart-gallery.dataset.ts) as a filtered count over a count. The steps, the reconciliation clauses and the four dimensions are unchanged",
           "ref": "#20943"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "acceptance[0].verify and source[3] re-pointed to the meta wire shape (checklist-accuracy finding C1 of QA run #23927, wave #23878). GET /api/v1/analytics/meta answers `data` as a BARE array of CubeMeta projections — AnalyticsMetadataResponseSchema says outright there is no `cubes` wrapper (#6442) — so the verify text's 'cubes[] entry' named a key the body never carries. The clause still requires every listed measure and dimension on the showcase_delivery entry; source gains the response schema's anchor",
+          "ref": "#24036"
         }
       ]
     },

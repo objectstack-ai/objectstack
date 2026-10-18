@@ -369,7 +369,28 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         // [#23050 slice 10] 10 → 11 (`ui-routes.ts`): 59 and 74, +1 each for
         // that slice's forwarder (the two call sites moved with the body and are
         // counted in both readings).
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
+        // [#23050 slice 11] 11 → 12 (`form-routes.ts`): 59 and 74 unchanged —
+        // the public form body reads neither term, so its literal forwards
+        // neither.
+        // [#23050 slice 12] 12 → 13 (`crud-routes.ts`): 60 and 75, +1 each for
+        // that slice's forwarder (the six CRUD doors' call sites moved with the
+        // body and are counted in both readings).
+        // [#23050 slice 13a] 13 → 14 (`meta-collection-routes.ts`): 60 unchanged
+        // and 75 → 76. The moved `/meta` groups call `resolveExecCtx` at three
+        // sites and `enforceAuth` at none (the umbrella's wrapper gates them), so
+        // the host literal the inner method builds forwards the first only; the
+        // three call sites moved and are counted in both readings.
+        // [#23050 slice 13b] 14 → 15 (`meta-item-read-routes.ts`): 60 unchanged
+        // and 76 → 77, the same shape: the per-item reads call `resolveExecCtx` at
+        // one site and `enforceAuth` at none, so the second host literal the inner
+        // method builds forwards the first only; the call site moved and is
+        // counted in both readings.
+        // [#23050 slice 13c] 15 → 16 (`meta-item-write-routes.ts`): 60 unchanged
+        // and 77 → 78, the same shape: the per-item writes call `resolveExecCtx` at
+        // two sites and `enforceAuth` at none, so the third host literal the inner
+        // method builds forwards the first only; the two call sites moved and are
+        // counted in both readings.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
     });

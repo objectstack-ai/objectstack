@@ -33,6 +33,7 @@ import { isCatalogActivationWrite, handleCatalogActivationWrite } from './catalo
 import { isPermissionSetCloneWrite, handlePermissionSetCloneWrite } from './permission-set-clone.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 // [#23214] The repo's one sentence for a repeated single-valued parameter.
 import { repeatedQueryParamMessage } from '@objectstack/rest';
 
@@ -90,6 +91,9 @@ export async function handleSecurityRequest(
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
         };
     }
+    // [#24151] The body is read once the baseline above has admitted the
+    // caller, never ahead of it (`../deferred-request-body.ts`).
+    _body = readDispatchedBody(_body);
 
     // [ADR-0126 §3 regime C, ADR-0131 D3/D6] THE CATALOG ACTIVATION DOOR —
     // switch a position or a permission set on/off for this deployment, which

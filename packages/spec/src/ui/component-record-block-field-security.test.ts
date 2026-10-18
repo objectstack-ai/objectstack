@@ -192,11 +192,15 @@ describe('`requiredPermissions` is declared on the three blocks as a capability 
     expect(keys).toContain('requiredPermissions');
   });
 
-  it('B · the census: exactly the three blocks, `record:quick_actions` and `record:json` declare it — lit controls `aria` and `fields` fire on the same instrument', () => {
-    // `record:json` (#23745) declares the same NAME with a different meaning on
-    // purpose — required and fail-closed — so it is outside the "one key, one
-    // text" pin below; its own pins live in `component-record-json.test.ts`.
-    expect(declaring('requiredPermissions')).toEqual([...BLOCKS, 'record:json', 'record:quick_actions'].sort());
+  it('B · the census: exactly the three blocks, `record:quick_actions` and `list-view` declare it — lit controls `aria` and `fields` fire on the same instrument', () => {
+    // `record:json` (#23745) declared the same NAME with a different meaning —
+    // required and fail-closed — until it was retired (#24162); its row now
+    // refuses every bag, so it declares no key at all
+    // (`component-record-json-retirement.test.ts`).
+    // `list-view` (#22444) is the list view's own members by reference, so it
+    // carries the list view's audience `requiredPermissions`, the same
+    // capability-set member.
+    expect(declaring('requiredPermissions')).toEqual([...BLOCKS, 'record:quick_actions', 'list-view'].sort());
     // Controls: the census can find a key at all, and finds the blocks under
     // test when it should. `fields` is declared on two of the three (the related
     // list's column key is `columns`), which is itself a discriminating reading.

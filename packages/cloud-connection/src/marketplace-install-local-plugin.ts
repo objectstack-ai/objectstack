@@ -88,10 +88,12 @@
  *          → removes the cached manifest, withdraws the package from the
  *            running kernel through the registry's `uninstallPackage` — the
  *            verb the protocol's own uninstall uses — so its objects answer
- *            404 at once (#21576), then runs the uninstall cleanups domain
- *            plugins registered with the protocol (#21490) — the package's
- *            permission sets and their grants go with it — and reports each
- *            outcome as `cleanups`, a refused withdrawal included.
+ *            404 at once (#21576), and the copies of its objects the install
+ *            bridged into the `metadata` service, so the object reads stop
+ *            serving them at once too (#24070), then runs the uninstall
+ *            cleanups domain plugins registered with the protocol (#21490) —
+ *            the package's permission sets and their grants go with it — and
+ *            reports each outcome as `cleanups`, a refused withdrawal included.
  *
  * Persistence layout:
  *   <cwd>/.objectstack/installed-packages/<safe-manifest-id>.json
@@ -184,7 +186,7 @@ import { ConnectionCredentialStore } from './connection-credential-store.js';
 import { readJsonRequestBody } from './request-json-body.js';
 import { MARKETPLACE_INSTALLED_UI_BUNDLE } from './marketplace-ui.js';
 import { matchSeedRows, purgeSeedRows, type PurgeSeedDataset } from './marketplace-install-local-purge.js';
-import type { IAuthService, IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, IAuthService, IHttpServer, IMetadataService, IObjectQLEngine } from '@objectstack/spec/contracts';
 import type {
     DeletePackageRequest,
     UninstallCleanupOutcome,
@@ -199,6 +201,9 @@ import type {
 // this environment's own metadata), and the client-facing sentence rule.
 import { unmanagedInstallPostureRefusal, isWritablePackage, clientFacingFailureText, captureUninstallDeclared } from '@objectstack/metadata-protocol';
 import { resolveThrownHttpError } from '@objectstack/types';
+
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 const ROUTE_BASE = '/api/v1/marketplace/install-local';
 
@@ -234,6 +239,13 @@ const UNINSTALL_CLEANUP_RUNNER = 'protocol.runUninstallCleanups';
  * above is named for the protocol's.
  */
 const REGISTRY_WITHDRAWAL = 'registry.uninstallPackage';
+
+/**
+ * [#24070] The outcome name this door reports when the `metadata` service kept
+ * a copy of one of the uninstalled package's objects — named for the service
+ * verb that withdraws it, as the one above is named for the registry's.
+ */
+const OBJECT_COPY_WITHDRAWAL = 'metadata.unregister';
 
 /**
  * [#8976] The capability every MUTATING install-local route demands.
@@ -774,6 +786,13 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                     this.reportProtocolIncompatibleEntry(ctx, entry, compat.diagnostic);
                     continue;
                 }
+                // ADR-0087 D2 — the ledger entry is data at rest: the body is
+                // converted forward ONCE here ({@link convertPackageBodyForward}),
+                // and that converted body is what registers, what the binder
+                // binds, what the side effects replay and what the heal seeds.
+                // The ledger keeps the body as installed, so it converts again
+                // at every rehydrate.
+                const converted = this.convertPackageBodyForward(ctx, entry.manifest);
                 // Awaited: register also bridges the manifest's objects into
                 // the metadata service (late-registration bridge in
                 // ObjectQLPlugin) — wait for that so metadata consumers see
@@ -781,7 +800,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // [#23972] Every ledger entry is a marketplace install, so its
                 // registry row says so (`source: 'marketplace'`) after a restart
                 // exactly as it did when it was installed.
-                await manifestService!.register(entry.manifest, { source: 'marketplace' });
+                await manifestService!.register(converted, { source: 'marketplace' });
                 // Sync schemas so the driver creates tables for the newly-
                 // registered objects (idempotent — already-synced tables
                 // are no-ops).
@@ -791,12 +810,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 } catch { /* non-fatal */ }
                 // [#21321] Bind the package's script-action bodies and body
                 // hooks — `register` above makes them declared, not runnable.
-                await this.bindArtifactHandlers(ctx, entry.manifest, entry.manifestId);
+                await this.bindArtifactHandlers(ctx, converted, entry.manifestId);
                 // Replay translations + register seed datasets, but don't
                 // re-run seeding — existing rows are already in the DB from
                 // the original install, and multi-tenant orgs will replay
                 // via the security middleware on next sys_organization insert.
-                await this.applySideEffects(ctx, entry.manifest, { seedNow: false });
+                await this.applySideEffects(ctx, converted, { seedNow: false });
                 // …EXCEPT when the database no longer has them: the ledger is
                 // anchored to <cwd> while the database can be swapped out from
                 // under it (`os dev --fresh`, a deleted dev.db, a --database
@@ -804,7 +823,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 // boot via AppPlugin, but a rehydrated marketplace package
                 // would stay empty forever — app visible, tables created,
                 // zero rows. Heal that case.
-                await this.maybeHealSampleData(ctx, entry);
+                await this.maybeHealSampleData(ctx, entry, converted);
                 ctx.logger?.info?.(`[MarketplaceInstallLocal] rehydrated ${entry.manifestId}@${entry.version}`);
             } catch (err: any) {
                 ctx.logger?.error?.(`[MarketplaceInstallLocal] rehydrate failed for ${entry.manifestId}`, err instanceof Error ? err : new Error(String(err)));
@@ -825,11 +844,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      *     install-time rows (or the user's own data) are still present, and
      *     re-upserting would silently revert user edits on every boot.
      *
+     * `converted` is the entry's manifest as rehydrate converted it — the one the
+     * package registered — so the heal seeds what registered, not the raw
+     * ledger bytes.
+     *
      * Never throws — a failed heal logs and leaves the boot untouched.
      */
-    private maybeHealSampleData = async (ctx: PluginContext, entry: InstalledEntry): Promise<void> => {
-        const datasets = Array.isArray(entry.manifest?.data)
-            ? entry.manifest.data.filter((d: any) => d && d.object && Array.isArray(d.records))
+    private maybeHealSampleData = async (ctx: PluginContext, entry: InstalledEntry, converted: any): Promise<void> => {
+        const datasets = Array.isArray(converted?.data)
+            ? converted.data.filter((d: any) => d && d.object && Array.isArray(d.records))
             : [];
         if (datasets.length === 0) return;
         if (entry.sampleDataPurged === true) return;
@@ -1553,6 +1576,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //    running kernel held a package it did not, and the console read
         //    that answer as "the app should now appear".
         let hotLoadError: string | undefined;
+        // ADR-0087 D2 — the fetched bundle is a published artifact, so it is
+        // converted forward ONCE here ({@link convertPackageBodyForward}); the
+        // converted body is what registers, what the binder binds (4c) and
+        // what the side effects replay (5). The ledger entry (4) keeps the
+        // body as installed, and rehydrate converts it again at every boot.
+        const converted = this.convertPackageBodyForward(ctx, manifest);
         try {
             const manifestService = ctx.getService('manifest') as any;
             // Awaited: register also bridges the manifest's objects into the
@@ -1560,7 +1589,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // 200 (AI describe_object, Studio object list) must see them.
             // [#23972] The registry row records where this package came
             // from: the marketplace (`source: 'marketplace'`).
-            await manifestService.register(manifest, { source: 'marketplace' });
+            await manifestService.register(converted, { source: 'marketplace' });
         } catch (err: any) {
             const registerError = String(err?.message ?? err);
             // For offline file imports we treat a register failure as a hard
@@ -1624,14 +1653,14 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         //     through the runtime's ONE binder — the call `AppPlugin.start`
         //     makes for a boot artifact. A reinstall replaces the previous
         //     version's set rather than adding to it.
-        await this.bindArtifactHandlers(ctx, manifest, manifestId);
+        await this.bindArtifactHandlers(ctx, converted, manifestId);
 
         // 5. Replicate the AppPlugin start-time side-effects that the
         //    `manifest` service does NOT do on its own:
         //      • load translation bundles into the i18n service
         //      • stash seed datasets on the kernel + run them now so the
         //        installed app has demo data on first paint.
-        const seededSummary = await this.applySideEffects(ctx, manifest, { seedNow: true, c });
+        const seededSummary = await this.applySideEffects(ctx, converted, { seedNow: true, c });
         // `skipped` counts too: an all-skip run means the rows are ALREADY in
         // the database (e.g. a reinstall/upgrade over live sample data) — the
         // install carries sample data either way. Leaving the flag false here
@@ -1963,20 +1992,40 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         // withdrawal releases them — synchronously, so still no `await` before
         // it, at the same point and through the same helper as
         // `deletePackage` — and the cleanup revokes the grants naming them.
+        //
+        // [#24070] The registry is one of the two places the install put the
+        // package's objects: its `manifest.register` also bridged a copy of
+        // each into the `metadata` service, which the object reads serve. The
+        // copies go right after the registry half and before the cleanups —
+        // only once the registry withdrew, so a refused withdrawal leaves the
+        // package whole, as loaded as it was.
         let registry: unknown;
         try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing registered */ }
         const declared = captureUninstallDeclared(registry, manifestId);
         const withdrawal = this.withdrawFromRunningKernel(ctx, manifestId);
+        const copies = withdrawal ? undefined : await this.withdrawObjectCopies(ctx, manifestId);
+        // [#24182] …and the copies of OTHER packages' objects that this one's
+        // extensions rewrote: the bridge that wrote them restores the owner's
+        // definition (`manifest.restoreExtendedObjectCopies`, never rejects).
+        if (!withdrawal) {
+            let manifestService: { restoreExtendedObjectCopies?(id: string): Promise<void> } | undefined;
+            try { manifestService = ctx.getService('manifest') as typeof manifestService; } catch { /* no engine — nothing bridged */ }
+            await manifestService?.restoreExtendedObjectCopies?.(manifestId);
+        }
         const cleanups = [
             ...(withdrawal ? [withdrawal] : []),
+            ...(copies ? [copies] : []),
             ...await this.runUninstallCleanups(ctx, manifestId, admission.userId, declared),
         ];
+        const withdrawals = (withdrawal ? 1 : 0) + (copies ? 1 : 0);
         ctx.logger?.info?.(
             `[MarketplaceInstallLocal] uninstalled ${manifestId} (cached manifest removed; `
             + (withdrawal
                 ? 'the running kernel did NOT withdraw it, so it stays loaded until the next restart; '
-                : 'withdrawn from the running kernel; ')
-            + `${cleanups.length - (withdrawal ? 1 : 0)} uninstall cleanup(s) ran)`,
+                : copies
+                    ? 'withdrawn from the running kernel\'s registry, but the metadata service kept copies of its objects until the next restart; '
+                    : 'withdrawn from the running kernel; ')
+            + `${cleanups.length - withdrawals} uninstall cleanup(s) ran)`,
         );
         return c.json({
             success: true,
@@ -1985,7 +2034,9 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 cleanups,
                 note: withdrawal
                     ? 'Cached manifest removed, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The running kernel did not withdraw the package, so it stays loaded until the next restart; that is the `registry.uninstallPackage` entry in `cleanups`.'
-                    : 'Cached manifest removed, the package withdrawn from the running kernel, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`.',
+                    : copies
+                        ? 'Cached manifest removed, the package withdrawn from the running kernel\'s registry, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`. The metadata service kept copies of the package\'s objects, so the object listing and reads keep serving them until the next restart; that is the `metadata.unregister` entry in `cleanups`.'
+                        : 'Cached manifest removed, the package withdrawn from the running kernel, and the uninstall cleanups this runtime\'s plugins registered ran — each one\'s outcome is in `cleanups`.',
             },
         }, 200);
     };
@@ -2012,7 +2063,10 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * same id (`registerApp`): the package's object contributions (so its
      * objects answer 404 at once instead of after a restart), its namespace,
      * every metadata item it shipped, its boot disable seed, and its package
-     * record. Its tables and rows are untouched.
+     * record. Its tables and rows are untouched. [#24070] The verb reaches the
+     * registry only: the copies of the package's objects that the install's
+     * register bridged into the `metadata` service are
+     * {@link withdrawObjectCopies}'s, which the door runs right after this.
      *
      * Never throws: the uninstall has already happened. Two answers:
      *   - `undefined` — withdrawn, or nothing to withdraw: no `objectql`
@@ -2052,6 +2106,94 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 error: 'the running kernel did not withdraw the package — it stays loaded until the next restart',
             };
         }
+    };
+
+    /**
+     * [#24070] Withdraw the copies of an uninstalled package's objects from the
+     * `metadata` service — the half of what the install put in the running
+     * kernel that {@link withdrawFromRunningKernel}'s registry verb cannot
+     * reach. The door runs it right after that verb has withdrawn.
+     *
+     * The install's `manifest.register` does two things: `registerApp` puts the
+     * package in the registry and, on a started kernel, the ObjectQL plugin
+     * bridges each of the package's objects into the `metadata` service, as a
+     * copy stamped with the package's id (`_packageId`), so every reader of
+     * that service sees them. Nothing took those copies out again. The metadata
+     * protocol's `GET /meta/object` merges the service's listing into its
+     * answer, and `GET /meta/object/NAME` reads the service before the
+     * registry, so both kept serving every object of the uninstalled package
+     * until a restart — while its data route already answered 404, and its
+     * `app` and `permission` items, which nothing copies into the service,
+     * were already gone.
+     *
+     * What is withdrawn is what the bridge itself counts as the package's own
+     * copy, the predicate it re-registers by on a hot upgrade: an `object` whose
+     * `_packageId` is this package's id. And only under the two conditions the
+     * ObjectQL plugin's own copy-follow takes before it removes a copy, because
+     * `unregister` also deletes through the service's writable `datasource:`
+     * loaders: the registry no longer serves the name, and the removal is
+     * silent to the service's watchers (`notify: false`), as the bridge's
+     * register was. A same-name copy the package never bridged — an authored
+     * one, or another package's — is not this uninstall's, and stays.
+     *
+     * Never throws: the uninstall has already happened. Two answers:
+     *   - `undefined` — every such copy withdrawn, or nothing to withdraw: no
+     *     `metadata` service, no `objectql` registry (so nothing was bridged),
+     *     or no copy stamped with the package's id;
+     *   - one failed outcome named {@link OBJECT_COPY_WITHDRAWAL}, when the
+     *     service could not be listed or refused to remove a copy; `removed`
+     *     counts the copies that did go. It rides on `cleanups`, the way a
+     *     refused registry withdrawal does, and the operator log names the
+     *     objects kept, what it costs and the remedy; the cause is logged,
+     *     never put on the wire.
+     */
+    private withdrawObjectCopies = async (
+        ctx: PluginContext,
+        manifestId: string,
+    ): Promise<UninstallCleanupOutcome | undefined> => {
+        let metadata: IMetadataService | undefined;
+        let registry: IObjectQLEngine['registry'] | undefined;
+        try { metadata = ctx.getService<IMetadataService>('metadata'); } catch { /* no metadata service — nothing bridged */ }
+        try { registry = ctx.getService<IObjectQLEngine>('objectql')?.registry; } catch { /* no data engine — nothing bridged */ }
+        if (!metadata || !registry) return undefined;
+
+        let removed = 0;
+        const kept: string[] = [];
+        let cause: unknown;
+        try {
+            for (const copy of await metadata.list('object')) {
+                const name = (copy as { name?: unknown } | null)?.name;
+                if (typeof name !== 'string' || (copy as { _packageId?: unknown })._packageId !== manifestId) continue;
+                if (registry.getObject(name) !== undefined) continue;
+                try {
+                    await metadata.unregister('object', name, { notify: false });
+                    removed++;
+                } catch (err) {
+                    kept.push(name);
+                    cause ??= err;
+                }
+            }
+        } catch (err) {
+            cause = err;
+        }
+        if (cause === undefined) return undefined;
+
+        const what = kept.length > 0
+            ? `kept its copies of object(s) ${kept.map((n) => `'${n}'`).join(', ')}`
+            : 'could not be listed, so its copies of the package\'s objects were not withdrawn';
+        ctx.logger?.warn?.(
+            `[MarketplaceInstallLocal] uninstalled ${manifestId} and withdrew it from the registry, but the metadata `
+            + `service ${what} (${(cause as { message?: unknown })?.message ?? cause}) — GET /api/v1/meta/object and `
+            + 'GET /api/v1/meta/object/NAME keep serving them until the next restart, while their data route already '
+            + 'answers 404. The outcome is on the response (`cleanups`). Remedy: restart the runtime — the ledger entry '
+            + 'is already gone, so the restart does not bring the package back.',
+        );
+        return {
+            name: OBJECT_COPY_WITHDRAWAL,
+            success: false,
+            removed,
+            error: 'the metadata service kept copies of the package\'s objects — the object reads serve them until the next restart',
+        };
     };
 
     /**
@@ -2508,6 +2650,12 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
      * refused first, with the install route's `422 OS_PROTOCOL_INCOMPATIBLE`
      * ({@link refuseProtocolIncompatibleEntry}): ahead of the side effects,
      * because both of those answers are decided after them.
+     *
+     * [#24040] An entry the handshake admits is then converted forward once
+     * (ADR-0087 D2, {@link convertPackageBodyForward}), as the install and the
+     * rehydrate convert it, so the side effects reload the same translations
+     * and seed the same datasets the other two loads of that body do. A body
+     * with no declared range comes back unchanged.
      */
     private handleReseed = async (c: any, ctx: PluginContext): Promise<Response> => {
         const admission = await this.requireInstallCapability(c, ctx, 'Reseeding sample data');
@@ -2531,7 +2679,15 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
         const incompatible = this.refuseProtocolIncompatibleEntry(c, entry);
         if (incompatible) return incompatible;
 
-        const summary = await this.applySideEffects(ctx, entry.manifest, { seedNow: true, c, door: 'reseed' });
+        // [#24040] ADR-0087 D2 — a reseed is a load of the ledger body too: the
+        // body is converted forward ONCE here ({@link convertPackageBodyForward}),
+        // after the handshake above judged the entry as stored, exactly as the
+        // install and the rehydrate convert it, and that converted body is what
+        // the side effects reload (its translations) and seed (its datasets).
+        // The ledger keeps the body as installed: `entry` is written back below
+        // with its `manifest` untouched.
+        const converted = this.convertPackageBodyForward(ctx, entry.manifest);
+        const summary = await this.applySideEffects(ctx, converted, { seedNow: true, c, door: 'reseed' });
         // [ADR-0123 D2 / D4] A walled session with no active organization: the
         // reseed is a tenant-scoped write with no organization to write under.
         if (summary.seeded.mode === 'refused') {
@@ -2759,6 +2915,33 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             success: false,
             error: { code: refusal.code, message: refusal.message, details: refusal.details },
         }, refusal.status);
+    };
+
+    /**
+     * ADR-0087 D2 for this plugin's three loads of a ledger body — the install,
+     * the rehydrate and the reseed ({@link handleReseed}, #24040). The body is
+     * data at rest (a published artifact), so it replays the versioned forward
+     * conversion inside the window its own `engines.protocol` opens, through the
+     * engine's ONE registration-door entry point
+     * (`ObjectQL.convertPackageBodyForward`), reused here, never re-derived: a
+     * body with no declared range comes back by reference, and the named warning
+     * is the engine's own.
+     *
+     * Converted once per load and handed to EVERY reader of that load — on the
+     * install and the rehydrate `manifest.register`, {@link bindArtifactHandlers},
+     * {@link applySideEffects} and the rehydrate's sample-data heal; on the
+     * reseed {@link applySideEffects} alone, since it neither registers nor
+     * binds — so none of them reads the raw bytes while the registry holds the
+     * converted copy. On the two loads that register, `register` meets the same
+     * entry point again, which hands an already-converted body back by reference
+     * with no second warning.
+     *
+     * An engine without that door (not ObjectQL) is handed the body as before.
+     */
+    private convertPackageBodyForward = (ctx: PluginContext, manifest: unknown): any => {
+        let ql: { convertPackageBodyForward?: (body: unknown) => unknown } | undefined;
+        try { ql = ctx.getService('objectql') as typeof ql; } catch { /* no data engine */ }
+        return typeof ql?.convertPackageBodyForward === 'function' ? ql.convertPackageBodyForward(manifest) : manifest;
     };
 
     /**
@@ -3180,8 +3363,11 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             if (!api?.getSession) return null;
             // [#22258] A request carrying a session cookie reads without
             // renewal: this route's response never carries a renewed cookie.
-            const session = await api.getSession(inProcessSessionReadInput(c.req.raw.headers));
-            const direct = session?.session?.activeOrganizationId ?? session?.activeOrganizationId ?? null;
+            // [#24222] Typed as `AuthSessionApi` declares the answer, and read
+            // where it declares the active organization. No top-level
+            // `activeOrganizationId` operand: no in-process producer answers one.
+            const session: SessionRead | null = await api.getSession(inProcessSessionReadInput(c.req.raw.headers));
+            const direct = session?.session?.activeOrganizationId ?? null;
             if (direct) return String(direct);
         } catch { /* ignore */ }
         return null;
@@ -3341,7 +3527,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
             // The better-auth session bridge — resolved lazily and defensively,
             // exactly as the previous implementation did, then handed to the
             // shared resolver instead of being trusted on its own.
-            const getSession = async (h: any) => {
+            // [#24222] Answers as `AuthSessionApi` declares the read, not `any`.
+            const getSession = async (h: any): Promise<SessionRead | null> => {
                 try {
                     const authService: any = ctx.getService('auth');
                     let api: any = authService?.api;

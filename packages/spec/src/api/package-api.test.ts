@@ -5,6 +5,7 @@ import {
   GetInstalledPackageRequestSchema,
   PackageInstallRequestSchema,
   PackageInstallBodySchema,
+  PackageInstallManifestSchema,
   PackageInstallResponseSchema,
   PackageUpgradeRequestSchema,
   PackageUpgradeResponseSchema,
@@ -1210,6 +1211,60 @@ describe('install contract bound to the live door', () => {
       expect(PackageInstallBodySchema.safeParse({
         manifest: SDK_MANIFEST, settings: undefined, enableOnInstall: undefined, overwrite: true,
       }).success).toBe(true);
+    });
+  });
+
+  /**
+   * An install through this door AUTHORS a project package. `cloud` and
+   * `system` are the scopes of packages the platform ships, which the
+   * read-only gate refuses on every API exit, so an authored install that
+   * declared one locked itself. The install manifest narrows `scope` to
+   * `project`; `ManifestSchema` itself keeps all three, for platform packages.
+   */
+  describe('`manifest.scope` on an authored install admits `project` alone', () => {
+    const PLATFORM_SCOPES = ['cloud', 'system'] as const;
+
+    for (const scope of PLATFORM_SCOPES) {
+      it(`\`scope: '${scope}'\` is refused on BOTH body forms and with \`overwrite\`, the remedy named`, () => {
+        const m = { ...SDK_MANIFEST, scope };
+        for (const body of [{ manifest: m }, m, { manifest: m, overwrite: true }]) {
+          expect(PackageInstallBodySchema.safeParse(body).success, JSON.stringify(body)).toBe(false);
+        }
+        // The located issue — what the install door surfaces — on each branch alone.
+        const wrapped = PackageInstallRequestSchema.safeParse({ manifest: m });
+        const bare = PackageInstallManifestSchema.safeParse(m);
+        for (const [verdict, path] of [[wrapped, ['manifest', 'scope']], [bare, ['scope']]] as const) {
+          expect(verdict.success).toBe(false);
+          const issues = verdict.error?.issues ?? [];
+          expect(issues).toHaveLength(1);
+          expect(issues[0]?.code).toBe('invalid_value');
+          expect(issues[0]?.path).toEqual(path);
+          expect(issues[0]?.message).toContain(`"${scope}"`);
+          expect(issues[0]?.message).toContain("scope: 'project'");
+        }
+      });
+    }
+
+    it('`scope: project` and an absent scope parse green on both forms, the parsed scope `project`', () => {
+      for (const m of [SDK_MANIFEST, { ...SDK_MANIFEST, scope: 'project' }]) {
+        const wrapped = PackageInstallBodySchema.safeParse({ manifest: m });
+        const bare = PackageInstallBodySchema.safeParse(m);
+        expect(wrapped.success && bare.success).toBe(true);
+        expect((wrapped.data as { manifest: { scope: string } }).manifest.scope).toBe('project');
+        expect((bare.data as { scope: string }).scope).toBe('project');
+      }
+    });
+
+    it('`ManifestSchema` is NOT narrowed — platform packages still declare all three scopes', () => {
+      for (const scope of ['cloud', 'system', 'project']) {
+        expect(ManifestSchema.safeParse({ ...SDK_MANIFEST, scope }).success, scope).toBe(true);
+      }
+    });
+
+    it('the install manifest is ManifestSchema in every other key — the same closed key set', () => {
+      expect(Object.keys(PackageInstallManifestSchema.shape).sort())
+        .toEqual(Object.keys(ManifestSchema.shape).sort());
+      expect(PackageInstallManifestSchema.safeParse({ ...SDK_MANIFEST, bogus: 1 }).success).toBe(false);
     });
   });
 

@@ -3757,6 +3757,218 @@ const FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Flow anti-patterns (`lint-flow-patterns.ts`) ─────────────────────────────
+
+/** The minimal `catch` region, shared by the two containment entries; its `fix:` lines spell the same region. */
+const FLOW_MINIMAL_CATCH =
+  'A `catch` region cannot be empty: its `nodes` is `.min(1)`, so `catch: {}` and `catch: { nodes: [] }` are ' +
+  'both refused by the parse. The shortest handler that works is one bare `assignment` node with no `config`, ' +
+  '`catch: { nodes: [ { id: \'handled\', type: \'assignment\', label: \'Handled\' } ] }`; the region\'s `edges` ' +
+  'may be omitted, and so may the `try_catch` node\'s `errorVariable`, which defaults to `$error`.';
+
+/** Where the containment pattern is written out, shared by the two containment entries. */
+const FLOW_CONTAINMENT_DOCS =
+  'The pattern is written out in content/docs/automation/flows.mdx §"Per-iteration containment".';
+
+const FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-loop-body-uncontained',
+  covers: 'why a loop body needs its own `try_catch`',
+  paragraphs: [
+    'A node counts as one that can fail when its executor can end a run for a reason not knowable at ' +
+      'authoring time (an absent row, a refused write, a 500, a connector outage, a child flow that died): ' +
+      '`get_record`, `create_record`, `update_record`, `delete_record`, `http`, `notify`, ' +
+      '`connector_action`, `script`, `subflow`, `map` and `approval`. A node type outside that list, a ' +
+      'plugin\'s included, is not judged.',
+    'Containment is judged by ancestry, not depth: a `try_catch` anywhere between the loop and the node ' +
+      'contains it, a `parallel` branch is walked through, and a nested `loop` is judged on its own, so each ' +
+      'node is reported once, against its innermost loop. A `try_catch` with no `catch` counts as containment ' +
+      'here, because `flow-try-catch-without-catch` reports it and names the missing key. A `loop` with no ' +
+      '`body` (the legacy flat-graph form) is not judged.',
+    FLOW_MINIMAL_CATCH + ' Measured with that handler, a 5-item sweep whose 3rd item fails processes all 5 ' +
+      'items and the run completes.',
+    'A loop that is meant to stop at its first failure is a legitimate reading, so this is a warning and ' +
+      'never fails a build. ' + FLOW_CONTAINMENT_DOCS,
+  ],
+};
+
+const FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION: RuleExplanation = {
+  rule: 'flow-try-catch-without-catch',
+  covers: 'why a `try_catch` with no `catch` contains nothing',
+  paragraphs: [
+    'Reported wherever the node sits, at any depth of the flow. A `catch` that is present but malformed is ' +
+      'refused by the parse itself, with the schema\'s own message, so it is not reported here. Inside a ' +
+      '`loop` body, `flow-loop-body-uncontained` counts any enclosing `try_catch` as containment, so a ' +
+      'catch-less one is reported once, here, where the missing key can be named.',
+    FLOW_MINIMAL_CATCH,
+    'If failing loudly is the intent, a `try_catch` with only `try` (and optionally `retry`) is a legitimate ' +
+      'retry-then-fail shape, so this is a warning and never fails a build. ' + FLOW_CONTAINMENT_DOCS,
+  ],
+};
+
+const FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-multi-write-unfiltered',
+  covers: 'when a bulk write is bounded by nothing',
+  paragraphs: [
+    'A filter carries no condition when the key is absent, when it is `{}`, or when the Filter Protocol\'s ' +
+      'identity reduction (the one the SQL, MongoDB and memory drivers execute) resolves it to true, such as ' +
+      '`{ $and: [] }`; a filter the reduction cannot resolve is not reported. Only `multi: true` itself ' +
+      'declares bulk intent: a `multi: \'true\'` string is refused by the parse.',
+    'The worked example is examples/app-showcase `showcase_inquiry_purge`, whose bulk delete is bounded by ' +
+      'a predicate. If emptying or rewriting the whole object really is the intent, keep the node: ' +
+      '`multi: true` is how a flow declares bulk intent, and the engine admits a whole-object write declared ' +
+      'that way, so this is a warning, not a gate, and the run-time path stays open.',
+    'Distinct from the run-time erased-condition guard, which REFUSES this node at run time when a condition ' +
+      'you WROTE evaluated to nothing: that guard is keyed on "a written condition is gone" and deliberately ' +
+      'not on "the filter is empty", which is the fact this rule judges at authoring time.',
+  ],
+};
+
+const FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION: RuleExplanation = {
+  rule: 'flow-decision-inclusive-overlap',
+  covers: 'when an inclusive decision runs more than one branch',
+  paragraphs: [
+    'An edge-branched decision is exclusive by default: with `mode` omitted, the first out-edge whose ' +
+      'condition holds, in declaration order, wins, and an `isDefault: true` edge runs only when none did. ' +
+      'Keep `mode: \'inclusive\'` only where running every matching branch is the intent. The rule cannot ' +
+      'prove the conditions disjoint over CEL, so it is a warning and never fails a build.',
+    'Counted over conditioned out-edges only: a `fault` edge is error routing, and an `isDefault` edge opens ' +
+      'only when nothing else did, so one conditioned edge beside a default is not reported (there the two ' +
+      'modes cannot differ).',
+    // Named as the bare command, the way descriptive prose names it: a quoted
+    // `--from N` marker is judged as a prescription by the spec class pin
+    // `shared/retired-key-migrate-sentence.test.ts`, and this is not one.
+    'A flow authored against protocol major 17 and converted by `os migrate meta` carries ' +
+      '`mode: \'inclusive\'` wherever two or more conditioned out-edges left a decision (the ' +
+      '`flow-decision-mode-inclusive-explicit` conversion writes it so the run does not change ' +
+      'silently): delete it where the branches partition.',
+  ],
+};
+
+const FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-approval-revise-target-not-service-owned',
+  covers: 'why the revise window is an `approval_revise` node',
+  paragraphs: [
+    'The revise window is ended by `POST /api/v1/approvals/requests/:id/resubmit`, not by a signal, so a ' +
+      '`waitEventConfig` on it has nothing to wait for: drop it when retyping the node.',
+    'ADR-0044 D3 originally said `wait` here; its 2026-07-28 amendment reversed that, because a `wait` is ' +
+      'resumable by anyone with the run id, while the run-resume route continues a pause on a service-owned ' +
+      'node type only through the service that owns it. `sendBack` refuses any other target before it ' +
+      'changes anything, which is why this fails the build.',
+    'The whole loop: the `revise` edge reaches the `approval_revise` node, whose resubmit edge returns to ' +
+      'the approval marked `type: \'back\'`, and `maxRevisions` bounds it. examples/app-showcase ' +
+      '`showcase_budget_approval` is the reference shape.',
+  ],
+};
+
+const FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-antipattern',
+  covers: 'why a date equality on a record trigger misfires',
+  paragraphs: [
+    'Reported on a `record-*` trigger whose start condition puts a time function (`daysFromNow`, `daysAgo`, ' +
+      '`today`, `now`, `date`, `datetime`) beside `==` or `!=`, on either side. Range comparisons (`>=`, ' +
+      '`<=`) are not reported: they are the building block of the correct shape. A `schedule` trigger is not ' +
+      'judged.',
+    'The robust shape is a daily sweep. Declared, it is a `schedule` flow whose start node carries a ' +
+      '`config.timeRelative` descriptor (the object, the date field, and `withinDays` or `offsetDays`): it is ' +
+      'swept daily and runs once per record whose date falls in the window. Hand-written, it is a daily ' +
+      '`schedule` flow whose `get_record` filters the date field with a range (`$gte` / `$lt`), never an ' +
+      'equality (`os explain flow-date-equality-filter`).',
+    'Either way the run has no trigger user, so a sweep that reads or writes records declares ' +
+      '`runAs: \'system\'` (`os explain flow-runas-unscoped`).',
+  ],
+};
+
+const FLOW_DATE_EQUALITY_FILTER_EXPLANATION: RuleExplanation = {
+  rule: 'flow-date-equality-filter',
+  covers: 'why a date filter needs a window, not an equality',
+  paragraphs: [
+    'Reported for a field bound directly to a time-function value (an implicit equality), or through `$eq` ' +
+      'or `$in`, inside `$and` / `$or` too. Range operators (`$gte`, `$gt`, `$lte`, `$lt`) and `$ne` are the ' +
+      'correct shape and are never reported.',
+    'A one-day window, `{ $gte: daysFromNow(N), $lt: daysFromNow(N+1) }`, matches the whole day, and ' +
+      'abutting windows tile the timeline, so with several tiers wrapped in `$or` each row matches exactly ' +
+      'once.',
+    'A T-minus rule can declare the sweep instead: a `schedule` flow whose start node carries a ' +
+      '`config.timeRelative` descriptor with `offsetDays` runs once per record on each offset day.',
+  ],
+};
+
+const FLOW_RUNAS_UNSCOPED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-runas-unscoped',
+  covers: 'why a flow with no trigger user runs as `system`',
+  paragraphs: [
+    '`runAs` is enforced (ADR-0049, ADR-0073 D5): `\'user\'`, the default when none is declared, scopes each ' +
+      'data operation to the triggering user\'s grants, and with no trigger user the runtime refuses the ' +
+      'operation rather than run it unscoped. A schedule, time-relative or api trigger provably resolves no ' +
+      'user, so a flow with a data node anywhere in it, a `loop` body included, can never complete; that is ' +
+      'why this fails the build. A flow with no data node is not reported.',
+    '`runAs: \'system\'` makes the elevation explicit: the run reads and writes every record. Except behind an ' +
+      'anonymous door: publish refuses `system` on a flow that an `authRequired: false` endpoint of type ' +
+      '`flow` triggers (ADR-0138 D2b); serve that caller through an authenticated endpoint, the flow\'s ' +
+      'signed inbound hook, or a public form.',
+    'A record-change flow fired by a write that carried no user meets the same refusal, but whether a write ' +
+      'carries a user is not knowable at authoring time, so that case is refused at run time only.',
+  ],
+};
+
+const FLOW_DECISION_MODE_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'flow-decision-mode-invalid',
+  covers: 'which `mode` a decision takes',
+  paragraphs: [
+    'With `mode` omitted, an edge-branched decision is exclusive: the first out-edge whose condition holds, ' +
+      'in declaration order, wins. `mode: \'inclusive\'` takes every out-edge whose condition holds. A ' +
+      '`conditions` list is first-match on its own and takes no `mode`, so a legal `mode` beside a non-empty ' +
+      '`conditions` list is refused as well: it would be accepted and never read.',
+    'The finding is the spec\'s own `DecisionConfigSchema` issue, and `registerFlow` refuses this flow with ' +
+      'the same sentence, so it can never arm; that is why this fails the build. Fix the node in the flow ' +
+      'definition.',
+  ],
+};
+
+const FLOW_DECISION_UNCONDITIONAL_BRANCH_EXPLANATION: RuleExplanation = {
+  rule: 'flow-decision-unconditional-branch',
+  covers: 'how a decision gates its out-edges',
+  paragraphs: [
+    'An out-edge is gated by a `condition`, by `isDefault: true` (taken only when no sibling condition ' +
+      'matched, the BPMN default flow), or by a `label` the decision selects through a matching ' +
+      '`config.conditions[].label`. Declare the branching one way and one way only.',
+    'If the unconditional fan-out is what you meant, drop `type: \'decision\'` and use the node it already ' +
+      'behaves as. Both shapes stay warnings: one guarded and one unconditional out-edge is a legal "maybe ' +
+      'notify, always continue" fan-out, and an all-unconditional decision is that same fan-out under a ' +
+      'mis-chosen node type.',
+    'Not reported here: a decision routing by `config.conditions[]` labels alone has declared its branching ' +
+      'on the node, and a declared label no out-edge carries is `flow-branch-label-unmatched`. A `fault` edge ' +
+      'is error routing and never counts as a branch.',
+  ],
+};
+
+const FLOW_ERROR_LABEL_NOT_FAULT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-error-label-not-fault',
+  covers: 'which failures a `fault` edge routes',
+  paragraphs: [
+    'Only runtime failures route through a `fault` edge. A guard refusal (a filter token that resolved to ' +
+      'nothing, a missing required config key, an unscoped run) stays fatal by design and must be fixed in ' +
+      'the metadata, not handled.',
+    'The labels read as an error path are `error`, `fault`, `failure`, `failed`, `catch`, `on_error`, ' +
+      '`onerror` and `on error`, compared trimmed and case-insensitively. Not reported: an edge that is ' +
+      'already `type: \'fault\'`, an edge with a `condition`, and an edge out of a `decision`, `approval`, ' +
+      '`screen` or `try_catch` node, which picks its out-edge by label, so the label is load-bearing there.',
+  ],
+};
+
+const FLOW_BRANCH_LABEL_UNMATCHED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-branch-label-unmatched',
+  covers: 'how a decision label selects its out-edge',
+  paragraphs: [
+    'Labels are compared trimmed and case-insensitively. Use one mechanism per decision, never both: ' +
+      '`config.conditions[]` with an out-edge whose `label` matches each declared branch, or branching on the ' +
+      'out-edges themselves (a `condition` per branch plus `isDefault: true` on the fallback).',
+    'No reading of this metadata routes what it says, on any run, and the run completes green having taken ' +
+      'the wrong path, so this fails the build. A stored flow authored before the rule still reaches run ' +
+      'time, where the engine warns when it meets the shape.',
+  ],
+};
+
 // ── Name-bound action references (`validate-action-name-refs.ts`) ──────────
 
 const ACTION_NAME_UNDEFINED_EXPLANATION: RuleExplanation = {
@@ -4564,6 +4776,18 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION.rule]: FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION,
   [FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION.rule]: FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION,
   [FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION.rule]: FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION,
+  [FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION.rule]: FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION,
+  [FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION.rule]: FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION,
+  [FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION.rule]: FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION,
+  [FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION.rule]: FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION,
+  [FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION.rule]: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION,
+  [FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION.rule]: FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION,
+  [FLOW_DATE_EQUALITY_FILTER_EXPLANATION.rule]: FLOW_DATE_EQUALITY_FILTER_EXPLANATION,
+  [FLOW_RUNAS_UNSCOPED_EXPLANATION.rule]: FLOW_RUNAS_UNSCOPED_EXPLANATION,
+  [FLOW_DECISION_MODE_INVALID_EXPLANATION.rule]: FLOW_DECISION_MODE_INVALID_EXPLANATION,
+  [FLOW_DECISION_UNCONDITIONAL_BRANCH_EXPLANATION.rule]: FLOW_DECISION_UNCONDITIONAL_BRANCH_EXPLANATION,
+  [FLOW_ERROR_LABEL_NOT_FAULT_EXPLANATION.rule]: FLOW_ERROR_LABEL_NOT_FAULT_EXPLANATION,
+  [FLOW_BRANCH_LABEL_UNMATCHED_EXPLANATION.rule]: FLOW_BRANCH_LABEL_UNMATCHED_EXPLANATION,
   [ACTION_NAME_UNDEFINED_EXPLANATION.rule]: ACTION_NAME_UNDEFINED_EXPLANATION,
   [MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION.rule]: MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION,
   [VIEW_CONTAINER_SHAPE_EXPLANATION.rule]: VIEW_CONTAINER_SHAPE_EXPLANATION,

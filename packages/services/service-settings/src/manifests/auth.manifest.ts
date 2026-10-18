@@ -70,7 +70,7 @@ const manifest = {
         { value: 'invite-only', label: 'Invitation only — never join automatically' },
       ],
       description:
-        'Automatic binds every new user to this deployment\'s default organization. Invitation only grants membership solely through an explicit act — creating a workspace, accepting an invitation, being added by an admin, or SSO just-in-time provisioning. Applies to the backfill of pre-existing member-less users too.',
+        'Automatic binds every new user to this deployment\'s default organization. Invitation only grants membership solely through an explicit act — creating an organization, accepting an invitation, being added by an admin, or SSO just-in-time provisioning. Applies to the backfill of pre-existing member-less users too.',
     },
 
     // [#11768] Audience posture (#11739, epic #11723) — who may BECOME a user

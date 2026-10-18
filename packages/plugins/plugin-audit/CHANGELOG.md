@@ -1,5 +1,119 @@
 # @objectstack/plugin-audit
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 5b6c257: feat(plugin-audit): `sys_activity` rows carry two writer-stamped read-rule columns, and the withheld-row rule is a predicate over them, with no SYSTEM pre-scan (ADR-0139 E6)
+  
+  **Run `os migrate activity-changed-fields --apply` at once after upgrading.** After the upgrade, and until it runs, the `sys_activity` rows written before the upgrade carry no stamp and are withheld from every non-system reader: activity feeds, the header bell and record timelines show only the rows written since the upgrade. The door is `os migrate activity-changed-fields`, dry run by default, `--apply` to write, idempotent, and it stamps both columns in one run. Its flags are `os migrate audit-metadata-bodies`'s, one for one (`--database-url`, `--apply`, `--yes`, `--force`, `--json`). The columns arrive with the upgraded deployment's schema sync, which an `--apply` run performs itself; a dry run against a database no upgraded process has opened cannot read them and exits `1`.
+  
+  Clause-②: yes
+  
+  `sys_activity` gains two columns, stamped at write time by one derivation (`planActivityStamp`): the CRUD mirror stamps its own rows, and a `sys_activity` before-insert hook stamps every row any other writer inserts (an app's own server action, the seed loader), over whatever value that writer sent.
+  
+  - `changed_fields` (`tags`) — the key set of the recorded change: for an update, every field its recorded `old` / `new` values name; `[]` for a create, a delete, a note, or an update that touched only `internal` fields. It is served narrowed to the fields the reader is served.
+  - `milestone_key` (`text`) — for a fired activity milestone, one sorted, comma-joined key of every field the object's `activityMilestones` declaration watched when it fired; `null` for every other row. It is never served.
+  
+  The withheld-row rule is now a WHERE over those two columns, one branch per parent object, on `find`, `findOne`, `count` and `aggregate`. It reads no row, so the 2,000-row SYSTEM pre-scan and its window are gone: a broad read of the stream is served every row the caller may read, with a true `total`. What the rule withholds:
+  
+  - an update row whose `changed_fields` is non-empty and names no field the reader is served (unchanged);
+  - a fired milestone row, unless its key equals the key of the object's CURRENT `activityMilestones` declaration and the reader is served every field that declaration watches. **The cost:** a milestone row written under an earlier declaration, or naming a since-removed field, is withheld from every non-exempt reader until retention ages it out (14 days declared; `lifecycle.retention_overrides` may lengthen it);
+  - an unstamped row, from every non-system reader: one at rest from before the upgrade until the backfill stamps it, and one the planner cannot judge (a milestone row naming no readable watched-field list), which stays unstamped.
+  
+  The parent-field query guard covers both columns as it covers `metadata`: a reader withheld any field of the parent is refused a filter, sort, group or aggregate over `changed_fields` or `milestone_key` (`PERMISSION_DENIED` / 403).
+  
+  `@objectstack/plugin-audit` exports the backfill, `backfillActivityChangedFields` (with `ACTIVITY_BACKFILL_PAGE_SIZE` and its report and engine types), and the planner, `planActivityStamp` (with `ACTIVITY_CHANGED_FIELDS_COLUMN`, `ACTIVITY_MILESTONE_KEY_COLUMN` and `ActivityStamp`). Inside the module (none of it is exported from the package), `computeWithheldUpdateFilter` keeps its name and now builds the predicate, `isWithheldOnlyUpdate` keeps its name as the update half over `changed_fields`, and `isWithheldMilestone` / `isWithheldRow` are gone with the pre-scan they judged for.
+- 67e8792: feat(plugin-audit): `sys_comment` rows carry a writer-stamped parent pair, `object_name` + `record_id`, and the comment-thread read gate narrows by it with one `ReadableIds` leaf per parent object, with no pre-scan (ADR-0139 E7)
+  
+  **Run `os migrate comment-parent-pair --apply` at once after upgrading.** After the upgrade, and until it runs, the `sys_comment` rows written before the upgrade carry no pair, and the read gate answers them as it answered every comment before: by a SYSTEM pre-scan of at most 2,000 candidate rows per read, fail closed. So a broad comment list — one not scoped to a single record's thread — can omit comments the reader may see, and its `total` agrees with the short list; a record's own comment thread is unaffected. The door is `os migrate comment-parent-pair`, dry run by default, `--apply` to write, idempotent, and it stamps both columns in one run, keeping each row's `updated_at`. Its flags are `os migrate activity-changed-fields`'s, one for one (`--database-url`, `--apply`, `--yes`, `--force`, `--json`). The columns arrive with the upgraded deployment's schema sync, which an `--apply` run performs itself; a dry run against a database no upgraded process has opened cannot read them and exits `1`.
+  
+  Clause-②: yes
+  
+  `sys_comment` gains two `readonly` text columns and an index over them. They are derived from `thread_id` (`{object}:{record_id}`, split on the first colon) by one planner, `planCommentParentPair`, and `thread_id` stays the key authors write: nothing changes for a writer. A `sys_comment` before-insert hook stamps every inserted row, whoever writes it, over whatever value the writer sent; an update that names `thread_id` (a re-point) is re-stamped from it; and an update that names either column without a thread has the pair re-derived from the row's stored thread, for every caller — a historical import (`preserveAudit`) included, where the engine's update-side `readonly` strip keeps a value — so no writer's value for either column lands. A multi-row update that names either column without a thread is refused whole (`VALIDATION_ERROR` / 400, nothing written) when its rows' threads name different records, since one write cannot store each row's own pair; over rows sharing one thread it stores that thread's pair. A thread that names no record stamps `null` / `null`, and such a comment stays hidden from every non-system reader, as before.
+  
+  The comment-thread read gate (`installCommentReadVisibility`) is now the parent-record gate the activity stream and the compliance ledger use, over the comment's own pair: one branch `{ object_name: P, record_id: { $in: ReadableIds.of(P) } }` per registered object other than `sys_comment`, ORed and ANDed into the read's `where`, on `find`, `findOne`, `count` and `aggregate`. A broad comment read is served every comment the reader may read, on any table size, with a true `total`. What keeps the bounded 2,000-row fail-closed probe, chosen up front by name, never by catching a refusal:
+  
+  - ADR-0139 D5's three classes: a delegated (on-behalf-of) caller (the whole read); a parent narrowed by an object-scoped read middleware (`sys_attachment`, `sys_comment_reaction`, `sys_approval_request`, …); a parent bound to another datasource;
+  - a security service that answers no `canReadObject`, or none at all (no leaf is written without it), and an engine that cannot classify a parent — each sends the whole read to the probe and is said once;
+  - a row with no stamped pair (until the backfill reaches it): probed by its `thread_id`, restricted to rows with no pair, never leafed;
+  - a composition whose registered `sys_comment` declares no pair: the thread probe over every row, said once.
+  
+  **The cost:** a deployment whose driver compiles no `ReadableIds` leaf — `driver-mongodb`, until ADR-0139's O3 — now fails a non-system comment read with `INTERNAL_ERROR` / 500 naming the driver in the log, as the activity, ledger and attachment reads already do (ADR-0139 D3); the gate does not catch that refusal into an empty list.
+  
+  Comment reactions are unchanged: their only parent is `sys_comment`, which this gate narrows by an object-scoped middleware, so the reaction gate keeps the bounded probe (ADR-0139 D5.2).
+  
+  `installCommentReadVisibility` takes an optional third argument, the security source whose `canReadObject` admits a leaf (`ParentObjectReadAdmissionSource`); without it every comment read is the bounded probe, as before. Its first parameter widens from `CommentAccessEngine` to `ParentRecordGateEngine` (`CommentAccessEngine` plus three optional members: a registry view, `hasObjectMiddleware` and `resolveEffectiveDatasource`); every existing caller's engine still satisfies it. Both types reach the published declaration through that signature. `CommentAccessEngine` gains an optional `getSchema`. `@objectstack/plugin-audit` exports the backfill, `backfillCommentParentPair` (with `COMMENT_PARENT_PAIR_BACKFILL_PAGE_SIZE` and its report and engine types), the planner `planCommentParentPair` (with `COMMENT_PARENT_OBJECT_COLUMN`, `COMMENT_PARENT_RECORD_COLUMN` and the `CommentParentPair` type).
+
+### Patch Changes
+
+- 94114c1: fix(plugin-audit): the audit ledger no longer records a user's own writes to their own UI-state row (`sys_user_preference`). A deployment that exports `sys_audit_log` to a SIEM or a compliance archive stops receiving those rows from this release on, and nothing else tells that consumer.
+  
+  Clause-②: no
+  
+  The console saves a user's list preferences, recent items, favourites and palette recents as that user's own `sys_user_preference` rows, one write per click. Each write landed an `update` row in `sys_audit_log`, so Setup's Audit Logs opened on a run of one user's clicks, and the System Overview's "Events by User" chart counted them.
+  
+  - **What changed.** When the acting user is the row's owner (`user_id`) on both sides of the write, the audit writer records neither the `sys_audit_log` row nor the `sys_activity` row. It already skipped the activity row for such a write; it now skips the ledger row by the same test. A create, an update and a delete are all covered.
+  - **What is still recorded.** Every other actor's write to the same rows: an administrator editing someone's preferences from Setup, a system write with no user, and a write that moves a row to another owner. `sys_user_preference` is not an excluded object, and every other object is unchanged.
+  - **Nothing to migrate.** Rows already in `sys_audit_log` stay.
+  
+  The list of per-user UI-state objects is closed and declared inside the plugin, and today holds one object, `sys_user_preference`. No metadata key adds an object to it.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [abb6df0]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [d050a8f]
+- Updated dependencies [b25d98a]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

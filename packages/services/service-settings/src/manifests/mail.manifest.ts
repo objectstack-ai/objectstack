@@ -55,7 +55,7 @@ const manifest = {
   order: 10,
   specifiers: [
     { type: 'group', id: 'provider', label: 'Provider', required: false,
-      description: 'Choose how this workspace sends outbound email.' },
+      description: 'Choose how this environment sends outbound email.' },
 
     // See PROVIDER_OPTIONS above — the option list is a contract with
     // @objectstack/plugin-email, not a wish list.

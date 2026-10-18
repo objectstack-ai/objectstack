@@ -1,5 +1,81 @@
 # @objectstack/service-job
 
+## 18.0.0-next.3
+
+### Patch Changes
+
+- f606ba2: feat(spec)!: a job `retryPolicy` block whose `maxRetries` is omitted or 0 is refused, and `retry-policy-converged` leaves the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** `maxRetries` has defaulted to 0 since 17, so a `job.retryPolicy` block that omits it, or writes 0, buys no retry: the job runs once. Through 17 the loader hid that by writing the pre-17 `maxRetries: 3` and `backoffMultiplier: 2` into such a block with a notice. At 18 the ADR-0087 D2 conversion `retry-policy-converged` is retired from the load path (`retiredAfter: '17.7.0'`), and the job parse refuses the block at `retryPolicy.maxRetries`, at every door that parses an authored job (`defineStack`, `os validate`, `os build`, and `os lint` when the config calls it): "A retry block with no attempts is no retry block: state `maxRetries` ≥ 1, for example 3, or delete the block." The rule is the job's, the same one `flow.errorHandling` applies to `strategy: 'retry'`; the shared `RetryPolicySchema` is unchanged, so a `try_catch` node's `retry` region is judged as before.
+  
+  Migration:
+  
+  - `retryPolicy: {}` or `retryPolicy: { backoffMs: 5000 }` → `retryPolicy: { maxRetries: 3, backoffMs: 5000 }` (3 is the count such a block ran with before 17), or delete the block if the job should run once.
+  - `retryPolicy: { maxRetries: 0, … }` → delete the block: a job with no `retryPolicy` is a single attempt.
+  
+  What an author who still writes it sees: `defineStack` throws `STACK_SCHEMA_INVALID` (422) with one issue at `jobs.N.retryPolicy.maxRetries` carrying the prescription above, and `os validate` prints the same issue. Nothing is rewritten silently any more.
+  
+  Not refused: a block that states `maxRetries` and omits `backoffMultiplier`. It keeps the declared default of 1, a flat delay, where the loader used to write 2. State `backoffMultiplier: 2` to keep the old exponential curve.
+  
+  Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. For such a block the edit writes both pre-17 numbers (`maxRetries: 3`, `backoffMultiplier: 2`). The D3 entry `job-retry-policy-without-attempts-refused` states the decision left to you: keep the written count, or delete the block.
+  
+  The flow half of the conversion (`retryDelayMs` → `backoffMs` on `flow.errorHandling` and a `try_catch` node's `retry`) needed nothing more: both surfaces already refuse `retryDelayMs` with the rename to `backoffMs`.
+  
+  Stored metadata needs no edit. Stored-row rehydration, the automation engine's flow rehydration, the metadata save door's flow fallback and the artifact-ingestion door inside its window still replay the conversion, so a job row stored without a count keeps loading with the three retries it ran with.
+  
+  `@objectstack/service-job`: a comment-only change in `runWithPolicy`, whose `maxRetries` default is now reached only by a caller that builds the options by hand.
+  
+  <!-- adr-0087: registered job-retry-policy-without-attempts-refused -->
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Patch Changes

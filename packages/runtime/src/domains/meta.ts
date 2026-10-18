@@ -211,6 +211,53 @@ async function resolveProtocol(
 }
 
 /**
+ * [#7557, #24210] The answer for an object of a DISABLED package on a door that
+ * reads the registry for it: the registry is a resolution reader and keeps
+ * serving that object (`packages/objectql/src/package-disable-enforcement.test.ts`),
+ * so such a door asks this first. `undefined` when `name` is no such object.
+ * Otherwise the protocol's own refusal, `404 OBJECT_PACKAGE_DISABLED`, the
+ * answer `GET /meta/object/:name` gives; a host whose protocol does not refuse
+ * it is answered `absent`, the door's own answer for no object. The predicate is
+ * `SchemaRegistry`'s and is not on the engine's registry view, so it is asked
+ * when present, as the object branch of the item read asks it.
+ */
+async function disabledObjectAnswer(
+    deps: DomainHandlerDeps,
+    context: HttpProtocolContext,
+    registry: unknown,
+    name: string,
+    absent: { status: number; body: any },
+): Promise<HttpDispatcherResult | undefined> {
+    const predicate = (registry as { isObjectPackageDisabled?: (n: string) => boolean } | undefined)
+        ?.isObjectPackageDisabled;
+    if (typeof predicate !== 'function' || predicate.call(registry, name) !== true) return undefined;
+    const protocol = await resolveProtocol(deps, context);
+    if (protocol && typeof protocol.getMetaItem === 'function') {
+        try {
+            await protocol.getMetaItem({ type: 'object', name });
+        } catch (e) {
+            if ((e as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') {
+                return { handled: true, response: deps.errorFromThrown(e, 404) };
+            }
+        }
+    }
+    return { handled: true, response: absent };
+}
+
+/**
+ * [#7557, #24210] Whether a document the metadata service holds belongs to a
+ * disabled package: its `_packageId`, asked of the engine registry's
+ * `isPackageDisabled`, the predicate the protocol's list and by-name reads ask
+ * of a non-object item. The service knows nothing of a disable, so a door that
+ * falls back to it asks this before serving what it found.
+ */
+function isServiceItemOfDisabledPackage(registry: unknown, item: unknown): boolean {
+    const predicate = (registry as { isPackageDisabled?: (id: unknown) => boolean } | undefined)?.isPackageDisabled;
+    return typeof predicate === 'function'
+        && predicate.call(registry, (item as { _packageId?: unknown } | null | undefined)?._packageId) === true;
+}
+
+/**
  * [#20338] May this caller read PENDING metadata (a `sys_metadata` row in
  * `state: 'draft'`)? The one question this domain's draft doors ask —
  * `_drafts`, the item and list reads' `?preview=draft` and [#20320] the item
@@ -1023,6 +1070,12 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
         if (arity) return queryRefusalAnswer(deps, arity);
         const from = query?.from !== undefined ? String(query.from) : undefined;
         const qlService = await deps.getObjectQL(_context);
+        // [#7557, #24210] An API door reading the registry, a resolution
+        // reader: an object of a disabled package gets the item read's answer.
+        const disabled = await disabledObjectAnswer(
+            deps, _context, qlService?.registry, name, deps.error('Object not found', 404),
+        );
+        if (disabled) return disabled;
         const schema = qlService?.registry?.getObject(name);
         if (!schema) return { handled: true, response: deps.error('Object not found', 404) };
         // Dynamic import (matches the runtime convention for @objectstack/objectql)
@@ -1208,6 +1261,30 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             return successWithHeaders(deps, served, { 'Cache-Control': cacheControl });
         };
 
+        // [#7557, #24210] A disabled package's item is answered as a name with
+        // nothing behind it (every exit below ends in this same `404`), as
+        // `RestServer`'s `/published` answers it: the owner the plain read's
+        // kept protection envelope names, `packageId`, asked of the engine
+        // registry ({@link isServiceItemOfDisabledPackage}). Neither store below
+        // knows a disable. A throw of that read is the item read's answer for
+        // it. An object is the layered read's own refusal below; `package` is
+        // never hidden.
+        if (publishedType !== 'object' && publishedType !== 'package'
+            && protocol && typeof protocol.getMetaItem === 'function') {
+            const registry = (await deps.getObjectQL(_context))?.registry;
+            if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled === 'function') {
+                let owner: unknown;
+                try {
+                    owner = (await protocol.getMetaItem({ type, name }))?.packageId;
+                } catch (e) {
+                    return { handled: true, response: deps.errorFromThrown(e, 404) };
+                }
+                if (isServiceItemOfDisabledPackage(registry, { _packageId: owner })) {
+                    return { handled: true, response: deps.error('Not found', 404) };
+                }
+            }
+        }
+
         let publishedOverlay: unknown;
         if (protocol && typeof protocol.getMetaItemLayered === 'function') {
             try {
@@ -1235,7 +1312,16 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         ? layered.effective
                         : layered.overlay;
                 }
-            } catch { /* fall through to the code/package snapshot below */ }
+            } catch (e) {
+                // [#7557, #24210] The protocol's refusal of an object of a
+                // disabled package is the answer, as `RestServer`'s
+                // `/published` renders it: the snapshot below would serve the
+                // object the refusal withholds. Any other throw still falls
+                // through to the code/package snapshot below.
+                if ((e as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') {
+                    return { handled: true, response: deps.errorFromThrown(e, 404) };
+                }
+            }
         }
         if (publishedOverlay !== undefined) return servePublished(publishedOverlay);
 
@@ -1766,6 +1852,11 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                         // renders it), never a fall-through to a registry that
                         // would serve the canonical schema for it.
                         if (memberNamed) throw e;
+                        // [#7557, #24097] …and so is the refusal of an object
+                        // whose package is disabled: the registry below keeps
+                        // serving that object (it is a resolution reader), so
+                        // falling through would serve what the protocol refused.
+                        if ((e as { code?: unknown } | null)?.code === 'OBJECT_PACKAGE_DISABLED') throw e;
                         return undefined; // fall through to registry / 404
                     }
                 };
@@ -1773,7 +1864,18 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                 let found: any = protocolFirst ? await readFromProtocol() : undefined;
                 if (found === undefined && !memberNamed) {
                     const qlService = await deps.getObjectQL(_context);
-                    const data = qlService?.registry?.getObject(name);
+                    const registry = qlService?.registry;
+                    // [#7557, #24097] The registry answers a disabled package's
+                    // object too, so it does not answer for one here: the
+                    // protocol read below refuses it `404 OBJECT_PACKAGE_DISABLED`,
+                    // the answer the listing and the data plane give. The
+                    // predicate is `SchemaRegistry`'s and is not on the engine's
+                    // registry view, so it is asked when present, as the
+                    // protocol's data plane asks it.
+                    const predicate = (registry as { isObjectPackageDisabled?: (n: string) => boolean } | undefined)
+                        ?.isObjectPackageDisabled;
+                    const disabled = typeof predicate === 'function' && predicate.call(registry, name) === true;
+                    const data = disabled ? undefined : registry?.getObject(name);
                     // [#5563] The registry hands back the bare ObjectSchema, so this
                     // fallback used to answer a different body shape than the
                     // protocol branch above for the very same request. Wrap it in
@@ -1859,6 +1961,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
                     // package-scoped (prefer-local), matching list resolution.
                     data = await (metaSvc as any).getItem(singularType, name, packageId);
                 } catch { /* not found */ }
+                // [#7557, #24210] The protocol answers a disabled package's item
+                // as absent, and this fallback must not serve it in its place:
+                // the service keeps that item. `package` itself is never hidden.
+                if (data && singularType !== 'package'
+                    && isServiceItemOfDisabledPackage((await deps.getObjectQL(_context))?.registry, data)) {
+                    data = undefined;
+                }
                 // [#5563] Same convergence as the object branch above: the
                 // MetadataService hands back the bare document, so wrap it in
                 // the declared envelope rather than letting which service
@@ -2143,6 +2252,13 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             // `book`) serves an object SCHEMA. An anonymous caller never reaches
             // a schema — the deny it skipped is answered here instead.
             if (anonymous) return anonymousDeny();
+            // [#7557, #24210] The registry keeps serving a disabled package's
+            // object (a resolution reader), so this exit answers it as the item
+            // read does.
+            const disabled = await disabledObjectAnswer(
+                deps, _context, qlService.registry, typeOrName, deps.error('Not found', 404),
+            );
+            if (disabled) return disabled;
             // Legacy: treat as object name. [ADR-0106 D5(4)] A schema-bearing
             // exit reached by a one-segment path — masked like every other, so
             // the legacy spelling is not a way around the projection.

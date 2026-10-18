@@ -19,6 +19,21 @@
  * `readableFlowing` is `null` — never after an explicit `pause()`. Listener
  * attached, `bytesRead` 0, server deaf.
  *
+ * WHY THIS FILE NOW PAUSES STDIN ITSELF (#24191). `serve` no longer supplies
+ * that pause: its `config` positional sets `ignoreStdin`, because oclif's
+ * stdin read also SWALLOWED an `initialize` the client wrote at spawn (pinned in
+ * `serve-mcp-stdio-early-initialize.integration.test.ts`). The `resume()` in
+ * `MCPServerRuntime.start()` stays, for the reason its own comment gives: any
+ * host that touched stdin before `start()` — a readline prompt, a supervisor,
+ * an embedding process — leaves it paused. Without a pauser this file stayed
+ * green with that `resume()` removed (measured on the #24191 change), so the
+ * stdio boot now runs with a preload that IS such a host
+ * (`PAUSE_STDIN_FIRST`): it pauses `process.stdin` before the CLI loads, and
+ * reports `readableFlowing` at the moment the transport attaches its `data`
+ * listener. The test asserts that report reads `false`, so the premise is
+ * measured on every run rather than assumed, and a later change that resumes
+ * stdin earlier cannot quietly make this file vacuous again.
+ *
  * WHY THIS FILE SPAWNS THE CLI. `packages/mcp`'s 17 existing stdio pins were
  * all green while every real `os serve` stdio session was unusable, because
  * they sit BELOW the gap: they exercise the runtime in a plain node process,
@@ -30,7 +45,8 @@
  * the mechanism, not the consequence. The assertion below is the card's own
  * repro: write a real `initialize` to the child's stdin, get a real result
  * back. Reverse-verified — with the `resume()` in `MCPServerRuntime.start()`
- * removed, this file times out with zero bytes on stdout.
+ * removed, this file times out with zero bytes on stdout (re-measured with the
+ * preload above when #24191 moved the pause out of `serve`).
  *
  * WHY IT MINTS A KEY OVER HTTP FIRST. stdio auto-start is fail-closed
  * (ADR-0101): without an `OS_MCP_STDIO_API_KEY` that resolves to a real
@@ -93,6 +109,30 @@ const HERE = resolve(fileURLToPath(import.meta.url), '..');
  */
 const CLI = resolve(HERE, '../bin/run.js');
 
+/** The line the preload prints each time a `data` listener attaches to stdin. */
+const PREMISE_TAG = '[fx-7645] stdin data listener attached, readableFlowing=';
+
+/**
+ * Node arguments for the stdio boot: a host that paused stdin before the CLI
+ * loaded — #7645's premise, which `serve` itself no longer supplies (#24191).
+ *
+ * `process.stdin.pause()` is what readline's `Interface.close()` did when
+ * oclif's `tryStdin` paused it. The `newListener` report fires BEFORE the
+ * listener is added, so it reads the state the transport's `data` listener
+ * meets: `false` is the premise holding, `null` is a stream nobody paused.
+ * A `data:` URL keeps the whole host on this page; `--import` runs it before
+ * `bin/run.js`.
+ */
+const PAUSE_STDIN_FIRST: readonly string[] = [
+  '--import',
+  `data:text/javascript,${encodeURIComponent([
+    'process.stdin.pause();',
+    "process.stdin.on('newListener', (event) => {",
+    `  if (event === 'data') process.stderr.write(${JSON.stringify(PREMISE_TAG)} + String(process.stdin.readableFlowing) + '\\n');`,
+    '});',
+  ].join('\n'))}`,
+];
+
 const CONFIG = `
 export default {
   manifest: {
@@ -134,14 +174,19 @@ interface Booted {
  * stdout alone would wait on a stream that carries nothing until a client
  * speaks.
  *
- * NOTE: no positional config path is passed. That is deliberate and load-bearing:
- * supplying one makes oclif skip `tryStdin` entirely, so stdin is never paused
- * and the defect cannot reproduce. `os serve --dev` is also the form every user
- * types.
+ * NOTE: no positional config path is passed. That used to be what paused stdin
+ * (oclif's `tryStdin` ran only for an omitted positional); since #24191 `serve`
+ * never reads stdin for it either way, and the pause comes from `nodeArgs`
+ * (`PAUSE_STDIN_FIRST`). The bare form stays because `os serve --dev` is the
+ * form every user types.
  */
-function boot(env: Record<string, string | undefined>, waitFor: RegExp): Promise<Booted> {
+function boot(
+  env: Record<string, string | undefined>,
+  waitFor: RegExp,
+  nodeArgs: readonly string[] = [],
+): Promise<Booted> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(process.execPath, [CLI, 'serve', '-p', port, '--dev'], {
+    const child = spawn(process.execPath, [...nodeArgs, CLI, 'serve', '-p', port, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, not a bare `...process.env`: the vitest worker exports
@@ -423,7 +468,20 @@ describe('#7645: the stdio MCP transport answers over a spawned CLI process', ()
         OS_MCP_STDIO_API_KEY: apiKey,
       },
       /\[MCP\] Server started \(transport: stdio/,
+      PAUSE_STDIN_FIRST,
     );
+
+    // The premise, measured: the transport attached its reader to a stdin that
+    // was already paused, so only `resume()` can make it flow. Every attach the
+    // preload saw reads `false`; none at all means the preload never ran.
+    const attaches = booted.stderr()
+      .split('\n')
+      .filter((line) => line.includes(PREMISE_TAG))
+      .map((line) => line.slice(line.indexOf(PREMISE_TAG) + PREMISE_TAG.length).trim());
+    expect(
+      attaches.length > 0 && attaches.every((state) => state === 'false'),
+      `stdin was not paused when the transport attached (readableFlowing at each data-listener attach: ${JSON.stringify(attaches)}), so this run never exercised #7645's resume()\n--- stderr ---\n${booted.stderr().slice(-4000)}`,
+    ).toBe(true);
 
     // The started transport is the premise, not the assertion — the whole
     // defect was a transport that reached exactly this line and then went deaf.

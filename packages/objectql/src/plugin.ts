@@ -377,6 +377,16 @@ export class ObjectQLPlugin implements Plugin {
   private bridgeLateManifests = false;
 
   /**
+   * [#24182] For each package the late bridge bridged as an EXTENDER, the
+   * names of the objects whose copy it rewrote: copies stamped with another
+   * package's id (the owner's), re-registered with the merged body that
+   * carries this package's extension. Read and cleared by
+   * {@link restoreExtendedObjectCopies} when the package is withdrawn, the one
+   * moment the registry no longer says which objects it extended.
+   */
+  private readonly extendedObjectCopies = new Map<string, Set<string>>();
+
+  /**
    * Set at `kernel:ready`, once the boot audit has found every picklist a
    * field names: from then on an artifact registered through the `manifest`
    * service is judged before it registers (AGENTS.md, startup registry reads:
@@ -766,7 +776,14 @@ export class ObjectQLPlugin implements Plugin {
           ? [...ordered, { id: residual.ownerId }]
           : ordered;
         return this.bridgeArtifactObjectsToMetadataService(ctx, bridged);
-      }
+      },
+      // [#24182] The withdrawal counterpart of the bridge's extender rewrite:
+      // a door that withdrew a package from the registry calls this so the
+      // copies of OTHER packages' objects that the package's extensions
+      // rewrote serve the registry's definition again. Never rejects. See
+      // {@link restoreExtendedObjectCopies}.
+      restoreExtendedObjectCopies: (packageId: string): Promise<void> =>
+        this.restoreExtendedObjectCopies(ctx, packageId),
     });
 
     ctx.logger.info('ObjectQL engine registered', {
@@ -2792,6 +2809,14 @@ export class ObjectQLPlugin implements Plugin {
           if (!existing || ownPreviousCopy) {
             await metadataService.register('object', obj.name, obj, { notify: false });
             bridged++;
+            // [#24182] Another package owns this object: the copy just written
+            // carries this package's extension. Remembered, so its withdrawal
+            // can put the owner's definition back.
+            if ((obj as any)._packageId !== packageId) {
+              let names = this.extendedObjectCopies.get(packageId);
+              if (!names) this.extendedObjectCopies.set(packageId, names = new Set());
+              names.add(obj.name);
+            }
           }
         } catch (e: unknown) {
           ctx.logger.debug('Failed to bridge manifest object to metadata service', {
@@ -2813,6 +2838,71 @@ export class ObjectQLPlugin implements Plugin {
         package: packageId,
         error: e instanceof Error ? e.message : String(e),
       });
+    }
+  }
+
+  /**
+   * [#24182] The withdrawal counterpart of {@link bridgeManifestObjectsToMetadataService}
+   * for a package that EXTENDS objects other packages own: put the registry's
+   * current definition back into each owner's copy the package's bridge rewrote.
+   *
+   * When an extender is bridged, the objects it contributes to resolve to the
+   * merged body stamped with the OWNER's id, and the bridge re-registers the
+   * owner's copy with it (its own-previous-copy rule is keyed on that stamp).
+   * Withdrawing the extender (`SchemaRegistry.uninstallPackage`) drops its
+   * contribution from the registry, so the object listing and the data door
+   * stop serving the extension's fields; but the copy keeps them, and
+   * `GET /meta/object/NAME` reads the copy before the registry, so it kept
+   * serving them until a restart. A withdrawal of the package's OWN copies
+   * never touches these: they are stamped with another package's id.
+   *
+   * The names come from {@link extendedObjectCopies}, recorded when the bridge
+   * wrote each copy. Only a copy the bridge itself would overwrite is written
+   * (its stamp is the registry owner's), through the bridge's own verb, so an
+   * authored copy stays as it is; a name the registry no longer serves is left
+   * to the owner's own withdrawal. A package the registry still holds is not
+   * withdrawn, and nothing is done.
+   *
+   * Never rejects: the withdrawal has already happened. A copy that could not
+   * be written disagrees with what the registry serves while everything looks
+   * normal, so that is said once at `error`, with the remedy.
+   */
+  private async restoreExtendedObjectCopies(ctx: PluginContext, packageId: string): Promise<void> {
+    const names = this.extendedObjectCopies.get(packageId);
+    const registry = this.ql?.registry;
+    if (!names || !registry || registry.getPackage(packageId) !== undefined) return;
+    this.extendedObjectCopies.delete(packageId);
+    let metadataService: IMetadataService | undefined;
+    try {
+      metadataService = ctx.getService<IMetadataService>('metadata');
+    } catch {
+      return; // no metadata service on this kernel — there is no copy to restore
+    }
+    if (!metadataService || typeof metadataService.register !== 'function') return;
+
+    const failed: string[] = [];
+    for (const name of names) {
+      try {
+        const served = this.currentObjectCopyBody(name);
+        const owner = (served as any)?._packageId;
+        if (!served || owner === undefined) continue;
+        const existing = await metadataService.getObject(name);
+        if (existing == null || (existing as any)._packageId !== owner) continue;
+        await metadataService.register('object', name, served, { notify: false });
+      } catch {
+        failed.push(name);
+      }
+    }
+    if (failed.length > 0) {
+      ctx.logger.error(
+        `[ObjectQLPlugin] package '${packageId}' was withdrawn, but the metadata service's copy of the object(s) it extended `
+        + `${failed.map((n) => `'${n}'`).join(', ')} could not be restored: the object listing and the data door already `
+        + 'serve them without its fields, while GET /api/v1/meta/object/NAME keeps serving those fields until a restart. '
+        + 'Fix: restart this process (the boot bridge re-copies every object); if it recurs, check that the metadata '
+        + 'service accepts registration.',
+        undefined,
+        { package: packageId, objects: failed },
+      );
     }
   }
 

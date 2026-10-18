@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import type { Auth, BetterAuthOptions } from 'better-auth';
+import type { JSONWebKeySet } from 'jose';
 import type { OrganizationOptions } from 'better-auth/plugins/organization';
 import type { SCIMIdentityState, SCIMTransactionContext } from '@better-auth/scim';
 // better-auth value imports (betterAuth + plugins) are deferred via dynamic
@@ -55,6 +56,7 @@ import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type {
   ApiKeyLifecyclePolicy,
   IEmailService,
+  II18nService,
   ISmsService,
   PrincipalSession,
   PrincipalSessionMintOptions,
@@ -71,6 +73,7 @@ import {
 } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
@@ -159,6 +162,7 @@ import {
   interpolatePhoneSms,
   resolvePhoneSmsTemplateBody,
 } from './phone-sms-texts.js';
+import { invitationRoleLabel } from './invitation-role-label.js';
 // commit 35e94c96b — the stored rung of the ruled locale ladder reuses the messaging
 // seam's normalizer rather than growing a second one. `normalizeRecipientLocale`
 // is the platform's ONE reader of a value at rest in `sys_user.locale`, and its
@@ -189,6 +193,11 @@ import {
   protectGetSessionJwtHook,
   resolveJwtSigningAlgorithm,
 } from './jwt-key-algorithm.js';
+import {
+  createSigningKeyReader,
+  retireHeldKeyrings,
+  UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS,
+} from './signing-key-read-cache.js';
 
 /**
  * Detect WebContainer (StackBlitz) environment.
@@ -897,6 +906,20 @@ export interface AuthManagerOptions extends Partial<AuthConfig> {
   getAuditSink?: () => AuthEventAuditSurface | undefined;
 
   /**
+   * Accessor for the runtime's `i18n` service, read by the organization
+   * invitation mail to name the invitee's membership role by its option LABEL
+   * in the mail's locale (`成员`, not `member`) — the label the console shows
+   * for the same option, read through the same service, so a tenant's authored
+   * translation reaches the mail too.
+   *
+   * Lazy for the same reason `getTenancy` is: the service is registered on the
+   * kernel after the AuthManager is constructed, and every call happens at
+   * send time. Omitted, or resolving to `undefined` (no i18n service) → the mail
+   * names the option's authored label (`Member`), never the stored value.
+   */
+  getI18n?: () => II18nService | undefined;
+
+  /**
    * Optional structured logger (the kernel `ctx.logger`) for best-effort
    * bookkeeping surfaces such as the ADR-0093 membership reconciler. Omitted →
    * those surfaces run silently (they already fail closed to no-op).
@@ -1340,6 +1363,70 @@ async function slugGuardReadFaultApiError(object: string, cause: unknown): Promi
   });
   (err as { cause?: unknown }).cause = cause;
   return err;
+}
+
+/** [#23945] The standard ADR-0112 code a store outage answers with — the status's own name. */
+const INVITATION_ROLE_CAP_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
+
+/**
+ * [#23945] The invitation role cap's answer when its one read — the issuer's
+ * `sys_member` rows — cannot answer: `503 SERVICE_UNAVAILABLE`, as the slug
+ * guard's read fault answers ({@link slugGuardReadFaultApiError}).
+ *
+ * Not the cap's `403 INVITE_ISSUER_UNVERIFIED`: that code is a verdict — the
+ * store answered and established no role — while a read that threw reached no
+ * verdict, so it must not wear the refusal's code. Still fail-closed: the
+ * throw ends the endpoint, so no invitation row is written. Unlike the slug
+ * guard's body, this one carries the code too, so every answer from the
+ * invitation endpoint has one. The driver's own failure rides `cause`.
+ */
+async function invitationRoleCapReadFaultApiError(cause: unknown): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  const err = new APIError('SERVICE_UNAVAILABLE', {
+    message:
+      'The invitation role cap could not read `sys_member`, so the role the issuer holds was never ' +
+      'determined, and no invitation was created. This is a server-side outage, not a refusal of the ' +
+      'invitation: retry once the data store is reachable.',
+    code: INVITATION_ROLE_CAP_READ_FAULT_CODE,
+  });
+  (err as { cause?: unknown }).cause = cause;
+  return err;
+}
+
+/**
+ * [#24166, ruling 6232069920 A] The access-token claim that carries the
+ * organization an OAuth consent bound. Minted by `customAccessTokenClaims` on
+ * the embedded authorization server and read back by
+ * {@link AuthManager.verifyMcpAccessToken} — one spelling for both ends.
+ */
+const OAUTH_ORGANIZATION_CLAIM = 'organization_id';
+
+/**
+ * [#24166] The organization an OAuth consent binds: the consenting session's
+ * active organization, or `undefined` when it has none.
+ *
+ * Reads the session the installed provider hands `postLogin.consentReferenceId`
+ * — the session of record, by better-auth's field name — and nothing else, so
+ * neither the authorize request nor the client can choose the value. An empty
+ * or non-string value is no organization: the consent then binds none and the
+ * token carries no claim, which is the ruled outcome for a user with no
+ * organization, never a guessed or default one.
+ */
+function consentOrganizationOf(session: Record<string, unknown> | null | undefined): string | undefined {
+  const organizationId = session?.activeOrganizationId;
+  return typeof organizationId === 'string' && organizationId ? organizationId : undefined;
+}
+
+/**
+ * [#24186] The key set the MCP access-token verifier checks signatures
+ * against: the document better-auth's `getJwks` endpoint answers, which is
+ * what `/jwks` publishes — public members only, read through the signer's
+ * keyring reader (`signing-key-read-cache.ts`). `undefined` when the instance
+ * carries no jwt plugin or the answer is not a key set.
+ */
+async function readPublishedJwks(api: unknown): Promise<JSONWebKeySet | undefined> {
+  const jwks = await (api as { getJwks?: () => Promise<unknown> } | null | undefined)?.getJwks?.();
+  return jwks && Array.isArray((jwks as { keys?: unknown }).keys) ? (jwks as JSONWebKeySet) : undefined;
 }
 
 export class AuthManager {
@@ -2996,13 +3083,20 @@ export class AuthManager {
    * 2. **Existing EdDSA keys.** `resolveSigningKey` falls back to *any* stored
    *    key when none matches the configured algorithm, so a deployment that
    *    already minted an EdDSA key would still die in `importJWK` after the
-   *    fallback. On a host without Ed25519 we install better-auth's
-   *    `adapter.getJwks` keyring seam so unusable keys are not offered at all
-   *    and a fresh ES256 key is minted instead. Rows are hidden, never
-   *    deleted — moving back to a host with Ed25519 restores them.
+   *    fallback. On a host without Ed25519 the `adapter.getJwks` keyring seam
+   *    hides unusable keys, so they are not offered at all and a fresh ES256
+   *    key is minted instead. Rows are hidden, never deleted — moving back to
+   *    a host with Ed25519 restores them.
+   *
+   * The same seam carries the signing-key read cache on every host (#24061,
+   * `signing-key-read-cache.ts`): the keyring is held across requests only
+   * until a `sys_jwks` write passes the engine or its TTL lapses.
    *
    * Belt-and-braces, on every host: a signing failure degrades the
-   * `set-auth-jwt` header instead of 500ing `/get-session`.
+   * `set-auth-jwt` header instead of 500ing `/get-session`, and the header is
+   * signed only for an HTTP `/get-session` — an in-process `auth.api.getSession`
+   * read discards it, so it no longer pays the key read and the signature
+   * (#24061; see `protectGetSessionJwtHook`).
    */
   private async buildJwtPlugin(jwt: (options: any) => any): Promise<any> {
     if (!this.ed25519ProbeResult) this.ed25519ProbeResult = probeEd25519Support();
@@ -3026,12 +3120,20 @@ export class AuthManager {
     const jwtPlugin = jwt({
       schema: buildJwtPluginSchema(),
       jwks: { keyPairConfig },
-      // The keyring override is installed ONLY on a host that needs it, so a
-      // normal deployment runs better-auth's stock read path with no
-      // ObjectStack code in it and nothing to regress.
-      ...(ed25519Supported
-        ? {}
-        : { adapter: { getJwks: createHostUsableJwksReader() } }),
+      // [#24061] The keyring read goes through `createSigningKeyReader` on
+      // every host: it holds the rows across requests only while no
+      // `sys_jwks` write has passed this engine's middleware since they were
+      // read, and never past `SIGNING_KEY_CACHE_TTL_MS` — both halves of the
+      // cross-request caching rule (see `signing-key-read-cache.ts`). A miss
+      // reads exactly what it read before: better-auth's stock read, or, on a
+      // host without Ed25519, the host-usable keyring that hides keys this
+      // host cannot import (#3585).
+      adapter: {
+        getJwks: createSigningKeyReader({
+          engine: this.config.dataEngine,
+          read: ed25519Supported ? undefined : createHostUsableJwksReader(),
+        }),
+      },
     });
 
     const protectedHook = protectGetSessionJwtHook(jwtPlugin, (error) =>
@@ -3043,7 +3145,8 @@ export class AuthManager {
       console.error(
         '[AuthManager] Could not attach the JWT signing guard to better-auth\'s /get-session hook ' +
           '(its `hooks.after` shape changed). A JWT signing failure will now 500 every /get-session ' +
-          'instead of degrading to a missing set-auth-jwt header. Re-check ' +
+          'instead of degrading to a missing set-auth-jwt header, and every in-process session read ' +
+          'signs a JWT it discards (two sys_jwks reads per authenticated request). Re-check ' +
           'the better-auth version in better-auth-schema-parity.test.ts.',
       );
     }
@@ -3413,13 +3516,18 @@ export class AuthManager {
             // placement intent at all. Skipped for a plain `member` invitation,
             // which can never trip the cap — so the ordinary path pays nothing.
             if (!isPlainMemberInvitation(invitation?.role)) {
-              const capFailure = invitationRoleCapFailure(
+              // [#23945] Each refusal carries its ADR-0112 code beside its
+              // message, the way better-auth's own `owner` refusal on this
+              // endpoint does. A membership read that THROWS never reaches
+              // this verdict: `resolveMembershipRole` answers it as an outage
+              // (503 `SERVICE_UNAVAILABLE`), not as a refusal.
+              const refusal = invitationRoleCapFailure(
                 invitation?.role,
                 await this.resolveMembershipRole(inviterUserId, organizationId),
               );
-              if (capFailure) {
+              if (refusal) {
                 const { APIError } = await import('better-auth/api');
-                throw new APIError('FORBIDDEN', { message: capFailure });
+                throw new APIError('FORBIDDEN', { message: refusal.message, code: refusal.code });
               }
             }
 
@@ -3620,29 +3728,40 @@ export class AuthManager {
           // the deployment default, which is the documented floor rather than a
           // failure.
           const storedLocale = await this.storedRecipientLocale({ email: recipientEmail });
+          // #14319 — DELIBERATELY no request argument, and the only one of
+          // the five sends without one. better-auth DOES hand this callback
+          // a `ctx.request`, but it is the INVITER's: stamping their
+          // browser language onto the invitee's mail would recreate this
+          // very card one seat over. The 2026-09-02 ruling enumerates
+          // signup, sign-in and password reset — sends where the requester
+          // IS the recipient — and the superseded 2026-08-13 ruling named
+          // invitations as its own counterexample. #13881's ruling item 3
+          // fixes the chain as RECIPIENT locale → deployment default, so
+          // the inviter direction stays rejected: what #14641 added above
+          // is the invitee's own column, never the inviter's header.
+          const mailLocale = this.emailLocaleArg(undefined, storedLocale);
+          // #24154 — `{{role}}` names the membership role by its option LABEL
+          // in the mail's own locale (`成员`, not `member`): every body of the
+          // template interpolates this one value, so the zh-CN mail stops
+          // printing the stored enum inside a Chinese sentence. Never throws;
+          // a value with no label is named as stored, with one warn.
+          const roleLabel = await invitationRoleLabel(invitation.role || '', mailLocale.locale, {
+            getI18n: this.config.getI18n,
+            warn: (msg, meta) =>
+              this.config.logger ? this.config.logger.warn(msg, meta) : console.warn(msg, meta),
+          });
           try {
             await emailService.sendTemplate({
               template: 'auth.invitation',
               to: recipientEmail,
-              // #14319 — DELIBERATELY no request argument, and the only one of
-              // the five sends without one. better-auth DOES hand this callback
-              // a `ctx.request`, but it is the INVITER's: stamping their
-              // browser language onto the invitee's mail would recreate this
-              // very card one seat over. The 2026-09-02 ruling enumerates
-              // signup, sign-in and password reset — sends where the requester
-              // IS the recipient — and the superseded 2026-08-13 ruling named
-              // invitations as its own counterexample. #13881's ruling item 3
-              // fixes the chain as RECIPIENT locale → deployment default, so
-              // the inviter direction stays rejected: what #14641 added above
-              // is the invitee's own column, never the inviter's header.
-              ...this.emailLocaleArg(undefined, storedLocale),
+              ...mailLocale,
               data: {
                 inviter: {
                   name: inviter?.user?.name ?? inviter?.user?.email ?? 'A teammate',
                   email: inviter?.user?.email ?? '',
                 },
                 organization: { name: org?.name ?? invitation.organizationId },
-                role: invitation.role || '',
+                role: roleLabel,
                 acceptUrl,
                 appName: this.getAppName(),
               },
@@ -4012,6 +4131,46 @@ export class AuthManager {
         // an anonymous registration mints no authority by itself.
         allowDynamicClientRegistration: dcr,
         allowUnauthenticatedClientRegistration: dcr,
+        // ── The organization an OAuth consent binds (ruling 6232069920, A) ──
+        // At consent the consenting session's active organization becomes the
+        // consent's `reference_id`, and the installed provider carries that
+        // value onto the authorization code, the refresh family it starts, and
+        // every access token minted from either, where `customAccessTokenClaims`
+        // emits it as `organization_id` (`verifyMcpAccessToken` reads it back).
+        //
+        // ⛔ The value is the SESSION's, never the client's: the hook reads the
+        // session the provider hands it and nothing else. The authorize query,
+        // the consent body and the client's metadata never reach it, so no
+        // request parameter can choose the organization a token acts in.
+        //
+        // ⛔ No session organization ⇒ no reference and no claim. Never a
+        // guessed or default one: the principal then resolves with global
+        // grants only.
+        //
+        // Existing consents re-confirm once, by the provider's own lookup: it
+        // finds a consent by (client, user, reference) whenever this hook
+        // answers a reference, so a consent stored before this binding (its
+        // `reference_id` is null) no longer satisfies an authorize made in an
+        // organization, and the user sees the consent page again. Until then an
+        // old refresh family keeps minting tokens with no claim, because a
+        // refresh carries the family's own reference, never the session's.
+        //
+        // `postLogin` is declared as one object, so its two other members are
+        // required beside the hook. `shouldRedirect` answers false: the
+        // organization is the one the session already has, not a choice made
+        // on an extra page. `page` is read only when `shouldRedirect` answers
+        // true, which it never does here; it names the consent page so that it
+        // could only ever point at a page that exists.
+        postLogin: {
+          page: this.getConsolePageUrl('/oauth/consent'),
+          shouldRedirect: () => false,
+          consentReferenceId: ({ session }) => consentOrganizationOf(session),
+        },
+        // `organization_id` is not in the provider's reserved access-token
+        // claim set, which it strips at issuance. This is the claim the
+        // `IAuthService.verifyMcpAccessToken` contract names.
+        customAccessTokenClaims: ({ referenceId }) =>
+          referenceId ? { [OAUTH_ORGANIZATION_CLAIM]: referenceId } : {},
       })];
       });
     }
@@ -6606,9 +6765,15 @@ export class AuthManager {
   // in-process, no self-HTTP hop, no client credentials needed).
   // ---------------------------------------------------------------------------
 
-  /** Cached JWKS for local access-token verification (5-minute TTL). */
-  private jwksCache?: { jwks: any; fetchedAtMs: number };
-  private static readonly JWKS_CACHE_TTL_MS = 5 * 60_000;
+  /**
+   * [#24186] The one forced keyring re-read a token signed by an unknown key
+   * earns: when the last one started, and its answer while it is in flight.
+   *
+   * There is no held key set here. `verifyMcpAccessToken` reads the keyring
+   * through the signer's own reader on every call, so it is held only under
+   * both halves of the cross-request caching rule (`signing-key-read-cache.ts`).
+   */
+  private unknownKeyReread?: { readonly startedAtMs: number; pending?: Promise<JSONWebKeySet | undefined> };
 
   /** Canonical origin of this deployment (config `baseUrl`, auto-detected in dev). */
   private getCanonicalOrigin(): string {
@@ -6750,6 +6915,17 @@ export class AuthManager {
    * userinfo, plain OIDC SSO — do NOT unlock MCP), `exp`/`nbf` enforced by
    * jose.
    *
+   * [#24186] The key set is read on every call through the signer's own
+   * keyring reader — better-auth's `getJwks`, the document `/jwks` serves —
+   * and is never held here. So a `sys_jwks` write that passes this process's
+   * engine reaches the very next verification, and the reader's TTL bounds a
+   * write it cannot see, such as one on another node. A token signed by a key
+   * the set does not carry is retried ONCE against a forced fresh read before
+   * it is refused. That read is shared while it is in flight and runs at most
+   * once per `UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS`, so tokens naming keys that
+   * do not exist cost at most one keyring read per interval. Only the public
+   * projection `/jwks` publishes is ever handed to jose.
+   *
    * A `client_credentials` (M2M) token is REFUSED here — the MCP surface is
    * principal-bound by design; headless callers use API keys. The
    * discriminator is the `sub`/`client_id` PAIR, read as RFC 9068 defines it
@@ -6782,28 +6958,46 @@ export class AuthManager {
    * `resolveAuthzContext` — the single shared authorization resolver — so
    * OAuth is a second *provenance* for the principal, never a second authz
    * model.
+   *
+   * [#24166] `organizationId` is the organization the user's consent bound,
+   * read from the token's `organization_id` claim, which this deployment's
+   * authorization server mints from the consent's reference and from nothing
+   * else (`postLogin.consentReferenceId` / `customAccessTokenClaims` in the
+   * provider options). It is absent when the token carries no such claim: a
+   * consent made with no active organization, or a refresh family started
+   * before consents bound one. It is a record, not an authorization — the
+   * caller vets it on every request by the rule that vets a session's active
+   * organization (`vetOrganizationClaim`, `@objectstack/core`), as the
+   * `IAuthService` contract states.
    */
   async verifyMcpAccessToken(
     token: string,
-  ): Promise<{ userId: string; scopes: string[]; clientId?: string } | null> {
+  ): Promise<{ userId: string; scopes: string[]; clientId?: string; organizationId?: string } | null> {
     try {
       if (!token || token.split('.').length !== 3) return null; // not a JWS compact token
       if (!this.isMcpOAuthEnabled()) return null;
 
-      const { createLocalJWKSet, jwtVerify } = await import('jose');
+      const { createLocalJWKSet, jwtVerify, errors } = await import('jose');
 
-      const now = Date.now();
-      if (!this.jwksCache || now - this.jwksCache.fetchedAtMs > AuthManager.JWKS_CACHE_TTL_MS) {
-        const api = await this.getApi();
-        const jwks = await (api as any).getJwks?.();
-        if (!jwks || !Array.isArray(jwks.keys)) return null;
-        this.jwksCache = { jwks, fetchedAtMs: now };
+      const api = await this.getApi();
+      const jwks = await readPublishedJwks(api);
+      if (!jwks) return null;
+      const expected = { issuer: this.getAuthIssuer(), audience: this.getMcpResourceUrl() };
+      const verifyAgainst = async (keys: JSONWebKeySet) =>
+        (await jwtVerify(token, createLocalJWKSet(keys), expected)).payload;
+
+      let payload: Awaited<ReturnType<typeof verifyAgainst>>;
+      try {
+        payload = await verifyAgainst(jwks);
+      } catch (error) {
+        // Only "no key in the set matches this token" earns the fresh read: a
+        // key minted where this process could not see it. Every other failure
+        // is the token's own, and a re-read could not change it.
+        if (!(error instanceof errors.JWKSNoMatchingKey)) throw error;
+        const fresh = await this.rereadKeyringForUnknownKey(api);
+        if (!fresh) return null;
+        payload = await verifyAgainst(fresh);
       }
-
-      const { payload } = await jwtVerify(token, createLocalJWKSet(this.jwksCache.jwks), {
-        issuer: this.getAuthIssuer(),
-        audience: this.getMcpResourceUrl(),
-      });
 
       const subject = typeof payload.sub === 'string' && payload.sub ? payload.sub : undefined;
       if (!subject) return null;
@@ -6832,10 +7026,62 @@ export class AuthManager {
         typeof payload.scope === 'string'
           ? payload.scope.split(' ').filter(Boolean)
           : [];
-      return { userId: subject, scopes, ...(azp ? { clientId: azp } : {}) };
+      // The bound organization, when the token carries one. A claim that is
+      // PRESENT but is not a non-empty string is no organization this
+      // authorization server mints, so the token is refused rather than read
+      // as "no organization": the check that cannot run must not pass.
+      const organizationClaim = (payload as Record<string, unknown>)[OAUTH_ORGANIZATION_CLAIM];
+      if (
+        organizationClaim !== undefined
+        && (typeof organizationClaim !== 'string' || !organizationClaim)
+      ) return null;
+      const organizationId = organizationClaim as string | undefined;
+      return {
+        userId: subject,
+        scopes,
+        ...(azp ? { clientId: azp } : {}),
+        ...(organizationId ? { organizationId } : {}),
+      };
     } catch {
       return null; // unknown/expired/wrong-audience/garbage → no principal
     }
+  }
+
+  /**
+   * [#24186] The forced fresh keyring read a token signed by an unknown key
+   * earns, bounded twice:
+   *
+   *  - **single-flight** — a read already in flight is joined, never repeated;
+   *  - **a floor** — no new one starts sooner than
+   *    `UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS` after the last one STARTED, so a
+   *    stream of tokens naming keys that do not exist costs at most one
+   *    keyring read per interval. Inside the floor the answer is `undefined`
+   *    and the token is refused, as it would have been without the retry.
+   *
+   * The read retires the keyring the signer's reader holds for this engine
+   * first, so it goes to the table rather than to the set that just failed.
+   * A failed read still spends the interval: a keyring that cannot be read is
+   * not read again on every token.
+   */
+  private rereadKeyringForUnknownKey(api: unknown): Promise<JSONWebKeySet | undefined> {
+    const last = this.unknownKeyReread;
+    if (last?.pending) return last.pending;
+    const now = Date.now();
+    if (last && now - last.startedAtMs < UNKNOWN_SIGNING_KEY_REREAD_FLOOR_MS) {
+      return Promise.resolve(undefined);
+    }
+    retireHeldKeyrings(this.config.dataEngine);
+    const pending = readPublishedJwks(api);
+    const reread: { readonly startedAtMs: number; pending?: Promise<JSONWebKeySet | undefined> } = {
+      startedAtMs: now,
+      pending,
+    };
+    this.unknownKeyReread = reread;
+    const settle = () => {
+      reread.pending = undefined;
+    };
+    pending.then(settle, settle);
+    return pending;
   }
 
   // ---------------------------------------------------------------------------
@@ -7601,10 +7847,18 @@ export class AuthManager {
    * org-scoped RLS read performed as a non-privileged delegate could return
    * nothing and silently grade them as unresolved.
    *
-   * Returns `null` when the role cannot be established — missing keys, no
-   * engine, no membership row, or a lookup error. That grades BELOW a plain
-   * member, so the cap refuses anything above a `member` invitation: this
-   * backs a security gate, and an unverifiable issuer must confer nothing.
+   * Returns `null` when the role is not established — missing keys, no
+   * engine, or a read that answered with no usable membership row. That
+   * grades BELOW a plain member, so the cap refuses anything above a `member`
+   * invitation with `INVITE_ISSUER_UNVERIFIED`: this backs a security gate,
+   * and an issuer it cannot check confers nothing — "no engine to read" is
+   * "cannot check", never "the cap does not apply".
+   *
+   * [#23945] A read that THROWS is not one of those answers: it throws
+   * `503 SERVICE_UNAVAILABLE` ({@link invitationRoleCapReadFaultApiError}), so
+   * an outage is never reported as a verdict about the issuer. Still no
+   * invitation is created.
+   *
    * Multiple membership rows (legacy duplicates) are joined so the highest
    * grade among them wins — the cap must judge the authority they actually
    * hold, not whichever row came back first.
@@ -7618,18 +7872,19 @@ export class AuthManager {
     if (!uid || !oid) return null;
     const engine = this.getDataEngine();
     if (!engine) return null;
+    let members: unknown;
     try {
-      const members = await withSystemReadContext(engine).find('sys_member', {
+      members = await withSystemReadContext(engine).find('sys_member', {
         where: { user_id: uid, organization_id: oid },
         limit: 10,
       });
-      const roles = (Array.isArray(members) ? members : [])
-        .map((m: any) => (typeof m?.role === 'string' ? m.role : ''))
-        .filter((r: string) => r.length > 0);
-      return roles.length > 0 ? roles.join(',') : null;
-    } catch {
-      return null;
+    } catch (err) {
+      throw await invitationRoleCapReadFaultApiError(err);
     }
+    const roles = (Array.isArray(members) ? members : [])
+      .map((m: any) => (typeof m?.role === 'string' ? m.role : ''))
+      .filter((r: string) => r.length > 0);
+    return roles.length > 0 ? roles.join(',') : null;
   }
 
   /**

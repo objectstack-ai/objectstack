@@ -142,6 +142,50 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
     + 'is the supported entry point. Delete the `ai:chat_window` component node and put nothing '
     + "in its place; to choose which platform agent the overlay answers with, set the app's "
     + '`defaultAgent`.'],
+  // #24162, ADR-0049 enforce-or-remove, by the maintainer's ruling quoted on
+  // that card (triage record 6232511377): face 4 of the objectui#12438 ruling C —
+  // the approval request page's raw JSON panel — is dropped, because the person
+  // deciding an approval has no business need to read the request as JSON.
+  // `record:json` (#23745) was declared spec first for that one panel and
+  // shipped only in the 18.0.0-next.3 prerelease: no renderer registered it,
+  // no page placed it (objectui and objectstack measured zero), and its one
+  // planned producer was closed unmerged. The `ai:chat_window` shape: the
+  // row's three keys go with the element, so the kept `ComponentPropsMap` row
+  // refuses the WHOLE bag (`retiredComponentProps`) with this text. No
+  // `os migrate meta` sentence: there is no mechanical edit to list (a
+  // conversion does not delete authored page nodes), and the D3 entry
+  // `ui-record-json-retired` carries the delegated deletion. No replacement is
+  // named, by ruling.
+  ['record:json', '`record:json` was removed in @objectstack/spec 18 (ADR-0049) — it shipped '
+    + 'only in the 18.0.0-next.3 prerelease, declared for one raw-JSON panel on the approval '
+    + 'request page, and that panel was dropped: the person deciding an approval has no business '
+    + 'need to read a record as raw JSON, so no renderer draws the type and no page places it, and '
+    + 'its `field`, `label` and `requiredPermissions` props configure nothing. Delete the '
+    + '`record:json` component node and put nothing in its place.'],
+  // #24230, ADR-0049 enforce-or-remove, executing ruling B on #23892 (record
+  // 6216295104, item 2: "the separate Installed Apps view retires once the
+  // filtered view serves its actions"). objectui#12733 (PR objectui#12926,
+  // merged 35244b6379) deleted the type's one renderer, and its one producer,
+  // `@objectstack/cloud-connection`'s `marketplace_installed` page, had already
+  // left the `MARKETPLACE_INSTALLED_UI_BUNDLE` (#23933): the bundle's "Installed
+  // Apps" navigation entry now opens the console's `developer:packages`
+  // component with `params: { source: 'marketplace' }`. The type was never a
+  // `PageComponentType` member (a plugin console widget on the open string
+  // arm, in a namespace the enum does not reserve), so without this entry the
+  // retired name would fall back to an open-arm custom string and parse in
+  // silence. The `ai:chat_window` shape: the kept `ComponentPropsMap` row
+  // refuses the WHOLE bag (`retiredComponentProps`) with this text; it never
+  // had a key. No `os migrate meta` sentence: deleting an authored page node is
+  // the author's layout decision, which the D3 entry
+  // `ui-marketplace-installed-list-retired` delegates.
+  ['marketplace:installed-list', '`marketplace:installed-list` was removed in @objectstack/spec '
+    + '18 (ADR-0049) — the separate Installed Apps view it drew was retired, so no renderer '
+    + 'draws the type and the console would show "Unknown component type" in its place. The '
+    + 'Installed Apps list is Setup → Packages filtered to Source = marketplace: the console\'s '
+    + '`developer:packages` component opened with `params: { source: \'marketplace\' }`. Delete '
+    + 'the `marketplace:installed-list` component node; to link to that view, add a `component` '
+    + 'navigation item with `componentRef: \'developer:packages\'` and '
+    + '`params: { source: \'marketplace\' }`.'],
   ['element:form', '`element:form` was removed in @objectstack/spec 17 '
     + '(ADR-0049) — the whole `element:form` element is retired: no renderer for it '
     + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
@@ -174,6 +218,11 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
  * kept as a whole-bag refusal. No renderer ever shipped and none is wanted —
  * the console's floating chat overlay is the supported AI chat entry point, so
  * an inline page-level chat window is not part of the authorable surface.
+ *
+ * `record:json` REMOVED (#24162, ADR-0049 enforce-or-remove) the same way, one
+ * prerelease after it was declared (#23745, published in 18.0.0-next.3 only):
+ * the approval request page's raw JSON panel it was declared for was dropped
+ * by the maintainer, so it has no renderer, no placement and no producer.
  */
 export const PageComponentType = z.enum([
   // Structure
@@ -202,12 +251,10 @@ export const PageComponentType = z.enum([
   // every record page of an `enable.files` object. Each has a
   // `ComponentPropsMap` row measured from its renderer's read points.
   'record:approvals', 'record:attachments',
-  // #23745 (the spec half of face 4 of the objectui#12438 ruling, letter C):
-  // one key of the bound record drawn as indented JSON behind a REQUIRED,
-  // fail-closed `requiredPermissions` gate. Declared spec first, as
-  // `record:approval_decision` above was: objectui registers the renderer and
-  // plugin-approvals places it after this declaration exists.
-  'record:json',
+  // `record:json` REMOVED (#24162, ADR-0049; the maintainer dropped face 4 of
+  // the objectui#12438 ruling, the approval request page's raw JSON panel it
+  // was declared for): refused by name through `RETIRED_PAGE_COMPONENT_TYPES`
+  // above, not merely de-advertised.
   // Navigation
   'app:launcher', 'nav:menu', 'nav:breadcrumb',
   // Utility — `user:profile` REMOVED (#14159): shell chrome, refused by name
@@ -582,7 +629,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
     if (guidance) {
       ctx.addIssue({ code: 'custom', message: guidance, params: { retiredComponentType: type } });
     }
-  }).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable; `ai:chat_window` — no renderer by design, the floating chat overlay is the AI chat entry point; `element:filter` and `element:form` — retired whole, no renderer for either ever shipped) is refused at the parse itself, with the retirement prescription.'),
+  }).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable; `ai:chat_window` — no renderer by design, the floating chat overlay is the AI chat entry point; `element:filter` and `element:form` — retired whole, no renderer for either ever shipped; `record:json` — the raw-JSON panel it was declared for was dropped; `marketplace:installed-list` — the separate Installed Apps view it drew was retired, Setup → Packages filtered to Source = marketplace replaces it) is refused at the parse itself, with the retirement prescription.'),
   id: z.string().optional().describe('Unique instance ID'),
   
   /** Configuration */
@@ -1270,6 +1317,7 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
   ['record:history', 'draws a window of the history feed (`limit`, 50 unless set), so a printed copy carries only part of it'],
   ['record:activity', 'draws a window of the activity feed (`limit`) with comment and reaction controls, so a printed copy carries only part of it'],
   ['object-grid', 'pages its rows (`pagination` / `pageSize`), so a printed copy carries only the page on screen'],
+  ['list-view', 'pages its rows (`pagination`), so a printed copy carries only the page on screen'],
   ['object-timeline', 'draws a window of its items (`limit`) along a time axis scrolled to the visible range'],
   ['object-tree', 'draws only the nodes a viewer has expanded, so a printed copy depends on who expanded what'],
   // Lays itself out to the screen.
@@ -1291,7 +1339,6 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
   ['record:approval_decision', 'is the decision panel of an approval request: action controls that differ by viewer, beside a progress tally each decision changes, with nothing to print'],
   ['record:approvals', 'is the record\'s live approval timeline, with a remind control only the submitter sees, so what prints would depend on who prints it'],
   ['record:attachments', 'is a list of attached files with upload, download and delete controls, and the files themselves never reach paper'],
-  ['record:json', 'is a panel that starts collapsed behind a per-viewer capability gate, so what prints would depend on who prints it and whether they opened it'],
   ['element:button', 'is an action control, with nothing to print'],
   ['element:record_picker', 'is an input control, with nothing to print'],
   ['element:text_input', 'is an input control, with nothing to print'],
@@ -1308,7 +1355,6 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
   ['global:search', 'is shell chrome, not document content'],
   ['global:notifications', 'is shell chrome, not document content'],
   ['cloud-connection:panel', 'is a console administration widget, not document content'],
-  ['marketplace:installed-list', 'is a console administration widget, not document content'],
   ['mcp:connect-agent', 'is a console administration widget, not document content'],
   ['ai:suggestion', 'is an AI suggestion generated for each viewer, not document content'],
 ]);

@@ -9,7 +9,7 @@
       "title": "Per-group sign-off (会签) needs one approval from EACH group",
       "since": "v16",
       "status": "active",
-      "revision": 6,
+      "revision": 7,
       "priority": "P1",
       "surface": "browser",
       "personas": ["approver holding exactly one group (e.g. manager)", "second approver holding the other group (e.g. finance/auditor)"],
@@ -66,9 +66,9 @@
           "evidence": "actions read"
         },
         {
-          "clause": "the server derives the decision actor from the session — the posted actorId is a hint, not an authority (#3800)",
+          "clause": "the server records the decision against the authenticated session — a posted actorId naming anyone ELSE is refused, never honored and never silently overridden (#3800)",
           "oracle": "network",
-          "verify": "capture the approve POST; the recorded action row's actor is the authenticated session user regardless of any actorId in the body",
+          "verify": "capture the approve POST: with an actorId naming another user (e.g. the finance-group approver) it answers 403 FORBIDDEN 'cannot act as …' and writes no action row; with the caller's own id (or none) it succeeds and the recorded action row's actor is the authenticated session user",
           "evidence": "decision POST + action row"
         }
       ],
@@ -89,7 +89,8 @@
         { "revision": 3, "date": "2026-08-10", "change": "entry path refreshed: the inbox is opened through the account app's Approvals nav entry (component route) rather than the bare /system/approvals deep link, so the item exercises the path a real user takes after #7213", "ref": "#7331" },
         { "revision": 4, "date": "2026-08-11", "change": "knownGaps records the better-auth issuer=local:credential provisioning detail — the one field that decides whether Ada can be driven as a real second session or the run falls back to the admin override; it used to be rediscovered every sweep, behind a 'User not found' warn that points at the wrong cause", "ref": "#7530" },
         { "revision": 5, "date": "2026-08-18", "change": "the fixture blocker is CLOSED, not merely documented: the showcase now provisions Ada's better-auth credential account at boot (issuer derived from the dev admin's own row), so she signs in on stock seeds. knownGaps rewritten as closed-by-fixture rather than deleted — the issuer detail is the reason the gap existed and the next sweep still needs it. The admin-override fallback is withdrawn as an acceptable path for this item", "ref": "#9308" },
-        { "revision": 6, "date": "2026-09-19", "change": "the issuer knownGap is re-anchored rather than re-pointed: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, so the cited plugin-auth backfill module no longer exists and has no successor. The reason the gap carries is kept verbatim in substance — a password hash alone was not enough, and the failure was a silent lockout whose 'User not found' warn pointed at the wrong row — and the durable anchor is now the retirement's own migration entry in packages/spec. The clause describing the seed as reading the issuer off the dev admin's credential row is withdrawn as false: there is no issuer to read", "ref": "#17453" }
+        { "revision": 6, "date": "2026-09-19", "change": "the issuer knownGap is re-anchored rather than re-pointed: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, so the cited plugin-auth backfill module no longer exists and has no successor. The reason the gap carries is kept verbatim in substance — a password hash alone was not enough, and the failure was a silent lockout whose 'User not found' warn pointed at the wrong row — and the durable anchor is now the retirement's own migration entry in packages/spec. The clause describing the seed as reading the issuer off the dev admin's credential row is withdrawn as false: there is no issuer to read", "ref": "#17453" },
+        { "revision": 7, "date": "2026-10-16", "change": "the actorId clause described a silent override ('a hint … regardless of any actorId in the body'), but the server REFUSES a mismatched actorId (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 on EXP-2001: the admin's approve carrying Ada's id answers 403 FORBIDDEN \"cannot act as 'usr_showcase_auditor_demo' — an approval action is recorded against the authenticated caller\" and adds no action row; the same call carrying the admin's own id answers 200 and the approve row's actor is the admin. The clause now states the stricter, measured behavior; it still fails if a foreign actorId is recorded", "ref": "#24036" }
       ]
     },
     {
@@ -404,7 +405,7 @@
       "title": "Every approval action executes its REST route and produces the expected state transition plus a timeline entry",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": ["dev admin (pending approver on the seeded requests; submitter of the invoice request)"],
@@ -428,7 +429,7 @@
         "recall: raise one more pending request; POST /:id/recall as the submitter; re-read",
         "reassign: on a pending request POST /:id/reassign {to: <userId>, comment}; re-read pending_approvers",
         "remind: POST /:id/remind on the admin-submitted invoice request; then POST it again immediately (throttle probe)",
-        "request-info + comment: POST /:id/request-info {comment} and /:id/comment {comment} on a pending request",
+        "request-info + comment: POST /:id/request-info {comment} AS A PENDING APPROVER of the request (request-info is approver-only: once the admin has reassigned their own slot away in the reassign step, the admin's request-info answers 403 FORBIDDEN \"actor '…' is not a pending approver\" — drive it as the pending approver, e.g. the reassign target with their own token), and POST /:id/comment {comment}, which a non-approver admin may still post",
         "after EVERY action above: GET /:id and GET /:id/actions; record the status transition and the appended timeline row",
         "lock contrast: while a request from exec_review (lockRecord: true) is pending, PATCH the project record — refused; while parked at manager_review (lockRecord: false) the same PATCH succeeds",
         "exec no-revise gate: drive a >500000 budget to exec_review and POST /:id/revise — expect a clear refusal"
@@ -519,7 +520,8 @@
         { "revision": 1, "date": "2026-08-07", "change": "initial — decision-action matrix derived from the approvals REST route ledger and the ADR-0044 revise/resubmit flow shape", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "corrected the resubmit transition the item asserted: it does NOT move the original returned→pending — the approval node's re-entry mints a round-N+1 request while the original stays terminally returned (source-confirmed as by design). Split the old combined revise/resubmit clause into three (revise parks · resubmit mints · original stays returned) and sharpened the maxRevisions verify to name which request the auto-reject lands on. Fixes the sole reason #7517 scored this item PARTIAL", "ref": "#7530" },
         { "revision": 3, "date": "2026-08-30", "change": "added the READ_BACK_FAILED clause (#12769, landed #13181 2026-08-29): all ten fresh! non-null assertions on the post-write echo are gone — deciding an org-less request (the schedule/api-trigger shape, #10131) as an org-scoped caller now answers a loud named refusal with the write recorded, never a malformed 200 with request:null. Fixture reality recorded in knownGaps: no seeded flow opens an org-less request on demand, so the live-HTTP leg is blocked(fixture) while the unit pin covers the mechanism", "ref": "#13181" },
-        { "revision": 4, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 19). A10 was blocked(fixture): no org-less request can be provisioned, and even an api-hook approval is org-stamped. Disposition: pin. approval-service.test.ts (the #12769 describe) proves the clause's verdict at the service. `automated` names it for that clause, and the knownGap records the refuted api-trigger candidate, the one untried schedule candidate, and the wire-envelope half that stays unobserved on stock", "ref": "#22017" }
+        { "revision": 4, "date": "2026-10-06", "change": "partial-coverage gap of QA run #21784 parked on #22017 (row 19). A10 was blocked(fixture): no org-less request can be provisioned, and even an api-hook approval is org-stamped. Disposition: pin. approval-service.test.ts (the #12769 describe) proves the clause's verdict at the service. `automated` names it for that clause, and the knownGap records the refuted api-trigger candidate, the one untried schedule candidate, and the wire-envelope half that stays unobserved on stock", "ref": "#22017" },
+        { "revision": 5, "date": "2026-10-16", "change": "step 9 ran request-info + comment as the admin on a pending request, but request-info is approver-only (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: request-info by the admin while a pending approver → 200; after the admin reassigns their slot to Ada → the admin's request-info answers 403 FORBIDDEN \"actor … is not a pending approver\", the admin's comment still answers 200, and Ada's request-info answers 200. The step now names the pending approver as the request-info caller; the clauses are unchanged", "ref": "#24036" }
       ]
     },
     {
@@ -665,27 +667,27 @@
       "title": "An active out-of-office delegation reroutes an individually-routed approver to the delegate; expiring the window hands the slot back",
       "since": "v16",
       "status": "active",
-      "revision": 5,
+      "revision": 6,
       "priority": "P2",
       "surface": "mixed",
       "personas": ["dev admin — the DELEGATOR A: the delegation row is written BY them FOR them (sys_approval_delegation is self-service-only, so the delegator must be whoever is authenticated)", "a SECOND REAL runtime account — the DELEGATE B (Ada Auditor usr_showcase_auditor_demo, provisioned as a real login per knownGaps), who holds their own bearer token and decides the rerouted request as themselves"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a flow with an INDIVIDUALLY-routed approver — OOO delegation only applies to type user / field / manager (ApprovalService.expandApprovers), NOT position. No ACTIVE seeded showcase flow routes individually (they all route by position), so author a scratch flow in a WRITABLE package with a RECORD-TRIGGERED start — start config {objectName: <a scratch object in the same package>, triggerType: 'record-after-create'} — and a single approval node config.approvers=[{type:'user', value:'<A = the signed-in admin's sys_user id>'}], shaped after examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the record-backed approver specimen, whose start is record-triggered the same way). ⚠ Not a trigger-only start: an approval node needs a record, and POST /api/v1/automation/<flow>/trigger cannot supply one — buildAutomationContext (packages/runtime/src/domains/automation.ts) maps the body's recordId into params only, while the approval node reads its record id from $record, which the engine seeds from context.record, so the run answers 400 \"Approval node '…': no record id in $record\" (packages/plugins/plugin-approvals/src/approval-node.ts)",
+          "a flow with an INDIVIDUALLY-routed approver — OOO delegation only applies to type user / field / manager (ApprovalService.expandApprovers), NOT position. No ACTIVE seeded showcase flow routes individually (they all route by position), so register a scratch flow with a RECORD-TRIGGERED start through POST /api/v1/automation on the stock boot — start config {objectName: 'showcase_field_zoo', triggerType: 'record-after-create'} (a stock object; no writable package or scratch object is needed) — and a single approval node config.approvers=[{type:'user', value:'<A = the signed-in admin's sys_user id>'}], shaped after examples/app-showcase/src/automation/flows/approver-bindings.flow.ts (the record-backed approver specimen, whose start is record-triggered the same way). ⚠ Not a trigger-only start: an approval node needs a record, and POST /api/v1/automation/<flow>/trigger cannot supply one — buildAutomationContext (packages/runtime/src/domains/automation.ts) maps the body's recordId into params only, while the approval node reads its record id from $record, which the engine seeds from context.record, so the run answers 400 \"Approval node '…': no record id in $record\" (packages/plugins/plugin-approvals/src/approval-node.ts)",
           "delegator A = the SIGNED-IN dev admin (so the delegation is a self-service write); delegate B = a second real runtime account with its own credentials and bearer token — Ada Auditor (usr_showcase_auditor_demo / auditor.demo@example.com), provisioned as a real login per the knownGap below"
         ],
         "knownGaps": [
           "⛔ the delegation CANNOT be set up as a third party on behalf of another delegator: sys_approval_delegation is self-service-only and there is no admin exemption (#4839 — bindDelegationWriteGuard rejects a foreign delegator_id with FORBIDDEN, and an absent one is stamped to the caller). Combined with the seeded demo personas having no auth account of their own, the 'admin delegates on behalf of Mei' shape this item used to prescribe is not constructible by ANYBODY. The run drives the mirror image instead — the admin delegates their OWN slot to a real second account — which is also the stronger test, because the delegate decides under a genuinely separate identity and the audit's no-laundering clause becomes falsifiable (#7517)",
           "[CLOSED by #9308 fixture 1 — the gap text stays because it carries the reason] provisioning a seeded demo persona as a real login needs more than a password hash, and for one release the missing half was an issuer: better-auth 1.7 keyed account identity on (issuer, accountId), so a credential row whose issuer was not the local credential issuer was invisible to findAccountByKey — sign-in failed INVALID_EMAIL_OR_PASSWORD behind a misleading 'User not found' warn pointing at the sys_user row rather than at the account: the user exists and the hash is right, so the warn sends you looking in exactly the wrong place. ⚠️ THE TRAP IS RETIRED, not merely closed by the fixture: better-auth 1.7.3 rolled the issuer-scoped account identity back and sys_account.issuer retired with it, together with the plugin-auth symbols that existed only to serve it — the durable record is packages/spec/src/migrations/entries/semantic/18.sys-account-issuer-retired.ts, and there is no successor module this citation could be re-pointed at. The key is (provider_id, account_id), internalAdapter.createAccount supplies both, and the derivation, its failure branch and the whole class of silent lockout behind it are gone. Delegate B is constructible with no setup and nothing about her issuer to get right: seed-approval-demo.ts provisions Ada Auditor's credential account at boot, password DEMO_PERSONA_PASSWORD ('showcase123', demo-personas.ts), pinned by packages/qa/dogfood/test/showcase-demo-personas-loginable.dogfood.test.ts. Drive the real second account; do not record blocked(fixture) for this reason",
-          "authoring the scratch flow needs a writable/scratch package — the showcase ships read-only"
+          "[CLOSED — the gap text stays because it carries the reason] authoring the scratch flow used to need a writable/scratch package because the showcase ships read-only; POST /api/v1/automation registers a runtime flow on the stock boot (measured on main c91af8ed6, record-triggered on showcase_field_zoo), so the package is not needed. A runtime-registered flow is removed with DELETE /api/v1/automation/<name>"
         ]
       },
       "steps": [
         "boot showcase isolated (dogfood §0); provision B as a real login — a stock boot already does it, see knownGaps — and hold B's bearer token separately from the admin's",
         "sign in as the dev admin (the delegator A)",
-        "in a writable/scratch package author + register (POST /api/v1/automation) a flow whose start is record-triggered on a scratch object (start config objectName + triggerType 'record-after-create') and whose single approval node has approvers=[{type:'user', value:'<A = the admin's sys_user id>'}], behavior first_response",
-        "baseline (no delegation): start a run by creating one record of the trigger object (POST /api/v1/data/<scratch object>); GET /api/v1/approvals/requests?status=pending, find the new request, GET /:id — pending_approvers must be [A]; GET /:id/actions shows NO ooo_substitute row",
+        "register (POST /api/v1/automation) a flow whose start is record-triggered on a stock object (start config objectName 'showcase_field_zoo' + triggerType 'record-after-create') and whose single approval node has approvers=[{type:'user', value:'<A = the admin's sys_user id>'}], behavior first_response",
+        "baseline (no delegation): start a run by creating one record of the trigger object (POST /api/v1/data/showcase_field_zoo {name, f_master_detail: <a showcase_project id>}); GET /api/v1/approvals/requests?status=pending, find the new request, GET /:id — pending_approvers must be [A]; GET /:id/actions shows NO ooo_substitute row",
         "create an ACTIVE delegation AS A (self-service): POST /api/v1/data/sys_approval_delegation {delegate_id:'<B>', valid_from:<now-1h ISO>, valid_until:<now+24h ISO>, reason:'Annual leave'} — omit delegator_id and the guard stamps the caller; passing a delegator_id that is not the caller is refused (see the negative below)",
         "start a run AGAIN (create another record of the trigger object); GET the new request /:id — pending_approvers must now be [B], not [A]; GET /:id/actions — one row action='ooo_substitute' whose comment names 'A → B'",
         "read B's inbox/notifications — a topic approval.ooo_substituted notification addressed to B, actionUrl /system/approvals?request=<id> (#1322 M4)",
@@ -744,7 +746,8 @@
         { "revision": 2, "date": "2026-08-11", "change": "persona shape rewritten around what is constructible: the old fixture had the admin write a delegation on behalf of a non-admin delegator, which sys_approval_delegation's self-service-only guard refuses from everybody (#4839) and which the named delegator could not do either (no auth account). Now A = the signed-in admin delegating their OWN slot and B = a second REAL runtime account deciding with its own bearer token — the mirror image #7517 actually drove, and the stronger test. Added the foreign-delegator refusal as a negative and the better-auth issuer provisioning detail to knownGaps", "ref": "#7530" },
         { "revision": 3, "date": "2026-08-18", "change": "delegate B needs no hand-provisioning any more: the showcase gives Ada Auditor a real better-auth credential account on a stock boot, so the issuer knownGap is rewritten as closed-by-fixture. The OTHER two gaps are untouched and still bind — the self-service-only delegation guard (#4839) and the writable/scratch package the individually-routed flow needs", "ref": "#9308" },
         { "revision": 4, "date": "2026-09-19", "change": "same re-anchoring as the sibling items: the retired plugin-auth backfill citation is replaced by the retirement's migration entry in packages/spec and the reason is kept, the parenthetical 'issuer derived from the dev admin's own row' is withdrawn as false, and the step that told a runner to check issuer=local:credential when provisioning delegate B goes with it — that field no longer exists", "ref": "#17453" },
-        { "revision": 5, "date": "2026-10-13", "change": "fixtures.requires[0] and steps[2], [3], [5] and [8] start the scratch flow from a record instead of POST …/trigger (assertion defect, #23166 A0; parked on #23121, carried by #23169). The trigger route cannot open an approval: buildAutomationContext maps the body's record into params only, the approval node reads its record id from $record, which the engine seeds from context.record, and the run answers 400 'no record id in $record'. QA run #23166 drove the item through a record-triggered start (the approver-bindings.flow.ts shape) and passed every clause. Read from source at 6d7f4df3c: runtime domains/automation.ts buildAutomationContext, plugin-approvals approval-node.ts", "ref": "#23169" }
+        { "revision": 5, "date": "2026-10-13", "change": "fixtures.requires[0] and steps[2], [3], [5] and [8] start the scratch flow from a record instead of POST …/trigger (assertion defect, #23166 A0; parked on #23121, carried by #23169). The trigger route cannot open an approval: buildAutomationContext maps the body's record into params only, the approval node reads its record id from $record, which the engine seeds from context.record, and the run answers 400 'no record id in $record'. QA run #23166 drove the item through a record-triggered start (the approver-bindings.flow.ts shape) and passed every clause. Read from source at 6d7f4df3c: runtime domains/automation.ts buildAutomationContext, plugin-approvals approval-node.ts", "ref": "#23169" },
+        { "revision": 6, "date": "2026-10-16", "change": "the knownGap 'authoring the scratch flow needs a writable/scratch package' is stale (#23878 checklist-accuracy finding): POST /api/v1/automation registers a runtime flow on the stock boot. The fixture line and step 3 now register the user-routed flow that way, record-triggered on the stock showcase_field_zoo, and the run steps create a showcase_field_zoo row to start it. Full re-run on main c91af8ed6 with B = Ada Auditor: baseline pending [A]; an active self-service A→B delegation reroutes the next request to [B] with one ooo_substitute row (actor null, 'A → B — Annual leave'); B's /notifications row is type approval.ooo_substituted with actionUrl /system/approvals?request=ID; B approves with her own token (actor B, via_override false); with valid_until in the past the next request routes back to [A] with no substitution", "ref": "#24036" }
       ]
     },
     {
@@ -752,7 +755,7 @@
       "title": "Approve/Reject render in the record header; Reject fires after ONE dialog; a locking approval hides inline edit",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["dev admin (holds the manager position, so showcase_budget_approval's manager_review routes to them — a pending approver standing on the record page)"],
@@ -766,13 +769,13 @@
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin",
         "PATCH a showcase_project budget to e.g. 200000 over /api/v1/data — showcase_budget_approval opens and parks at manager_review (routed to manager = admin), lockRecord:false",
-        "open that project's record page (/apps/showcase_app/showcase_project/:id); screenshot the header — Approve and Reject must render in the primary slot (buildApprovalDecisionActions: Approve variant 'primary' order -100, Reject variant 'destructive' order -99, both locations ['record_header'])",
+        "open that project's record page — /_console/apps/showcase_app/showcase_project/record/:id, the served record route (the shorthand /apps/showcase_app/showcase_project/:id still lands there: the console's ShorthandRecordRedirect rewrites it); screenshot the header — Approve and Reject must render in the primary slot (buildApprovalDecisionActions: Approve variant 'primary' order -100, Reject variant 'destructive' order -99, both locations ['record_header'])",
         "because manager_review is lockRecord:false, confirm inline-edit affordances remain live on this record (the editable contrast)",
         "click Reject: assert exactly ONE dialog opens — the param dialog carrying the comment textarea inline, titled by the Reject label with the confirm question as its description; there is NO separate confirm-then-comment second dialog (objectui#3126)",
         "fill the comment and Confirm; capture POST /api/v1/approvals/requests/:id/reject and re-read the request (status=rejected)",
         "approve path: raise another budget-approval request; on its record page click Approve → one dialog with an optional comment → Confirm → POST /:id/approve → re-read (status=approved)",
         "lock contrast: drive a >500000 budget to exec_review (lockRecord:true) on a project record page; screenshot — the inline-edit affordances are HIDDEN (recordLockedByApproval → canEdit suppressed)",
-        "both-sides gate: open a project record page whose pending approval routes AWAY from the admin (or has none) — the header offers NO Approve/Reject (approvals.canDecide false)"
+        "both-sides gate: open the same project's record page as a member who can READ the project but is NOT a pending approver and holds no override — e.g. a contributor-bound member — the header offers NO Approve/Reject (approvals.canDecide false). ⛔ Not the dev admin: on a record whose approval routes away from them the admin still sees 'Override Approve' / 'Override Reject' (the organization-administrator override path), so the admin cannot prove the gate's closed side"
       ],
       "acceptance": [
         {
@@ -800,9 +803,9 @@
           "evidence": "two record-page screenshots (locked vs editable)"
         },
         {
-          "clause": "the decision buttons are gated by the viewer's approver relationship — a record whose pending approval does not route to the viewer offers neither Approve nor Reject",
+          "clause": "the decision buttons are gated by the viewer's approver relationship — a viewer who is neither a pending approver nor an override holder is offered neither Approve nor Reject; an organization administrator off the slate is offered the OVERRIDE pair instead, which is a different control, not this gate failing",
           "oracle": "dom",
-          "verify": "after confirming render via screenshot, the header DOM has no approve_request/reject_request actions when approvals.canDecide is false (the current user is not in pending_approvers)",
+          "verify": "after confirming render via screenshot, the header DOM of the non-approver, non-override member (e.g. a contributor-bound member) has no approve_request/reject_request actions when approvals.canDecide is false (the current user is not in pending_approvers); record, separately, that the admin routed away sees 'Override Approve' / 'Override Reject'",
           "evidence": "screenshot + header action DOM list"
         }
       ],
@@ -819,7 +822,8 @@
         "examples/app-showcase/src/automation/flows/index.ts#BudgetApprovalFlow (BudgetApprovalFlow — manager_review lockRecord:false / exec_review lockRecord:true on showcase_project)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-08", "change": "initial — the record-page approval surface (distinct from the inbox-drawer items): header Approve/Reject, one-dialog Reject (#3126), decision round-trip, and the lockRecord-driven inline-edit hide (#2902)", "ref": "claude/platform-test-checklist-ocwugl" }
+        { "revision": 1, "date": "2026-08-08", "change": "initial — the record-page approval surface (distinct from the inbox-drawer items): header Approve/Reject, one-dialog Reject (#3126), decision round-trip, and the lockRecord-driven inline-edit hide (#2902)", "ref": "claude/platform-test-checklist-ocwugl" },
+        { "revision": 2, "date": "2026-10-17", "change": "the both-sides clause and step 9 named no persona, and the natural choice — the dev admin on a record routed away from them — sees 'Override Approve' / 'Override Reject' (#23878 checklist-accuracy finding), so it can never show the closed side; the step and clause 5 now name a non-override member. The record route in step 3 is the served /_console/apps/showcase_app/showcase_project/record/:id (the shorthand form redirects to it). Re-run on main c91af8ed6 with the console at objectui f8267df93aba: on a project whose budget approval is pending for the admin, the admin's header shows Approve and Reject; a contributor-bound member's header shows neither; with the admin's slot reassigned away the admin's header shows Override Approve and Override Reject", "ref": "#24036" }
       ]
     },
     {
@@ -1056,7 +1060,7 @@
       "title": "The bell badge and Home's action card agree on the pending-approval count and lead to an app the user can open",
       "since": "v17",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "browser",
       "personas": ["a non-admin pending approver", "an admin with >9 combined unread notifications + pending approvals"],
@@ -1067,11 +1071,11 @@
           "enough seeded sys_inbox_message rows plus pending approvals that the combined total exceeds 9, so the CLAMP case is the one exercised (a total of 9 or less never proves the breakdown is unclamped)"
         ],
         "knownGaps": [
-          "sys_inbox_message is granted by no platform permission set, so a plain member's notification count is structurally 0 and the >9 case can only be reached as an admin — tracked at #7344"
+          "[STALE premise corrected — #7344 closed 2026-08-11] a plain member's notification count is NOT structurally 0: a member holding only the baseline sets reads its own notifications (GET /api/v1/notifications?view=mine 200), so the >9 case is reachable for a non-admin. Measured on main c91af8ed6: seed it by routing approvals to the member through a runtime user-routed flow (POST /api/v1/automation, record-triggered on showcase_field_zoo; DELETE it afterwards). Notifications of one type COALESCE in the popover ('Approval requested ×9' counts as one), so drive the total past 9 with pending approvals: at 10 pending + 2 notification groups the button read 9+ and the header 12 total"
         ]
       },
       "steps": [
-        "boot showcase isolated; seed >9 combined notifications + pending approvals for the persona",
+        "boot showcase isolated; seed >9 combined notifications + pending approvals for a NON-ADMIN member (knownGaps: a runtime flow routing {type:'user', value:<the member>} on showcase_field_zoo, one create per approval — coalesced notifications count once, so the pending approvals carry the total); sign in as that member through the form",
         "open the bell popover; screenshot the header line and read the button badge",
         "open /_console/home; screenshot the 'Needs your attention' card",
         "click the card's pending-approvals row and record the URL it navigates to",
@@ -1093,7 +1097,7 @@
         {
           "clause": "Home's pending-approvals card navigates within an app the user can open — never /apps/setup/...",
           "oracle": "dom",
-          "verify": "after a screenshot confirms the card rendered, click it and read the URL: /apps/<an app in this session's meta/app list>/system/approvals. For a non-admin whose app list excludes setup, a setup URL is a FAIL",
+          "verify": "after a screenshot confirms the card rendered, click it and read the URL: /apps/<an app in this session's meta/app list>/system/approvals. For a non-admin whose app list excludes setup, a setup URL is a FAIL. The URL's app segment may be the app's package id (measured: /apps/com.example.showcase/system/approvals, which the console resolves to the Showcase app) or its name; either is an app the session can open",
           "evidence": "the landed URL + the session's meta/app list"
         }
       ],
@@ -1108,7 +1112,8 @@
         "objectui packages/app-shell/src/console/home/HomePage.tsx (onOpenApprovals → /apps/<approvalsAppSegment>/system/approvals)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-10", "change": "initial — the bell breakdown (objectui#4073) and Home's card target had no checklist coverage", "ref": "#7331" }
+        { "revision": 1, "date": "2026-08-10", "change": "initial — the bell breakdown (objectui#4073) and Home's card target had no checklist coverage", "ref": "#7331" },
+        { "revision": 2, "date": "2026-10-17", "change": "knownGaps[0] said a plain member's notification count is structurally 0, so the >9 case was admin-only (#7344); #7344 closed on 2026-08-11 and the #23878 run saw a member read 2 notifications. Re-run on main c91af8ed6 with the console at objectui f8267df93aba as a baseline-only member seeded with 10 pending approvals and 2 notification groups: the bell button read 9+, the popover header '12 total · 2 notifications + 10 pending approvals', Home's Awaiting approval card 10, the inbox's My Pending tab 10 and the approvals API 10; the card's View all opened /_console/apps/com.example.showcase/system/approvals inside the Showcase app. The knownGap, step 1 and clause 3's verify now say so", "ref": "#24036" }
       ]
     },
     {
@@ -1116,7 +1121,7 @@
       "title": "The anonymous /approvals/act door: a minted one-tap token renders a confirm page and one POST decides as exactly the bound approver — every dead-token shape is a designed refusal page with no state change",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (submitter of the seeded invoice request — remind is submitter-only, and the remind fan-out is what mints the tokens)", "the ANONYMOUS bearer of an action link: a clean HTTP client holding NO session cookie and NO bearer token"],
@@ -1138,7 +1143,7 @@
         "switch to a CLEAN anonymous client (no cookies, no Authorization header — prove it: GET /api/v1/approvals/requests from the same client answers 401); GET the approve URL — 200 HTML confirm page naming the action, the acting approver id and the request summary, with a POST form; GET it again — the confirm page renders a second time, not the 'Already used' page (peek validates without consuming), then re-read the request and GET /:id/actions as admin: nothing changed (mail-gateway prefetch safety — the GET never mutates). The token row is served through no door, so the second confirm page IS the 'still live' oracle",
         "POST the form body (token=<raw>) anonymously — 200 result page 'Approved · 已通过'; as admin re-read the request (status moved / group tally advanced) and GET /:id/actions — the approve row's actor is the BOUND approver_id, comment 'Via action link'",
         "replay: POST the same token again — 'Already used · 链接已使用' page; no new action row, no state movement",
-        "dead-slot leg: on a second pending request mint tokens, decide it through the normal UI/API first, then GET the leftover token URL — 'Already decided · 请求已处理' page; and on a third, reassign the bound approver away first, then GET — 'No longer your approval · 已不在你名下' (the link died with the slot, ADR-0043 invalidation)",
+        "dead-slot leg: on a second pending request mint tokens, decide it through the normal UI/API first, then GET the leftover token URL — 'Already decided · 请求已处理' page; and on a third, reassign the BOUND approver's own slot away first — POST /:id/reassign {\"from\": \"<the token's bound approver_id>\", \"to\": \"<someone else>\"} as the admin, or the bound approver's own reassign with their token — then GET — 'No longer your approval · 已不在你名下' (the link died with the slot, ADR-0043 invalidation). ⚠️ An admin reassign WITHOUT `from` moves the CALLER's own slot (from defaults to the caller's taken slot, approval-service.ts reassign), so when the admin also holds a slot the bound approver's token stays live and the leg scores nothing",
         "garbage: GET and POST with token=garbage — 'Invalid link · 链接无效' page, 200, no summary rows",
         "expiry: no live door on this build (see knownGaps) — cite the pinned unit test's 'expired' reason and the RESULT_COPY.expired page copy ('Link expired · 链接已过期'), and record the leg as blocked(fixture)",
         "scope probe: replay the raw token as a credential everywhere else — Authorization: Bearer <token> on GET /api/v1/approvals/requests and on GET /api/v1/data/showcase_invoice — every such call is unauthenticated (401); the token opens nothing but the act door"
@@ -1201,7 +1206,8 @@
       ],
       "history": [
         { "revision": 1, "date": "2026-08-30", "change": "initial — the anonymous actionable-link door (ADR-0043) had no checklist coverage despite being an unauthenticated decision path. Authored from source with one register correction: the hunter proposed an emailed-link capture harness as the fixture, but messaging persists the reminder payload (raw action URLs included) on the sys_notification event row, so every token/door clause is stock-runnable; only the email-rendering leg still wants the LogTransport capture (recorded in knownGaps)", "ref": "#sweep-2026-08-30" },
-        { "revision": 2, "date": "2026-10-10", "change": "re-pointed after PR #22633 (#22616) closed sys_approval_token to the automatic API (apiEnabled: false, apiMethods: [] — 404 OBJECT_API_DISABLED for every caller): the token-row oracles move to the act door's outcome pages, the request's action history (GET /:id/actions) and the two pinned integration tests (internal-hash, generic-door); the mint clause is scored by test; the expiry leg, whose only recipe was backdating expires_at over the data API, has no surviving door (ttlMs is not REST-reachable and the plugin threads no clock) and is recorded in knownGaps as blocked(fixture) with the pinned 'expired' reason as its oracle. Two steps had contradicted the door before that PR already: the digest has been withheld since #21197, and update was never in the whitelist", "ref": "#22631" }
+        { "revision": 2, "date": "2026-10-10", "change": "re-pointed after PR #22633 (#22616) closed sys_approval_token to the automatic API (apiEnabled: false, apiMethods: [] — 404 OBJECT_API_DISABLED for every caller): the token-row oracles move to the act door's outcome pages, the request's action history (GET /:id/actions) and the two pinned integration tests (internal-hash, generic-door); the mint clause is scored by test; the expiry leg, whose only recipe was backdating expires_at over the data API, has no surviving door (ttlMs is not REST-reachable and the plugin threads no clock) and is recorded in knownGaps as blocked(fixture) with the pinned 'expired' reason as its oracle. Two steps had contradicted the door before that PR already: the digest has been withheld since #21197, and update was never in the whitelist", "ref": "#22631" },
+        { "revision": 3, "date": "2026-10-16", "change": "step 7's dead-slot leg said 'reassign the bound approver away first' without saying who can (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6 on a two-slot request [admin, Ada] minted by remind: the admin's reassign without `from` moved the admin's own slot ([OTHER, Ada]) and Ada's approve token still peeked as the 'Approve · 通过' confirm page; the admin's reassign with from: Ada moved Ada's slot and the same token then rendered 'No longer your approval · 已不在你名下'. The step now passes `from` (or has the bound approver reassign their own slot); the clause is unchanged", "ref": "#24036" }
       ]
     },
     {
@@ -1209,19 +1215,19 @@
       "title": "Every approver type resolves the slate it declares — department includes all descendants, deprecated role warns and resolves, and a slate with no concrete person takes the declared onEmptyApprovers fork, never a fake approval",
       "since": "v16",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "api",
       "personas": ["dev admin (authors the scratch flows; org owner)", "Ada Auditor / Mei Phone (real logins since #9308 — directory rows the graph legs resolve to)"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "scratch ACTIVE autolaunched flows in a WRITABLE package, one per uncovered approver leg, each with a single approval node whose approvers carry the type under test (shape them after examples/app-showcase/src/automation/flows/approver-bindings.flow.ts, but note the caveat in knownGaps: that file is a DRAFT designer specimen, not a runnable fixture)",
+          "scratch ACTIVE autolaunched flows, one per uncovered approver leg, each with a single approval node whose approvers carry the type under test — registered at runtime on the STOCK boot through POST /api/v1/automation (the flow-registration door — no writable package is needed), started by a record trigger on a stock object, e.g. start config {objectName: 'showcase_field_zoo', triggerType: 'record-after-create'} and a showcase_field_zoo create carrying name and f_master_detail; deregister each with DELETE /api/v1/automation/<name> when its leg is done, so two scratch flows never fire on the same create. Shape the approval node after examples/app-showcase/src/automation/flows/approver-bindings.flow.ts, but note the caveat in knownGaps: that file is an OBSOLETE designer specimen, not a runnable fixture",
           "directory rows for the graph legs: the sys_business_unit tree IS seeded (the real org tree — examples/app-showcase/src/data/seed/index.ts), but unit MEMBERSHIP (sys_business_unit_member) and teams are runtime writes. Memberships go in over the data API as the admin (POST /api/v1/data/sys_business_unit_member). A team does NOT: the data API refuses sys_team and sys_team_member writes (405 OBJECT_API_METHOD_NOT_ALLOWED), so create it with POST /api/v1/auth/organization/create-team {name} and add each member with POST /api/v1/auth/organization/add-team-member {teamId, userId}",
           "a manager chain for the manager leg: as the admin, POST /api/v1/auth/admin/set-user-manager {userId: <the submitter>, managerId: <the manager>} — a data-API PATCH of sys_user.manager_id is refused (403, the field is not editable there)"
         ],
         "knownGaps": [
-          "approver-bindings.flow.ts is status:'draft' with EMPTY values, deliberately — its own docblock says an active flow over those kinds would resolve to nobody and 're-teach the bug' (#3508). It exercises the DESIGNER's Value pickers, so it cannot serve as the runtime specimen the register hypothesized; every leg this matrix drives needs its own scratch active flow (the writable-package gap approvals.ooo-delegation-reroute already records)",
+          "approver-bindings.flow.ts ships status 'obsolete' with EMPTY values, deliberately (PR #24008, closing #23965) — loaded, never armed: a fresh org has no rows for those kinds, so an armed run would park on the organization's administrators. It exercises the DESIGNER's Value pickers, so it cannot serve as the runtime specimen the register hypothesized; every leg this matrix drives needs its own scratch active flow. (It shipped 'draft' until #23965, and draft flows DO fire their triggers, so every showcase_field_zoo update used to open an admin_rescue request; measured on main c91af8ed6, an update now opens none.) The scratch flows no longer need a writable package: POST /api/v1/automation registers them on the stock boot (fixtures.requires)",
           "position, org_membership_level and expression already have LIVE stock coverage — the seeded per-group/quorum/budget flows route position, and showcase_dynamic_approval routes org_membership_level + expression (see approvals.dynamic-approver-routing). This matrix owns the missing legs (department+descendants, team, field, manager, user, role, queue, empty-slate forks); do not double-run the covered three — cite the sibling items' runs instead",
           "sys_team is EMPTY on a stock boot (the seeded 'Team' rows are the demo showcase_team object, not the platform sys_team) — the team leg blocks(fixture) until the run creates a team and its members at runtime, through the organization team doors (fixtures.requires)"
         ]
@@ -1230,7 +1236,7 @@
       "variants": ["manager", "position", "department (+ ALL descendant units)", "team", "field (multi-value fan-out)", "expression", "org_membership_level", "role (deprecated → org_membership_level: warn + resolve)", "user", "queue (dead slot, #3508)"],
       "steps": [
         "boot showcase isolated (dogfood §0); sign in as the dev admin; provision the directory rows — BU memberships over the data API, a team and its members through the organization team doors, a manager chain through set-user-manager (fixtures.requires names each door) — and record their ids",
-        "author + register the scratch flows in a writable package; per leg: trigger the flow, GET /api/v1/approvals/requests?status=pending, GET /:id and read pending_approvers (and pending_approver_names)",
+        "author + register the scratch flows through POST /api/v1/automation (fixtures.requires: a record trigger on a stock object, no writable package); per leg: trigger the flow by creating one record of its trigger object, GET /api/v1/approvals/requests?status=pending, GET /:id and read pending_approvers (and pending_approver_names); deregister the flow before the next leg",
         "department leg: point the approver at a PARENT unit whose descendant units hold the members — the slate must union the parent's members with every descendant's, deduped; deactivate a descendant and re-trigger: its members drop out (inactive units are skipped)",
         "field leg: a multi-select user field naming two users — two slots, in order, never one 'u1,u2' literal",
         "manager leg: the submitter's manager_id resolves; user leg: the literal id resolves",
@@ -1302,6 +1308,12 @@
           "date": "2026-10-16",
           "change": "stale clauses re-pointed (#23950, from QA run #23926): acceptance[4] and acceptance[5] pinned the pre-#22824 shape, where an empty slate under the default admin_rescue opened on the literal type:value slot (position:qa_nobody, queue:support) and waited for the #3424 override. Since the #22824 ruling (PR #22850) that request opens on the request organization's administrators as ordinary approvers, with the abandoned literal and the reason kept in __resolvedFrom, a routed-to-administrators comment on the request and a WARN naming the routing, so both clauses went red against a correct product. Both now score that shape: pending_approvers equals the organization's administrators and never the literal slot, the reason is recorded, the request stays pending; the queue clause keeps its #3508 warn and its never-a-fake-approval property. The queue and empty-slate steps follow, a fallback that resolves to nobody now names where it lands, a negative fails the retired nameless request, and the sources cite organizationAdministrators, emptySlateReason and the admin-rescue-named-slate pin. The fail, auto_approve and fallback legs are unchanged. Measured on the re-run and corrected here, same class (a fixture naming a door the product has closed): the data API refuses sys_team / sys_team_member writes (405) and sys_user.manager_id (403), so fixtures.requires, step 1 and the sys_team knownGap now name the doors that work — POST /api/v1/auth/organization/create-team and add-team-member, and POST /api/v1/auth/admin/set-user-manager",
           "ref": "#23950"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-16",
+          "change": "residual of the #23878 finding, settled now that #23965 closed: approver-bindings.flow.ts ships status 'obsolete' (PR #24008), not 'draft', so knownGaps[0] and the fixture line stop calling it a draft (re-measured on main c91af8ed6: a showcase_field_zoo update opens no admin_rescue request; three pending requests before and after). The scratch-flow door is re-pointed too (the approvals.ooo-delegation-reroute finding covers this item): POST /api/v1/automation registers a runtime flow on the stock boot, record-triggered on showcase_field_zoo, so no writable package is needed. Re-run of the door with the user leg: a flow routing {type:'user', value:<admin>} opened its request with pending_approvers [admin]",
+          "ref": "#24036"
         }
       ]
     },
@@ -1310,23 +1322,23 @@
       "title": "approvalStatusField mirrors every request transition onto the business record — through the record lock's whitelist, attributed to the acting user",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": ["dev admin (authors the scratch flow; decides and recalls)", "a second real login (Ada) as submitter where the recall/pending attribution needs a non-deciding identity"],
       "fixtures": {
         "app": "showcase",
         "requires": [
-          "a scratch ACTIVE flow in a WRITABLE package whose approval node declares config.approvalStatusField naming a text field on the trigger object (the spec says the field 'should be readonly on the object' — declare it so, the mirror lands anyway), plus a SECOND node/flow WITHOUT the key for the never-writes side",
+          "a scratch ACTIVE flow whose approval node declares config.approvalStatusField naming a text field on the trigger object, registered on the STOCK boot through POST /api/v1/automation (no writable package is needed) and record-triggered on a stock object — e.g. start {objectName: 'showcase_field_zoo', triggerType: 'record-after-create'}, approvalStatusField 'f_textarea'. The spec says the field 'should be readonly on the object'; a stock field cannot be redeclared, and the mirror lands either way — author a scratch object in a writable package only if the readonly declaration itself is under test. Plus a SECOND flow WITHOUT the key for the never-writes side; register one flow at a time and DELETE /api/v1/automation/<name> between legs, so two flows never fire on one create",
           "for the failure-tolerance clause: a third scratch flow whose approvalStatusField names a NONEXISTENT field"
         ],
         "knownGaps": [
-          "NO showcase flow declares approvalStatusField (grepped examples/ — zero hits), so nothing here runs on stock seeds: the whole item rides the scratch-flow route, which needs the writable/scratch package gap approvals.ooo-delegation-reroute already records. A one-line addition to a seeded showcase flow (e.g. BudgetApprovalFlow) plus a readonly mirror field on showcase_project would retire this gap",
+          "NO showcase flow declares approvalStatusField (grepped examples/ — zero hits), so nothing here runs on stock seeds: the whole item rides the scratch-flow route. That route no longer needs a writable package — POST /api/v1/automation registers the flows on the stock boot (fixtures.requires; the writable-package gap approvals.ooo-delegation-reroute recorded is closed). A one-line addition to a seeded showcase flow (e.g. BudgetApprovalFlow) plus a readonly mirror field on showcase_project would still retire this gap",
           "the 'returned' leg needs the ADR-0044 revise loop on the SAME node that declares the mirror — copy BudgetApprovalFlow's manager step shape (maxRevisions) into the scratch flow, or the send-back transition is not reachable"
         ]
       },
       "steps": [
-        "boot showcase isolated (dogfood §0); author + register the scratch flows; trigger the mirrored flow",
+        "boot showcase isolated (dogfood §0); register the scratch flows through POST /api/v1/automation (one at a time, fixtures.requires); trigger the mirrored flow by creating a record of its trigger object (e.g. POST /api/v1/data/showcase_field_zoo {name, f_master_detail})",
         "submit: while the request is pending, GET the trigger record — the mirror field reads 'pending', and the record's updated_by is the SUBMITTER (the pending stamp is attributed to whoever the row calls submitter, #3783)",
         "decide: approve — the field flips to 'approved' with updated_by = the decider; re-trigger and reject — 'rejected'; re-trigger and recall as the submitter — 'recalled'; re-trigger, send back (revise) — 'returned' (NOTE: the service writes this fifth value though the spec docblock lists only four — assert the actual behavior); drive the revise loop past maxRevisions — the auto-reject stamps 'rejected'",
         "lock contrast: with lockRecord true (the default) and the request pending, PATCH the record as the submitter — refused (RECORD_LOCKED class); yet the 'pending' mirror already landed on that same locked record — the lock hook whitelists a write whose ONLY change is the configured approvalStatusField",
@@ -1381,7 +1393,8 @@
         "packages/plugins/plugin-approvals/src/status-mirror-cascade.integration.test.ts#kernel (the cascade-identity pin: real kernel + real SQL store, positive decider-identity case and the load-bearing user-less negative)"
       ],
       "history": [
-        { "revision": 1, "date": "2026-08-30", "change": "initial — the opt-in status mirror had no coverage. Grounded in the six service write sites (including 'returned', which the spec docblock omits — recorded so a run asserts actual behavior), the lock hook's mirror-field-only whitelist, and the #3783 acting-user attribution the existing integration test pins; no showcase flow declares the key, so the fixture rides the scratch-flow route (knownGaps)", "ref": "#sweep-2026-08-30" }
+        { "revision": 1, "date": "2026-08-30", "change": "initial — the opt-in status mirror had no coverage. Grounded in the six service write sites (including 'returned', which the spec docblock omits — recorded so a run asserts actual behavior), the lock hook's mirror-field-only whitelist, and the #3783 acting-user attribution the existing integration test pins; no showcase flow declares the key, so the fixture rides the scratch-flow route (knownGaps)", "ref": "#sweep-2026-08-30" },
+        { "revision": 2, "date": "2026-10-16", "change": "the scratch-flow route re-pointed: the flows no longer need a writable package (the approvals.ooo-delegation-reroute finding of #23878 names this item too). POST /api/v1/automation registers them on the stock boot, record-triggered on showcase_field_zoo. Scoped re-run on main c91af8ed6 (approvalStatusField f_textarea): submit stamps 'pending' with updated_by the submitter; the submitter's PATCH while pending answers 409 RECORD_LOCKED while the mirror already sits on the record; approve → 'approved', reject → 'rejected', recall → 'recalled'; a flow without the key leaves the field null at every read; a flow naming f_text (no such field) still finalizes approved and logs WARN '[approvals] mirrorStatusField failed: Unknown field …'. The returned / maxRevisions and cascade legs were not re-run", "ref": "#24036" }
       ]
     },
     {

@@ -159,9 +159,39 @@ interface CensusEntry {
  * body (`ui-routes.ts`) builds no `query:` literal either — it hands
  * `getUiView` an `{ object, type }` request read off the path, never a
  * `query:` slot.
+ *
+ * [#23050 slice 11] 4 = 1 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0: the
+ * public form doors (`form-routes.ts`) build no `query:` literal either — they
+ * list the environment's views and objects by `type` and insert through
+ * `createData`, never through a `query:` slot.
+ *
+ * [#23050 slice 12] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1, a
+ * MOVE: `rest-server.ts`' one slot, the list door's caller-supplied
+ * `query: req.query`, left with `registerCrudEndpoints`' body for
+ * `crud-routes.ts` (the QueryAST door's `query` is a shorthand member, which
+ * `querySlots` does not read, as before). Each floor equals its file's
+ * measured count, so `rest-server.ts`' goes 1 → 0 and the moved slot keeps
+ * its floor of 1 there.
+ *
+ * [#23050 slice 13a] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0,
+ * unchanged: the first three `/meta` groups (`meta-collection-routes.ts`) build
+ * no `query:` slot. The per-type list's one `query` key sits mid-line in the
+ * list chain's options literal, which `querySlots` (a line-initial `query:`)
+ * does not read, as before the move, so the moved module's floor is 0.
+ *
+ * [#23050 slice 13b] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0,
+ * unchanged: the per-item reads (`meta-item-read-routes.ts`) build no `query:`
+ * slot either, so the moved module's floor is 0.
+ *
+ * [#23050 slice 13c] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0 + 0,
+ * unchanged: the per-item writes (`meta-item-write-routes.ts`) build no `query:`
+ * slot either. The item save's one `query` key sits mid-line in the argument of
+ * its request mapping (`metaSaveRequestOptions`), which `querySlots` (a
+ * line-initial `query:`) does not read, as before the move, so the moved
+ * module's floor is 0.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
-    'rest-server.ts': 1,
+    'rest-server.ts': 0,
     'data-action-routes.ts': 3,
     'batch-routes.ts': 0,
     'approvals-routes.ts': 0,
@@ -172,6 +202,11 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'email-routes.ts': 0,
     'search-routes.ts': 0,
     'ui-routes.ts': 0,
+    'form-routes.ts': 0,
+    'crud-routes.ts': 1,
+    'meta-collection-routes.ts': 0,
+    'meta-item-read-routes.ts': 0,
+    'meta-item-write-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -366,7 +401,16 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // [#23050 slice 8] Length 8 → 9, the sum unchanged.
         // [#23050 slice 9] Length 9 → 10, the sum unchanged.
         // [#23050 slice 10] Length 10 → 11, the sum unchanged.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(11);
+        // [#23050 slice 11] Length 11 → 12, the sum unchanged.
+        // [#23050 slice 12] Length 12 → 13, the sum unchanged (its one slot moved
+        // from `rest-server.ts` to `crud-routes.ts`).
+        // [#23050 slice 13a] Length 13 → 14, the sum unchanged (the moved `/meta`
+        // groups carry no slot).
+        // [#23050 slice 13b] Length 14 → 15, the sum unchanged (the per-item reads
+        // carry no slot).
+        // [#23050 slice 13c] Length 15 → 16, the sum unchanged (the per-item writes
+        // carry no slot).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

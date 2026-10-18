@@ -45,7 +45,17 @@ import {
   FormFieldSchema,
   type FormField,
   type FormFieldInput,
+  // [#22444] The `list-view` row is the list view itself: its members by
+  // reference, its two object-level checks, and the list overlay member's
+  // judged `options` bag (`VIEW_METADATA_MEMBERS.listOverlay`) — see
+  // `ListViewPageProps`.
+  checkListViewCalendarVisualization,
+  checkListViewChartBinding,
+  VIEW_METADATA_MEMBERS,
 } from './view.zod';
+// [#22444] The one prescription both tiers refuse a list view's retired
+// `objectName` / `viewType` with (the react tier's `REACT_RETIRED_OVERLAY_PROPS.ListView`).
+import { LIST_VIEW_RETIRED_ALIASES } from './list-view-retired-aliases';
 // [#21445] `object-grid.bulkActionDefs` is the list view's bulk-action def,
 // by identity — the element `ListViewSchema.bulkActionDefs` declares.
 import { BulkActionDefSchema } from './bulk-action.zod';
@@ -421,15 +431,17 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
  * `nav:breadcrumb`, `global:search`, `global:notifications`,
- * `element:divider`, the three plugin console widgets
- * `cloud-connection:panel` and `marketplace:installed-list` (#11575) and
- * `mcp:connect-agent` (#12344), and `record:approval_decision` (#22472) and
- * `record:attachments` (#22537), which read the record context alone.
+ * `element:divider`, the two plugin console widgets
+ * `cloud-connection:panel` (#11575) and `mcp:connect-agent` (#12344), and
+ * `record:approval_decision` (#22472) and `record:attachments` (#22537),
+ * which read the record context alone.
  * (`record:approvals` declares no props either, but its row is its own
  * {@link RecordApprovalsProps}, which names the two host-channel keys its
  * renderer reads.) `user:profile` left this list at #14159 — it
  * is not author-placeable at all, so its row refuses the whole bag
- * ({@link retiredComponentProps}).
+ * ({@link retiredComponentProps}) — and `marketplace:installed-list`, the third
+ * console widget (#11575), left it at #24230, when its one renderer was
+ * deleted with the separate Installed Apps view.
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
@@ -455,9 +467,11 @@ const emptyProps = (type: string) =>
 
 /**
  * A component RETIRED at element grain whose props bag is refused WHOLE —
- * `user:profile` (#14159), and `ai:chat_window` (#21504), whose four keys left
- * with its props def. The `retiredKey` channel one grain wider: where a
- * tombstoned KEY accepts absence and refuses any value, a retired ELEMENT has
+ * `user:profile` (#14159), `ai:chat_window` (#21504), whose four keys left
+ * with its props def, `record:json` (#24162), whose three did, and
+ * `marketplace:installed-list` (#24230), which never had one. The
+ * `retiredKey` channel one grain wider: where a tombstoned KEY accepts absence
+ * and refuses any value, a retired ELEMENT has
  * nothing an author may write at all, so the row is `z.never` — `{}` is refused
  * exactly like a populated bag, `expected: 'never'` / `code: 'invalid_type'` is
  * the same issue shape a key tombstone raises, and the message is the element's
@@ -2429,14 +2443,25 @@ const RECORD_LINE_ITEMS_HISTORY =
  * `object-master-detail-form` detail entry's `columns` take, not a copy: the
  * panel hands its columns to the same objectui grid (`GridField`, whose
  * `GridColumn` declares exactly that schema's twenty keys and IS the spec's
- * type by reference). One difference is the
- * carrier's, not the column's, and the `describe()` says it: this panel does
- * NOT hydrate a column from the child object's field — it passes `columns`
- * straight through the field-security pass to the grid — so a column draws exactly what it declares, and an identity-only `{ name }`
- * column is a text cell headed by its name. For the same reason
- * `defineStack`'s identity-only check (`collectHydratedInlineColumnErrors` in
- * `stack.zod.ts`) does not reach this block: there is no hydrated type to
- * judge.
+ * type by reference). The column also means here what it means on those
+ * carriers (#24140, route B), because the column schema's own `label` describe
+ * — "defaults to the child field's label via hydration" — governs every
+ * carrier: a column that declares no `type` hydrates from the child object's
+ * field through objectui's `hydrateColumns`, so an identity-only `{ name }`
+ * column takes the child field's label (and with it that label's
+ * translation), its cell type and its options; declaring a `type` opts the
+ * column out. The renderer half is objectstack-ai/objectui#12854:
+ * `LineItemsPanel` reuses `hydrateColumns`, not a second resolver. Until the
+ * `.objectui-sha` pin carries it, the panel hands `columns` to the grid
+ * through the field-security pass alone, and an identity-only column draws as
+ * a text cell headed by its name.
+ *
+ * `defineStack`'s resolved-type check (`collectHydratedInlineColumnErrors` in
+ * `stack.zod.ts`) walks the three master-detail carriers and not this block,
+ * so an identity-only column here that hydrates to a type carrying a
+ * type-conditional column rule (today `currency`, which refuses `scale`) is
+ * not judged at publish. Closing that gap changes what publishes, so it is a
+ * change of its own, not part of this block's describe.
  *
  * The keys this block shares with an `object-master-detail-form` detail entry
  * take that entry's types and alias table, so one concept is spelled one way
@@ -2444,7 +2469,7 @@ const RECORD_LINE_ITEMS_HISTORY =
  * measured reason: `relationshipField` and `columns` are required here because
  * nothing derives them (the entry auto-detects the FK and derives the
  * columns; this panel queries `{ [relationshipField]: parentId }` and draws
- * `columns` as given), and `childObject` is optional because the
+ * only the authored `columns`), and `childObject` is optional because the
  * component-level `dataSource` binding can supply it instead. `title` is a
  * plain string because the panel draws it as a React child.
  */
@@ -2491,7 +2516,7 @@ export const RecordLineItemsProps = lazySchema(() => strictObject({
   relationshipField: z.string()
     .describe("FK on the child object pointing back to the parent record — the rows are queried as `{ [relationshipField]: parentId }`. Required: this panel does not auto-detect it"),
   columns: z.array(InlineGridColumnSchema).min(1)
-    .describe("Editable grid columns, drawn exactly as declared. Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, options?, … } — objectui GridColumn); unknown keys and the retired `field` spelling are refused. Unlike the master-detail carriers, this block does NOT hydrate a column from the child object's field: declare `label`, `type` and `options` yourself — an identity-only `{ name }` column is a text cell headed by its name. Required, with at least one column: nothing derives them, and an empty list draws a grid with no cells"),
+    .describe("Editable grid columns. Each entry is the strict, name-keyed inline grid column a relationship field's `inlineColumns` takes ({ name, label?, type?, options?, … } — objectui GridColumn); unknown keys and the retired `field` spelling are refused. As on the master-detail carriers, identity-only entries ({ name }) hydrate everything else from the child object's fields, `label`, `type` and `options` included, so an identity-only column is headed by the child field's label and translates with it. Declaring `type` opts a column out of hydration — supply its `label`, `options` and other extras yourself. Required, with at least one column: nothing derives them, and an empty list draws a grid with no cells"),
   parentObject: z.string().optional()
     .describe("Parent object the `totalField` rollup is written to (default: the object of the record on the page)"),
   parentId: z.string().optional()
@@ -2568,76 +2593,13 @@ const RecordApprovalsProps = strictObject({
   },
 }, {});
 
-/**
- * `record:json` (#23745, the spec half of face 4 of objectui#12438's ruling,
- * letter C): one key of the bound record, drawn as indented JSON in a panel
- * that starts collapsed, with a copy control. The worked case is the approval
- * request page's raw request snapshot (`payload` on a `sys_approval_request`
- * row), which only a caller holding `studio.access` may see.
- *
- * A NEW block rather than a widened one, on the ruling's own test ("A NEW block
- * is opened only where no existing block can carry the face"): no declared
- * block draws a record value as JSON, `record:details` draws JSON only for a
- * DECLARED `json` field, and the gate this face needs fails CLOSED, which the
- * record blocks' gate of the same name does not
- * ({@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}, clause 5). That
- * shared gate is left exactly as it is.
- *
- * Declared spec first, like `record:approval_decision`: no renderer draws it
- * and no page authors it on the day it lands. objectui registers the renderer,
- * and plugin-approvals places it on the request page, after this declaration.
- *
- * Three keys, all of them the renderer's whole contract:
- *
- *  - `field` — the key to draw. It is NOT judged against the object's
- *    declared fields (it has no entry in `@objectstack/lint`'s
- *    `COMPONENT_FIELD_SPECS`), because the key this block exists for is one
- *    the read route serves beside the declared fields: the request's
- *    `payload` is parsed from the declared column `payload_json`, which is
- *    never served under its own name. `attachedOnRead` on the object does not
- *    describe such a key either — it declares per-caller blocks with a fixed
- *    set of scalar leaves, and a snapshot's leaves are the source record's
- *    fields. So a misspelled `field` draws nothing, and nothing at publish
- *    says so.
- *  - `label` — the collapsed panel's summary line.
- *  - `requiredPermissions` — REQUIRED, and fail-CLOSED: see the describe.
- *    Presentation only, like every block-level gate: it authorises nothing.
- */
-export const RecordJsonProps = strictObject({
-  surface: 'this `record:json`',
-  history: PROPS_HISTORY,
-  guidanceSets: COMPONENT_LEVEL_GUIDANCE,
-  aliases: {
-    key: 'field', path: 'field', fieldName: 'field',
-    title: 'label', summary: 'label',
-    permissions: 'requiredPermissions', requiredCapabilities: 'requiredPermissions',
-  },
-}, {
-  field: z.string()
-    .regex(/^[a-z_][a-z0-9_]*$/, {
-      message: 'record:json `field` must be a lowercase snake_case key of the bound record (e.g. "payload").',
-    })
-    .describe(
-      'The key of the bound record whose value this block draws as indented JSON, in a panel that starts '
-      + 'collapsed, with a copy control. A declared field, or a key the record\'s read route serves beside '
-      + 'the declared fields (`payload` on a `sys_approval_request` row). It is NOT checked against the '
-      + 'object\'s fields: a key with no value on the served record draws nothing, so a misspelled `field` '
-      + 'draws nothing and no publish check reports it.',
-    ),
-  label: I18nLabelSchema.optional().describe(
-    'The collapsed panel\'s summary line — a string or an inline locale map (renderer default: "Raw data (JSON)").',
-  ),
-  requiredPermissions: z.array(z.string().min(1)).min(1).describe(
-    '[ADR-0066] REQUIRED, at least one. Capabilities the user must ALL hold — names that permission sets grant '
-    + 'through `systemPermissions`, not object actions. It fails CLOSED, unlike the record blocks\' gate of the '
-    + 'same name: a client that cannot resolve the user\'s capabilities (no permission provider, or one that '
-    + 'does not report `systemPermissions`) draws nothing, and so does a user missing any of them — no notice, '
-    + 'no summary line, no empty panel. '
-    + 'Presentation only: it authorises nothing, and the read route still serves the value to the same user. '
-    + 'To keep a value from a user, gate the object, the field or the route.',
-  ),
-});
-export type RecordJsonProps = z.input<typeof RecordJsonProps>;
+// `RecordJsonProps` REMOVED (#24162, ADR-0049) with the `record:json` element
+// it described (#23745): `field` / `label` / `requiredPermissions` were the
+// contract of a renderer that was never built, for the approval request page's
+// raw JSON panel, which the maintainer dropped before anything drew or placed
+// the type. Its row in `ComponentPropsMap` below now refuses the whole bag
+// (`retiredComponentProps`), and the def is recorded in
+// `migrations/entries/retired-defs/18.ui__RecordJsonProps.ts`.
 
 export const PageAccordionProps = strictObject({
   surface: 'this `page:accordion`',
@@ -8228,6 +8190,91 @@ export type ObjectTimelineProps = z.input<typeof ObjectTimelinePropsSchema>;
 export type ObjectTimelinePropsParsed = z.infer<typeof ObjectTimelinePropsSchema>;
 
 /**
+ * The guidance a page `list-view` node's retired binding alias is refused
+ * with: what to write in the bag, then the react tier's own note for the same
+ * alias, verbatim ({@link LIST_VIEW_RETIRED_ALIASES}), so the two tiers carry
+ * one prescription.
+ */
+const LIST_VIEW_PAGE_ALIAS_GUIDANCE: Readonly<Record<'objectName' | 'viewType', string>> = {
+  objectName:
+    '`objectName` was retired on a page `list-view` node in @objectstack/spec 18: the list view names its object in its own '
+    + `\`${LIST_VIEW_RETIRED_ALIASES.objectName.replacedBy}\` source — write \`data: { provider: 'object', object: '…' }\` `
+    + 'in `properties`, or name the object on the node\'s `dataSource` binding (`dataSource.object`). The '
+    + 'console reads no `objectName` off this node, so the list queries nothing. '
+    + `The react tier retired the same alias on \`ListView\`: ${LIST_VIEW_RETIRED_ALIASES.objectName.note} `
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+  viewType:
+    '`viewType` was retired on a page `list-view` node in @objectstack/spec 18: the list kind is the list view\'s own '
+    + `\`${LIST_VIEW_RETIRED_ALIASES.viewType.replacedBy}\`, written in \`properties\` (\`type: 'kanban'\`) — the `
+    + 'node\'s own `type` stays `list-view`, the registry key. The console reads no `viewType` off this node, '
+    + 'so the list draws as a grid. The react tier retired the same alias on `ListView`: '
+    + `${LIST_VIEW_RETIRED_ALIASES.viewType.note} `
+    + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
+};
+
+/**
+ * `list-view` — a list view embedded on a page (#22444, ruling C, the
+ * maintainer's 「同意」: the page carrier converges on the spec spelling; one
+ * list view has one set of property names wherever it is embedded).
+ *
+ * ## Built from the list view, by reference
+ *
+ * Every member is {@link ListViewSchema}'s own schema object (its `shape`
+ * spread), and both of its object-level checks are attached
+ * ({@link checkListViewCalendarVisualization}, {@link checkListViewChartBinding}),
+ * so a key or value the authoring door refuses on a list view is refused here
+ * with the same issue. So `kanban.groupField` is an unknown key of the kanban
+ * block, and the list kind is the bag's own `type` (the node's `type` is the
+ * registry key `list-view`, and objectui's page renderer reads the bag's
+ * `type` as the list kind).
+ *
+ * ## The two members the list OVERLAY member declares instead
+ *
+ * The ruling takes the overlay layer's two differences, measured on the seat's
+ * probes, and nothing else:
+ *
+ * - `columns` OPTIONAL — the overlay member's own spelling
+ *   (`shape.columns.optional()`). A page node bound to a saved view through
+ *   its `dataSource.view` draws that view's columns, and the list renderer
+ *   draws a column-less list from the object; the authoring
+ *   {@link ListViewSchema} keeps `columns` required, because an authored list
+ *   view is a full config. The row judges `properties` only, so it cannot see
+ *   the node's binding: `columns` is optional whatever the binding.
+ * - `options` judged PER KIND — the overlay member's own bag, by reference
+ *   (`VIEW_METADATA_MEMBERS.listOverlay.shape.options`): each `options.KIND` is
+ *   judged by that kind's block, an unknown key refused by name, and
+ *   `options.grid` refused with its own guidance (a grid has no per-kind
+ *   block).
+ *
+ * ## The retired aliases
+ *
+ * `objectName` and `viewType` were the page carrier's own spelling of `data`
+ * and `type`. The pinned console reads neither off a page `list-view` node,
+ * and the react tier retired both on `ListView` with no window. They are
+ * undeclared here and answered by name ({@link LIST_VIEW_PAGE_ALIAS_GUIDANCE});
+ * stored pages carry them forward through the D2 conversion
+ * `page-list-view-object-name-view-type-to-data-type`, never a fallback read.
+ *
+ * Not exported: a top-level exported schema mints a protocol def and a full
+ * set of authorable-surface keys, which would duplicate every `ui/ListView`
+ * key under a second name (the reason `ListViewShapeSchema` is not exported).
+ * The row reaches readers through {@link ComponentPropsMap}.
+ */
+const ListViewPageProps = lazySchema(() => strictObject({
+  surface: 'this page `list-view`',
+  history:
+    'Until this row a page `list-view` node\'s `properties` were judged by nothing: a key every list view '
+    + 'door refuses (a kanban block\'s `groupField`, an `options.grid` bag) saved green on a page and reached '
+    + 'the renderer.',
+  guidance: LIST_VIEW_PAGE_ALIAS_GUIDANCE,
+  guidanceSets: [COMPONENT_NODE_VISIBILITY_GUIDANCE],
+}, {
+  ...ListViewSchema.shape,
+  columns: ListViewSchema.shape.columns.optional(),
+  options: VIEW_METADATA_MEMBERS.listOverlay.shape.options,
+}).superRefine(checkListViewCalendarVisualization).superRefine(checkListViewChartBinding));
+
+/**
  * ----------------------------------------------------------------------
  * Component Props Map
  * Maps Component Type to its Property Schema
@@ -8325,13 +8372,14 @@ export const ComponentPropsMap = {
   //    attributes it reads are node-level, never `properties`.
   'record:approvals': RecordApprovalsProps,
   'record:attachments': emptyProps('record:attachments'),
-  // #23745 — one key of the bound record drawn as indented JSON, behind a
-  // REQUIRED, fail-closed `requiredPermissions` gate (objectui#12438 ruling,
-  // letter C, face 4). A `PageComponentType` member declared spec first, as
-  // `record:approval_decision` was: no renderer and no authored page yet, so
-  // the key set is the declared contract the renderer is built to, not a
-  // measurement of read points. See the schema's own header.
-  'record:json': RecordJsonProps,
+  // RETIRED by name (#24162, ADR-0049; the maintainer dropped the approval
+  // request page's raw JSON panel, the one face `record:json` was declared
+  // for, #23745). The row STAYS, for the reason `user:profile`'s does: every
+  // reader that dispatches on the row keeps recognising the name and answers
+  // with the prescription instead of skipping it as an unregistered custom
+  // string. Its three keys (`field`, `label`, `requiredPermissions`) left with
+  // `RecordJsonProps`, so the WHOLE bag is refused, as `ai:chat_window`'s is.
+  'record:json': retiredComponentProps('record:json'),
 
   // Navigation
   'app:launcher': emptyProps('app:launcher'),
@@ -8356,7 +8404,7 @@ export const ComponentPropsMap = {
 
   // Plugin console widgets — #11575, the #8691/#8744 mechanism two instances
   // over, on `@objectstack/cloud-connection`'s published Setup pages: both
-  // types are console-registered renderers reachable only through the type
+  // types were console-registered renderers reachable only through the type
   // union's open string arm, and with no row here the #5068 gate's dispatch
   // skipped them as unregistered — any authored key would have ridden through
   // in silence (nothing authors one today: both shipped pages carry `{}`).
@@ -8367,7 +8415,16 @@ export const ComponentPropsMap = {
   // `inputs: []` happen to agree here, but the row is the measurement, not
   // the claim (#8691/#8744 record where those diverge).
   'cloud-connection:panel': emptyProps('cloud-connection:panel'),
-  'marketplace:installed-list': emptyProps('marketplace:installed-list'),
+  // RETIRED by name (#24230, ADR-0049; ruling B on #23892 retired the separate
+  // Installed Apps view, objectui#12733 deleted its one renderer, and its one
+  // page left `@objectstack/cloud-connection` at #23933 — Setup's "Installed
+  // Apps" entry opens Packages filtered to Source = marketplace instead). The
+  // row STAYS, for the reason `user:profile`'s does, and here it matters more:
+  // the type is not a `PageComponentType` member, so this row is the only
+  // thing that makes the name KNOWN — delete it and every reader that
+  // dispatches on the row skips the retired name as an unregistered custom
+  // string. It never had a key, so the WHOLE bag is refused, `{}` included.
+  'marketplace:installed-list': retiredComponentProps('marketplace:installed-list'),
   // #12344 — the same mechanism a third instance over, on `@objectstack/mcp`'s
   // plugin-shipped Setup page (`CONNECT_AGENT_PAGE`, `connect-ui.ts`): a
   // console-registered widget reachable only through the type union's open
@@ -8480,6 +8537,15 @@ export const ComponentPropsMap = {
   // own header carries the per-key reading and what it deliberately does NOT
   // declare.
   'object-timeline': ObjectTimelinePropsSchema,
+  // #22444, ruling C (the maintainer's 「同意」): a list view embedded on a
+  // page is judged as a list view. Until this row the node's `properties` were
+  // judged by nothing, so `kanban.groupField` and `options.grid`, refused at
+  // every list view door, saved green on a page. The row is the list view's
+  // members by reference plus the list overlay member's two differences
+  // (`columns` optional, `options` judged per kind), and the page carrier's
+  // retired `objectName` / `viewType` are refused by name — see the schema's
+  // own header.
+  'list-view': ListViewPageProps,
 } as const;
 
 /**

@@ -1,5 +1,150 @@
 # @objectstack/cloud-connection
 
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 75ced06: fix(cloud-connection)!: the cloud-connection and install-local routes refuse a declared JSON body that does not parse with `400 INVALID_REQUEST`, instead of answering as if no body was sent
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, no stored row is rewritten or deleted, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of four of this package's own routes for one input: a body declared as JSON that does not parse, which used to be read as no body. The remedy is in the requests a client sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  `POST /api/v1/cloud-connection/bind/start`, `/bind/poll`, `/install` and `POST /api/v1/marketplace/install-local` read their bodies as `try { body = await c.req.json() } catch { body = {} }`, so a truncated body was answered as if the client had sent none: `/bind/poll` answered `400 "device_code is required"` for a body that carried `device_code` and lacked a closing brace.
+  
+  What changes for an integrator. A body sent as `application/json` (matched case-insensitively) that is not blank and does not parse: FROM the route's answer for an empty body, TO `400` with `{ "success": false, "error": { "code": "INVALID_REQUEST", "message": "The request body could not be parsed as JSON (it was sent as application/json). It was refused rather than read as an empty body: send a well-formed JSON document, or no body at all." } }`. Install-local refuses it after its sign-in and capability checks and before anything is fetched, registered or written.
+  
+  **Remedy, in one line.** Send a JSON body as well-formed JSON with `Content-Type: application/json`, or send no body.
+  
+  **Unchanged.** An empty or whitespace-only JSON body is still no body, and every route answers it as before (for `/bind/poll`, `400 "device_code is required"`). A body that parses, and a body that does not declare JSON, are read as before.
+- c7168ac: Clause-②: yes (widening)
+  
+  fix(service-package,cloud-connection): a stored or installed package body converts forward under ADR-0087 D2 at the `sys_packages` boot hydration and at the marketplace install, and one refused `sys_packages` record no longer stops the hydration of the rest
+  
+  The registration door (`ObjectQL.convertPackageBodyForward`, `@objectstack/objectql`) already replays the versioned forward conversion for a package body that declares its `engines.protocol` range. Two more doors that load a body at rest now go through that same entry point, before the registry judges the body:
+  
+  - **`sys_packages` boot hydration** (`PackageServicePlugin.start`). A stored record whose range admits this runtime, built before a retirement (for example a `type: 'home'` page with `isDefault: true`), now hydrates converted, with the engine's named warning, where the registry used to refuse it. The stored row is not rewritten, so it converts again at every boot.
+    - A record the registry still refuses is reported **by name** at `error`, with the refusal attached, and the records after it keep hydrating. Before, the first refusal threw out of the whole loop to a `debug` line, and every durable package after it was absent from the registry with nothing saying so.
+    - `Hydrated N package(s) from sys_packages into registry` counts the records the registry accepted in that pass.
+    - The ADR-0087 D1 handshake still runs first: a record whose declared range excludes this runtime's major is refused by it, named, as before.
+  - **The marketplace install** (`MarketplaceInstallLocalPlugin`, install and boot rehydrate). The body is converted once per load, and that one converted body is what `manifest.register`, the handler binder, the side effects (translations, seed datasets) and the rehydrate's sample-data heal read. Before, `register` converted its own copy while the side readers read the raw ledger entry. The ledger keeps the body as installed.
+  
+  Nothing is narrowed. A body with no declared range (a manifest built in code) meets the registry's refusals exactly as before at both doors. The install primitive `protocol.installPackage` (`POST /api/v1/packages`) is authoring-side and stays strict: the registry judges the manifest as handed.
+
+### Patch Changes
+
+- 66d2757: feat(spec)!: every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
+  
+  Clause-②: yes (narrowing — the served row gains two declared keys, and the record schema, the served-row union and the registry's installPackage signature each refuse what they accepted before)
+  
+  **BREAKING** — three published accept sets narrow. `InstalledPackageSchema` refuses a row without `source`, or with a value outside `code` / `marketplace` / `authored`. The served-row union `InstalledPackageAtEitherStageSchema` refuses a row without a boolean `writable`. `SchemaRegistry.installPackage` and `EngineSchemaRegistryView.installPackage` take `source` as their second argument and refuse a call without it. The migration is below. None of it is mechanically convertible, because only the door that registers a package knows where it came from.
+  
+  **What is new on the wire.** `GET /api/v1/packages` and `GET /api/v1/packages/:id` serve two declared keys on every row:
+  
+  - `source` names the package's origin. `code` means the deployment's own code registered it (a `defineStack()` host, a plugin's bundled manifest, a platform package). `marketplace` means the marketplace install-local plugin installed it, and that holds after a restart too, when the plugin rehydrates it from its ledger. `authored` means it is a database-authored package (a Studio base, a duplicate, an HTTP install), including after the restart that rehydrates it from `sys_packages`. The door that registers the package stamps the value. No reader derives it.
+  - `writable` is the server's own writability verdict (ADR-0070 D2), served on these rows since #14375 and now declared. It is computed per read and never stored, so it is declared on the served row (`InstalledPackageAtEitherStageSchema`) and not on the registry record.
+  
+  FROM → TO for a reader of these rows:
+  
+  | you did | do instead |
+  | --- | --- |
+  | treated `writable: true` as authored, and looked up each non-writable row in the marketplace's installed list (the control plane's, else install-local's) to tell marketplace from code | read `row.source` |
+  | read the undeclared `writable` | read the declared `writable` (unchanged value) |
+  
+  The two keys are separate statements: `source` says where the package came from, and `writable` says what this server lets an org do to it.
+  
+  **`InstalledPackageSchema` requires `source`.** It is `InstalledPackageSourceSchema`, exported from `@objectstack/spec/kernel`. A row without it, or with a value outside the closed set, is refused at the `source` key.
+  
+  **API change for code that registers packages (`@objectstack/objectql`).** The registry records the origin and never infers it:
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `registry.installPackage(manifest)` | `registry.installPackage(manifest, 'code')` (or `'marketplace'` / `'authored'`, whichever is where the package came from) |
+  | `registry.installPackage(manifest, settings, scope)` | `registry.installPackage(manifest, source, settings, scope)` |
+  | `ctx.getService('manifest').register(artifact)` for a marketplace install | `ctx.getService('manifest').register(artifact, { source: 'marketplace' })` |
+  
+  `SchemaRegistry.installPackage` throws a `TypeError` naming the closed set when `source` is missing or unknown, before anything is recorded. `ObjectQL.registerApp(body, scope?, source?)` and the `manifest` service record `'code'` when no source is given. They accept `'code'` or `'marketplace'` and refuse `'authored'`. The `IObjectQLEngine` registry contract (`@objectstack/spec/contracts`) declares the same `installPackage(manifest, source, settings?)`.
+  
+  **The one-line fix:** pass the package's origin as `installPackage`'s second argument.
+  
+  Readers: objectui's Setup → Packages Source column and its `?source=` filter (it switches from the two-read join to `source` in its own follow-up), and the client SDK's `packages.list()` / `packages.get()` row types.
+  
+  <!-- adr-0087: registered installed-package-row-source-required, registry-install-package-source-argument -->
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [9fcea20]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [14aff67]
+- Updated dependencies [7428da0]
+- Updated dependencies [b55be42]
+- Updated dependencies [abb6df0]
+- Updated dependencies [8776119]
+- Updated dependencies [f7a5ebe]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9d4fb3c]
+- Updated dependencies [c5cf546]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [f846cc2]
+- Updated dependencies [34b740f]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2e15620]
+- Updated dependencies [0cb45e9]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [605aa01]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [6e18016]
+- Updated dependencies [d050a8f]
+- Updated dependencies [9e797a8]
+- Updated dependencies [b25d98a]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [6dede7a]
+- Updated dependencies [077b75f]
+- Updated dependencies [62f959d]
+- Updated dependencies [d6bd98a]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+- Updated dependencies [cdf3777]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/runtime@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/metadata-protocol@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

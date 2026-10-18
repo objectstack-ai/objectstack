@@ -72,6 +72,10 @@ on:
   workflow_run:
     # Byte-exact workflow NAMES (the `name:` at the top of each file), not
     # paths. Quoted because `Lint & Type Check` starts a YAML alias unquoted.
+    #
+    # Every name listed here must have an entry in `CARD_CADENCES`
+    # (scripts/ci/scheduled-full-run.mjs), which refuses a name it does not
+    # hold rather than default one, so a card never prints the wrong cadence.
     workflows: ['CI', 'Lint & Type Check']
     types: [completed]
 

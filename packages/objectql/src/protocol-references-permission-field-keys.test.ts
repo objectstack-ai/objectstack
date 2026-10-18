@@ -159,7 +159,7 @@ describe('findReferencesToMeta lists a permission set that names an object only 
         await kernel.bootstrap();
         protocol = kernel.getService('protocol');
 
-        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'application' } });
+        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
         for (const [type, item] of [
             ['object', customerBody],
             ['object', invoiceBody],

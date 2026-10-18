@@ -39,6 +39,7 @@
 import { describe, expect, it } from 'vitest';
 import { SysInvitation } from './sys-invitation.object.js';
 import { SysMember } from './sys-member.object.js';
+import { SysOrganization } from './sys-organization.object.js';
 import { SysUser } from './sys-user.object.js';
 
 const INVITE_ENDPOINT = '/api/v1/auth/organization/invite-member';
@@ -48,6 +49,7 @@ const OBJECTS_BY_NAME: Record<string, unknown> = {
   sys_user: SysUser,
   sys_member: SysMember,
   sys_invitation: SysInvitation,
+  sys_organization: SysOrganization,
 };
 
 interface AnyAction {
@@ -80,6 +82,18 @@ const MIRRORS: Array<[string, unknown]> = [
   ['sys_user', SysUser],
   ['sys_invitation', SysInvitation],
   ['sys_member', SysMember],
+];
+
+/**
+ * Every declaration site: the three toolbar mirrors plus sys_organization's
+ * `record_header` copy (ruling 6228318638, B′ on #24034), which a
+ * `page:header` can name because it lives on the page's own object. Its
+ * placement is pinned in `sys-organization-invite-action.test.ts`; what the
+ * four must share — endpoint, gates, inputs — is pinned here.
+ */
+const ALL_MIRRORS: Array<[string, unknown]> = [
+  ...MIRRORS,
+  ['sys_organization', SysOrganization],
 ];
 
 describe('invite_user — reachable from the default Members tab (#11544)', () => {
@@ -137,22 +151,25 @@ describe('invite_user — reachable from the default Members tab (#11544)', () =
   });
 });
 
-describe('invite_user — the three mirrors agree (#11544)', () => {
-  it.each(MIRRORS)('%s dispatches the same endpoint from the same location', (_name, object) => {
+describe('invite_user — the mirrors agree (#11544)', () => {
+  it.each(ALL_MIRRORS)('%s dispatches the same endpoint', (_name, object) => {
     const invite = action(object, 'invite_user');
     expect(invite.type).toBe('api');
     expect(invite.target).toBe(INVITE_ENDPOINT);
-    expect(invite.locations).toContain('list_toolbar');
   });
 
-  it.each(MIRRORS)('%s carries the same lowered `organization` capability gate', (_name, object) => {
+  it.each(MIRRORS)('%s offers it from the list toolbar', (_name, object) => {
+    expect(action(object, 'invite_user').locations).toContain('list_toolbar');
+  });
+
+  it.each(ALL_MIRRORS)('%s carries the same lowered `organization` capability gate', (_name, object) => {
     // `requiresFeature: 'organization'` is authoring sugar — it is lowered to a
     // CEL predicate at ObjectSchema.create time and the sugar key does not
     // survive (pinned in platform-objects.test.ts), so the gate is read from
     // its lowered form. A mirror that lost the gate would render a button that
     // 404s wherever the org capability is off.
     // The grade gate composes AHEAD of it (`requiresMembershipReach:
-    // 'invite_member'`), so the three mirrors also agree on WHO is offered
+    // 'invite_member'`), so the mirrors also agree on WHO is offered
     // the button: owner, admin and delegated_admin — never a plain member.
     expect(action(object, 'invite_user').visible?.source).toBe(
       "('org_owner' in current_user.positions || 'org_admin' in current_user.positions"
@@ -160,12 +177,12 @@ describe('invite_user — the three mirrors agree (#11544)', () => {
     );
   });
 
-  it.each(MIRRORS)('%s asks for the same two inputs, email and role', (_name, object) => {
+  it.each(ALL_MIRRORS)('%s asks for the same two inputs, email and role', (_name, object) => {
     const keys = (action(object, 'invite_user').params ?? []).map((p) => p.name ?? p.field);
     expect(keys).toEqual(['email', 'role']);
   });
 
-  it.each(MIRRORS)('%s requires both of them', (_name, object) => {
+  it.each(ALL_MIRRORS)('%s requires both of them', (_name, object) => {
     // The endpoint has no default for either; an optional param here is a
     // dialog that submits an incomplete body and answers with a server error.
     for (const p of action(object, 'invite_user').params ?? []) {
@@ -175,11 +192,11 @@ describe('invite_user — the three mirrors agree (#11544)', () => {
 });
 
 describe('invite_user — every field-backed param resolves to a real field (#11544)', () => {
-  // THE load-bearing pin. Stated over all three mirrors rather than over the
+  // THE load-bearing pin. Stated over every mirror rather than over the
   // one that was wrong, because the defect is a property of the DECLARATION
   // SHAPE, not of sys_member: any future mirror of any action that copies a
   // `{ field }` param onto an object that lacks that field lands here.
-  it.each(MIRRORS)('%s', (name, object) => {
+  it.each(ALL_MIRRORS)('%s', (name, object) => {
     const params = action(object, 'invite_user').params ?? [];
     expect(params.length).toBeGreaterThan(0);
     for (const p of params) {

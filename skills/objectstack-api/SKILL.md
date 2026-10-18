@@ -14,7 +14,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x (Zod v4 schemas)
 metadata:
   author: objectstack-ai
-  version: "18.0.0-next.2"
+  version: "18.0.0-next.3"
   domain: api
   tags: rest, endpoint, auth, realtime, server
 ---
@@ -84,9 +84,11 @@ GET  /api/v1/forms/:slug         # returns form spec + restricted objectSchema
 POST /api/v1/forms/:slug/submit  # whitelist-filtered INSERT, no auth header
 ```
 
-These bypass `enforceAuth`, run under a synthetic
-`{ permissions: ['guest_portal'], anonymous: true }` execution context, and
-are intended for Web-to-Lead / Web-to-Case style flows. The framework
+These bypass `enforceAuth` (Web-to-Lead / Web-to-Case flows). The form's own
+declaration authorizes the submit: a `publicFormGrant` on its target object
+(create and read-back of its new row, nothing else), decided before any permission
+set resolves. The submit context's `guest_portal` name admits nothing and needs
+no set; a set so named only feeds the grant's result masker. The framework
 strips fields outside the form's `sections[].fields[]` list; a
 `beforeInsert` hook on the target object should stamp safe defaults
 (`status='new'`, `lead_source='web'`, …) and `delete` privileged keys

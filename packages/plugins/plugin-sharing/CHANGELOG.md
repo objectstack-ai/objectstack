@@ -1,5 +1,96 @@
 # @objectstack/plugin-sharing
 
+## 18.0.0-next.3
+
+### Patch Changes
+
+- 099cc9d: Clause-②: no
+  
+  The approval, security, automation and sharing objects describe their records in plain admin
+  sentences. Approval Delegations now reads "While someone is away, approvals assigned to them
+  personally go to their delegate.", Record Shares "Records shared beyond their owner, one row per
+  grant.", User Positions "Which positions each user holds, one row per assignment.", Audience
+  Binding Suggestions "A package's suggestion to give one of its permission sets to everyone who
+  signs in, and the decision taken on it." and Automation Runs "Paused automation runs waiting to
+  resume, and the recent history of finished runs." Field help on Approval Requests, Approval
+  Delegations, User Positions, User Permission Sets and Audience Binding Suggestions, the
+  descriptions of the `organization_admin_no_bypass`, `mcp_agent_data_read` and
+  `mcp_agent_data_write` permission sets, the flow-dispatch ledger's description and the
+  reserved-position refusal no longer carry design-record numbers or runtime vocabulary; those
+  references stay in the code comments. The zh-CN, ja-JP and es-ES translations follow. Wording
+  only: no field, permission or behaviour changes.
+- 6dede7a: fix(runtime, plugin-sharing): on the standalone server, an anonymous caller of any `/api/v1/notifications` verb or any `/api/v1/share-links` path off the two token faces is answered `401 UNAUTHENTICATED` in the dispatcher's standard envelope
+  
+  Clause-②: no
+  
+  The v18 text for these two doors reads "`/notifications`: `401 UNAUTHENTICATED` on every face" and "`/share-links`: `401 UNAUTHENTICATED` on the create, list and revoke faces and on every path the domain does not serve", in "the dispatcher's standard envelope … with the shared message every other dispatcher domain answers with". A host that reaches the dispatcher through `@objectstack/hono`'s catch-all already answered that way. The standalone server (the one `os dev` and `os serve` run) did not:
+  
+  - `/api/v1/notifications`, `/api/v1/notifications/read` and `/api/v1/notifications/read/all` were each mounted for the one verb they serve, so any other verb never reached the `notifications` domain and the HTTP adapter answered `405`, naming the allowed methods, to an anonymous caller as well.
+  - `/api/v1/share-links` is served there by `@objectstack/plugin-sharing`'s routes, not by the dispatcher. They registered five routes and nothing else, so another verb or path got the adapter's `405` or `404`, and the create, list and revoke faces answered `401` with a sentence of their own ("Sign in to list share links") and no `error.httpStatus`.
+  
+  What the standalone server answers now:
+  
+  - **Anonymous caller.** `401 UNAUTHENTICATED`, `{ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication is required to access this endpoint.', httpStatus: 401 } }`, on every verb of the three notifications paths, and on every verb and path under `/api/v1/share-links` except `GET /share-links/:token/resolve` and `GET /share-links/:token/messages`, which the capability token still admits. A body the server cannot parse does not outrank this answer anywhere under `/api/v1/share-links`, nor on the notifications verbs no face serves.
+  - **Signed-in caller of a verb or path that is not served.** Still refused. On the notifications paths the domain answers it: `404 ROUTE_NOT_FOUND` from the dispatcher (or the `501` capability answer on a deployment with no inbox), where the adapter used to answer `405`. Under `/api/v1/share-links` the share-link routes answer it themselves: `404 ENDPOINT_NOT_FOUND`, naming the request, where the adapter used to answer `405` or `404`. No `Allow` header is sent on either.
+  
+  Every request that was served is served as before. A notifications sub-path no face names, such as `/api/v1/notifications/<anything>`, is still not mounted on the standalone server and is answered `404`.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [abb6df0]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [d050a8f]
+- Updated dependencies [b25d98a]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

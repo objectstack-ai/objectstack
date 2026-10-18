@@ -87,7 +87,7 @@ export const SysOauthRefreshToken = ObjectSchema.create({
       label: 'Reference ID',
       required: false,
       maxLength: 255,
-      description: 'Caller-supplied correlation identifier',
+      description: 'Organization bound by the consent that started this refresh family; empty when none was bound',
     }),
 
     authorization_code_id: Field.text({

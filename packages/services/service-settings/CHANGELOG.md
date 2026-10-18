@@ -1,5 +1,72 @@
 # @objectstack/service-settings
 
+## 18.0.0-next.3
+
+### Patch Changes
+
+- 747c8e9: Clause-②: no
+  
+  fix(service-settings): the File Storage, Knowledge and AI settings pages show their warnings as `info_banner` callouts with `bannerSeverity: 'warning'`, not as a sentence inside a subtitle or a field's help text
+  
+  Four warnings were written into ordinary strings with a hand-typed warning glyph, so the admin read them as one more sentence of the page subtitle or of a toggle's help. Each one is now an `info_banner` row in the section it concerns, directly under the field it warns about:
+  
+  - `storage` — `adapter_switch_warning`, under the Adapter select: switching adapter does not migrate existing files.
+  - `knowledge` — `adapter_switch_warning`, under the Adapter select: switching adapter does not migrate existing indices.
+  - `knowledge` — `enforce_rls_warning`, under the Enforce RLS on search toggle: disabling it skips the vector-store leakage safeguard.
+  - `ai` — `log_prompts_warning`, under the Log full prompts toggle: full prompts may leak PII.
+  
+  The namespace description or field help of each keeps its non-warning text. The translations moved with them: in the `en`, `zh-CN`, `ja-JP` and `es-ES` bundles each warning sentence left the `description` / `help` copy and sits under `settings.NAMESPACE.banners.BANNER_ID.{title,text}`, with a translated title per banner. The existing Feature Flags `beta_notice` banner gained the same copies, so no shipped locale reads it in English any more.
+  
+  No setting key, value, default or save behaviour changes. A host that renders `info_banner` rows from the manifest literals draws the English title and text; translated copy is read through `resolveSettingsBannerTitle` / `resolveSettingsBannerText` from `@objectstack/spec/system`.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
 ## 18.0.0-next.2
 
 ### Minor Changes

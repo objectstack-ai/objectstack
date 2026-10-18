@@ -7,9 +7,10 @@
  *
  * ## Why the template has its own column rule
  *
- * The export's default columns are every field of the object, narrowed only
- * by what the caller may READ. That is right for an export, whose reader wants
- * to SEE the data, and wrong for a template, whose reader wants to FILL it: the
+ * The export's default columns are every field of the object not declared
+ * `hidden`, narrowed by what the caller may READ. That is right for an export,
+ * whose reader wants to SEE the data, and wrong for a template, whose reader
+ * wants to FILL it: the
  * registry injects `created_at`, `created_by`, `organization_id` and the other
  * platform columns onto every object, and a value typed into one of them never
  * lands. So the export's rule is left exactly as it is, and the template takes

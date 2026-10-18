@@ -240,10 +240,31 @@ export default class Start extends Command {
       const outputPath = path.resolve(cwd, CONVENTIONAL_ARTIFACT_RELATIVE_PATH);
       printStep('Compiling objectstack.config.ts → dist/objectstack.json...');
       const binPath = process.argv[1];
+      // ── stdin belongs to the protocol, never to the compile step (#24002) ──
+      // This command's stdin is the stdio MCP transport's input once the
+      // `serve` child below starts it, and an MCP client writes `initialize`
+      // the moment it spawns `os start` — before this one-shot child runs.
+      // Inherited, the child's argument parser read that pending line as its
+      // missing `config` positional (oclif's `tryStdin`), so the compile failed
+      // on "Config file not found: …/{"jsonrpc":"2.0",…}" and `initialize` was
+      // consumed before any transport existed. The compile reads no input, so
+      // it gets none: `'ignore'` keeps every byte in the pipe for `serve`.
+      //
+      // ── stdout belongs to the protocol, the compile step included (#24192) ──
+      // `redirectStdoutToStderr()` above patches `process.stdout.write` in
+      // THIS process only; a child handed `'inherit'` writes to the raw fd 1,
+      // the fd the `serve` child's stdio transport writes JSON-RPC frames to.
+      // Measured on a first run with the transport enabled: the compile's 24
+      // progress lines (`◆ Compile`, `✓ Build complete`, `Artifact: …`) reached
+      // the client ahead of the `initialize` answer. So the child's stdout is
+      // this process's stderr (fd 2), where the header above already goes —
+      // unconditionally, for the reason the top of `run()` gives: everything
+      // this supervisor prints is a diagnostic, stdio transport or not.
+      // Pinned by `test/start-stdio-stdout-purity.integration.test.ts`.
       const compileResult = spawnSync(
         process.execPath,
         [binPath, 'compile', '--output', outputPath],
-        { stdio: 'inherit', env: process.env },
+        { stdio: ['ignore', 2, 'inherit'], env: process.env },
       );
       if (compileResult.status !== 0) {
         printError('Compile failed — fix errors above before starting the server');
@@ -487,11 +508,25 @@ export default class Start extends Command {
         // `const child = spawn(` is the anchor
         // `utils/port-contract-single-source.test.ts` reads to hold the port
         // door above AHEAD of this spawn — keep the spelling.
+        //
+        // ── The config positional is NAMED, never left to stdin (#24002) ──
+        // stdio stays inherited: the child's stdio MCP transport reads this
+        // process's stdin. But oclif fills an omitted positional from a pending
+        // stdin line (`tryStdin`), and `serve`'s `config` is one — so with no
+        // positional here, an MCP client's `initialize`, written at spawn,
+        // became "the config path": the child booted without the config the
+        // banner above names ("No objectstack.config.ts found") and the
+        // transport never saw `initialize`. A supplied positional skips that
+        // read. `projectConfigPath` is the path `serve` would default to
+        // (`objectstack.config.ts` under this same cwd), and the same one the
+        // `Config:` row was judged by, so whether it joins the boot is still
+        // the child's own `cwdConfigJoinsBoot` reading — exactly as before.
         const child = spawn(
           process.execPath,
           [
             binPath,
             'serve',
+            projectConfigPath,
             flags.ui ? '--ui' : '--no-ui',
             ...(flags.verbose ? ['--verbose'] : []),
             ...(flags['log-level'] ? ['--log-level', flags['log-level']] : []),
