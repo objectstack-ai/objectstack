@@ -3603,8 +3603,8 @@ const PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION: RuleExplanation = {
   paragraphs: [
     ...SECTION_GROUP_REFERENCE,
     'On a page the reference is a `record:details` section\'s `group`, resolved against the object ' +
-      'the component binds (its `dataSource.object`, then `properties.object`, then the page\'s ' +
-      '`object`).',
+      'the component binds (its `dataSource.object`, then `properties.object`, then the binding it ' +
+      'inherits from its container, then the page\'s `object`).',
   ],
 };
 
