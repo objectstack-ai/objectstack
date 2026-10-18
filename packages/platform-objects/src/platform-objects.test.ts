@@ -592,6 +592,7 @@ describe('feature-gate lowering matrix (#2874)', () => {
     ['SysOrganization', SysOrganization, 'delete_organization', `(${OWNER}) && ${MULTI_ORG}`],
     ['SysOrganization', SysOrganization, 'set_active_organization', MULTI_ORG],
     ['SysOrganization', SysOrganization, 'leave_organization', MULTI_ORG],
+    ['SysOrganization', SysOrganization, 'change_slug', MULTI_ORG],
     ['SysUser', SysUser, 'invite_user', `${INVITE} && ${ORG}`],
     ['SysUser', SysUser, 'create_user', `(${STANDING}) && features.admin == true`],
     // [#11544] Third mirror of `invite_user` — the Members tab's own copy of

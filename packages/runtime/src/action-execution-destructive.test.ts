@@ -135,16 +135,15 @@ describe("actionLooksDestructive: mode:'delete' and variant:'danger' still class
 });
 
 // ---------------------------------------------------------------------------
-// The 6-of-14 flipped identity actions, read off their REAL declarations —
-// five now: `sys_organization.change_slug` left the platform object (its door
-// is the cloud orchestrator's, so the composition that serves it declares it)
+// The 6-of-14 flipped identity actions, read off their REAL declarations
 // (not hand-rolled fixtures) — the check the ruling explicitly calls for.
 // ---------------------------------------------------------------------------
 
-describe('the identity actions #7309 flipped now read not-destructive, off their real declarations', () => {
+describe('the 6 identity actions #7309 flipped now read not-destructive, off their real declarations', () => {
     const flipped: Array<[string, any, any]> = [
         ['sys_user.generate_backup_codes', SysUser, 'generate_backup_codes'],
         ['sys_two_factor.regenerate_backup_codes', SysTwoFactor, 'regenerate_backup_codes'],
+        ['sys_organization.change_slug', SysOrganization, 'change_slug'],
         ['sys_oauth_application.enable_oauth_application', SysOauthApplication, 'enable_oauth_application'],
         ['sys_oauth_application.disable_oauth_application', SysOauthApplication, 'disable_oauth_application'],
         ['sys_oauth_application.rotate_client_secret', SysOauthApplication, 'rotate_client_secret'],
@@ -269,16 +268,14 @@ describe('the classification IS live-reachable for a shape gate 1/2/3 all pass �
 });
 
 // ---------------------------------------------------------------------------
-// Documents (with real assertions, not narration) why today's 13 identity
+// Documents (with real assertions, not narration) why today's 14 identity
 // actions never reach the classifier via the live MCP path — confirming the
 // #7828 triage comment's "double-gated dead" plus the third gate found while
-// verifying this card (isHeadlessInvokableAction: all 13 are `type: 'api'`).
-// The fourteenth #7309 site, `sys_organization.change_slug`, left the platform
-// object: its door is the cloud orchestrator's.
+// verifying this card (isHeadlessInvokableAction: all 14 are `type: 'api'`).
 // ---------------------------------------------------------------------------
 
-describe('today, all 13 #7309 identity actions the platform declares are excluded before actionLooksDestructive ever runs on them', () => {
-    // The 13 sites #7309 converted that the platform still declares — same set pinned by
+describe('today, all 14 #7309 identity actions are excluded before actionLooksDestructive ever runs on them', () => {
+    // The canonical 14 sites #7309 converted — same set pinned by
     // `platform-objects/src/identity/action-confirm-one-dialog.test.ts`'s
     // `CONVERTED` map, reproduced here rather than imported so this suite
     // does not depend on that test file's internals staying exported.
@@ -294,12 +291,13 @@ describe('today, all 13 #7309 identity actions the platform declares are exclude
         ['sys_two_factor.disable_two_factor', 'sys_two_factor', SysTwoFactor, 'disable_two_factor'],
         ['sys_two_factor.regenerate_backup_codes', 'sys_two_factor', SysTwoFactor, 'regenerate_backup_codes'],
         ['sys_account.unlink_account', 'sys_account', SysAccount, 'unlink_account'],
+        ['sys_organization.change_slug', 'sys_organization', SysOrganization, 'change_slug'],
         ['sys_sso_provider.delete_sso_provider', 'sys_sso_provider', SysSsoProvider, 'delete_sso_provider'],
         ['sys_team_member.remove_team_member', 'sys_team_member', SysTeamMember, 'remove_team_member'],
     ];
 
-    it('the fixture reproduces the 13 #7309 sites the platform declares, no more, no fewer', () => {
-        expect(allFourteen).toHaveLength(13);
+    it('the fixture reproduces all 14 #7309 sites, no more, no fewer', () => {
+        expect(allFourteen).toHaveLength(14);
     });
 
     it.each(allFourteen)('%s is excluded by isSystemObjectName (gate 1: sys_* fail-closed)', (_label, objName) => {

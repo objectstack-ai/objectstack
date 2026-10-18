@@ -202,9 +202,9 @@ export const SysOrganization = ObjectSchema.create({
       // `invite_user` leading, the header's three inline slots go to the
       // invite, `set_active_organization` and `rename_organization`, and this
       // one folds into the `⋯` overflow's destructive band (objectui's
-      // page:header split, default `maxVisible` 3). Without it, registration
-      // order kept it inline as the third button. Ungated by grade: every
-      // grade may leave.
+      // page:header split, default `maxVisible` 3), with `change_slug` in the
+      // overflow above it. Without it, registration order kept it inline as
+      // the third button. Ungated by grade: every grade may leave.
       order: 1,
       mode: 'custom',
       locations: ['list_item', 'record_header'],
@@ -226,12 +226,15 @@ export const SysOrganization = ObjectSchema.create({
       // `beforeUpdateOrganization` slug guard both run only on a sent slug.
       //
       // One door per field. A record page reaches no `list_item` action, so
-      // this one is declared at `record_header` too, and nothing on that page
-      // sends a slug to better-auth. Here `update_organization` (list row) is
-      // the slug door. This object declares no slug action of its own beyond
-      // it: a composition that governs the slug elsewhere (cloud's
-      // orchestrator, `change-slug`) declares that action beside the route it
-      // serves, so no composition is offered a button whose door it lacks.
+      // this one is declared at `record_header` too; where the cloud
+      // orchestrator governs the slug, that page offers this action and
+      // `change_slug`, and nothing on it sends a slug to better-auth.
+      // `update_organization` stays the slug door of a composition without the
+      // orchestrator, because `change_slug`'s target exists only in cloud.
+      //
+      // Declared BEFORE `change_slug`: both sort at `order` 0, so declaration
+      // order breaks the tie, the rename takes the header's third inline slot,
+      // and `change_slug` folds into the `⋯` overflow.
       name: 'rename_organization',
       label: 'Rename Organization',
       icon: 'pencil',
@@ -250,6 +253,36 @@ export const SysOrganization = ObjectSchema.create({
       params: [
         { field: 'name', required: true, defaultFromRow: true },
         { field: 'logo', defaultFromRow: true },
+      ],
+    },
+    {
+      // Rename the organization slug (URL prefix). Backed by the cloud
+      // orchestrator at /api/v1/cloud/organizations/{id}/change-slug,
+      // which atomically updates sys_organization.slug, rewrites
+      // platform_subdomain sys_domain rows under the new slug, soft-
+      // retires the old rows with a redirect window, parks the old
+      // slug in sys_slug_reservation, and refreshes the registry
+      // mirror. See cloud `docs/design/sys-domain.md` §6.
+      name: 'change_slug',
+      label: 'Change Slug',
+      icon: 'edit-3',
+      variant: 'secondary',
+      mode: 'custom',
+      locations: ['record_header'],
+      type: 'api',
+      target: '/api/v1/cloud/organizations/{id}/change-slug',
+      method: 'POST',
+      requiresFeature: 'multiOrgEnabled',
+      // Confirm question on `description`, not `confirmText`: this action collects
+      // params, and pairing the two keys opens two dialogs for one decision
+      // (#7278 ruling 2026-08-10, swept by #7309). The two param-LESS actions
+      // above (`delete_organization`, `leave_organization`) keep `confirmText`
+      // — with no param dialog, the confirm IS the only dialog.
+      description: 'Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?',
+      successMessage: 'Organization slug changed',
+      refreshAfter: true,
+      params: [
+        { field: 'slug', required: true, defaultFromRow: true },
       ],
     },
   ],

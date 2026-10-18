@@ -140,6 +140,7 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_organization.actions.delete_organization',
       'sys_organization.actions.set_active_organization',
       'sys_organization.actions.leave_organization',
+      'sys_organization.actions.change_slug',
     ],
     notes:
       'Reflects ACTUAL multi-tenancy capability (the tenancy posture enforces ' +

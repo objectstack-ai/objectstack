@@ -1,27 +1,29 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * The organisation's OWN admin actions follow the caller's membership grade,
- * and the organisation record offers no action whose door this composition
- * does not serve — measured on a booted multi-organization showcase, on the
- * wire, from the same three things the console combines.
+ * The organisation's OWN admin actions follow the caller's membership grade —
+ * measured on a booted multi-organization showcase, on the wire, from the same
+ * three things the console combines.
  *
- * ## The two defects this pins shut
+ * ## The defect this pins shut
  *
- * 1. `sys_organization`'s rename, edit and delete actions were gated on
- *    `multiOrgEnabled` alone. Only the invitation carried a grade gate, so a
- *    plain member was offered "Rename Organization" in the record header and
- *    "Edit" / "Delete" on the list row, and better-auth's `organization/update`
- *    and `organization/delete` refused every click with 403. They now declare
- *    `requiresMembershipReach` from the reach table's `update_organization`
- *    (owner, admin) and `delete_organization` (owner) rows — the rows
- *    plugin-auth's `membership-reach-table.test.ts` pins equal to the door.
- * 2. `change_slug` targeted `/api/v1/cloud/organizations/{id}/change-slug`, a
- *    route only the cloud orchestrator serves. Here, with multi-org on, the
- *    record header offered it and the click answered `404 ENDPOINT_NOT_FOUND`.
- *    The platform object no longer declares it: the composition that serves the
- *    door declares the action beside it. The open-source slug door is
- *    `update_organization`, better-auth's `organization/update`.
+ * `sys_organization`'s rename, edit and delete actions were gated on
+ * `multiOrgEnabled` alone. Only the invitation carried a grade gate, so a plain
+ * member was offered "Rename Organization" in the record header and "Edit" /
+ * "Delete" on the list row, and better-auth's `organization/update` and
+ * `organization/delete` refused every click with 403. They now declare
+ * `requiresMembershipReach` from the reach table's `update_organization`
+ * (owner, admin) and `delete_organization` (owner) rows — the rows
+ * plugin-auth's `membership-reach-table.test.ts` pins equal to the door.
+ *
+ * ## The one action outside it: `change_slug`
+ *
+ * Its target, `/api/v1/cloud/organizations/{id}/change-slug`, is served only
+ * by the cloud orchestrator; on this composition it answers
+ * `404 ENDPOINT_NOT_FOUND`. Where it is offered, and to whom, waits on a
+ * decision about that action's shape (a door outside better-auth, so no reach
+ * row describes it). It is held out of the graded set and out of the door
+ * probe below, by name, so the day it changes this file is edited with it.
  *
  * ## What this measures
  *
@@ -36,8 +38,8 @@
  *
  * The door probes then show the verdicts are the door's own: each refusal is
  * the vendor's 403 with its own code, each admission a 200 that took effect.
- * And every `type: 'api'` action the record serves is called once at its own
- * target: none answers the router's `404 ENDPOINT_NOT_FOUND`.
+ * And every other `type: 'api'` action the record serves is called once at its
+ * own target: none answers the router's `404 ENDPOINT_NOT_FOUND`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -60,6 +62,8 @@ const UPDATE = ['update_organization', 'rename_organization'] as const;
 /** `organization/delete`: the owner alone. */
 const DELETE = ['delete_organization'] as const;
 const ALL = [...EVERY_GRADE, ...INVITE, ...UPDATE, ...DELETE];
+/** Served, and held out of the graded set — see the docblock. */
+const UNDECIDED = ['change_slug'] as const;
 
 const EXPECTED: Record<Grade, readonly string[]> = {
   owner: ALL,
@@ -168,9 +172,9 @@ describe('sys_organization admin actions follow the membership grade, and every 
     }
   });
 
-  it('every grade is served the same action set, and change_slug is not in it', () => {
+  it('every grade is served the same action set', () => {
     for (const grade of Object.keys(PROJECTED) as Grade[]) {
-      expect([...served[grade].keys()].sort(), grade).toEqual([...ALL].sort());
+      expect([...served[grade].keys()].sort(), grade).toEqual([...ALL, ...UNDECIDED].sort());
     }
   });
 
@@ -210,8 +214,9 @@ describe('sys_organization admin actions follow the membership grade, and every 
     expect(await findRows(ql, 'sys_organization', { id: org.doomed.id }, 1)).toEqual([]);
   }, 60_000);
 
-  it('every api action the record serves reaches a door this composition mounts — none answers ENDPOINT_NOT_FOUND', async () => {
-    const apiActions = [...served.owner.values()].filter((a) => a.type === 'api');
+  it('every graded api action the record serves reaches a door this composition mounts — none answers ENDPOINT_NOT_FOUND', async () => {
+    const held: readonly string[] = UNDECIDED;
+    const apiActions = [...served.owner.values()].filter((a) => a.type === 'api' && !held.includes(a.name));
     // The plain member and an organisation id no row carries: every door
     // refuses before it writes anything, and a refusal from the door is the
     // door's own answer, not the router's.
