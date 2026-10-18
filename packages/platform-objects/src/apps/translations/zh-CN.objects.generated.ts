@@ -688,9 +688,9 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "成员已移除"
       },
       transfer_ownership: {
-        label: "转移所有权",
-        confirmText: "确定要将该组织的所有权转移给所选成员吗？您将被降级为管理员，并失去仅所有者拥有的权限。",
-        successMessage: "已转移所有权"
+        label: "设为所有者",
+        confirmText: "确定要将所选成员设为该组织的所有者吗？对方将获得所有者的全部权限，包括删除该组织。您仍是所有者；如需卸任，请在您自己的成员记录上使用“更改角色”。",
+        successMessage: "该成员现已成为所有者"
       }
     }
   },
