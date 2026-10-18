@@ -1181,6 +1181,11 @@ function rowFromRequest(row: any): ApprovalRequestRow {
     submitted_at: row.created_at ?? undefined,
     process_label: labels.process_label,
     step_label: labels.current_step_label,
+    // [#24281] The same step label under the column's own name: a page bound
+    // to `sys_approval_request` names the object's declared fields, and
+    // `step_label` is not one, so the record page's step chip lists this.
+    // `step_label` stays for the inbox and the action-link pages.
+    current_step_label: labels.current_step_label,
     sla_due_at: slaDueAt(row.created_at, cfg),
     // ADR-0044 revision round (rides the config snapshot; absent ⇒ round 1).
     round: typeof cfg?.__round === 'number' ? cfg.__round : undefined,
@@ -3519,7 +3524,8 @@ export class ApprovalService implements IApprovalService {
     const processName = `flow:${input.flowName ?? input.nodeId}`;
     // Display labels also ride the config snapshot, where rows opened before
     // the `process_label` / `current_step_label` columns (#23889) carry them;
-    // `rowFromRequest` surfaces them as `process_label` / `step_label`.
+    // `rowFromRequest` surfaces them as `process_label` and as `step_label` /
+    // `current_step_label`.
     const configSnapshot: any = { ...input.config };
     if (input.flowLabel) configSnapshot.__flowLabel = input.flowLabel;
     if (input.nodeLabel) configSnapshot.__nodeLabel = input.nodeLabel;
