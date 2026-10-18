@@ -1128,6 +1128,51 @@ const RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION =
   + 'A client that cannot resolve the user\'s capabilities (no permission provider, or one that does not report `systemPermissions`) renders this block as if they were held — it fails open.';
 
 /**
+ * [#24266] The authored empty state of the three BOUND record blocks —
+ * `record:details`, `record:highlights` and `record:quick_actions`, the set
+ * that reads its one binding as the node-level `dataSource`
+ * (`PageComponentSchema.dataSource`) by the single-record rule: the first row
+ * of the bound set by its `sort`. Measured on objectui `79cb8c03e`: these
+ * three are exactly the blocks wrapped by `recordBindingBlock`
+ * (`packages/plugin-detail/src/renderers/recordBinding.tsx`), and no other
+ * block binds the same way — `record:related_list`'s `parentDataSource` is a
+ * second binding with its own declared 0-row answer, a loud absence.
+ *
+ * What a 0-row binding draws without it is the block's own placeholder for a
+ * record that is not there — "record not found" on `record:details`, nothing
+ * on `record:highlights`, the empty bar on `record:quick_actions` — so a page
+ * whose binding can legitimately answer no row (the control plane's
+ * environment blocks, for an organisation with no production environment)
+ * had no way to say what that absence means. The pull is
+ * objectstack-ai/cloud#2774 Q2 = B, as the card quotes it.
+ *
+ * The shape is the list view's own {@link EmptyStateSchema}, BY REFERENCE —
+ * the one `object-grid.emptyState` takes (#20694) — never a second spelling.
+ *
+ * Drawn on ONE condition only: the block carries a `dataSource` binding and
+ * the bound read answered no row. A block with no binding reads the record
+ * page's record context and never draws it; a still-loading read draws the
+ * loading state, and a read that failed draws its error panel (a read the
+ * server refuses as forbidden is not a failure there: `recordBinding.tsx`
+ * reads it as no row, so "absent" and "not yours to read" stay
+ * indistinguishable, and this key is drawn for both). A row that is
+ * there but leaves the block nothing to show (a record with no quick actions
+ * at the bar's location) is not a 0-row binding either.
+ *
+ * PLANNED, not yet read: no renderer reads this key. Its reader is
+ * objectstack-ai/objectui#12932, dispatched once a spec release carrying the
+ * key is installable. The liveness record is the `liveness/page.json` `_note`
+ * (a component-level key carries no ledger row: the walk stops at the
+ * undrilled `page/regions` container) and the `[PLANNED — not yet rendered]`
+ * marker this describe opens with; when that card lands, the marker leaves
+ * and the `_note` sentence is rewritten.
+ */
+const BOUND_RECORD_BLOCK_EMPTY_STATE_DESCRIPTION =
+  '[PLANNED — not yet rendered] What this block draws when its `dataSource` binding answers no row: `{ title, message, icon, link }`, the list view\'s own empty-state shape. '
+  + 'Drawn then and only then — never on a block with no `dataSource` (it reads the record page\'s record instead), never while the bound read is loading, and never in place of the error a failed read shows. '
+  + 'Omitted, a binding with no row keeps the block\'s own placeholder.';
+
+/**
  * [#23013] The ONE hole a `record:details` section heading binds: `{{ count }}`
  * — the number of values the field named by the section's `count.field` holds
  * on the current record. Inner whitespace is free (`{{count}}` is the same
@@ -1610,6 +1655,12 @@ export const RecordDetailsProps = strictObject({
    * behind every clause are on {@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}.
    */
   requiredPermissions: z.array(z.string()).optional().describe(RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION),
+  /**
+   * [#24266] Drawn in place of "record not found" when the block's
+   * `dataSource` binding answers no row, and only then — see
+   * {@link BOUND_RECORD_BLOCK_EMPTY_STATE_DESCRIPTION}.
+   */
+  emptyState: EmptyStateSchema.optional().describe(BOUND_RECORD_BLOCK_EMPTY_STATE_DESCRIPTION),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -1915,6 +1966,12 @@ export const RecordHighlightsProps = strictObject({
    * behind every clause are on {@link RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION}.
    */
   requiredPermissions: z.array(z.string()).optional().describe(RECORD_BLOCK_REQUIRED_PERMISSIONS_DESCRIPTION),
+  /**
+   * [#24266] Drawn in place of the empty chip band when the block's
+   * `dataSource` binding answers no row, and only then — see
+   * {@link BOUND_RECORD_BLOCK_EMPTY_STATE_DESCRIPTION}.
+   */
+  emptyState: EmptyStateSchema.optional().describe(BOUND_RECORD_BLOCK_EMPTY_STATE_DESCRIPTION),
   /** ARIA accessibility */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
 });
@@ -2365,6 +2422,13 @@ export const RecordQuickActionsProps = strictObject({
   inline: z.boolean().optional().describe('Render in the flow instead of pulling up into the record-header band. The page header sets this itself when it hosts the bar in its own action slot.'),
   variant: z.enum(['default', 'destructive', 'outline', 'secondary', 'ghost', 'link']).optional().describe('Button variant for every action — the Button primitive\'s own vocabulary; a per-action `variant` on the resolved def wins (renderer default: `default`).'),
   size: z.enum(['default', 'sm', 'lg', 'icon']).optional().describe('Button size for every action — the Button primitive\'s own vocabulary; a per-action `size` wins (renderer default: `sm`).'),
+  /**
+   * [#24266] Drawn in place of the empty bar when the block's `dataSource`
+   * binding answers no row, and only then — a bound record whose bar resolves
+   * no action keeps the empty placeholder `actionNames` describes. See
+   * {@link BOUND_RECORD_BLOCK_EMPTY_STATE_DESCRIPTION}.
+   */
+  emptyState: EmptyStateSchema.optional().describe(BOUND_RECORD_BLOCK_EMPTY_STATE_DESCRIPTION),
 });
 export type RecordQuickActionsProps = z.input<typeof RecordQuickActionsProps>;
 

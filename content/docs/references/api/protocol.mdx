@@ -2524,6 +2524,7 @@ Installed package with runtime lifecycle state
 | **materializeApplied** | `{ success: boolean; inserted: integer; updated: integer; failures: object[] }` | optional | ADR-0086 P2 — aggregate result of publish-time materializers across the batch (e.g. `flow`, whose draft credentials become the live ones), including side-effect failures surfaced by the per-item effects loop. Present ONLY when at least one published item had a registered materializer or a side-effect failure. Best-effort, same contract as `seedApplied`. |
 | **probes** | `any` | optional | ADR-0038 L3 post-publish runtime probe report — one real read per published artifact (seeded objects have rows, views are readable, widget dataset selections execute). DELIBERATELY OPAQUE in this contract: the key is declared and carried through verbatim, but its inner shape is intentionally not modeled until a consumer needs a field of it. Present only when something was publishable; probes never fail the publish. |
 | **commitId** | `string` | optional | ADR-0067 — id of the commit this publish recorded. Absent when nothing published. |
+| **backfillApplied** | `{ success: boolean; fields: object[] }` | optional | The opt-in `backfill` request key's receipt: the literal `defaultValue` of each named field this publish added, written into the object's existing rows whose value is absent, page by page, as the caller (permissions, RLS/FLS and record hooks apply as on their own edit). Present ONLY when the request named at least one field and the batch published; absent means nothing was asked. A request that names a field this publish does not add, or one without a literal default, is refused with a 400 before anything is published, so this key never reports a refusal. |
 | **unhiddenApps** | `string[]` | optional | ADR-0045 §3 — names of the apps whose `_unpublished` gate this publish cleared (publish = live AND visible; a materialized additive build has no drafts, only this flip). Attached by the REST door, not the protocol helper. Present ONLY when at least one app flipped — on a mid-loop failure it names the apps that DID persist, beside `unhideError` ('s split report). Spelling is a permanent wire contract (see the door's note). |
 | **unhideError** | `string` | optional | Present when the ADR-0045 visibility flip failed (wholly or partway): the drafts ARE published, but apps still stored `_unpublished: true` stay externally unobservable. Client-facing text only — undeclared driver text is withheld per ADR-0112; the full cause is in the server log. The route is idempotent: re-run it once the cause is resolved. |
 | **rebindError** | `string` | optional | Present when the post-publish `metadata:reloaded` announce failed: everything is published and stored, but boot-cached consumers keep the pre-publish view until re-run or restart (a newly published record-triggered flow does not bind its trigger). Client-facing text only, same ADR-0112 withhold as `unhideError`. |
@@ -2566,6 +2567,13 @@ Installed package with runtime lifecycle state
 | **inserted** | `integer` | ✅ | Data-plane rows created across the batch. |
 | **updated** | `integer` | ✅ | Data-plane rows updated across the batch. |
 | **failures** | `{ type: string; name: string; error: string }[]` | ✅ | Each item whose data-plane projection did NOT land — named per-item, unlike the single-item door's scalar `error`, because one aggregate boolean over N items would hide WHICH ones never went live. |
+
+### Nested Shape: `PublishPackageDraftsResponse.backfillApplied`
+
+| Property | Type | Required | Description |
+| :--- | :--- | :--- | :--- |
+| **success** | `boolean` | ✅ | False when any field stopped short (its entry carries `error`). The publish itself still succeeded and is not undone. |
+| **fields** | `{ object: string; field: string; updated: integer; error?: string; … }[]` | ✅ | One element per requested field, in request order. |
 
 
 ---

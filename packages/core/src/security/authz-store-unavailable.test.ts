@@ -179,10 +179,10 @@ const REPO_ROOT = fileURLToPath(new URL('../../../..', import.meta.url));
  *    throw reaches the transport's error mapping unaided.
  */
 const TRANSPORT_LEDGER: Record<string, 'guarded' | 'propagates'> = {
-  'packages/rest/src/rest-server.ts': 'guarded',
   // The one request-to-ExecutionContext composition (ruling record 6227928430,
   // letter A). It catches nothing around the resolver: every door that calls
-  // it — the runtime dispatcher's `resolve-execution-context.ts` first —
+  // it — the runtime dispatcher's `resolve-execution-context.ts` first, REST's
+  // `rest-server.ts` second, whose fail-closed `catch` re-raises the outage —
   // receives the outage and answers it at its own net.
   'packages/core/src/security/request-execution-context.ts': 'propagates',
   'packages/mcp/src/plugin.ts': 'propagates',
@@ -299,7 +299,10 @@ describe('[#13279] every transport that authorizes through resolveAuthzContext',
     // below would be comparing two empty sets and passing.
     const found = discoverTransports();
     expect(found.length).toBeGreaterThanOrEqual(8);
-    expect(found).toContain('packages/rest/src/rest-server.ts');
+    // A transport this repo is known to hold. [#23217 slice 2] It named
+    // `rest-server.ts` until that door moved onto the one composition, which
+    // is the call site REST's answers now come from.
+    expect(found).toContain('packages/core/src/security/request-execution-context.ts');
   }, SCAN_BUDGET_MS);
 
   it('⭐ SET EQUALITY: the ledger names exactly the transports source contains', () => {

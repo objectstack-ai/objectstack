@@ -1,7 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [#7557, #24210] Two `RestServer` doors that read past the by-name read for a
+ * [#7557, #24210] The `RestServer` doors that read past the by-name read for a
  * DISABLED package's item, each pinned before, during and after the disable,
  * beside a control (another package's item, still served):
  *
@@ -12,6 +12,13 @@
  *  - `GET /meta/object/:name/state/:field`: the protocol's own refusal, `404
  *    OBJECT_PACKAGE_DISABLED`, byte for byte what `GET /meta/object/:name`
  *    answers, and the registry is never asked for the schema.
+ *  - the layered view, `GET /meta/:type/:name/layers` and the deprecated
+ *    `?layers=true`, a non-object item: answered as a name with nothing behind
+ *    it, status, body and headers, for a code-shipped, an overlay-only and a
+ *    combined item, to an author as to any other caller. The owner is the plain
+ *    read's kept envelope `packageId` under the same `?package=` scope, asked
+ *    of the registry by the shared chain's step 1b; the protocol's layered read
+ *    keeps serving its layers.
  *
  * The protocol and the registry are the REAL ones (the predicate lives on the
  * registry, so a double would measure the double); only `sys_metadata` is
@@ -114,16 +121,31 @@ async function seed(protocol: any, registry: SchemaRegistry) {
     }
 }
 
+/**
+ * [#24210] The layered doors' extra specimens, beside {@link seed}'s: a
+ * dashboard the disabled package ships whose name also carries an unpackaged
+ * overlay row (the combined item: a code layer and an overlay), and one name
+ * stored in BOTH packages, which `?package=` tells apart.
+ */
+async function seedLayered(protocol: any, registry: SchemaRegistry) {
+    registry.registerItem('dashboard', { name: 'demo_both', label: 'shipped', widgets: [] } as any, 'name', PKG);
+    await protocol.saveMetaItem({ type: 'dashboard', name: 'demo_both', item: { name: 'demo_both', label: 'customised', widgets: [] } });
+    for (const [pkg, label] of [[PKG, 'disabled copy'], [OTHER_PKG, 'healthy copy']] as const) {
+        await protocol.saveMetaItem({ type: 'dashboard', name: 'twin_dash', packageId: pkg, item: { name: 'twin_dash', label, widgets: [] } });
+    }
+}
+
 function makeRes() {
     const res: any = { statusCode: 200, body: undefined };
     res.status = vi.fn((c: number) => { res.statusCode = c; return res; });
     res.json = vi.fn((b: any) => { res.body = b; return res; });
-    res.header = vi.fn(() => res);
+    res.headers = {} as Record<string, string>;
+    res.header = vi.fn((k: string, v: string) => { res.headers[k] = v; return res; });
     res.setHeader = vi.fn(); res.write = vi.fn(); res.end = vi.fn(); res.send = vi.fn();
     return res;
 }
 
-function setup(objectQLProvider?: () => Promise<unknown>) {
+function setup(objectQLProvider?: () => Promise<unknown>, caller: Record<string, unknown> = { userId: 'u1' }) {
     const h = makeHarness();
     const snapshot = {
         getPublished: vi.fn(async (type: string, name: string) =>
@@ -136,16 +158,20 @@ function setup(objectQLProvider?: () => Promise<unknown>) {
         listen: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined),
     };
     const rest = new RestServer(server as any, h.protocol as any, { api: { requireAuth: false } } as any);
-    (rest as any).resolveExecCtx = async () => ({ userId: 'u1' });
+    (rest as any).resolveExecCtx = async () => caller;
     (rest as any).metadataServiceProvider = async () => snapshot;
     (rest as any).objectQLProvider = objectQLProvider ?? (async () => ({ registry: h.registry }));
     rest.registerRoutes();
-    const get = async (pattern: string, path: string, params: Record<string, string>, query: Record<string, string> = {}) => {
+    const call = async (pattern: string, path: string, params: Record<string, string>, query: Record<string, string> = {}) => {
         const route = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === `${META}${pattern}`);
         if (!route) throw new Error(`GET ${pattern} is not registered`);
         const res = makeRes();
         await route.handler({ method: 'GET', path: `${META}${path}`, params, query, body: {}, headers: {} }, res);
-        return { status: res.statusCode, body: res.body };
+        return { status: res.statusCode, body: res.body, headers: res.headers as Record<string, string> };
+    };
+    const get = async (pattern: string, path: string, params: Record<string, string>, query: Record<string, string> = {}) => {
+        const { status, body } = await call(pattern, path, params, query);
+        return { status, body };
     };
     return {
         ...h,
@@ -153,6 +179,11 @@ function setup(objectQLProvider?: () => Promise<unknown>) {
         published: (type: string, name: string) => get('/:type/:name/published', `/${type}/${name}/published`, { type, name }),
         state: (name: string) => get('/object/:name/state/:field', `/object/${name}/state/status`, { name, field: 'status' }, { from: 'open' }),
         plain: (type: string, name: string) => get('/:type/:name', `/${type}/${name}`, { type, name }),
+        // [#24210] The layered view's two spellings, with every header each answer carries.
+        layers: (type: string, name: string, query: Record<string, string> = {}) =>
+            call('/:type/:name/layers', `/${type}/${name}/layers`, { type, name }, query),
+        layersFlag: (type: string, name: string, query: Record<string, string> = {}) =>
+            call('/:type/:name', `/${type}/${name}`, { type, name }, { ...query, layers: 'true' }),
     };
 }
 
@@ -223,5 +254,165 @@ describe('[#24210] RestServer: /published and /state of a disabled package\'s it
         absent.registry.disablePackage(PKG);
         // No engine to ask, so nothing is withheld: the door's answer before #24210.
         expect(await absent.published('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { label: 'demo board' } });
+    }, 60_000);
+});
+
+/**
+ * [#24210] The flag's answer with its `Link` set aside: that header names the
+ * item's own path, so it differs from the missing name's by the name alone.
+ */
+const withoutLink = (r: { status: number; body: any; headers: Record<string, string> }) => {
+    const { Link: _link, ...headers } = r.headers;
+    return { ...r, headers };
+};
+
+describe('[#24210] RestServer: the layered view of a disabled package\'s item, both spellings', () => {
+    const SPECIMENS = [
+        ['page', 'demo_page'], // code-shipped: a code layer only
+        ['dashboard', 'demo_dash'], // runtime-saved: an overlay only, whose layers name no owner
+        ['dashboard', 'demo_both'], // combined: the shipped layer and an overlay row
+    ] as const;
+
+    it('served, then the missing name\'s answer on /layers and ?layers=true, then served again', async () => {
+        const host = setup();
+        await seed(host.protocol, host.registry);
+        await seedLayered(host.protocol, host.registry);
+
+        const before = new Map<string, unknown>();
+        for (const [type, name] of SPECIMENS) {
+            const layers = await host.layers(type, name);
+            expect(layers.status).toBe(200);
+            expect(layers.body?.effective).toMatchObject({ name });
+            const flag = await host.layersFlag(type, name);
+            expect(flag.status).toBe(200);
+            expect(flag.headers.Deprecation).toBe('true');
+            // One body behind both spellings.
+            expect(flag.body).toEqual(layers.body);
+            before.set(`${type}/${name}`, { layers, flag });
+        }
+
+        host.registry.disablePackage(PKG);
+        const missingPlain = await host.plain('dashboard', 'no_such_dash');
+        expect(missingPlain.status).toBe(404);
+        const missingLayers = await host.layers('dashboard', 'no_such_dash');
+        const missingFlag = await host.layersFlag('dashboard', 'no_such_dash');
+        // The two spellings' missing name is the plain read's own absence.
+        expect({ status: missingLayers.status, body: missingLayers.body }).toEqual(missingPlain);
+        expect({ status: missingFlag.status, body: missingFlag.body }).toEqual(missingPlain);
+        for (const [type, name] of SPECIMENS) {
+            // Status, body and headers, byte for byte the missing name's.
+            expect(await host.layers(type, name)).toEqual(missingLayers);
+            const flag = await host.layersFlag(type, name);
+            expect(withoutLink(flag)).toEqual(withoutLink(missingFlag));
+            expect(flag.headers.Link).toBe(`<${META}/${type}/${name}/layers>; rel="successor-version"`);
+            // …and the plain read's, which the list read agrees with.
+            expect(await host.plain(type, name)).toEqual(missingPlain);
+            // The producer keeps serving its layers to its resolution readers.
+            expect((await host.protocol.getMetaItemLayered({ type, name }))?.effective).toMatchObject({ name });
+        }
+        // Control: another package's items, both spellings, still served.
+        for (const [type, name] of [['page', 'healthy_page'], ['dashboard', 'healthy_dash']] as const) {
+            expect(await host.layers(type, name)).toMatchObject({ status: 200, body: { effective: { name } } });
+            expect(await host.layersFlag(type, name)).toMatchObject({ status: 200, body: { effective: { name } } });
+        }
+
+        host.registry.enablePackage(PKG);
+        for (const [type, name] of SPECIMENS) {
+            const { layers, flag } = before.get(`${type}/${name}`) as any;
+            expect(await host.layers(type, name)).toEqual(layers);
+            expect(await host.layersFlag(type, name)).toEqual(flag);
+        }
+    }, 60_000);
+
+    it('an author is answered the same absence: the owner step precedes the per-caller gate', async () => {
+        const author = { userId: 'u_author', systemPermissions: ['manage_metadata', 'studio.access'] };
+        expect((RestServer as any).metaSaveVerdict(author).allowed).toBe(true);
+        const authorHost = setup(undefined, author);
+        const memberHost = setup(undefined, { userId: 'u_member' });
+        for (const host of [authorHost, memberHost]) {
+            await seed(host.protocol, host.registry);
+            await host.protocol.saveMetaItem({
+                type: 'app', name: 'demo_gated_app', packageId: PKG,
+                item: {
+                    name: 'demo_gated_app', label: 'Gated',
+                    navigation: [
+                        { id: 'gated_entry', type: 'url', label: 'Gated', url: 'https://example.com/a', requiredPermissions: ['gate_24210_cap'] },
+                        { id: 'open_entry', type: 'url', label: 'Open', url: 'https://example.com/b' },
+                    ],
+                },
+            });
+        }
+        const navIds = (r: any) => (r.body?.effective?.navigation ?? []).map((e: any) => e?.id);
+        // Enabled: the per-caller gate decides. The author reads the stored
+        // version whole (ruling 5856774816); the member reads it pruned.
+        const authorServed = await authorHost.layers('app', 'demo_gated_app');
+        expect(authorServed.status).toBe(200);
+        expect(navIds(authorServed)).toEqual(['gated_entry', 'open_entry']);
+        const memberServed = await memberHost.layers('app', 'demo_gated_app');
+        expect(memberServed.status).toBe(200);
+        expect(navIds(memberServed)).toEqual(['open_entry']);
+
+        for (const host of [authorHost, memberHost]) {
+            host.registry.disablePackage(PKG);
+            const missing = await host.layers('app', 'no_such_app');
+            expect(missing.status).toBe(404);
+            // Both callers, both spellings: the missing name's answer, not the
+            // author's whole view, and not the member's pruned one.
+            expect(await host.layers('app', 'demo_gated_app')).toEqual(missing);
+            expect(withoutLink(await host.layersFlag('app', 'demo_gated_app')))
+                .toEqual(withoutLink(await host.layersFlag('app', 'no_such_app')));
+            host.registry.enablePackage(PKG);
+        }
+        expect(await authorHost.layers('app', 'demo_gated_app')).toEqual(authorServed);
+        expect(await memberHost.layers('app', 'demo_gated_app')).toEqual(memberServed);
+    }, 60_000);
+
+    it('an object keeps the protocol\'s own 404 OBJECT_PACKAGE_DISABLED, the plain read\'s refusal', async () => {
+        const host = setup();
+        await seed(host.protocol, host.registry);
+        host.registry.disablePackage(PKG);
+        const plain = await host.plain('object', 'demo_gadget');
+        expect({ status: plain.status, code: plain.body?.code ?? plain.body?.error?.code })
+            .toEqual({ status: 404, code: 'OBJECT_PACKAGE_DISABLED' });
+        const layers = await host.layers('object', 'demo_gadget');
+        expect({ status: layers.status, body: layers.body }).toEqual(plain);
+        const flag = await host.layersFlag('object', 'demo_gadget');
+        expect({ status: flag.status, body: flag.body }).toEqual(plain);
+        expect(await host.layers('object', 'healthy_gadget')).toMatchObject({ status: 200, body: { effective: { name: 'healthy_gadget' } } });
+    }, 60_000);
+
+    it('?package= picks the owner: the healthy package\'s copy of a shared name is served, the disabled one\'s is absent', async () => {
+        const host = setup();
+        await seed(host.protocol, host.registry);
+        await seedLayered(host.protocol, host.registry);
+        host.registry.disablePackage(PKG);
+        const missing = await host.layers('dashboard', 'no_such_dash', { package: OTHER_PKG });
+        expect(missing.status).toBe(404);
+        expect(await host.layers('dashboard', 'twin_dash', { package: OTHER_PKG }))
+            .toMatchObject({ status: 200, body: { effective: { label: 'healthy copy' } } });
+        expect(await host.layersFlag('dashboard', 'twin_dash', { package: OTHER_PKG }))
+            .toMatchObject({ status: 200, body: { effective: { label: 'healthy copy' } } });
+        expect(await host.layers('dashboard', 'twin_dash', { package: PKG })).toEqual(missing);
+    }, 60_000);
+
+    // The objectQLProvider slot's consumer census (`objectql-slot-consumer-census.test.ts`)
+    // cites this case: the layered owner step keeps a failed engine and an
+    // absent one apart, as every consumer of the slot must.
+    it('the owner step reads the objectQLProvider slot through wiredEngineOrLoud: a rejecting engine is loud, an absent one serves as before', async () => {
+        const rejecting = setup(async () => { throw new Error('driver handshake failed'); });
+        await seed(rejecting.protocol, rejecting.registry);
+        for (const read of [rejecting.layers, rejecting.layersFlag]) {
+            const failed = await read('dashboard', 'demo_dash');
+            expect({ status: failed.status, code: failed.body?.code ?? failed.body?.error?.code })
+                .toEqual({ status: 503, code: 'SERVICE_UNAVAILABLE' });
+            expect(JSON.stringify(failed.body)).not.toContain('demo board');
+        }
+
+        const absent = setup(async () => undefined);
+        await seed(absent.protocol, absent.registry);
+        absent.registry.disablePackage(PKG);
+        // No engine to ask, so nothing is withheld: the doors' answer before #24210.
+        expect(await absent.layers('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { effective: { label: 'demo board' } } });
+        expect(await absent.layersFlag('dashboard', 'demo_dash')).toMatchObject({ status: 200, body: { effective: { label: 'demo board' } } });
     }, 60_000);
 });

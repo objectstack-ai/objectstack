@@ -1652,6 +1652,14 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
                     const result = await protocol.publishPackageDrafts({
                         packageId: id,
                         ...(body?.actor ? { actor: body.actor } : {}),
+                        // [#24253] Passed through as sent: the protocol judges
+                        // its shape and what it names, and refuses the whole
+                        // request before anything is published. The writes run
+                        // as THIS caller, so the request's own execution
+                        // context rides with it, never a system one.
+                        ...(body?.backfill !== undefined
+                            ? { backfill: body.backfill, context: _context?.executionContext }
+                            : {}),
                     });
                     // Publishing a `seed` draft is what actually loads its
                     // rows. The objectql protocol now batch-applies seeds

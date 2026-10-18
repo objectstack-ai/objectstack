@@ -11,11 +11,19 @@
  * through the door's OWN entry, and the named parameters the door declares to
  * the function. Every request in {@link REQUESTS} goes through both, and the
  * two contexts must be equal. A later slice converts its door and adds it as
- * one more row; nothing else here changes.
+ * one more row.
  *
- * Across rows, a request that resolves a principal must resolve the SAME
- * principal at every door ({@link IDENTITY}): the named parameters decide what
- * a door withholds or adds around the identity, never who the caller is.
+ * Who a request resolves to is the request's {@link Request.principal} at every
+ * door, except where a door's declared parameters authenticate nobody for it
+ * ({@link expectedPrincipal}: a door that requires a session API, on a host
+ * with no auth service). Across rows, every door that resolves a principal
+ * resolves the SAME one ({@link IDENTITY}): the named parameters decide what a
+ * door withholds or adds around the identity, and whether it admits at all,
+ * never who the caller is.
+ *
+ * A door's own additions after the function returns (REST's `__kernel` and
+ * `__authEnvironmentId`, see its `drive`) are not the composition and are
+ * set aside before the comparison, by name.
  *
  * ## Why the requests are these
  *
@@ -27,6 +35,7 @@
  * |:--|:--|
  * | no credential | `anonymous` |
  * | a session cookie, a gated user, a session bearer, `Accept-Language` | `session`, `authGate`, `accessToken`, `requestLocale`, `localization` |
+ * | the same session while no gate is active | `authGate` (`'resolved'` against `'reread-when-active'`) |
  * | an API key | `credentials` |
  * | an ex-member's organization-stamped key under a walled posture | `tenancy` |
  * | an API key on a host with no auth service | `sessionApi` |
@@ -42,6 +51,8 @@ import { describe, it, expect } from 'vitest';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 import { resolveRequestExecutionContext, type RequestExecutionContextInput } from '@objectstack/core';
+
+import { RestServer } from '@objectstack/rest';
 
 import { hashApiKey } from './api-key.js';
 import { resolveExecutionContext } from './resolve-execution-context.js';
@@ -59,7 +70,7 @@ interface World {
   services: Record<string, unknown>;
 }
 
-function world(opts: { auth: boolean }): World {
+function world(opts: { auth: boolean; gateActive?: boolean }): World {
   const tables: Record<string, Array<Record<string, unknown>>> = {
     sys_api_key: [
       { id: 'k_live', key: hashApiKey(KEY), revoked: false, user_id: 'u_key', active_organization_id: ORG, expires_at: FUTURE },
@@ -111,7 +122,7 @@ function world(opts: { auth: boolean }): World {
           };
         },
       },
-      isAuthGateActive: () => true,
+      isAuthGateActive: () => opts.gateActive ?? true,
       resolveUserAuthGates: async () => [],
     };
   }
@@ -122,7 +133,9 @@ interface Request {
   name: string;
   headers: Record<string, string>;
   auth: boolean;
-  /** Who the request resolves to at every door, or `undefined` for none. */
+  /** Whether the auth service says a gate feature is active (default: active). */
+  gateActive?: boolean;
+  /** Who the request resolves to, or `undefined` for none; see {@link expectedPrincipal}. */
   principal: string | undefined;
 }
 
@@ -132,6 +145,13 @@ const REQUESTS: Request[] = [
     name: 'a session cookie for a gated user, with a language preference',
     headers: { cookie: COOKIE, 'accept-language': 'zh-CN,zh;q=0.9' },
     auth: true,
+    principal: 'u_ses',
+  },
+  {
+    name: 'the same session while no gate is active',
+    headers: { cookie: COOKIE, 'accept-language': 'zh-CN,zh;q=0.9' },
+    auth: true,
+    gateActive: false,
     principal: 'u_ses',
   },
   { name: 'an API key', headers: { 'x-api-key': KEY }, auth: true, principal: 'u_key' },
@@ -144,6 +164,56 @@ interface DoorRow {
   door: string;
   drive(w: World, headers: Record<string, string>): Promise<ExecutionContext | undefined>;
   parameters(w: World, headers: Headers): Omit<RequestExecutionContextInput, 'headers' | 'ql' | 'authService'>;
+}
+
+/**
+ * Who `request` resolves to at a door declaring `parameters`: its principal,
+ * unless the door requires a session API and the host has no auth service, in
+ * which case the door authenticates nobody, the API-key door included.
+ */
+function expectedPrincipal(request: Request, parameters: Pick<RequestExecutionContextInput, 'sessionApi'>): string | undefined {
+  return !request.auth && parameters.sessionApi === 'required' ? undefined : request.principal;
+}
+
+/**
+ * REST's door, `RestServer#computeExecCtx`, through its public entry, on the
+ * single-kernel wiring `rest-api-plugin` builds: the auth service, the engine,
+ * the settings service and the tenancy service each through its provider.
+ */
+async function driveRest(w: World, headers: Record<string, string>): Promise<ExecutionContext | undefined> {
+  const provide = (service: unknown) => async () => service;
+  const rest = new RestServer(
+    { get() {}, post() {}, put() {}, delete() {}, patch() {}, use() {}, async listen() {}, async close() {} } as never,
+    {} as never,
+    {},
+    undefined, // kernelManager
+    undefined, // envRegistry
+    undefined, // defaultEnvironmentIdProvider
+    provide(w.services.auth), // authServiceProvider
+    provide(w.ql), // objectQLProvider
+    undefined, // emailServiceProvider
+    undefined, // sharingServiceProvider
+    undefined, // the retired slot
+    undefined, // approvalsServiceProvider
+    undefined, // sharingRulesServiceProvider
+    undefined, // i18nServiceProvider
+    undefined, // analyticsServiceProvider
+    provide(w.services.settings), // settingsServiceProvider
+    undefined, // serviceExistsProvider
+    undefined, // securityServiceProvider
+    undefined, // requestEnvResolver
+    undefined, // metadataServiceProvider
+    provide(w.services.tenancy), // tenancyServiceProvider
+  );
+  const ctx = await rest.resolvePackageRouteExecutionContext({ headers, params: {}, query: {}, method: 'GET', path: '/api/v1/data/task' });
+  if (!ctx) return undefined;
+  // The door's own additions after the function returns, set aside by name:
+  // the resolved kernel (none on this wiring) and the environment whose auth
+  // service validated the caller (none named on this wiring).
+  const { __kernel, __authEnvironmentId, ...context } = ctx;
+  expect(__kernel).toBeUndefined();
+  expect(__authEnvironmentId).toBeUndefined();
+  return context as ExecutionContext;
 }
 
 const DOORS: DoorRow[] = [
@@ -168,6 +238,24 @@ const DOORS: DoorRow[] = [
       onAdmission: undefined,
     }),
   },
+  {
+    door: 'packages/rest/src/rest-server.ts',
+    drive: driveRest,
+    parameters: (w, headers) => ({
+      tenancy: () => w.services.tenancy as never,
+      anonymous: 'fail-closed',
+      authGate: 'reread-when-active',
+      credentials: 'api-key-and-session',
+      sessionApi: 'required',
+      session: 'request',
+      localization: { settings: () => w.services.settings },
+      // REST reads the header first, then `?locale`; no request here carries `?locale`.
+      requestLocale: preferredLocaleFromHeader(headers.get('accept-language')),
+      accessToken: 'withhold',
+      oauth: undefined,
+      onAdmission: undefined,
+    }),
+  },
 ];
 
 /** The facts that say WHO the caller is; equal at every door that resolves one. */
@@ -177,27 +265,31 @@ describe('[ruling 6227928430 item 4] one request, the function and every convert
   for (const request of REQUESTS) {
     it(`${request.name}: each door's context IS the function's under the door's declared parameters`, async () => {
       for (const row of DOORS) {
-        const w = world({ auth: request.auth });
+        const w = world({ auth: request.auth, gateActive: request.gateActive });
         const viaDoor = await row.drive(w, request.headers);
         const headers = new Headers(request.headers);
+        const parameters = row.parameters(w, headers);
         const viaFunction = await resolveRequestExecutionContext({
           headers,
           ql: w.ql,
           authService: w.services.auth as RequestExecutionContextInput['authService'],
-          ...row.parameters(w, headers),
+          ...parameters,
         });
         expect(viaDoor, row.door).toEqual(viaFunction);
-        expect(viaDoor?.userId, row.door).toBe(request.principal);
+        expect(viaDoor?.userId, row.door).toBe(expectedPrincipal(request, parameters));
       }
     });
   }
 
-  it('a principal is the same principal at every door', async () => {
+  it('a principal is the same principal at every door that resolves one', async () => {
     for (const request of REQUESTS.filter((r) => r.principal)) {
-      const identities = await Promise.all(DOORS.map(async (row) => {
-        const ctx = await row.drive(world({ auth: request.auth }), request.headers);
-        return Object.fromEntries(IDENTITY.map((k) => [k, ctx?.[k]]));
-      }));
+      const contexts = await Promise.all(DOORS.map((row) => row.drive(world({ auth: request.auth, gateActive: request.gateActive }), request.headers)));
+      const identities = contexts
+        .filter((ctx): ctx is ExecutionContext => ctx !== undefined)
+        .map((ctx) => Object.fromEntries(IDENTITY.map((k) => [k, ctx[k]])));
+      // Which doors resolve one is the first case's to assert; this one needs
+      // at least one, or it would compare nothing.
+      expect(identities.length, request.name).toBeGreaterThan(0);
       for (const identity of identities) expect(identity, request.name).toEqual(identities[0]);
     }
   });
@@ -225,5 +317,42 @@ describe('[ruling 6227928430 item 4] one request, the function and every convert
     });
     expect(flipped?.authGate).toEqual({ code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' });
     expect(flipped?.accessToken).toBeUndefined();
+  });
+
+  it('CONTROL: the requests tell the REST door\'s named parameters apart', async () => {
+    const rest = DOORS[1]!;
+    const w = world({ auth: true });
+    // `authGate: 'reread-when-active'` under an active gate, `accessToken: 'withhold'`,
+    // the request locale and the settings lookup.
+    const session = await rest.drive(w, REQUESTS[1]!.headers);
+    expect(session).toMatchObject({ userId: 'u_ses', principalKind: 'human', locale: 'zh-CN', timezone: 'Europe/Paris', tenantId: ORG });
+    expect(session?.authGate).toEqual({ code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' });
+    expect(session?.accessToken).toBeUndefined();
+    // `anonymous: 'fail-closed'`: no context at all.
+    expect(await rest.drive(w, REQUESTS[0]!.headers)).toBeUndefined();
+    // `reread-when-active` and not `'resolved'`: no active gate, no posture.
+    const inactive = world({ auth: true, gateActive: false });
+    expect((await rest.drive(inactive, REQUESTS[2]!.headers))?.authGate).toBeUndefined();
+    const headers = new Headers(REQUESTS[2]!.headers);
+    const resolved = await resolveRequestExecutionContext({
+      headers,
+      ql: inactive.ql,
+      authService: inactive.services.auth as RequestExecutionContextInput['authService'],
+      ...rest.parameters(inactive, headers),
+      authGate: 'resolved',
+    });
+    expect(resolved?.authGate).toEqual({ code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' });
+    // `sessionApi: 'required'`: the key the runtime door admits on a host with
+    // no auth service is not admitted here, and `'optional'` would admit it.
+    const noAuth = world({ auth: false });
+    expect(await rest.drive(noAuth, REQUESTS[REQUESTS.length - 1]!.headers)).toBeUndefined();
+    const optional = await resolveRequestExecutionContext({
+      headers: new Headers(REQUESTS[REQUESTS.length - 1]!.headers),
+      ql: noAuth.ql,
+      authService: undefined,
+      ...rest.parameters(noAuth, new Headers()),
+      sessionApi: 'optional',
+    });
+    expect(optional?.userId).toBe('u_key');
   });
 });

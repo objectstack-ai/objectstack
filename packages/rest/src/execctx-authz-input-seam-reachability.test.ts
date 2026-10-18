@@ -194,15 +194,30 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     // REACHES the shared classification, and that neither grew a `catch` of its
     // own again. The discriminator is still the REGISTRY's brand, never message
     // text (#13905); it is asserted at its new home.
-    expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => kernel\.getServiceAsync\('tenancy'\)/);
-    expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => this\.tenancyServiceProvider!\(environmentId\)/);
+    //
+    // SUPERSEDED PINS, quoted for the same reason. [#23217 slice 2, ruling
+    // record 6227928430 letter A] the door calls the ONE request-to-context
+    // composition (`resolveRequestExecutionContext`, @objectstack/core), which
+    // runs the classification itself on the thunk the door hands it, so the
+    // two `await` sites these matched are gone from this file:
+    //     expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => kernel\.getServiceAsync\('tenancy'\)/);
+    //     expect(body).toMatch(/tenancyPosture = await classifyAdmissionTenancyPosture\(\s*\n?\s*\(\) => this\.tenancyServiceProvider!\(environmentId\)/);
+    // ⭐ RE-AIMED again, and the subject still has not moved: BOTH wirings
+    // reach the shared classification. Each branch now builds the thunk, and
+    // the thunk is what the composition is handed; that the composition
+    // classifies whatever it is handed is pinned in
+    // `packages/core/src/security/request-execution-context.test.ts` (its
+    // tenancy cases), and §2/§3 below still drive the wire answer end to end.
+    expect(body).toMatch(/tenancy = \(\) => kernel\.getServiceAsync\('tenancy'\)/);
+    expect(body).toMatch(/tenancy = \(\) => this\.tenancyServiceProvider!\(environmentId\)/);
+    expect(body).toMatch(/resolveRequestExecutionContext\(\{[\s\S]*?\n\s*tenancy,\n/);
     // ⛔ NARROWNESS CONTROL for the fold: the seam region itself holds NO
     // `catch`. A local `catch` reappearing here is exactly the silent-`catch`
     // degradation #13906 decision 1 option A forbids, and it would be invisible
-    // to the two delegation pins above.
+    // to the delegation pins above.
     const tenancySeam = body.slice(
-      body.indexOf('let tenancyPosture;'),
-      body.indexOf('const authz = await resolveAuthzContext('),
+      body.indexOf('let tenancy: TenancyServiceResolver | undefined;'),
+      body.indexOf('const base = await resolveRequestExecutionContext('),
     );
     expect(tenancySeam.length).toBeGreaterThan(0);
     expect(tenancySeam).not.toMatch(/catch/);
@@ -212,7 +227,7 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     // a `KernelBase`-shaped host (`LiteKernel`) has no `getServiceAsync`, and
     // without this guard the dereference would raise an unbranded `TypeError`
     // and turn that host shape into a 503.
-    expect(body).toMatch(/let tenancyPosture;\s*\n\s*if \(kernel && typeof kernel\.getServiceAsync === 'function'\) \{/);
+    expect(body).toMatch(/let tenancy: TenancyServiceResolver \| undefined;\s*\n\s*if \(kernel && typeof kernel\.getServiceAsync === 'function'\) \{/);
     // [#15256 / 1A] …and the OTHER wiring now has a leg of its own, with the
     // same classification. Before this card the `if` above was the whole
     // block, so on the single-kernel wiring `tenancyPosture` stayed the
@@ -255,18 +270,29 @@ describe('[#13906] §0 — the two seams are LIVE on today\'s tree, by symbol', 
     // the comment-only swallow that made a FAILED re-read of an ACTIVE gate
     // indistinguishable from gate-off. That swallow is gone.
     expect(body).not.toMatch(/catch\s*\{\s*\/\*\s*gate is best-effort/);
-    expect(body).toMatch(/isAuthGateActive === 'function'\s*\n?\s*&& authService\.isAuthGateActive\(\) === true/);
-    // The re-read is loud, and it is the RAW api call — ⛔ not the swallowing
-    // `getSession` closure, which would re-collapse the very same two facts.
-    // [#22258] Its argument is the in-process session-read rule's input (a
-    // cookie request reads without renewal); the call itself is still the raw,
-    // throwing one this pin exists for.
-    expect(body).toMatch(/gatedSession = await api\.getSession\(inProcessSessionReadInput\(headers\)\);/);
-    expect(body).toMatch(/throw new AuthzStoreUnavailableError\('auth_gate', err\);/);
-    // ⛔ NARROWNESS CONTROL: the probe-throws leg must STAY absorbed — a host
-    // whose probe faults never declared a gate. If this ever flips, the repair
-    // has widened past the window the ruling named.
-    expect(body).toMatch(/\} catch \{\s*\n\s*gateActive = false;\s*\n\s*\}/);
+    // SUPERSEDED PINS, quoted. [#23217 slice 2, ruling record 6227928430
+    // letter A] the gate decision left this file for the ONE request-to-context
+    // composition, so the door's own copy of it these matched is gone:
+    //     expect(body).toMatch(/isAuthGateActive === 'function'\s*\n?\s*&& authService\.isAuthGateActive\(\) === true/);
+    //     expect(body).toMatch(/gatedSession = await api\.getSession\(inProcessSessionReadInput\(headers\)\);/);
+    //     expect(body).toMatch(/throw new AuthzStoreUnavailableError\('auth_gate', err\);/);
+    //     expect(body).toMatch(/\} catch \{\s*\n\s*gateActive = false;\s*\n\s*\}/);
+    // ⭐ RE-AIMED to what stays this door's: it declares the decision the
+    // ruling made for it, `'reread-when-active'` (an active gate's re-read is
+    // the raw, throwing read and fails as `AuthzStoreUnavailableError('auth_gate')`;
+    // a probe that throws reads as inactive; a key keeps its own posture), and
+    // it holds no second copy of that decision. The decision's own window, both
+    // legs, is pinned where it lives (`packages/core/src/security/request-execution-context.test.ts`,
+    // choice 2), and §4 below still drives every leg through this door's wire.
+    expect(body).toMatch(/resolveRequestExecutionContext\(\{[\s\S]*?\n\s*authGate: 'reread-when-active',\n/);
+    // ⛔ NARROWNESS CONTROL for the move: no local gate probe or re-read came
+    // back beside the call. A copy here would drift from the composition's
+    // window exactly as the copies this card retired did. Read on the CODE
+    // lines only: the door's comments still name the probe to explain the
+    // parameter.
+    const code = body.split('\n').filter((line) => !/^\s*\/\//.test(line)).join('\n');
+    expect(code).toMatch(/authGate: 'reread-when-active'/);
+    expect(code).not.toMatch(/isAuthGateActive|gatedSession|getSession\(/);
   });
 
   it('KNOWN NEGATIVE: the engine seam #13476 repaired is NOT flagged as absorb', () => {

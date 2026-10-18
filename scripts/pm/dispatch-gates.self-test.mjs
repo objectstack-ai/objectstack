@@ -162,6 +162,7 @@ import {
   firstPartyImportBindings,
   firstPartyImportTargets,
   followCompositeActions,
+  fullBatteryOnlyClause,
   gateFamilyFiles,
   generatedModuleSources,
   globCarriesLiteralSuffix,
@@ -184,8 +185,10 @@ import {
   isTypeCheckInvocation,
   jobFilterOutputRefs,
   jobFilterPopulation,
+  jobFilteredNotMeasuredLine,
   jobFilteredStepLines,
   jobFilteredSteps,
+  jobIfReading,
   jobPathPopulations,
   joinLineContinuations,
   judgedAsPattern,
@@ -5669,6 +5672,17 @@ export function selfTest({ tier = 'full' } = {}) {
   t(
     '...and the clause in front of the filter output is not the stripped spelling either',
     jobFilterOutputRefs(`\${{ ${FULL_BATTERY} && needs.f.outputs.a != 'false' }}`) === null,
+  );
+  // #24073: stripped is not FORGOTTEN. The reading returns the event fact beside
+  // the refs it shares with `jobFilterOutputRefs`, and only when it stripped it.
+  const fullBatteryReading = jobIfReading(`\${{ !cancelled() && needs.filter.outputs.console != 'false' && ${FULL_BATTERY} }}`);
+  t(
+    'jobIfReading: the stripped full-battery clause is RETURNED as fullBatteryOnly, beside the same refs',
+    fullBatteryReading?.fullBatteryOnly === true && fullBatteryReading?.refs.map((r) => `${r.job}.${r.output}`).join() === 'filter.console',
+  );
+  t(
+    '...and an if: with no event clause reads fullBatteryOnly FALSE — the fact is read off the text, never defaulted on',
+    jobIfReading("${{ !cancelled() && needs.filter.outputs.console != 'false' }}")?.fullBatteryOnly === false,
   );
 
   const fixturePops = jobPathPopulations(jobFilterWf, 'fixture.yml');
@@ -11926,6 +11940,63 @@ export function selfTest({ tier = 'full' } = {}) {
   t(
     'and the count reaches that enumeration off the ARRAY that renders the block, never a recount of it',
     outsideBlockCounts(familyReconciliation({ jobFilteredRows: [{}, {}] })).jobFilteredJobs === 2,
+  );
+
+  // ── WHEN a path-scheduled job runs, on the row the reader reads (#24073) ──
+  //
+  // The measured case: a `packages/runtime/src/route-ledger.ts` change derived
+  // the Dogfood Regression Gate as "scheduled BY YOUR PATHS", and nothing said
+  // its `if:` skips pull_request and merge_group — so the PR never ran the two
+  // dogfood pins that read that file, and their first run was `main`'s push
+  // battery, red. Pinned LIVE on ci.yml for both dogfood jobs (they carry the
+  // same `if:`), against a NEGATIVE control on a job that does run on the PR,
+  // and with an in-place ABLATION of the carried flag on every row, so the
+  // statement cannot pass as a string typed per job. If ci.yml moves either job
+  // back onto the PR, these go red: re-point them to whichever path-scheduled
+  // job still carries the clause — ⛔ do not delete them.
+  const ledgerCard = 'packages/runtime/src/route-ledger.ts';
+  const ledgerJobs = jobFilteredSteps(liveWorkflows, [ledgerCard]);
+  const ledgerRow = (prefix) => ledgerJobs.rows.find((r) => r.job.startsWith(prefix)) ?? null;
+  const NOT_ON_PR = 'does NOT run on this PR or in the merge queue';
+  // The plain rendering of ONE row, with counts that satisfy the renderer's own
+  // refusals, so the ablated copy below is rendered by the same function.
+  const plainRowLine = (row) => {
+    if (!row) return '';
+    const n = row.steps.length;
+    const lines = jobFilteredStepLines([row], { covering: 1, named: 1, steps: n, accounted: 0, unaccounted: n, conditionalSteps: 0 });
+    return lines.find((l) => l.startsWith(`  - [${row.workflow} · ${row.job}]`)) ?? '';
+  };
+  for (const prefix of ['Dogfood Regression Gate', 'Dogfood Verify CLI']) {
+    const row = ledgerRow(prefix);
+    t(
+      `LIVE: a route-ledger.ts change schedules '${prefix}', and its row carries the full-battery fact read off its own if:`,
+      row?.fullBatteryOnly === true,
+    );
+    t(
+      '...its --commands line SAYS the job does not run on this PR or in the merge queue, ahead of the step list',
+      Boolean(row) && jobFilteredNotMeasuredLine(row).indexOf(NOT_ON_PR) > -1
+        && jobFilteredNotMeasuredLine(row).indexOf(NOT_ON_PR) < jobFilteredNotMeasuredLine(row).indexOf(' step(s):'),
+    );
+    t("...and so does its row in the plain rendering, on the row's own line", plainRowLine(row).includes(NOT_ON_PR));
+    // ABLATION, in place: the same row with the carried fact stripped. The
+    // statement must vanish from both lines — rendered from the flag, or not at all.
+    const stripped = row ? Object.fromEntries(Object.entries(row).filter(([k]) => k !== 'fullBatteryOnly')) : null;
+    t(
+      '...ABLATED — the carried fact stripped from the row — the statement disappears from BOTH lines',
+      Boolean(stripped)
+        && fullBatteryOnlyClause(stripped) === ''
+        && !jobFilteredNotMeasuredLine(stripped).includes(NOT_ON_PR)
+        && plainRowLine(stripped) !== ''
+        && !plainRowLine(stripped).includes(NOT_ON_PR),
+    );
+  }
+  const prJobRow = ledgerRow('Build Core');
+  t(
+    'LIVE NEGATIVE CONTROL: Build Core, scheduled by the same path and run on the PR, carries the fact as FALSE and no statement',
+    prJobRow?.fullBatteryOnly === false
+      && !jobFilteredNotMeasuredLine(prJobRow).includes(NOT_ON_PR)
+      && plainRowLine(prJobRow) !== ''
+      && !plainRowLine(prJobRow).includes(NOT_ON_PR),
   );
 
   // ── Type-check lanes (#19172): the negatives are the live over-matches a SUBSTRING reading produces here ──
