@@ -32,7 +32,12 @@ const LOCALES = [
   ['es-ES', esESObjects],
 ] as const;
 
-/** The 14 (object, action) pairs #7309 converted. */
+/**
+ * The 13 (object, action) pairs #7309 converted that the platform still
+ * declares. The fourteenth, `sys_organization.change_slug`, left the platform
+ * object: its door is the cloud orchestrator's, so the composition that serves
+ * it declares it.
+ */
 const PAIRS: readonly (readonly [string, string])[] = [
   ['sys_user', 'ban_user'],
   ['sys_user', 'delete_my_account'],
@@ -41,7 +46,6 @@ const PAIRS: readonly (readonly [string, string])[] = [
   ['sys_two_factor', 'disable_two_factor'],
   ['sys_two_factor', 'regenerate_backup_codes'],
   ['sys_account', 'unlink_account'],
-  ['sys_organization', 'change_slug'],
   ['sys_team_member', 'remove_team_member'],
   ['sys_oauth_application', 'enable_oauth_application'],
   ['sys_oauth_application', 'disable_oauth_application'],

@@ -4,27 +4,30 @@
 // offer.
 //
 // `update_organization` renames too, but it is declared at `list_item` only (a
-// record page's header never offers it) and it bundles `slug`, which the cloud
-// orchestrator's `change_slug` governs where it exists. So the record page
-// needs its own door for `name` and `logo`, one that sends no slug.
+// record page's header never offers it) and it bundles `slug`. So the record
+// page needs its own door for `name` and `logo`, one that sends no slug.
 //
 // What this file pins, from source:
 //  - the new action's declaration: its params are exactly `name` and `logo`,
 //    it sits at `record_header` and `list_item`, it targets better-auth's
 //    `organization/update` exactly as `update_organization` does, and it is
-//    gated on `multiOrgEnabled` like every sibling organization action;
+//    gated like it: on `multiOrgEnabled` and on the grades that reach
+//    `organization/update` (owner, admin);
 //  - one door per field on the record header: no `record_header` action that
 //    targets `organization/update` carries a `slug` param;
-//  - the header order: the rename takes an inline slot and `change_slug` folds
-//    into the overflow (the ordering model is described in
+//  - the header order: the rename takes an inline slot and leave sorts last
+//    (the ordering model is described in
 //    `sys-organization-invite-action.test.ts`);
-//  - controls: `update_organization` and `change_slug` are unchanged.
+//  - control: `update_organization` is unchanged, and stays the slug door;
+//    the object declares no other (no `change_slug`: its door is the cloud
+//    orchestrator's, so the composition that serves it declares it).
 //
 // The runtime half, a rename through better-auth that reads the slug back
 // unchanged, is `organization-rename-door.dogfood.test.ts` in
 // `packages/qa/dogfood`.
 import { describe, expect, it } from 'vitest';
 import { featureGatePredicate } from '@objectstack/spec/kernel';
+import { membershipReachPredicate } from '@objectstack/spec/identity';
 import { SysOrganization } from './sys-organization.object.js';
 
 interface DeclaredParam {
@@ -97,8 +100,8 @@ describe('sys_organization.rename_organization: the declaration', () => {
       .toEqual({ type: update.type, target: update.target, method: update.method, recordIdParam: update.recordIdParam, bodyShape: update.bodyShape });
   });
 
-  it('is gated on multiOrgEnabled, the same lowered predicate as update_organization', () => {
-    const gate = featureGatePredicate('multiOrgEnabled');
+  it('is gated on the update reach and multiOrgEnabled, the same lowered predicate as update_organization', () => {
+    const gate = `(${membershipReachPredicate('update_organization')}) && ${featureGatePredicate('multiOrgEnabled')}`;
     expect(action('rename_organization').visible?.source).toBe(gate);
     expect(action('update_organization').visible?.source).toBe(gate);
   });
@@ -115,18 +118,16 @@ describe('sys_organization: one door per field on the record header', () => {
     }
   });
 
-  it('the rename takes an inline header slot and change_slug folds into the overflow', () => {
+  it('the rename takes an inline header slot and leave sorts last, into the overflow', () => {
     const order = headerOrder();
-    const names = actions().map((a) => a.name);
-    expect(names.indexOf('rename_organization')).toBeLessThan(names.indexOf('change_slug'));
     expect(order.indexOf('rename_organization')).toBeGreaterThanOrEqual(0);
     expect(order.indexOf('rename_organization')).toBeLessThan(MAX_VISIBLE);
-    expect(order.indexOf('change_slug')).toBeGreaterThanOrEqual(MAX_VISIBLE);
+    expect(order.indexOf('leave_organization')).toBeGreaterThanOrEqual(MAX_VISIBLE);
     expect(order[order.length - 1]).toBe('leave_organization');
   });
 });
 
-describe('sys_organization: the slug doors are unchanged (controls)', () => {
+describe('sys_organization: the slug door is unchanged (control)', () => {
   it('update_organization keeps name / slug / logo, its target and list_item alone', () => {
     const update = action('update_organization');
     expect(update.locations).toEqual(['list_item']);
@@ -134,10 +135,9 @@ describe('sys_organization: the slug doors are unchanged (controls)', () => {
     expect(paramKeys(update)).toEqual(['name', 'slug', 'logo']);
   });
 
-  it("change_slug keeps its cloud orchestrator target, record_header alone and its one slug param", () => {
-    const change = action('change_slug');
-    expect(change.locations).toEqual(['record_header']);
-    expect(change.target).toBe('/api/v1/cloud/organizations/{id}/change-slug');
-    expect(paramKeys(change)).toEqual(['slug']);
+  it('update_organization is the one action that changes an existing slug', () => {
+    // `create_organization` collects the new organization's first slug.
+    expect(actions().filter((a) => paramKeys(a).includes('slug')).map((a) => a.name))
+      .toEqual(['create_organization', 'update_organization']);
   });
 });
