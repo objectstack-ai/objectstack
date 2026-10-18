@@ -141,11 +141,14 @@ async function boot() {
   (rest as any).resolveExecCtx = async () => caller;
   rest.registerRoutes();
   const routes = rest.getRoutes();
-  const find = (method: string, path: string) => routes.find((r: any) => r.method === method && r.path === path);
+  const find = (method: string, path: string): any => {
+    const route = routes.find((r: any) => r.method === method && r.path === path);
+    if (!route) throw new Error(`route ${method} ${path} is not registered`);
+    return route;
+  };
   const sync = find('POST', '/api/v1/data/:object/import');
   const jobs = find('POST', '/api/v1/data/:object/import/jobs');
   const progress = find('GET', '/api/v1/data/import/jobs/:jobId');
-  expect(sync && jobs && progress).toBeTruthy();
   return {
     engine,
     as(next: Record<string, unknown>) { caller = next; },
@@ -255,9 +258,9 @@ describe('[#24348] the import doors honour a control opt-out only for the system
         ctx.as(SYSTEM);
         const deal = await ctx.door(kind, 'oo_deal', { format: 'json', rows: DEAL_ROWS, runAutomations: false });
         expect(kind === 'sync' ? deal.res._json : deal.job).toMatchObject({ created: 1 });
-        const stored = await ctx.engine.findOne('oo_deal', { where: { id: 'd1' } });
+        const stored: any = await ctx.engine.findOne('oo_deal', { where: { id: 'd1' } });
         expect(stored).toMatchObject({ name: 'Acme renewal' });
-        expect(stored.approval_status ?? null).toBeNull();
+        expect(stored?.approval_status ?? null).toBeNull();
 
         const frozen = await ctx.door(kind, 'oo_case', { format: 'json', rows: CASE_ROWS, ...CASE_UPDATE, runAutomations: false });
         expect(kind === 'sync' ? frozen.res._json : frozen.job).toMatchObject({ updated: 1 });
