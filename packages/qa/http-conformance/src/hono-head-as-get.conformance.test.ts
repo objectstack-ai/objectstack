@@ -129,7 +129,7 @@ describe('[#24245] a HEAD is answered as its GET on a createHonoApp host (confor
         hostedKernel.use(fakeServicesPlugin());
         await hostedKernel.bootstrap();
         const app = createHonoApp({ kernel: hostedKernel as any, prefix: PREFIX, cors: false });
-        hosted = (path, init) => app.request(`http://hosted.test${PREFIX}${path}`, init);
+        hosted = async (path, init) => app.request(`http://hosted.test${PREFIX}${path}`, init);
 
         standaloneKernel = new LiteKernel();
         standaloneKernel.use(fakeServicesPlugin());

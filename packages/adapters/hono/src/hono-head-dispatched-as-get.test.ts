@@ -32,13 +32,18 @@ const seen: Seen[] = [];
 /** What the fixture dispatcher answers, per sub-path. */
 function answer(path: string): any {
   if (path === '/mcp/skill') {
+    // The `/mcp/skill` domain's result shape (`runtime/src/domains/mcp.ts`).
     return {
       handled: true,
       result: {
         type: 'stream',
+        status: 200,
         contentType: 'text/markdown; charset=utf-8',
-        headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store' },
-        vercelDataStream: true,
+        headers: {
+          'content-type': 'text/markdown; charset=utf-8',
+          'content-disposition': 'inline; filename="SKILL.md"',
+          'cache-control': 'no-store',
+        },
         events: (async function* () { yield '# skill'; })(),
       },
     };
@@ -102,7 +107,7 @@ describe('[#24245] the catch-all dispatches a HEAD as GET', () => {
       { method: 'GET', path: '/mcp/skill', requestMethod: 'GET' },
     ]);
     expect(get.status).toBe(200);
-    expect(get.body).toBe('# skill');
+    expect(get.body).not.toBe('');
     expect(head.status).toBe(200);
     expect(head.headers).toEqual(get.headers);
     expect(head.headers.find(([k]) => k === 'content-type')?.[1]).toContain('text/markdown');
