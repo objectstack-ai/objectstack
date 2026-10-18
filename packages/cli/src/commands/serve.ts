@@ -885,6 +885,8 @@ export interface BoundPortChannels {
   /**
    * Writes `runtime.<environment>.<project>.json`. ⛔ Must COMPLETE before
    * either announcement below: it is the file both of them send a consumer to.
+   * Best-effort: when it cannot be written the boot goes on, and the real
+   * channel says so once, naming the file (#24091).
    */
   writeRuntimeState: (published: { port: number; url: string }) => void;
   /**
@@ -1074,16 +1076,20 @@ export function runtimeStateFileName(environmentId: string, servedAppRoot: strin
 }
 
 /**
- * The real channels: the same three writes this command has always done, with
- * their failure handling unchanged.
+ * The real channels: the same three writes this command has always done.
  *
  * Each leg keeps its OWN `try` — a boot must not die because a supervision file
  * could not be written or because an IPC channel had already closed, and one
- * leg failing must not cost the other two. Only the ORDER changed (commit faff497fd).
+ * leg failing must not cost the other two. The ORDER changed (commit faff497fd),
+ * and a state file that could not be written is now said once on stderr
+ * (#24091); a closed IPC channel is still the ordinary `os serve` case, silent.
  */
 export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChannels {
   return {
     writeRuntimeState: ({ port, url }) => {
+      // Named the moment it is known, so the catch below can say WHICH file
+      // was not written (#24091).
+      let attemptedFile: string | undefined;
       try {
         const environmentId = process.env.OS_ENVIRONMENT_ID ?? 'env_local';
         // Keyed by the SERVED APP'S ROOT as well as the environment, so two
@@ -1095,11 +1101,12 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
           resolveObjectStackHome(),
           runtimeStateFileName(environmentId, servedAppRootOrCwd()),
         );
+        attemptedFile = runtimeFile;
         // Bounded (#23858): an `OS_HOME` that can never be made — a name under
-        // `/proc` — is refused here at once, and the best-effort catch below
-        // lets the boot go on without the file. Node's recursive mkdir looped
-        // on it after the bind and before the banner, holding the event loop,
-        // so the server never announced itself.
+        // `/proc` — is refused here at once, and the catch below lets the boot
+        // go on without the file, saying so. Node's recursive mkdir looped on
+        // it after the bind and before the banner, holding the event loop, so
+        // the server never announced itself.
         makeDirectorySync(path.dirname(runtimeFile));
         fs.writeFileSync(runtimeFile, JSON.stringify({
           pid: process.pid,
@@ -1110,7 +1117,25 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
         }, null, 2));
         const cleanupRuntimeFile = () => { try { fs.rmSync(runtimeFile, { force: true }); } catch { /* noop */ } };
         process.on('exit', cleanupRuntimeFile);
-      } catch { /* non-fatal — supervision file is best-effort */ }
+      } catch (error) {
+        // Best-effort, NOT silent (#24091). The file stays optional — a boot
+        // must not die for a supervision file — but both announcements that
+        // follow (the banner, the IPC message) send a consumer to it, so a
+        // refusal swallowed here told a supervisor "ready" and then answered
+        // its read with nothing. One line, naming the file and the operating
+        // system's own error, carried verbatim rather than paraphrased.
+        //
+        // Said ONCE: `run()` publishes the bound port at exactly one site, so
+        // this leg runs once per boot. Channel: `console.warn`, i.e. stderr,
+        // like every other boot warning in this file — stdout belongs to the
+        // stdio MCP transport's JSON-RPC frames (#7915).
+        const thrown = error instanceof Error ? error.message : String(error);
+        console.warn(chalk.yellow(
+          `  ⚠ Runtime state file not written: ${attemptedFile ?? '(its path could not be resolved)'} — ${thrown}. ` +
+            'The server runs on without it, so a supervisor that reads it will not find this process there; ' +
+            'point OS_HOME at a directory this process can write.',
+        ));
+      }
     },
     announceListening: (message) => {
       try {

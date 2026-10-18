@@ -24,11 +24,11 @@ import { dirname, resolve } from 'node:path';
  *
  * ## The walk
  *
- * The one `driver-sql`'s connect and this package's standalone host already
- * run (#23696, #23737; `makeSqliteDatabaseDirectory` in `standalone-stack.ts`
- * is that module's own async copy), made synchronous so it can stand in for
- * `mkdirSync` where it stood: find the nearest level that exists, then create
- * the missing ones top-down.
+ * The one `driver-sql`'s connect runs (#23696), made synchronous so it can
+ * stand in for `mkdirSync` where it stood: find the nearest level that exists,
+ * then create the missing ones top-down. This package's standalone host
+ * prepares its SQLite directory with it too (`makeSqliteDatabaseDirectory` in
+ * `standalone-stack.ts`, #24090).
  *
  * - `EEXIST` on a created level is a concurrent creator winning the race, and
  *   it is accepted only when what now stands there is a directory, as the

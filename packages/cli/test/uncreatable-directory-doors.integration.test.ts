@@ -4,7 +4,8 @@
  * `os start` and `os create` refuse a directory that can never be made at
  * once, naming the path and the operating system's code, instead of hanging
  * in Node's recursive mkdir (#23858). `os serve` stops hanging on its runtime
- * state file's directory the same way.
+ * state file's directory the same way, and goes on to its banner without the
+ * file — saying so once, naming the file and the error (#24091).
  *
  * ## The defect, measured on `origin/main` 0744f94366 (built CLI, Node v22.22.0)
  *
@@ -31,10 +32,10 @@
  * group with a hard SIGKILL of the whole group at `CHILD_BOUND_MS`, so a
  * reintroduced loop fails this file at the bound instead of hanging the suite.
  * `bin/run.js` with `NODE_ENV` unset is the entry an operator runs, and it
- * starts in about 3 s where the tsx source entry takes about 10 s, so the six
- * children (run concurrently) keep this file under the 10 s line. The two
+ * starts in about 3 s where the tsx source entry takes about 10 s, so the seven
+ * children (run concurrently) keep this file under the 10 s line. The three
  * `serve` children never exit by themselves: each is killed whole as soon as
- * its banner tail is out, and `--port 0` keeps both off any fixed port.
+ * its banner tail is out, and `--port 0` keeps them off any fixed port.
  *
  * ## What is asserted — kind, exit code and named subject, never the prose
  *
@@ -50,14 +51,21 @@
  *   4. CONTROL: `os create plugin --dir <tmp>/a/b/foo` exits 0 and writes the
  *      project.
  *   5. `os serve` under `OS_HOME=/proc/<missing>`: prints its banner tail
- *      inside the bound. The state file cannot be written there, and the
- *      write's best-effort catch lets the boot go on without it.
+ *      inside the bound. The state file cannot be written there; the boot
+ *      goes on without it, and exactly one output line names that file, with
+ *      `ENOENT`.
  *   6. CONTROL: `os serve` under a creatable `OS_HOME` three levels deep
  *      prints its banner tail, and by then that home holds one
- *      `runtime.env_local.<project>.json` naming the child's own pid.
+ *      `runtime.env_local.<project>.json` naming the child's own pid. No
+ *      output line names the file: a written file is not reported.
+ *   7. `os serve` under an `OS_HOME` whose parent is a regular file, the
+ *      portable uncreatable home (#24091): prints its banner tail, and exactly
+ *      one output line names the state file it could not write, with
+ *      `ENOTDIR`. Before #24091 the write's catch printed nothing, so a
+ *      supervisor told "ready" met a missing file and no reason.
  *
- * They need a `/proc` that refuses `mkdir` with ENOENT, so the `/proc` legs
- * run where `/proc/self` exists (Linux, which CI is).
+ * Legs 1, 3 and 5 need a `/proc` that refuses `mkdir` with ENOENT, so they run
+ * where `/proc/self` exists (Linux, which CI is). Leg 7 runs everywhere.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -85,6 +93,16 @@ const BANNER_TAIL = 'Press Ctrl+C to stop';
 
 /** The platform with no application — the cheapest project that reaches a banner. */
 const BARE_CONFIG = 'export default {};\n';
+
+/**
+ * The output lines that name a runtime state file under `home`. The file's
+ * project half is a digest of the served root, so a line is matched on the
+ * home-plus-`runtime.env_local.` prefix, never on a recomputed name.
+ */
+function linesNamingStateFile(output: string, home: string): string[] {
+  const prefix = join(home, 'runtime.env_local.');
+  return output.split('\n').filter((line) => line.includes(prefix));
+}
 
 interface Run {
   code: number | null;
@@ -164,10 +182,13 @@ beforeAll(async () => {
   serveDir = join(workdir, 'serve-project');
   mkdirSync(serveDir);
   writeFileSync(join(serveDir, 'objectstack.config.ts'), BARE_CONFIG);
+  // A regular file where the home's parent directory would be: `ENOTDIR`.
+  writeFileSync(join(workdir, 'serve-home-file'), '');
   const legs: Array<[string, Promise<Run>]> = [
     ['start-control', runCli(['start', '-p', UNSERVABLE_PORT], { OS_HOME: join(workdir, 'home', 'a', 'b', 'c') })],
     ['create-control', runCli(['create', 'plugin', 'foo', '--dir', join(workdir, 'create', 'a', 'b', 'foo')], {})],
     ['serve-control', runServe(join(workdir, 'serve-home', 'a', 'b', 'c'))],
+    ['serve-notdir', runServe(join(workdir, 'serve-home-file', 'sub'))],
   ];
   if (RUNS_PROC) {
     legs.push(
@@ -227,6 +248,9 @@ describe('a directory that can never be made is refused at the door, at once (#2
   it.runIf(RUNS_PROC)('os serve under OS_HOME=/proc/<missing> prints its banner instead of looping on the state file', () => {
     const run = runOf('serve-proc');
     expect(run.reached, run.output).toBe(true);
+    const named = linesNamingStateFile(run.output, `${PROC_TOP}-sv`);
+    expect(named, run.output).toHaveLength(1);
+    expect(named[0]).toContain('ENOENT');
   });
 
   it('CONTROL: os serve under a creatable OS_HOME three levels deep writes its state file before the banner', () => {
@@ -236,5 +260,18 @@ describe('a directory that can never be made is refused at the door, at once (#2
     const files = readdirSync(home).filter((name) => /^runtime\.env_local\..+\.json$/.test(name));
     expect(files, `entries in ${home}: ${readdirSync(home).join(', ')}`).toHaveLength(1);
     expect(JSON.parse(readFileSync(join(home, files[0]), 'utf8')).pid).toBe(run.pid);
+    expect(linesNamingStateFile(run.output, home), run.output).toEqual([]);
+  });
+});
+
+describe('a runtime state file that cannot be written is said once, and the boot goes on (#24091)', () => {
+  it('os serve under an OS_HOME below a regular file reaches its banner, and one line names the file and ENOTDIR', () => {
+    const run = runOf('serve-notdir');
+    const home = join(workdir, 'serve-home-file', 'sub');
+    expect(run.reached, run.output).toBe(true);
+    const named = linesNamingStateFile(run.output, home);
+    expect(named, run.output).toHaveLength(1);
+    expect(named[0]).toMatch(/runtime\.env_local\.\S+\.json/);
+    expect(named[0]).toContain('ENOTDIR');
   });
 });

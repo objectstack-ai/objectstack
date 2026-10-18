@@ -2512,6 +2512,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'favorites toggle still draws its star.',
   },
   {
+    id: 'page-list-view-object-name-view-type-retired',
+    order: 101,
+    text:
+      'It also judges a list view embedded on a page as a list view (maintainer ruling 2026-10-10: one '
+      + 'list view has one set of property names wherever it is embedded). `ComponentPropsMap` gains a '
+      + '`list-view` row built from the list view\'s own members, with `columns` optional and the legacy '
+      + '`options` bag judged per kind as the list overlay member judges them, so a key every list view door '
+      + 'refuses (a kanban block\'s `groupField`, `options.grid`) is no longer saved green on a page. The page '
+      + 'carrier\'s own spelling of the binding and the kind, `objectName` and `viewType`, is refused by name '
+      + 'with the prescription the react tier gives the same two aliases on `ListView`. The D2 conversion '
+      + '`page-list-view-object-name-view-type-to-data-type` moves them to `data` and `type` on stored nodes, '
+      + 'retired from the load path, and leaves an alias that disagrees with the spec key beside it as stored, '
+      + 'reported as a TODO. Its D3 record is the semantic entry `page-list-view-object-name-view-type-retired`.',
+  },
+  {
     id: 'page-requires-non-compiled-kind-refused',
     order: 66,
     text:
