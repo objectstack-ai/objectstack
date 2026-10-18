@@ -91,8 +91,9 @@ export const ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE = 'ORGANIZATION_OWNERSHIP_
  * The guard's kernel plugin name: a plugin that writes rows in its `start()`
  * names it in `optionalDependencies`, so on a kernel that composes the guard it
  * starts only once the guard has judged the database (ADR-0116 ordering).
- * Package-internal (`AppPlugin` reads it); a plugin in another package spells
- * the name.
+ * Not a package entry export: each writer spells the name as a string literal
+ * (`check:init-service-contract` reads `optionalDependencies` as literals only),
+ * and the guard's tests pin each declaration against this constant.
  */
 export const ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME = 'com.objectstack.organization-ownership-boot-guard' as const;
 
