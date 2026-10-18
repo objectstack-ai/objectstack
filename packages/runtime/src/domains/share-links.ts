@@ -171,7 +171,7 @@ async function handleShareLinksRequestBody(
     // a second hand-written `'shareLinks'`, copied from a constant whose own
     // doc-comment says "keep in sync with the SharingPlugin registration" — and a
     // drifted copy here resolves nothing, so every share link 501s with "Sharing
-    // is not configured for this environment" on an environment where it is.
+    // is not configured" on an environment where it is.
     const svc = await deps.resolveService(context, SHARE_LINK_SERVICE, context.environmentId);
     if (!svc) {
         return { handled: true, response: deps.error('Sharing is not configured', 501) };
