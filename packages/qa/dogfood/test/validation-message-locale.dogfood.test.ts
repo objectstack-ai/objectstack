@@ -159,9 +159,10 @@ describe('objectstack verify: localized field-validation messages (#3957)', () =
    * the same report, so both must speak the caller's language.
    */
   it('the import row report is localized — constraint AND cell coercion', async () => {
+    // [#24348] No `runAutomations: false`: the fixture binds no automation, and
+    // the import doors refuse that opt-out to every caller but the system principal.
     const r = await apiIn('zh-CN', 'POST', '/data/vml_settlement/import', {
       format: 'json',
-      runAutomations: false,
       rows: [
         { name: '越界行', penalty_amount: -1 },   // engine constraint
         { name: '烂单元格', quota_hours: 'abc' }, // importer coercion

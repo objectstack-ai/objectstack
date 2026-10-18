@@ -64,7 +64,7 @@ import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
-import { SysUser, SysAccount } from '@objectstack/platform-objects/identity';
+import { SysUser, SysAccount, SysOrganization } from '@objectstack/platform-objects/identity';
 import {
   bootstrapPlatformAdmin,
   PLATFORM_ADMIN_CANDIDATE_PAGE_SIZE,
@@ -125,9 +125,12 @@ async function boot(): Promise<ObjectQL> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount],
+    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount, SysOrganization],
   } as any);
   await engine.syncSchemas();
+  // [ADR-0131 D3/D5] The Default Organization a `single` boot creates before any
+  // `kernel:ready` hook runs; it owns the promotion's grant.
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, { context: { isSystem: true } });
   engines.push(engine);
   return engine;
 }
@@ -463,6 +466,8 @@ describe('#16682 — the promotion target is chosen, not sampled', () => {
         ['sys_user', users.map((r) => ({ ...r }))],
         ['sys_user_permission_set', []],
         ['sys_account', accounts.map((r) => ({ ...r }))],
+        // [ADR-0131 D5] The Default Organization, which owns the promotion's grant.
+        ['sys_organization', [{ id: 'org_default', slug: 'default' }]],
       ]);
       return {
         grants: () => tables.get('sys_user_permission_set')!,

@@ -114,6 +114,8 @@ function makeQl(userRows: unknown[]) {
     sys_permission_set: [],
     sys_user: userRows.map((r) => (r && typeof r === 'object' ? { ...(r as object) } : r)) as any[],
     sys_user_permission_set: [],
+    // [ADR-0131 D5] The Default Organization, which owns the promotion's grant.
+    sys_organization: [{ id: 'org_default', slug: 'default' }],
     // [#14348] Every probed row that CAN hold an account gets one.
     //
     // This probe reads plugin-security's human verdict indirectly, as

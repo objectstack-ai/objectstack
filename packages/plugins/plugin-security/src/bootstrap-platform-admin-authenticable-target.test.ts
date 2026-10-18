@@ -48,7 +48,7 @@
 import { describe, it, expect, afterEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
-import { SysUser, SysAccount } from '@objectstack/platform-objects/identity';
+import { SysUser, SysAccount, SysOrganization } from '@objectstack/platform-objects/identity';
 import { bootstrapPlatformAdmin, shouldReplayBootstrapFor } from './bootstrap-platform-admin.js';
 import { seedLegacyPlatformBucket } from './__tests__/legacy-catalog-rows.testkit.js';
 import { SysPermissionSet } from './__tests__/legacy-catalog-objects.testkit.js';
@@ -92,7 +92,7 @@ async function boot(): Promise<ObjectQL> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount],
+    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount, SysOrganization],
   } as any);
   engine.registerApp({
     id: 'com.example.seeded-app',
@@ -110,6 +110,9 @@ async function boot(): Promise<ObjectQL> {
     ],
   } as any);
   await engine.syncSchemas();
+  // [ADR-0131 D3/D5] The Default Organization a `single` boot creates before any
+  // `kernel:ready` hook runs; it owns the promotion's grant.
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, { context: { isSystem: true } });
   engines.push(engine);
   return engine;
 }

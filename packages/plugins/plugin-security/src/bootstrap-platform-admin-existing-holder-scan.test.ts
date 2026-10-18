@@ -73,7 +73,7 @@ import { assertEngineUpdateDispatch } from '@objectstack/metadata-core';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { resetPlatformAdminEmailMemo } from '@objectstack/core';
-import { SysUser, SysAccount } from '@objectstack/platform-objects/identity';
+import { SysUser, SysAccount, SysOrganization } from '@objectstack/platform-objects/identity';
 import {
   bootstrapPlatformAdmin,
   PLATFORM_ADMIN_GRANT_PAGE_SIZE,
@@ -128,9 +128,12 @@ async function boot(): Promise<ObjectQL> {
     version: '1.0.0',
     type: 'plugin',
     scope: 'system',
-    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount],
+    objects: [SysPermissionSet, SysUserPermissionSet, SysUser, SysAccount, SysOrganization],
   } as any);
   await engine.syncSchemas();
+  // [ADR-0131 D3/D5] The Default Organization a `single` boot creates before any
+  // `kernel:ready` hook runs; it owns the promotion's grant.
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, { context: { isSystem: true } });
   engines.push(engine);
   return engine;
 }
@@ -469,9 +472,10 @@ describe('#16861 — an existing platform admin is found, not sampled for', () =
             if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
           }
           if (object === 'sys_user_permission_set') {
-            // Every synthetic row is organization-scoped, so the narrow leg
-            // (`organization_id: null`) legitimately answers with nothing.
-            if ('organization_id' in where && where.organization_id === null) return [];
+            // Every synthetic row is another organization's, so the narrow leg
+            // (`organization_id: null`, and the Default Organization's)
+            // legitimately answers with nothing.
+            if ('organization_id' in where && (where.organization_id === null || where.organization_id === 'org_default')) return [];
             const offset = q?.offset ?? 0;
             const limit = q?.limit ?? 100;
             const out: any[] = [];
@@ -493,6 +497,8 @@ describe('#16861 — an existing platform admin is found, not sampled for', () =
               : [];
           }
           if (object === 'sys_account') return [{ id: 'acc_p', user_id: 'usr_promotable' }];
+          // [ADR-0131 D5] The Default Organization, which owns the promotion's grant.
+          if (object === 'sys_organization') return [{ id: 'org_default', slug: 'default' }];
           return [];
         },
         async insert(object: string, data: any) {
@@ -523,7 +529,7 @@ describe('#16861 — an existing platform admin is found, not sampled for', () =
       expect(said).toContain('stopped at its ceiling');
       expect(said).toContain(String(PLATFORM_ADMIN_GRANT_SCAN_CEILING));
       expect(said).toContain('were NOT examined');
-      expect(said).toContain('SECOND unscoped grant');
+      expect(said).toContain('SECOND platform-admin grant');
     });
 
     it('CONTROL: a population inside the ceiling produces no truncation warning', async () => {

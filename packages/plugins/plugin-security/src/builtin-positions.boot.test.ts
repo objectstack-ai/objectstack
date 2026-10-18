@@ -322,6 +322,11 @@ async function boot(scenario: Scenario): Promise<Booted> {
   };
   if (scenario.organizationAtBoot) {
     await engine.insert('sys_organization', { id: ORG, name: 'Eq Org', slug: 'eq' }, { context: SYS } as any);
+  } else if (scenario.posture === 'single') {
+    // [ADR-0131 D3/D5] A `single` boot always holds its Default Organization —
+    // plugin-auth's boot invariant creates it before `kernel:ready` — and it owns
+    // the first platform administrator's grant. No membership comes with it.
+    await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, { context: SYS } as any);
   }
   await user('usr_admin', 'admin@eq.example', '2025-01-01T00:00:00.000Z');
   await user('usr_orgadmin', 'orgadmin@eq.example', '2025-02-01T00:00:00.000Z');

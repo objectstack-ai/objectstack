@@ -268,6 +268,27 @@ const VARIANTS: Record<
     },
   },
 
+  // [ADR-0131 D5] The `single` promotion's grant, owned by the Default
+  // Organization: the only variant in which that organization's row is read,
+  // so the union needs it — without it `sys_organization.id` would be absent
+  // from the declaration and the guard would stop judging the delete that
+  // moves the anchor off this grant.
+  'default-organization-owned grant': {
+    org: 'org_1',
+    tables: {
+      sys_user: [{ id: 'usr_1', email: 'ada@example.com', ai_access: 0 }],
+      sys_organization: [{ id: 'org_1', slug: 'default' }],
+      sys_member: [],
+      sys_user_position: [],
+      sys_position: [],
+      sys_position_permission_set: [],
+      sys_user_permission_set: [
+        { id: 'ups_1', user_id: 'usr_1', permission_set: 'admin_full_access', organization_id: 'org_1' },
+      ],
+      sys_permission_set: [],
+    },
+  },
+
   // [#11663 L2] The CONFIG anchor. No grant row anywhere: standing comes from
   // the declared administrator list matched against this row's own `email`,
   // gated on `email_verified`. This is the only variant in which those two

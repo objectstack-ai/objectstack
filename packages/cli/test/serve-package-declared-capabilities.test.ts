@@ -44,7 +44,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { randomPort, runServe } from './helpers/serve-process.js';
+import { runServe } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
 /** The ready line. The banner it opens (`Plugins: N loaded`, `Flows:`) prints AFTER it. */
@@ -114,7 +114,7 @@ function bannerPlugins(output: string): string[] {
 }
 
 const boot = async (name: string, waitFor: RegExp, extra: string[] = []) => {
-  const run = await runServe(dirs[name], ['--port', randomPort(), ...extra], { waitFor, timeoutMs: 150_000 });
+  const run = await runServe(dirs[name], extra, { waitFor, timeoutMs: 150_000 });
   return run.stdout + run.stderr;
 };
 

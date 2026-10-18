@@ -113,6 +113,9 @@ async function soleGrantAnchoredAdmin(): Promise<Rig> {
     ]),
   } as any);
   await engine.syncSchemas();
+  // [ADR-0131 D3/D5] The Default Organization a `single` boot creates before
+  // `kernel:ready` (AuthPlugin's invariant); it owns the promotion's grant.
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization', slug: 'default' }, SYS);
   await plugin.start(ctx);
   vi.spyOn((engine as any).logger, 'warn').mockImplementation(() => undefined);
   registerGuard(engine);

@@ -65,6 +65,9 @@ function makeQl(seed: { users?: any[]; grants?: any[]; sets?: any[]; accounts?: 
     ['sys_user', (seed.users ?? []).map((r) => ({ ...r }))],
     ['sys_user_permission_set', (seed.grants ?? []).map((r) => ({ ...r }))],
     ['sys_account', (seed.accounts ?? []).map((r) => ({ ...r }))],
+    // [ADR-0131 D3/D5] The Default Organization a `single` boot creates, which
+    // owns the promotion's grant.
+    ['sys_organization', [{ id: 'org_default', slug: 'default' }]],
   ]);
   const rowsOf = (object: string) => tables.get(object) ?? [];
   return {

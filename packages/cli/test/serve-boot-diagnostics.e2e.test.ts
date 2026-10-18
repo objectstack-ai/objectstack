@@ -30,7 +30,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runServe, randomPort } from './helpers/serve-process.js';
+import { runServe } from './helpers/serve-process.js';
 
 /**
  * A stack whose only interesting property is that booting it MUST log a
@@ -83,10 +83,8 @@ describe('os serve — boot-phase logger output (#4012)', () => {
   it(
     'prints the boot WARN a plugin logged while the banner was being assembled',
     async () => {
-      // Random high port: never contend with a dev server this machine is
-      // already running (AGENTS.md multi-agent discipline §8).
-      const port = randomPort();
-      const { stdout, stderr } = await runServe(dir, ['--port', port], {
+      // No `--port`: `runServe()` hands the child a kernel-assigned one (#24342).
+      const { stdout, stderr } = await runServe(dir, [], {
         waitFor: /Press Ctrl\+C to stop/,
       });
 
@@ -111,8 +109,7 @@ describe('os serve — boot-phase logger output (#4012)', () => {
       // none of them from boot — not even the kernel's own plain
       // `logger.debug('Triggering kernel:ready hook')`. At a verbose level the
       // quiet window no longer opens at all.
-      const port = randomPort();
-      const { stdout, stderr } = await runServe(dir, ['--port', port, '--log-level', 'debug'], {
+      const { stdout, stderr } = await runServe(dir, ['--log-level', 'debug'], {
         waitFor: /Press Ctrl\+C to stop/,
       });
 
