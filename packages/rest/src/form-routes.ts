@@ -434,8 +434,9 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 // columns (owner_id, status, internal_notes, …) into the
                 // row. What the form does not collect, the object fills: a
                 // field's `defaultValue` (`crm_lead.status` in
-                // `examples/app-crm`), or a `beforeInsert` hook where the value
-                // needs logic (`StampInquiryDefaultsHook` in
+                // `examples/app-crm`) or, on a select that declares none, its
+                // `default: true` option; or a `beforeInsert` hook where the
+                // value needs logic (`StampInquiryDefaultsHook` in
                 // `examples/app-showcase/src/data/hooks/index.ts`).
                 const allowedFields = new Set<string>();
                 // [#24131] …and, off the SAME entries, the fields the form

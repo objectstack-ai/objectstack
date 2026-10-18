@@ -104,7 +104,7 @@ export const LeadViews = defineView({
      * (create + read-back on that object only, ADR-0056 Option A). No
      * permission set is needed, `GuestPortalProfile` included (see its
      * comment). Only the fields in `sections` are written; the lead object's
-     * field defaults fill what the form does not collect (`status`,
+     * field defaults fill what the form does not collect (`status`, `source`,
      * `lead_score`), and the server-managed anchors (`owner_id`,
      * `organization_id`, audit columns) are never taken from a submission.
      */
