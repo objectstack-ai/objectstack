@@ -34,8 +34,9 @@
  * hold its Default Organization. So the plugin that registers the object keeps
  * the invariant too: under `single`, `start()` runs the same
  * `ensureDefaultOrganizationExists` `AuthPlugin.start()` runs, and a failure
- * fails the boot. The invariant is not exported for a host to call — a step the
- * host must remember is a step a composition can forget.
+ * fails the boot. A host composing a kernel never calls the invariant itself —
+ * a step the host must remember is a step a composition can forget; it is
+ * exported for the one caller that is no boot (see its module header).
  *
  * ## Why the objects keep plugin-auth's package id
  *
@@ -88,9 +89,11 @@ export class IdentityObjectsPlugin implements Plugin {
   /**
    * `AuthPlugin`'s kernel plugin name: ordered ahead when composed, so its
    * `auth` service is registered by the time `init()` asks, and the pair is
-   * refused there.
+   * refused there. And the v18 boot guard's (ADR-0131 D10 item 5; see
+   * `AuthPlugin.optionalDependencies`): `start()` creates the Default
+   * Organization only once the guard has judged the database.
    */
-  optionalDependencies: string[] = ['com.objectstack.auth'];
+  optionalDependencies: string[] = ['com.objectstack.auth', 'com.objectstack.organization-ownership-boot-guard'];
   requiresServices: string[] = ['manifest'];
 
   private readonly options: IdentityObjectsPluginOptions;

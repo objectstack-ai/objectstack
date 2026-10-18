@@ -70,10 +70,12 @@ export { MigrationRecoveryPlugin, describeInterruptedRun } from './migration-rec
 export {
   OrganizationOwnershipBootGuardPlugin,
   OrganizationOwnershipBootRefusal,
+  ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME,
   ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE,
   assertOrganizationOwnershipMigrated,
   findV17ShapeTables,
   isOrganizationOwnershipBootRefusal,
+  organizationOwnershipBootRefusalIn,
   organizationOwnershipRefusalMessage,
 } from './organization-ownership-boot-guard.js';
 export type { OrganizationOwnershipBootGuardOptions } from './organization-ownership-boot-guard.js';

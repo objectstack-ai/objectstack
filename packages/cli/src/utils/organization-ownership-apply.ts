@@ -55,7 +55,11 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  *     ({@link AttributionSink}): the apply writes exactly what the plan
  *     reported, derived once, never a second derivation. Repeated to a fixed
  *     point, so a child whose parent was itself NULL in the first pass takes
- *     the parent's owner in the next.
+ *     the parent's owner in the next. Under `single` on a database that holds
+ *     no organization at all, the Default Organization is created first
+ *     ({@link DefaultOrganizationPort}; ADR-0131 D3: it exists before the
+ *     first write that needs an owner), so the rows no anchor names take it —
+ *     never left NULL and certified. The plan says so in its warnings.
  *  2. `authored-conversion` — the catalog rows an organization authored
  *     (the inventory's `authored` categories) become environment metadata
  *     through the metadata door, by core's row→definition mappers; the
@@ -137,7 +141,11 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  * empty, a delete selects only mirrors — so a second run writes nothing the
  * first one wrote. On top of that, each step that finishes is recorded in the
  * ceremony's checkpoint ({@link CeremonyLedgerPort}) and is not run again: a
- * run interrupted inside step N resumes at step N. A step that stops on a
+ * run interrupted inside step N resumes at step N. Two steps run again when
+ * checkpointed: `history-renumber` (below), and `attribution` whenever the
+ * plan derives an owner for rows still NULL — a row the operator made
+ * attributable since, or one an earlier run found no Default Organization
+ * for. A step that stops on a
  * blocker stops the ceremony there — fate order is the contract — and the
  * report names the blocker and its remedy.
  *
@@ -164,7 +172,9 @@ import { describeSecurityPluginComposition, type SchemaMigrationComposition } fr
  *
  * ⛔ Delete a row outside fate 2. ⛔ Give an unattributable row an owner:
  * owners come only from the plan's anchors and, under `single`, the Default
- * Organization. ⛔ Run at boot: the command is the only caller.
+ * Organization. ⛔ Create any organization but the Default Organization, and
+ * that one only under `single` on a database that holds none. ⛔ Run at boot:
+ * the command is the only caller.
  */
 
 /** The `sys_migration` row the ceremony checkpoints into and completes; the v18 boot guard reads it. */
@@ -276,6 +286,15 @@ export interface CeremonyCheckpoint {
    * between the two accepts the same choice and finishes.
    */
   metadataChoicesApplied?: string[];
+}
+
+/**
+ * The Default Organization's producer (the command: plugin-auth's boot
+ * invariant, `ensureDefaultOrganizationExists`): find it or create it, and
+ * answer its id. Throws when it cannot.
+ */
+export interface DefaultOrganizationPort {
+  create(): Promise<{ id: string }>;
 }
 
 /** Where the checkpoint lives (the command: the `sys_migration` row). */
@@ -499,6 +518,12 @@ export interface ApplyOptions {
   lock: MetadataLockPort;
   columnDrops: ColumnDropPort;
   ledger: CeremonyLedgerPort;
+  /**
+   * Creates the Default Organization when the plan says `--apply` does (`single`,
+   * no organization at all — `OrganizationOwnershipPlan.defaultOrganizationCreatedByApply`).
+   * Absent, such a run blocks at attribution instead of attributing nothing.
+   */
+  defaultOrganization?: DefaultOrganizationPort;
   /** The kept plan file the operator reviewed; the run refuses unless it matches (see the module doc). */
   reviewedPlan: ReviewedPlan;
   inventory?: readonly InventoryEntry[];
@@ -690,9 +715,49 @@ async function planFor(run: Run, extra: { onAttribution?: AttributionSink } = {}
 const nullsUnderAttribution = (plan: OrganizationOwnershipPlan): number =>
   plan.tables.filter((t) => t.fate === 'attribution').reduce((n, t) => n + (t.rows?.organizationNull ?? 0), 0);
 
+/** The rows the plan derives an owner for and has not yet written: what an attribution pass would write. */
+const rowsToAttribute = (plan: OrganizationOwnershipPlan): number =>
+  plan.tables.filter((t) => t.fate === 'attribution').reduce((n, t) => n + Number(t.fateCounts.rowsToAttribute ?? 0), 0);
+
 // ── Step 1: attribution ──────────────────────────────────────────────────────
 
+/**
+ * [ADR-0131 D3, D10 fate 3] Under `single`, on a database that holds no
+ * organization at all, create the Default Organization before the first
+ * attribution write: it owns every row no anchor names, and it exists before
+ * the first write that needs an owner. The plan the operator reviewed said so
+ * (`defaultOrganizationCreatedByApply`, and its warning). `null` when it now
+ * exists; the blocker, in the operator's terms, when it could not be created.
+ */
+async function ensureDefaultOrganization(run: Run): Promise<string | null> {
+  if (!run.plan.defaultOrganizationCreatedByApply) return null;
+  const port = run.opts.defaultOrganization;
+  if (!port) {
+    return (
+      'This single-posture database holds no organization, and this run has no way to create the Default ' +
+      'Organization that owns its organization-less rows (ADR-0131 D3). Nothing was attributed. Run the ceremony ' +
+      'through `os migrate organization-ownership --apply`, which creates it.'
+    );
+  }
+  try {
+    const { id } = await port.create();
+    run.opts.onProgress?.(`created the Default Organization ${id} (single posture): the owner of the rows no anchor names`);
+    return null;
+  } catch (error) {
+    return (
+      `The Default Organization could not be created (${error instanceof Error ? error.message : String(error)}), so ` +
+      'the organization-less rows no anchor names have no owner to take (ADR-0131 D3). Nothing was attributed. Make ' +
+      'the sys_organization insert land — the database\'s write permission, a legacy unique index on its slug — then ' +
+      're-run --apply.'
+    );
+  }
+}
+
 async function runAttribution(run: Run): Promise<StepReport> {
+  const unowned = await ensureDefaultOrganization(run);
+  if (unowned) {
+    return { step: 'attribution', status: 'blocked', summary: { rowsAttributed: 0, passes: 0 }, blockers: [unowned], notes: [] };
+  }
   let passes = 0;
   let total = 0;
   let lastNulls = Number.POSITIVE_INFINITY;
@@ -2703,6 +2768,26 @@ export async function applyOrganizationOwnership(opts: ApplyOptions): Promise<Or
       continue;
     }
     const done = checkpoint.completed[step];
+    // `attribution` runs again even when checkpointed, when the plan derives
+    // an owner for rows still NULL: it writes only where `organization_id IS
+    // NULL`, so it never re-derives an owner already written (D10 item 3), and
+    // a row that became attributable since the earlier run — its anchor fixed
+    // by the operator (D10 item 4: "resolves them and re-runs"), or the
+    // Default Organization now existing where an earlier run found none — is
+    // attributed instead of standing as a post-check discrepancy no re-run
+    // could clear.
+    if (done && step === 'attribution' && (rowsToAttribute(before) > 0 || before.defaultOrganizationCreatedByApply)) {
+      const again = await RUNNERS[step](run);
+      steps.push(again);
+      if (again.status !== 'done') {
+        stopped = true;
+        continue;
+      }
+      checkpoint.completed[step] = { at: now().toISOString(), summary: again.summary };
+      await opts.ledger.write(checkpoint, { complete: false, blocking: 0, advisory: 0 });
+      run.columns.clear();
+      continue;
+    }
     if (done) {
       // `history-renumber` runs again even when checkpointed: it is
       // idempotent, and an environment write made since the earlier run must

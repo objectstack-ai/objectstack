@@ -23,6 +23,7 @@ import { OBJECTQL_DRIVERS_READY_HOOK } from '@objectstack/objectql';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { SeedLoaderService } from './seed-loader.js';
+import { ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME } from './organization-ownership-boot-guard.js';
 import { recordSeedOutcome } from './seed-summary.js';
 import { contributeCodeDatasourceNames } from './code-datasource-names.js';
 import { mergeSeedDatasets, readSeedDatasets, registerSeedReplayerOnce } from './seed-datasets.js';
@@ -134,9 +135,17 @@ export class AppPlugin implements Plugin {
      * the same invariant, so it is ordered ahead for the same reason.
      * Order-if-present: a composition with neither registers no organization
      * object, and its seeds keep today's unstamped branch.
+     *
+     * The v18 boot guard (ADR-0131 D10 item 5,
+     * {@link ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME}): on a kernel that
+     * composes it (`os serve`), the guard judges the database in its own
+     * `start()`, and a database it refuses must be left as it found it — so this
+     * plugin's `start()`, which loads the inline seed, runs only after the guard
+     * has judged. Order-if-present: every other kernel is unchanged.
      */
     optionalDependencies = [
         'com.objectstack.engine.objectql',
+        ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME,
         'com.objectstack.auth',
         'com.objectstack.auth.identity-objects',
     ];

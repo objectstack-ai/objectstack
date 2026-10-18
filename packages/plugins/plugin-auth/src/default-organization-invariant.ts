@@ -5,11 +5,20 @@
  * `single` tenancy posture — the find-or-create `AuthPlugin.start()` runs
  * before any application seed loads and before the server accepts a request.
  *
- * ⛔ Internal on purpose: this module is NOT re-exported from the package
- * barrel. Its two callers are `AuthPlugin.start()` and
- * `IdentityObjectsPlugin.start()`; the owner bind it hands over to stays
- * with `ensureDefaultOrganization` (`ensure-default-organization.ts`), which is
- * the published helper.
+ * Its boot callers are `AuthPlugin.start()` and `IdentityObjectsPlugin.start()`;
+ * the owner bind it hands over to stays with `ensureDefaultOrganization`
+ * (`ensure-default-organization.ts`). ⛔ A host composing a kernel does not
+ * call it: those two plugins keep the invariant on every boot that registers
+ * the organization object.
+ *
+ * It is exported from the package barrel for ONE caller that is no boot: the
+ * v18 organization-ownership ceremony (`os migrate organization-ownership
+ * --apply`, ADR-0131 D10). Its attribution gives every organization-less row
+ * no anchor names to the Default Organization under `single` (D10 fate 3), so
+ * that organization must exist before its first write (D3). On a 17.x
+ * database that holds no organization the boot that would have created it is
+ * the one the v18 guard refuses before any plugin writes, so the ceremony
+ * creates it — through this function, so there is one producer of the row.
  */
 
 const SYSTEM_CTX = { isSystem: true };
