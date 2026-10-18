@@ -3542,6 +3542,13 @@ describe('validateStackExpressions — reads only keys the spec declares (meta-t
       // "key" is `Map.prototype.get`; the metadata keys it is built from are read
       // in `flow-cel-root-scope.ts`, not here.
       'flowEntrances',
+      // [#24316] The stored-metadata-body hop refusal: the per-object index of
+      // references into the family (object name → field → target), one
+      // object's entry of it, and the formula package's traversal analysis
+      // (field → related columns). Their keys are Map / Set methods, never
+      // metadata keys; the metadata keys the index is built from (`type`,
+      // `reference`) are read off the tabled `def` receiver.
+      'storedMetadataBodyReferenceIndex', 'familyRefs', 'traversals',
     ]);
     expect(receivers.filter((r) => !tabled.has(r) && !PLUMBING.has(r))).toEqual([]);
   });

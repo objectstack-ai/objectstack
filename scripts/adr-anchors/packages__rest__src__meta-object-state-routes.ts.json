@@ -1,0 +1,7 @@
+{
+  "file": "packages/rest/src/meta-object-state-routes.ts",
+  "adrs": [
+    "ADR-0020"
+  ],
+  "invariant": "The `/meta` object state-machine read, moved here whole from `rest-server.ts` (#23050 slice 13e): `GET {metaPath}/object/:name/state/:field?from=:state`, registered on the route manager the inner method captures inside the umbrella's guarded registration, under no per-family switch. ADR-0020 D3.3 — this is the introspection door that decision calls for: UIs and agents read the legal next states of an object field's declared `state_machine` rule here instead of re-deriving them, so the door asks the engine's own `legalNextStates` over the object's registered schema and never keeps a transition table of its own, and it answers the three values the runtime dispatcher's twin answers (`next: null`, a declared dead end `[]`, or the legal-next list). A door that re-derives the transitions in this transport, answers a value the dispatcher twin would not, or loads the engine statically (a host serving REST without the data engine answers 501 rather than failing to load) is the drift this record forbids; the body's own comments carry the citation."
+}

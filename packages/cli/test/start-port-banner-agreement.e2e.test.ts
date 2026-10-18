@@ -54,6 +54,18 @@
  * closes `serve`'s auto-shift branch and makes the bind deterministic. A
  * `bin/run-dev.js` child would pin `NODE_ENV=development`, re-open auto-shift,
  * and turn a busy-port race on this shared container into a flake.
+ *
+ * ## ⛔ No port is drawn and released before a production boot (#24295)
+ *
+ * The same posture turns a port taken between a pick and the child's bind into
+ * an `exit 1`, so the two production legs never hand the child a released
+ * number. The port the child must WIN with is a kernel-assigned request
+ * (`KERNEL_ASSIGNED_PORT`, `0`); a port the child must LOSE to is HELD by this
+ * file for the whole boot, so a child that wrongly took it could not bind it,
+ * and a held port is never the one the kernel assigns. So the flag leg compares
+ * the bound port against the held, losing value, and both legs compare it
+ * against {@link SERVE_DEFAULT_PORT} — what a child that honoured no channel
+ * binds.
  */
 
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
@@ -66,8 +78,8 @@ import {
   childEnv,
   boundPortFromBanner,
   requireBuiltCli,
-  reservePort,
   holdPort,
+  KERNEL_ASSIGNED_PORT,
   TSX,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
@@ -80,6 +92,24 @@ const RUN_DEV_JS = resolve(HERE, '../bin/run-dev.js');
 const BANNER_TAIL = /Press Ctrl\+C to stop/;
 
 const BOOT_TIMEOUT_MS = 180_000;
+
+/**
+ * The port `serve` binds when neither `--port` nor `$OS_PORT`/`$PORT` supplies
+ * one — the default on its `--port` flag in `commands/serve.ts`. The kernel
+ * never assigns it for a `0` request (it is below every ephemeral range), so a
+ * child that bound it honoured no channel at all.
+ */
+const SERVE_DEFAULT_PORT = 3000;
+
+/** The port a complete banner names, or a failed expectation that quotes the output. */
+function boundPortOf(output: string): number {
+  const readback = boundPortFromBanner(output);
+  expect(readback.state, `banner unreadable.\n--- output ---\n${output}`).toBe('bound');
+  const { port } = readback as { state: 'bound'; port: number };
+  expect(port, `the banner announced port 0 — the request, not the bound port.\n--- output ---\n${output}`)
+    .toBeGreaterThan(0);
+  return port;
+}
 
 // ESC spelled as a char code, never written as a raw control byte in source —
 // the same construction `helpers/serve-process.ts` uses for its own stripper.
@@ -185,36 +215,39 @@ describe('`os start` — every address it prints is the port it bound', () => {
   it(
     'an explicit --port beats an inherited $OS_PORT, and the banner agrees',
     async () => {
-      // Two DIFFERENT free ports: the one the operator exported, and the one
-      // they typed. The defect is only visible when they disagree.
-      const envPort = reservePort();
-      let flagPort = reservePort();
-      if (flagPort === envPort) flagPort = reservePort();
-      expect(flagPort).not.toBe(envPort);
+      // The operator's exported port and the one they typed must DISAGREE for
+      // the defect to be visible. The exported one is HELD (it must lose); the
+      // typed one is a kernel-assigned request (it must win) — see the header.
+      const envPort = await holdPort();
+      try {
+        const output = await bootStart(
+          { OS_PORT: String(envPort.port) },
+          ['--port', KERNEL_ASSIGNED_PORT],
+        );
 
-      const output = await bootStart(
-        { OS_PORT: String(envPort) },
-        ['--port', String(flagPort)],
-      );
+        // ── The bound port, read out of the CHILD's own banner ─────────────
+        const bound = boundPortOf(output);
+        // The explicit flag wins over the inherited environment variable, which
+        // is what `--port`'s help text ("overrides $PORT") has always promised.
+        expect(bound, `the child bound the exported $OS_PORT, not --port.\n--- output ---\n${output}`)
+          .not.toBe(envPort.port);
+        expect(bound, `the child honoured neither --port nor $OS_PORT.\n--- output ---\n${output}`)
+          .not.toBe(SERVE_DEFAULT_PORT);
 
-      // ── The bound port, read out of the CHILD's own banner ─────────────
-      const readback = boundPortFromBanner(output);
-      expect(readback.state, `banner unreadable.\n--- output ---\n${output}`).toBe('bound');
-      // The explicit flag wins over the inherited environment variable, which
-      // is what `--port`'s help text ("overrides $PORT") has always promised.
-      expect(readback).toEqual({ state: 'bound', port: flagPort });
-
-      // ── …and NOTHING printed names the losing port ─────────────────────
-      const printed = addressesIn(output);
-      // ⭐ POSITIVE CONTROL: the same probe, over the same captured text, does
-      // find the bound port. Without this the assertion below would pass on an
-      // empty capture, a child that printed nothing, or a broken regex.
-      expect(printed, `no localhost address at all in:\n${output}`).toContain(flagPort);
-      expect(
-        printed.filter((p) => p !== flagPort),
-        'os start printed an address it is not serving — the banner and the bind '
-        + `disagreed again.\n--- output ---\n${output}`,
-      ).toEqual([]);
+        // ── …and NOTHING printed names the losing port ─────────────────────
+        const printed = addressesIn(output);
+        // ⭐ POSITIVE CONTROL: the same probe, over the same captured text, does
+        // find the bound port. Without this the assertion below would pass on an
+        // empty capture, a child that printed nothing, or a broken regex.
+        expect(printed, `no localhost address at all in:\n${output}`).toContain(bound);
+        expect(
+          printed.filter((p) => p !== bound),
+          'os start printed an address it is not serving — the banner and the bind '
+          + `disagreed again.\n--- output ---\n${output}`,
+        ).toEqual([]);
+      } finally {
+        await envPort.release();
+      }
     },
     BOOT_TIMEOUT_MS + 30_000,
   );
@@ -223,17 +256,19 @@ describe('`os start` — every address it prints is the port it bound', () => {
     'with no --port, an inherited $OS_PORT is still honoured and still agrees',
     async () => {
       // The other half of the contract: the repair must not have made the flag
-      // win by breaking the environment channel it is supposed to outrank.
-      const envPort = reservePort();
+      // win by breaking the environment channel it is supposed to outrank. The
+      // exported value is a kernel-assigned request (see the header): honoured,
+      // it binds a kernel-assigned port; ignored, the child binds the default.
+      const output = await bootStart({ OS_PORT: KERNEL_ASSIGNED_PORT }, []);
 
-      const output = await bootStart({ OS_PORT: String(envPort) }, []);
-
-      expect(boundPortFromBanner(output)).toEqual({ state: 'bound', port: envPort });
+      const bound = boundPortOf(output);
+      expect(bound, `the child ignored $OS_PORT and bound the default.\n--- output ---\n${output}`)
+        .not.toBe(SERVE_DEFAULT_PORT);
 
       const printed = addressesIn(output);
-      expect(printed, `no localhost address at all in:\n${output}`).toContain(envPort);
+      expect(printed, `no localhost address at all in:\n${output}`).toContain(bound);
       expect(
-        printed.filter((p) => p !== envPort),
+        printed.filter((p) => p !== bound),
         `os start printed an address it is not serving.\n--- output ---\n${output}`,
       ).toEqual([]);
     },

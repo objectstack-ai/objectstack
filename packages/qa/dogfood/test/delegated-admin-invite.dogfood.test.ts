@@ -32,6 +32,14 @@
  * through this door (better-auth refuses a non-member before the hook runs);
  * it is pinned at the unit level in plugin-auth's `auth-manager.test.ts`.
  *
+ * [#24243] The placement gate behind the cap is pinned on its code here too:
+ * the delegate's out-of-scope placement answers
+ * `INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`. Its two other answers have no door
+ * on this boot and are pinned at the unit level beside the cap's: the harness
+ * always registers plugin-security's placement service, so
+ * `INVITE_PLACEMENT_UNSUPPORTED` is unreachable, and a store fault (503
+ * `SERVICE_UNAVAILABLE`) needs a store that cannot answer.
+ *
  * Harness note: `bootStack` boots the production `single` shape, so the
  * Default Organization exists from the boot (ADR-0131 D3); this file sets
  * membership roles in system context, which is the only writer
@@ -168,6 +176,30 @@ describe('#3697: delegated_admin may invite — as `member` only', () => {
     expect(body?.code).toBe('INVITE_ISSUER_MEMBER_ONLY');
     expect(
       (await findRows(ql, 'sys_invitation', { email: 'invitee.subdelegate.3697@example.com' }, 5)).length,
+    ).toBe(0);
+  }, 30_000);
+
+  it('the same delegate requesting PLACEMENT outside their scope is REFUSED by the gate, on its code, with no invitation row', async () => {
+    // [ADR-0105 D8, #24243] A plain `member` invitation passes the role cap, so
+    // the only thing left to judge is the placement intent: the delegated
+    // administration gate dry-runs the `sys_user_position` rows acceptance would
+    // write, against the ISSUER's adminScope (ADR-0090 D12). This delegate holds
+    // the org role and no adminScope at all, so any unit is outside it. The
+    // refusal is the gate's own `PermissionDeniedError`, so it answers the
+    // registered `INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`, not a store outage.
+    const res = await stack.apiAs(delegateToken, 'POST', '/auth/organization/invite-member', {
+      email: 'invitee.placed.3697@example.com',
+      role: 'member',
+      organizationId: orgId,
+      businessUnitId: 'bu_outside_24243',
+      positions: ['placement_probe_24243'],
+    });
+
+    const body = await res.clone().json();
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body?.code).toBe('INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE');
+    expect(
+      (await findRows(ql, 'sys_invitation', { email: 'invitee.placed.3697@example.com' }, 5)).length,
     ).toBe(0);
   }, 30_000);
 

@@ -311,13 +311,15 @@ const LEDGER = [
   {
     pkg: '@objectstack/rest',
     dep: '@objectstack/objectql',
-    file: 'packages/rest/src/rest-server.ts',
+    // [#23050 slice 13e] The state-machine introspection door moved, with this dynamic
+    // import, from `rest-server.ts` to its own module; the row follows the occurrence.
+    file: 'packages/rest/src/meta-object-state-routes.ts',
     kind: 'optional-runtime-probe',
     why:
       'The state-machine introspection door mirrors the dispatcher branch: the import is wrapped in '
       + 'try/catch and a deployment serving REST WITHOUT the data engine answers 501 '
       + 'NOT_IMPLEMENTED rather than failing to load. `@objectstack/rest` is deliberately not '
-      + 'coupled to the engine — `query-multiplicity.ts` and the rest of `rest-server.ts` duck-type '
+      + 'coupled to the engine — `query-multiplicity.ts` and `rest-server.ts` duck-type '
       + 'the same seam for exactly that reason — so declaring it would reverse a stance the tree '
       + 'states, not repair an omission.',
   },
