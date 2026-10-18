@@ -397,6 +397,29 @@ const READERS: Array<{
     },
   ]),
   {
+    reader: 'listDrafts() — GET /meta/_drafts',
+    enforces: true,
+    why: '[#24210] the pending-changes list omits a disabled package\'s drafts, as its by-name draft read answers NO_DRAFT',
+    serves: async ({ protocol }) =>
+      ((await protocol.listDrafts())?.drafts ?? []).some((d: any) => d?.packageId === PKG),
+  },
+  {
+    reader: 'listDrafts({ packageId }) — GET /meta/_drafts?packageId=',
+    enforces: true,
+    why: '[#24210] naming the package does not bring its drafts back',
+    serves: async ({ protocol }) =>
+      ((await protocol.listDrafts({ packageId: PKG }))?.drafts ?? []).length > 0,
+  },
+  {
+    reader: 'the repository\'s listDrafts — the package batch doors (publish-drafts, discard-drafts)',
+    enforces: false,
+    why: '[#24210] a disabled package\'s drafts still publish and discard: those doors define their batch here',
+    serves: async ({ protocol }) => {
+      await (protocol as any).ensureOverlayIndex();
+      return ((await (protocol as any).getOverlayRepo().listDrafts({ packageId: PKG })) ?? []).length > 0;
+    },
+  },
+  {
     reader: 'assertObjectRegistered — the data plane (findData / getData funnel here)',
     enforces: true,
     why: 'the symptom itself: 200 with all rows for a disabled package',
@@ -587,6 +610,11 @@ describe('#7557 (A) — a disabled package stops serving, on every API reader at
     expect(served).toEqual(allTrue(served));
     const app: any = await h.protocol.getMetaItem({ type: 'app', name: 'healthy_app' });
     expect(app?.item?._packageId).toBe(OTHER_PKG);
+    // [#24210] …and its pending drafts are still listed, both of them.
+    const drafts = (await h.protocol.listDrafts()).drafts;
+    expect(drafts.filter((d) => d.packageId === OTHER_PKG).map((d) => `${d.type}/${d.name}`).sort())
+      .toEqual(['app/healthy_app', 'object/healthy_widget']);
+    expect(drafts.filter((d) => d.packageId === PKG)).toEqual([]);
   });
 
   it('[#24210] the protection envelope stays: the write doors\' verdict on the address is not the item', async () => {

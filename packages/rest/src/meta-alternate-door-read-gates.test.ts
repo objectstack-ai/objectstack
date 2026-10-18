@@ -1016,6 +1016,8 @@ describe('[#20156] edges', () => {
         const history = await drive(rest, '/history', 'doc', 'crm_admin_runbook');
 
         expect(envelope(diff)).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+        // [#24210] Unchanged by the withheld-item answer: already the plain read's nested body.
+        expect(diff.body).toEqual({ error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' } });
         expect(text(diff)).not.toContain(DOC_SECRET);
         expect(history.statusCode).toBe(200);
         expect(Array.isArray(history.body?.events)).toBe(true);
@@ -1040,9 +1042,18 @@ describe('[#20156] edges', () => {
             protocol.historyMetaItem.mockClear();
             protocol.auditMetaItem.mockClear();
             protocol.diffMetaItem.mockClear();
+            // [#24210] The plain read's own answer for this withheld item, the
+            // missing name's nested body (`sendMetaItemAbsent`), is the one
+            // these doors give, byte for byte: not the flat `{ error, code }`.
+            const plain = await drive(rest, '', type, name);
+            expect({ status: plain.statusCode, body: plain.body }).toEqual({
+                status: 404,
+                body: { error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' } },
+            });
             for (const suffix of ['/history', '/audit', '/diff']) {
                 const res = await drive(rest, suffix, type, name);
                 expect(envelope(res), `${type} ${suffix} withheld`).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+                expect(text(res), `${type} ${suffix} withheld body`).toBe(text(plain));
                 expect(text(res), `${type} ${suffix}`).not.toContain('w_open_matters');
                 expect(text(res), `${type} ${suffix}`).not.toContain('nav_payroll_runs');
             }
