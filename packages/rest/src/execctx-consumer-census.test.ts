@@ -140,6 +140,11 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
  * lines, the change log's and the comparison's on their continuation lines —
  * two of §7's and §8's four continuation sites, which those sections find there
  * because they read every file here.
+ *
+ * [#23050 slice 13e] …and the seventh and eighth, the object state-machine read
+ * to `meta-object-state-routes.ts` and the published read to
+ * `meta-item-history-routes.ts`, with none: neither door resolves a caller
+ * itself (the umbrella's wrapper does, before either handler runs).
  */
 const SITE_FILES = REST_SERVER_REGISTRAR_FILES;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
@@ -157,7 +162,7 @@ const siteKey = (file: string, line: number) => `${file}:${line}`;
  * `registerSearchEndpoints`, `registerUiEndpoints`,
  * `registerCrudEndpoints`) hands its moved body — and each one
  * `registerMetadataEndpointsInner` builds for a moved `/meta` group's module
- * (#23050 slices 13a, 13b, 13c and 13d), counted as that module's registrar —
+ * (#23050 slices 13a to 13e), counted as that module's registrar —
  * forwards each member to the server with `(...a) => this.<member>(...a)`, so
  * a moved site's stack shows
  * that forwarder above the site itself. The site is the first censused frame
@@ -182,11 +187,17 @@ const FORWARDERS = new Set(FORWARDER_LINES.map((line) => siteKey('rest-server.ts
  * bodies), each handed over by its own host literal — but see
  * {@link MOVED_REGISTRARS_READING_NO_EXECCTX}: only one of its two literals
  * carries the forwarder.
+ *
+ * [#23050 slice 13e] So does `meta-item-history-routes.ts` (the history family
+ * and the published read), each handed over by its own host literal the inner
+ * method builds at its own position — and, as for the discovery module, only
+ * the first of the two carries the forwarder.
  */
 const EXTRA_MOVED_REGISTRARS: Readonly<Partial<Record<(typeof SITE_FILES)[number], number>>> = {
     'sharing-routes.ts': 1,
     'security-routes.ts': 1,
     'discovery-routes.ts': 1,
+    'meta-item-history-routes.ts': 1,
 };
 /**
  * [#23050 slice 7] The moved registrars whose bodies read no `resolveExecCtx`,
@@ -201,10 +212,18 @@ const EXTRA_MOVED_REGISTRARS: Readonly<Partial<Record<(typeof SITE_FILES)[number
  * either (the AST walk of the body finds no read): the public form doors run
  * as the form grant and resolve no caller, so their host literal names no
  * `resolveExecCtx` member.
+ *
+ * [#23050 slice 13e] Neither the object state-machine read's body
+ * (`meta-object-state-routes.ts`) nor the published read's
+ * (`meta-item-history-routes.ts`' second registrar) reads it either (the AST
+ * walk of each body finds no read): both doors leave the caller to the
+ * umbrella's wrapper, so neither host literal names a `resolveExecCtx` member.
  */
 const MOVED_REGISTRARS_READING_NO_EXECCTX: Readonly<Partial<Record<(typeof SITE_FILES)[number], number>>> = {
     'discovery-routes.ts': 1,
     'form-routes.ts': 1,
+    'meta-item-history-routes.ts': 1,
+    'meta-object-state-routes.ts': 1,
 };
 
 /** A stack frame in any censused file, as `<file>:<line>:<column>`. */
@@ -802,13 +821,24 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // out, one forwarder's two mentions in). Seventeen forwarders now:
         // (17 - 1) + 3 - 2, the module carrying one host literal that reads the seam,
         // so neither map gains an entry.
-        expect(SITE_FILES).toHaveLength(17);
+        //
+        // [#23050 slice 13e] 62 sites / 145 mentions UNCHANGED — the same MOVE. The
+        // seventh and eighth `/meta` groups, the object state-machine read and the
+        // published read, left for `meta-object-state-routes.ts` (a new module on the
+        // list) and `meta-item-history-routes.ts` (already on it) with NO site, and
+        // neither host literal the inner method builds for them names a
+        // `resolveExecCtx` member, so no mention moved either:
+        // 5 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 + 2 + 5 + 0 = 62
+        // sites. Still seventeen forwarders: (18 - 1) + 4 - 4, the published read
+        // counted as the history module's second registrar in BOTH maps and the new
+        // module in `MOVED_REGISTRARS_READING_NO_EXECCTX`.
+        expect(SITE_FILES).toHaveLength(18);
         expect(SITES.length).toBe(62);
         expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(145);
         const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
-        expect(extraMovedRegistrars).toBe(3);
+        expect(extraMovedRegistrars).toBe(4);
         const registrarsReadingNoExecCtx = Object.values(MOVED_REGISTRARS_READING_NO_EXECCTX).reduce((n, k) => n + (k ?? 0), 0);
-        expect(registrarsReadingNoExecCtx).toBe(2);
+        expect(registrarsReadingNoExecCtx).toBe(4);
         expect(FORWARDER_LINES, 'one host-literal resolveExecCtx forwarder per moved registrar whose body reads it: one was respelt or removed, or a module moved without joining SITE_FILES')
             .toHaveLength(SITE_FILES.length - 1 + extraMovedRegistrars - registrarsReadingNoExecCtx);
     });
