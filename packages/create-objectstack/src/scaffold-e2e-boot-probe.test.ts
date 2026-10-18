@@ -546,6 +546,14 @@ async function neighbour(options: NeighbourOptions = {}): Promise<Neighbour> {
   child.on('error', (err) => giveUp(diagnosis(`it never spawned: ${err.message}`)));
   child.on('exit', (code, signal) => {
     state.exited = { code, signal };
+  });
+  // The death is diagnosed on 'close', never on 'exit': Node does not order
+  // 'exit' after this side has read the child's pipes, and a refused bind's
+  // errno arrives on the same stdout. Measured with the cases running
+  // concurrently: 'exit' first, the errno unread, and the diagnosis "it
+  // exited" in place of "refused to bind: EADDRINUSE". 'close' waits for both
+  // pipes to drain, so the child's last words are read before its death.
+  child.on('close', (code, signal) => {
     giveUp(diagnosis(`it exited before announcing a listener (code ${code}, signal ${signal})`));
   });
   const backstop = setTimeout(
