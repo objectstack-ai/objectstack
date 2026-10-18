@@ -212,20 +212,19 @@ describe('sys_organization admin actions follow the membership grade, and every 
 
   it('every api action the record serves reaches a door this composition mounts — none answers ENDPOINT_NOT_FOUND', async () => {
     const apiActions = [...served.owner.values()].filter((a) => a.type === 'api');
-    expect(apiActions.map((a) => a.name).sort()).toEqual([...ALL].sort());
     // The plain member and an organisation id no row carries: every door
     // refuses before it writes anything, and a refusal from the door is the
     // door's own answer, not the router's.
+    const answers: Array<{ action: string; status: number; code?: string }> = [];
     for (const action of apiActions) {
       const target = String(action.target);
       expect(target.startsWith('/api/v1/'), `${action.name}: ${target}`).toBe(true);
       const path = target.slice('/api/v1'.length).replace('{id}', 'org_does_not_exist');
       const res = await stack.apiAs(tokens.member, 'POST', path, { organizationId: 'org_does_not_exist' });
       const body = (await res.clone().json().catch(() => ({}))) as { code?: string; error?: { code?: string } };
-      expect(
-        { status: res.status, code: body.error?.code ?? body.code },
-        `${action.name} → POST ${target}`,
-      ).not.toEqual({ status: 404, code: 'ENDPOINT_NOT_FOUND' });
+      answers.push({ action: action.name, status: res.status, code: body.error?.code ?? body.code });
     }
+    expect(answers.filter((a) => a.status === 404), JSON.stringify(answers)).toEqual([]);
+    expect(answers.map((a) => a.action).sort()).toEqual([...ALL].sort());
   }, 60_000);
 });
