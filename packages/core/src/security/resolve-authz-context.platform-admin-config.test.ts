@@ -655,3 +655,69 @@ describe('[#11663 L5] standing across postures — three arms invariant, the leg
     expect(seen[3]).toBe('MEMBER|');
   });
 });
+
+/**
+ * [ADR-0131 D5] The `single` promotion's grant row is OWNED BY THE DEFAULT
+ * ORGANIZATION (#11979, maintainer ruling A on #18707), so the anchor reads that
+ * row — one derivation site, the posture its parameter. Before this, the anchor
+ * read the organization-less row only, so a promoted rig whose grant D10's
+ * ceremony (or the promotion itself) had given the Default Organization resolved
+ * a zero-admin deployment.
+ */
+describe('[ADR-0131 D5] under `single` the Default Organization\'s admin_full_access grant is the anchor', () => {
+  const ownedBy = (organizationId: string, organizations: Array<Record<string, unknown>>) => ({
+    ...legacyTables(),
+    sys_organization: organizations,
+    sys_user_permission_set: [
+      { id: 'ups_1', user_id: 'usr_1', permission_set: ADMIN_FULL_ACCESS, organization_id: organizationId },
+    ],
+  });
+  const DEFAULT_ONLY = [{ id: 'org_default', slug: 'default' }];
+
+  it('⭐ confers PLATFORM_ADMIN with no config at all — in the Default Organization and with no active organization', async () => {
+    for (const tenantId of ['org_default', undefined]) {
+      const grants = await resolveUserAuthzGrants(makeQl(ownedBy('org_default', DEFAULT_ONLY)), 'usr_1', { nowMs: NOW, tenantId });
+      expect(grants.posture, String(tenantId)).toBe('PLATFORM_ADMIN');
+      expect(grants.positions[0]).toBe('platform_admin');
+      // The anchoring grant applies wherever the principal acts, as the
+      // organization-less row it replaces did: the set comes with the standing.
+      expect(grants.permissions).toContain(ADMIN_FULL_ACCESS);
+    }
+  });
+
+  it('the sole organization is the Default Organization whatever its slug — the boot invariant\'s definition', async () => {
+    const grants = await resolveUserAuthzGrants(
+      makeQl(ownedBy('org_only', [{ id: 'org_only', slug: 'acme' }])), 'usr_1', { nowMs: NOW, tenantId: 'org_only' },
+    );
+    expect(grants.posture).toBe('PLATFORM_ADMIN');
+  });
+
+  it('⛔ another organization\'s grant of the set confers the set in that organization, never standing', async () => {
+    const orgs = [{ id: 'org_default', slug: 'default' }, { id: 'org_b', slug: 'b' }];
+    const grants = await resolveUserAuthzGrants(makeQl(ownedBy('org_b', orgs)), 'usr_1', { nowMs: NOW, tenantId: 'org_b' });
+    expect(grants.permissions).toContain(ADMIN_FULL_ACCESS);
+    expect(grants.posture).toBe('MEMBER');
+    expect(grants.positions).not.toContain('platform_admin');
+  });
+
+  it('⛔ several organizations and none of them `default` name no Default Organization, so nothing anchors', async () => {
+    const orgs = [{ id: 'org_a', slug: 'a' }, { id: 'org_b', slug: 'b' }];
+    const grants = await resolveUserAuthzGrants(makeQl(ownedBy('org_a', orgs)), 'usr_1', { nowMs: NOW, tenantId: 'org_a' });
+    expect(grants.posture).toBe('MEMBER');
+  });
+
+  it('⛔ a WALLED rig derives nothing from the Default Organization\'s grant either, and does not ask which one it is', async () => {
+    requestPosture('isolated');
+    const ql = makeQl(ownedBy('org_default', DEFAULT_ONLY));
+    const grants = await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW, tenantId: 'org_default' });
+    expect(grants.posture).toBe('MEMBER');
+    expect(ql.calls.map((c) => c.object)).not.toContain('sys_organization');
+  });
+
+  it('the organization-less row a pre-D5 promotion wrote still anchors, and asks no organization read', async () => {
+    const ql = makeQl({ ...legacyTables(), sys_organization: DEFAULT_ONLY });
+    const grants = await resolveUserAuthzGrants(ql, 'usr_1', { nowMs: NOW });
+    expect(grants.posture).toBe('PLATFORM_ADMIN');
+    expect(ql.calls.map((c) => c.object)).not.toContain('sys_organization');
+  });
+});

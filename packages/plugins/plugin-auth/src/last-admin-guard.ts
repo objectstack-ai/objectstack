@@ -78,9 +78,10 @@
  * recovery path from inside the product once that happens.
  *
  * So the invariant is enforced at the WRITE, on the chokepoints every path goes
- * through — `beforeUpdate` and `beforeDelete` on `sys_user`, `sys_member` and
- * `sys_user_permission_set`, and `beforeInsert` / `beforeUpdate` on the
- * activation ledger — rather than at any
+ * through — `beforeUpdate` and `beforeDelete` on `sys_user`, `sys_member`,
+ * `sys_user_permission_set` and `sys_organization` (which names the Default
+ * Organization), and `beforeInsert` / `beforeUpdate` on the activation
+ * ledger — rather than at any
  * individual endpoint.
  * HTTP-level guards protect only the endpoints they are attached to; these hold
  * for the admin ban / remove endpoints, `updateMemberRole`, the SCIM adapter
@@ -127,10 +128,11 @@
  * guard is unchanged and still counts both, so the definition stands on its own
  * here, enumerated in the opposite direction:
  *
- *  1. **platform admin, grant-anchored** — an UNSCOPED
- *     (`organization_id = null`), in-window (ADR-0091)
- *     `sys_user_permission_set` grant of `admin_full_access`, **under a
- *     non-walled posture only**. This is the same evidence
+ *  1. **platform admin, grant-anchored** — an in-window (ADR-0091)
+ *     `sys_user_permission_set` grant of `admin_full_access` owned by the
+ *     Default Organization (ADR-0131 D5, the row the `single` promotion
+ *     writes) or by none (the row it wrote before), **under a non-walled
+ *     posture only**. This is the same evidence
  *     `resolveAuthzContext` derives `platform_admin` from
  *     (ADR-0068 D2 / ADR-0095 D3) — never a stored `sys_user.role` string —
  *     and since #11663 L5 that derivation is posture-keyed, so this grade is
@@ -398,7 +400,9 @@ type GuardedOp =
   | 'grant-delete'
   | 'activation-insert'
   | 'activation-update'
-  | 'user-standing-update';
+  | 'user-standing-update'
+  | 'organization-update'
+  | 'organization-delete';
 
 interface OpWords {
   /** Reads after "Refusing this …". */
@@ -490,6 +494,26 @@ const OP_WORDS: Record<GuardedOp, OpWords> = {
     subject: 'accounts',
     table: SystemObjectName.USER,
   },
+  // [ADR-0131 D5] The organization whose `admin_full_access` grant anchors
+  // platform standing under `single` is the Default Organization, named by its
+  // `slug` (or by being the only one) — so re-slugging or deleting it is a
+  // standing write.
+  'organization-update': {
+    noun: 'organization change',
+    verb: 'change',
+    gerund: 'changing',
+    Verb: 'Change',
+    subject: 'organizations',
+    table: SystemObjectName.ORGANIZATION,
+  },
+  'organization-delete': {
+    noun: 'organization removal',
+    verb: 'remove',
+    gerund: 'removing',
+    Verb: 'Remove',
+    subject: 'organizations',
+    table: SystemObjectName.ORGANIZATION,
+  },
 };
 
 /**
@@ -509,6 +533,14 @@ function standingOrigin(table: string, noun: string): string {
       `If the ${noun} came from a disable action, an upgrade step or a script, revoke the ` +
       `'${ADMIN_FULL_ACCESS}' grants first — the switch every platform admin is derived from is ` +
       'the last thing an environment gives up, not the first.'
+    );
+  }
+  if (table === SystemObjectName.ORGANIZATION) {
+    return (
+      `The organization this ${noun} moves is this deployment's Default Organization (slug ` +
+      `'default', or its only organization), whose '${ADMIN_FULL_ACCESS}' grant is what makes ` +
+      'its platform administrator one under the single tenancy posture. Grant another account ' +
+      'administrator standing first, then make the change.'
     );
   }
   if (table === SystemObjectName.USER) {
@@ -714,6 +746,15 @@ export const USER_STANDING_KEYS = ['email', 'email_verified'] as const;
 export const ACTIVATION_LEDGER_STANDING_KEYS = ['metadata_type', 'name', 'active'] as const;
 
 /**
+ * [ADR-0131 D5] Same, for `sys_organization`: the `slug` that names the Default
+ * Organization — the organization whose `admin_full_access` grant anchors
+ * platform standing under `single` (`slug = 'default'`, else the only
+ * organization). Re-slugging it while several organizations exist moves the
+ * anchor off its grant; a delete is judged on every row, like the other tables'.
+ */
+export const ORGANIZATION_STANDING_KEYS = ['slug'] as const;
+
+/**
  * [commit f8eb73601] The three lists above, keyed by the table each one judges — the shape
  * the correspondence gate consumes.
  *
@@ -735,6 +776,7 @@ export const STANDING_KEYS_BY_TABLE: Readonly<Record<string, readonly string[]>>
   [USER_PERMISSION_SET]: GRANT_STANDING_KEYS,
   [METADATA_ACTIVATION]: ACTIVATION_LEDGER_STANDING_KEYS,
   [SystemObjectName.USER]: USER_STANDING_KEYS,
+  [SystemObjectName.ORGANIZATION]: ORGANIZATION_STANDING_KEYS,
 };
 
 /**
@@ -788,6 +830,14 @@ export const STANDING_KEY_EXCLUSIONS: Readonly<Record<string, Readonly<Record<st
   [USER_PERMISSION_SET]: {},
 
   [METADATA_ACTIVATION]: {},
+
+  [SystemObjectName.ORGANIZATION]: {
+    id:
+      'The column the resolver compares a grant\'s owner against, and — as on `sys_user` — on '
+      + 'this engine `data.id` on an update ADDRESSES the row rather than proposing a new primary '
+      + 'key, so a key rewrite is not expressible through this write path at all; a delete is '
+      + 'judged whatever its payload.',
+  },
 
   [SystemObjectName.USER]: {
     id:
@@ -909,6 +959,50 @@ export function registerLastAdminGuard(
   };
 
   /**
+   * [ADR-0131 D5] The Default Organization once `pending` lands — the
+   * resolver's definition (`readDefaultOrganizationId`,
+   * `resolve-authz-context.ts`): the organization with `slug = 'default'`, else
+   * the only one; `undefined` when neither exists. With a pending organization
+   * write, the rows it addresses are read as well — an update can move a row
+   * onto or off `default`, a delete removes it — and judged as they would read
+   * after it. A composition that registers no organization object holds none
+   * (the read is not issued).
+   */
+  const readDefaultOrganizationId = async (
+    op: GuardedOp,
+    pending?: PendingStandingWrite,
+  ): Promise<string | undefined> => {
+    const registry = (engine as { registry?: { getObject?: (name: string) => unknown } }).registry;
+    if (typeof registry?.getObject === 'function' && !registry.getObject(SystemObjectName.ORGANIZATION)) {
+      return undefined;
+    }
+    const fields = ['id', 'slug'];
+    const orgWrite = pending?.table === SystemObjectName.ORGANIZATION ? pending : undefined;
+    const addressed = async (rows: Array<Record<string, unknown>>) => {
+      if (!orgWrite || orgWrite.ids.size === 0) return rows;
+      const seen = new Set(rows.map((row) => toId(row.id)));
+      const missing = [...orgWrite.ids].filter((id) => !seen.has(id));
+      if (missing.length === 0) return rows;
+      return [...rows, ...(await scan(op, SystemObjectName.ORGANIZATION, { where: { id: { $in: missing } }, fields }))];
+    };
+    const after = (rows: Array<Record<string, unknown>>) =>
+      rows.map((row) => applyPending(row, pending, SystemObjectName.ORGANIZATION))
+        .filter((row): row is Record<string, unknown> => row !== undefined);
+    const bySlug = after(await addressed(await scan(op, SystemObjectName.ORGANIZATION, { where: { slug: 'default' }, fields })))
+      .find((row) => row.slug === 'default' && toId(row.id));
+    if (bySlug) return toId(bySlug.id);
+    // "The only organization" asks 0 / 1 / several, so it reads a page just wide
+    // enough to still tell several apart after the rows a pending delete removes.
+    const page = await engine.find(
+      SystemObjectName.ORGANIZATION,
+      { where: {}, fields, limit: 2 + (orgWrite?.ids.size ?? 0) },
+      SYSTEM_READ,
+    );
+    const remaining = after(Array.isArray(page) ? page : []);
+    return remaining.length === 1 ? toId(remaining[0]!.id) : undefined;
+  };
+
+  /**
    * Every user this environment recognises as an administrator.
    *
    * With `pending` (#5978) the SAME enumeration is replayed over the rows as
@@ -923,8 +1017,9 @@ export function registerLastAdminGuard(
     const ids = new Set<string>();
     const now = Date.now();
 
-    // 1) Platform admins — unscoped, in-window `admin_full_access` grants,
-    //    on a NON-WALLED posture only.
+    // 1) Platform admins — in-window `admin_full_access` grants owned by the
+    //    Default Organization or by none (ADR-0131 D5), on a NON-WALLED
+    //    posture only.
     //
     // [#11663 L5] The posture key is read from the environment with the same
     // expression the derivation site uses — `postureEnforcesWall(
@@ -971,6 +1066,11 @@ export function registerLastAdminGuard(
       const links = await scan(op, USER_PERMISSION_SET, {
         where: { [GRANT_SET_NAME_FIELD]: ADMIN_FULL_ACCESS },
       });
+      // [ADR-0131 D5] Asked only when some grant names an organization: a
+      // deployment whose grants are all organization-less reads nothing more.
+      const defaultOrganizationId = links.some((l) => toId(l.organization_id ?? l.organizationId))
+        ? await readDefaultOrganizationId(op, pending)
+        : undefined;
       for (const raw of links) {
         const link = applyPending(raw, pending, USER_PERMISSION_SET);
         // Revoked outright by the pending write.
@@ -981,12 +1081,16 @@ export function registerLastAdminGuard(
         // [ADR-0131 D4] The name is the grant's one reference to its set, and
         // nothing derives it after this guard.
         if (grantSetNameOf(link) !== ADMIN_FULL_ACCESS) continue;
-        // An org-SCOPED grant makes a tenant admin, not the environment's
-        // break-glass admin — the same distinction `resolveAuthzContext` draws
-        // when it derives `platform_admin` from the unscoped grant only. This
-        // is also the "scope it to an org" revocation shape: a pending write
-        // that fills `organization_id` in lands here.
-        if (link.organization_id ?? link.organizationId) continue;
+        // Any other organization's grant makes a tenant admin, not the
+        // environment's break-glass admin — the same distinction
+        // `resolveAuthzContext` draws (`grantAnchorsPlatformStanding`): the
+        // anchor is the Default Organization's grant, or an organization-less
+        // one. This is also the "scope it to another org" revocation shape: a
+        // pending write that re-points `organization_id` lands here, and so
+        // does a pending organization write that stops naming the owner the
+        // Default Organization.
+        const owner = toId(link.organization_id ?? link.organizationId);
+        if (owner !== undefined && owner !== defaultOrganizationId) continue;
         // ADR-0091's ONE validity predicate, consumed exactly as it already was
         // — the guard invents no expiry semantics of its own (#5893 owns that
         // question, and is blocked on #5702). A pending write that moves
@@ -1622,6 +1726,27 @@ export function registerLastAdminGuard(
     await enforceStanding('activation-insert', METADATA_ACTIVATION, ctx.input, undefined, data);
   };
 
+  /**
+   * [ADR-0131 D5] The organization half: re-slugging or removing the Default
+   * Organization moves the anchor off the grant that makes its platform
+   * administrator one, so it is judged like every other standing write. A
+   * payload touching no standing key ({@link ORGANIZATION_STANDING_KEYS}) costs
+   * no reads.
+   */
+  const guardOrganizationUpdate = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.ORGANIZATION) return;
+    const data = (ctx.input?.data ?? {}) as Record<string, unknown>;
+    if (!touchesAny(data, ORGANIZATION_STANDING_KEYS)) return;
+    await enforceStanding('organization-update', SystemObjectName.ORGANIZATION, ctx.input, data);
+  };
+
+  const guardOrganizationDelete = async (rawCtx: unknown): Promise<void> => {
+    const ctx = ctxOf(rawCtx);
+    if (ctx.object !== SystemObjectName.ORGANIZATION) return;
+    await enforceStanding('organization-delete', SystemObjectName.ORGANIZATION, ctx.input);
+  };
+
   // Priority 20: AFTER the ADR-0092 identity write guard's checks (10), before
   // default-priority hooks (100) spend work on a write this may refuse. The
   // four standing hooks (#5978) and the two activation-ledger hooks (#6084) are
@@ -1673,11 +1798,22 @@ export function registerLastAdminGuard(
     priority: 20,
     packageId,
   });
+  engine.registerHook('beforeUpdate', guardOrganizationUpdate, {
+    object: SystemObjectName.ORGANIZATION,
+    priority: 20,
+    packageId,
+  });
+  engine.registerHook('beforeDelete', guardOrganizationDelete, {
+    object: SystemObjectName.ORGANIZATION,
+    priority: 20,
+    packageId,
+  });
 
   logger?.info(
     '[LastAdminGuard] last-administrator guard registered on sys_user (ban + delete, and the ' +
       'email/email_verified pair the deployment-config anchor derives from), sys_member and ' +
-      'sys_user_permission_set (standing revocation), and sys_metadata_activation ' +
+      'sys_user_permission_set (standing revocation), sys_organization (the Default ' +
+      'Organization the grant anchor reads) and sys_metadata_activation ' +
       '(switching admin_full_access off) — ADR-0135 D5.2',
   );
 }
