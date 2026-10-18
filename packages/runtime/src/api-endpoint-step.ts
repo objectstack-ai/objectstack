@@ -72,6 +72,7 @@
 import { DispatcherErrorCode } from '@objectstack/spec/api';
 import type { ApiEndpointMatch, IMetadataService } from '@objectstack/spec/contracts';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
+import { readDispatchedBody } from './deferred-request-body.js';
 import { apiErrorResponse } from './error-envelope.js';
 import { applyEndpointPolicies, type EndpointPolicyContext } from './endpoint-policy.js';
 import {
@@ -151,7 +152,12 @@ export interface AppEndpointStepAnswer {
  * growing a second, weaker copy in a consumer.
  */
 export interface AppEndpointExecutionInput {
-    /** The request as the fallback seam sees it — body and `remoteAddress` included. */
+    /**
+     * The request as the fallback seam sees it — body and `remoteAddress`
+     * included. The fallback hands the body deferred (`deferRequestBody`); the
+     * step reads it with `readDispatchedBody` only once the policy chain has
+     * admitted the caller, so the executor always receives the read body.
+     */
     request: EndpointExecutionRequest;
     /** The `callData` binding and the `automation` slot occupant. */
     deps: EndpointExecutorDeps;
@@ -273,11 +279,22 @@ export async function runAppEndpointStep(
 
     const { request, deps, executionContext, environmentId, dataDriver } = input.execution;
 
+    // ── The body is read HERE, and nowhere above (#24252) ────────────────
+    // The fallback hands it deferred (`deferRequestBody`): reading a body the
+    // transport could not parse throws its `400` and answers the request with
+    // it, so a read before the match or the policy chain would answer that
+    // `400` where a miss is owed its `404` and an anonymous caller of an
+    // `authRequired` endpoint its `401`. Read now, it refuses only a caller
+    // this endpoint admitted. A body that was not deferred (a direct caller,
+    // a test) is returned as it is.
+    const requestBody = readDispatchedBody(request.body);
+
     // ── inputMapping: project the request the executor will see ──────────
     // Nothing has been delegated yet, so a declaration this runtime cannot
     // serve is refused before it can have an effect. With no declaration the
-    // caller's own request object rides on unchanged, by reference.
-    const mappedBody = applyInputMapping(match.endpoint, request.body);
+    // caller's own request object rides on unchanged, by reference — unless
+    // its body was deferred, when it rides on carrying the body just read.
+    const mappedBody = applyInputMapping(match.endpoint, requestBody);
     if (!mappedBody.ok) return mappedBody.rejection;
     const mappedRequest = mappedBody.value === request.body
         ? request
