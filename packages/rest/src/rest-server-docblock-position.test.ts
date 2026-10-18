@@ -208,6 +208,12 @@ describe('rest-server.ts docblock position', () => {
  * ETag dimension). The moved `/meta` group held no TSDoc block of its own, so
  * `rest-server.ts` gives up exactly those two (163 → 161), still far above its
  * floor.
+ *
+ * [#23050 slice 13c] `meta-item-write-routes.ts` carries three, as the form and
+ * CRUD modules do: the module header, the host interface's block and the
+ * function's. The moved per-item writes held no TSDoc block of their own and
+ * took no module-level helper with them, so `rest-server.ts` keeps every block
+ * it had (161).
  */
 const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
     'data-action-routes.ts': 4,
@@ -224,6 +230,7 @@ const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof
     'crud-routes.ts': 3,
     'meta-collection-routes.ts': 5,
     'meta-item-read-routes.ts': 5,
+    'meta-item-write-routes.ts': 3,
 };
 const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
     .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
@@ -264,9 +271,11 @@ describe('[#23050 slice 3] the registrar list this pin reads', () => {
         // thirteen, length 13 → 14 (`ui-routes.ts` 4 → 3: the alias's block moved on).
         // [#23050 slice 13b] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 = 59 over
         // fourteen, length 14 → 15.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(15);
+        // [#23050 slice 13c] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 + 3 = 62
+        // over fifteen, length 15 → 16.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
         expect(Object.keys(MOVED_FILE_FLOORS).sort())
             .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
-        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(59);
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(62);
     });
 });

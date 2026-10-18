@@ -385,7 +385,12 @@ describe('[#13214] §1 the REST seam — absent context vs entitled context', ()
         // one site and `enforceAuth` at none, so the second host literal the inner
         // method builds forwards the first only; the call site moved and is
         // counted in both readings.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(15);
+        // [#23050 slice 13c] 15 → 16 (`meta-item-write-routes.ts`): 60 unchanged
+        // and 77 → 78, the same shape: the per-item writes call `resolveExecCtx` at
+        // two sites and `enforceAuth` at none, so the third host literal the inner
+        // method builds forwards the first only; the two call sites moved and are
+        // counted in both readings.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
     });

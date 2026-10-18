@@ -1,0 +1,9 @@
+{
+  "file": "packages/rest/src/meta-item-write-routes.ts",
+  "adrs": [
+    "ADR-0066",
+    "ADR-0131",
+    "ADR-0106"
+  ],
+  "invariant": "The `/meta` per-item write doors, moved here whole from `rest-server.ts` (#23050 slice 13c): the item save (`PUT {metaPath}/:type/:name`) and the reset to the artifact default (`DELETE {metaPath}/:type/:name`), registered through the inner method's per-item registrar, under the per-item switch and inside the umbrella's guarded registration. ADR-0066 — saving or resetting a metadata item is authoring, so each door asks the shared write-capability verdict FIRST, before the protocol is resolved, so nothing is written or discarded before a refusal and no kernel capability leaks to a caller it refuses. ADR-0131 — neither door names an organization: every write it admits lands environment-wide, and each asks the walled refusal after its capability gate and before the protocol is resolved. ADR-0106 — the save's capability gate is the write-side half of the masked schema read: whoever may save an object schema reads all of it, so a save never stores back a schema minus the fields its caller could not see. A door that resolves the protocol or writes before its capability gate, threads an organization into a write, or runs past the walled refusal is the drift these records forbid; the bodies' own comments carry each citation."
+}
