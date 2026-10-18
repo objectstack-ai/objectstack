@@ -480,6 +480,21 @@ const MetadataProtectionEnvelopeFields = {
 } as const;
 
 /**
+ * [#24395] The authoring surface of a metadata save: the one closed set both
+ * {@link SaveMetaItemRequestSchema}'s `surface` (what a save declares) and
+ * {@link GetMetaItemResponseSchema}'s `draftChanges[].by` (what the draft read
+ * reports a key was last changed through) are spelled in, so the value a save
+ * states and the value a read serves cannot drift apart.
+ */
+export const MetadataAuthoringSurfaceSchema = z.enum(['copilot', 'studio', 'api']).describe(
+  'The authoring surface of a metadata write. Closed: `copilot` is an AI assistant\'s tool writing on a '
+  + 'person\'s behalf (Studio\'s AI copilot); `studio` is a person editing in Studio; `api` is any other '
+  + 'caller of the save door. It names the surface, not the person: a copilot write and a Studio write of '
+  + 'the same user carry the same `actor`.',
+);
+export type MetadataAuthoringSurface = z.infer<typeof MetadataAuthoringSurfaceSchema>;
+
+/**
  * Get Metadata Item Response
  *
  * Describes the FULL body `GET /api/v1/meta/:type/:name` can return, not the
@@ -582,8 +597,15 @@ const MetadataProtectionEnvelopeFields = {
  *   and the array's entry says who last changed it and when. Attribution is
  *   per array, never per element.
  * - **Optional, never defaulted to `[]`.** Absent means "not recorded" (a
- *   server with no writer, or a draft row saved before one); an empty-array
- *   default would answer "nothing changed" for exactly those rows.
+ *   draft row saved before the writer, or one whose saves changed no key
+ *   path); an empty-array default would answer "nothing changed" for exactly
+ *   those rows.
+ *
+ * [#24395] The writer is the draft save (`saveMetaItem` with `mode: 'draft'`,
+ * in `@objectstack/metadata-protocol`). It records on the draft row, beside the
+ * body and never inside it, so publishing or discarding the draft removes the
+ * entries with the row. Each save names its surface on
+ * {@link SaveMetaItemRequestSchema}'s `surface`.
  *
  * The history log's per-event `source` (see `HistoryMetaItemResponseSchema`)
  * is not this vocabulary: it is an open label of the code path that wrote the
@@ -643,8 +665,9 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
       + 'published body\'s array; the entry answers only who last changed the array as a whole. '
       + '`[]` is the whole body: the write that created the draft of an item with no published body.',
     ),
-    by: z.enum(['copilot', 'studio', 'api']).describe(
-      'The authoring surface of the write that last changed this path. Closed: `copilot` is an AI '
+    by: MetadataAuthoringSurfaceSchema.describe(
+      'The authoring surface of the write that last changed this path: the `surface` that save declared '
+      + '(`SaveMetaItemRequestSchema.surface`), `api` when it declared none. Closed: `copilot` is an AI '
       + 'assistant\'s tool writing on a person\'s behalf (Studio\'s AI copilot); `studio` is a person '
       + 'editing in Studio; `api` is any other caller of the save door. It names the surface, not the '
       + 'person: a copilot write and a Studio write of the same user carry the same `actor`.',
@@ -660,13 +683,14 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   }).describe('One changed key path of the pending draft, and the last write that changed it.'))
     .optional().describe(
       'Per-key provenance of the pending draft: which authoring surface last changed each key path of '
-      + '`item`, under which actor, and when. No server writes the key yet: until the engine\'s draft '
-      + 'save records it, every draft read is one whose saves recorded none, and the key is absent. '
-      + 'The contract a writer must meet: it compares each draft save with the body that save replaced '
-      + '(the previous draft, or the published body for the draft\'s first save); it keeps the entries '
+      + '`item`, under which actor, and when. The draft save records it: each draft save is compared '
+      + 'with the body that save replaced (the previous draft, or the stored published row for the '
+      + 'draft\'s first save; a draft of an item with no stored published row is recorded as `[]`, the '
+      + 'whole body). A `migrate-stored` rewrite of a draft row records nothing, since it is not '
+      + 'authoring. The entries are kept '
       + 'from the first recorded save until the draft is published or discarded, which remove the draft '
-      + 'row and the entries with it; and it keeps no two entries on one path, replacing every entry at '
-      + 'or under a path a save changes, so the last write to change a key is the entry whose `path` is '
+      + 'row and the entries with it; and no two entries share a path: a save replaces every entry at '
+      + 'or under each path it changes, so the last write to change a key is the entry whose `path` is '
       + 'the longest prefix of that key\'s path, and entries under a key\'s path are changes inside it. '
       + 'The entries name which writes changed what; they are not a list of every difference from the '
       + 'published body (compare the two bodies for that). Served only on a `?state=draft` read that '
@@ -866,6 +890,12 @@ export const RuntimeAuthoringIssueSchema = lazySchema(() => z.object({
  *   it — declaring it here would advertise a wire-authorable provenance
  *   channel the REST layer deliberately never reads.
  *
+ * [#24395] `surface` is the save's authoring surface, the closed set
+ * `draftChanges[].by` reports (`MetadataAuthoringSurfaceSchema`). Unlike
+ * `writeFace` it IS caller-stated, and that is why the HTTP doors read it
+ * with a narrower set than this schema's: a remote caller may say `studio`
+ * or `api`, and only an in-process tool may say `copilot`.
+ *
  * `writeFace` IS declared, and the distinction with `source` is the point:
  * both are server-stated, but `writeFace` is sent by three doors (the two
  * metadata write doors and the external-table import) and the
@@ -958,6 +988,16 @@ export const SaveMetaItemRequestSchema = lazySchema(() => z.object({
     + 'and the 422 invalid-metadata '
     + 'message adapts to whether a structured `issues[]` channel reaches '
     + 'the consumer beside it. Absent = the conservative default wording.',
+  ),
+  surface: MetadataAuthoringSurfaceSchema.optional().describe(
+    'The authoring surface this save is made through (see `MetadataAuthoringSurfaceSchema`). A draft '
+    + 'save (`mode: \'draft\'`) stamps it as `by` on every key path it changes, the entries the strict '
+    + 'draft read serves as `draftChanges`; an active save records no per-key provenance. ABSENT stamps '
+    + '`api`. On the REST door and the runtime dispatcher it is the `?surface=` query parameter, which '
+    + 'takes `studio` or `api` and refuses every other value `400 VALIDATION_ERROR`, `copilot` '
+    + 'included: `copilot` is stated only by an in-process AI tool calling the save, never by a remote '
+    + 'caller, so an HTTP request cannot mark its own write as the copilot\'s. A value outside the set '
+    + 'in-process is refused `400 INVALID_REQUEST`, before anything is written.',
   ),
 }));
 
