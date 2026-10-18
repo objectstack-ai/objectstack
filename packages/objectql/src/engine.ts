@@ -292,7 +292,7 @@ import { declaredHookCondition } from './hook-wrappers.js';
 import { validateRecord, validateRecordInScope, normalizeMultiValueFields, normalizeBlankTypedValues, normalizeNumericStringValues, coerceBooleanFields, ValidationError, buildFieldError, resolveFieldLabel, valueShapePostureSetByEnv, mediaPostureSetByEnv, isScannableValueShapeField, valueShapeStrictEffective, mediaStrictEffective } from './validation/record-validator.js';
 import type { AdmittedValueShapeViolation, AdmittedValueShapeViolationSink } from './validation/record-validator.js';
 import type { RelatedFieldBinding, RelatedRecordBinding } from './validation/rule-validator.js';
-import { collectPredicateRelationships, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
+import { collectPredicateRelationships, collectReferenceTraversals, referenceTraversalConflicts, evaluateValidationRules, emitValidationAdvisories, optionVisibilityReadsPermissions, readsPermissionPredicate, referentialClearBinding, needsPriorRecord, stripReadonlyWhenFields, stripReadonlyWhenFieldsMulti, hasReadonlyWhenInPayload, hasParentScopedReadonlyWhenInPayload, hasParentScopedRequiredWhen, stripReadonlyFields, stripRuntimeOwnedFields, staticReadonlyInsertSubject, preserveAuditIgnoredOnInsertWarning } from './validation/rule-validator.js';
 // [#14088] The before-phase write recorder — the provenance channel the static
 // `readonly` strip needs to tell a hook's write from a caller's echo of the
 // SAME value. Armed and sealed in `update()`; the module owns the argument for
@@ -1547,6 +1547,21 @@ interface FormulaPlanEntry {
    * evaluator's value verbatim", which is what every formula did before this.
    */
   scale?: number;
+  /**
+   * [#24197] The reference fields this formula reads ONE hop through, and the
+   * related fields it names on each (`record.book.title` → `book → {title}`).
+   * Absent when the formula traverses nothing — every formula before #24197,
+   * and still the common case — which is what lets such a read skip the
+   * related read entirely.
+   */
+  hops?: ReadonlyMap<string, ReadonlySet<string>>;
+  /**
+   * [#24197] Why this formula's traversal cannot be served (a second hop; a
+   * reference read both through and as a value), worded for the author. Such a
+   * formula is not evaluated: it reads `null` and the fault sink carries this
+   * sentence — the lint refuses the same shape with the same words.
+   */
+  hopConflict?: string;
 }
 
 /**
@@ -1677,10 +1692,21 @@ function planFormulaProjection(
       const expr: Expression = typeof def.expression === 'string'
         ? { dialect: 'cel', source: def.expression }
         : def.expression;
-      plan.push({ name: f, expression: expr, scale: formulaRoundingScale(def) });
+      const entry: FormulaPlanEntry = { name: f, expression: expr, scale: formulaRoundingScale(def) };
+      // [#24197] The one hop this formula reads through a reference field, if
+      // any — judged by the validation-rule path's own collector, so the two
+      // seams that serve a hop read the same hops off the same expression.
+      const conflicts = referenceTraversalConflicts(expr, schema.fields, 'formula');
+      if (conflicts.length > 0) {
+        entry.hopConflict = conflicts.map((c) => c.message).join(' ');
+      } else {
+        const hops = collectReferenceTraversals([expr], schema.fields);
+        if (hops.size > 0) entry.hops = hops;
+      }
+      plan.push(entry);
       // Pre-compile to surface syntax errors at planning stage rather than
-      // per-row eval. Dependency discovery (which fields the formula reads)
-      // is no longer used — CEL uses dynamic projection via `record.<field>`.
+      // per-row eval. Own-column dependency discovery is not used — CEL reads
+      // the row via `record.<field>`; only the hops above are planned.
       ExpressionEngine.compile(expr);
     } else if (Array.isArray(requestedFields) && requestedFields.length > 0) {
       projected.add(f);
@@ -2580,12 +2606,99 @@ function roundFormulaValue(value: unknown, scale: number | undefined): unknown {
  */
 type FormulaFaultSink = (field: string, error: EvalError) => void;
 
+/**
+ * [#24197] What a formula read hands {@link applyFormulaPlan} for the hops its
+ * plan reads: the per-row related bindings
+ * ({@link ObjectQL.resolveFormulaRelated}), or — when this read serves no hop
+ * at all — the sentence saying why, which every traversing formula of the read
+ * then reports.
+ */
+type FormulaRelated = ((row: Record<string, unknown>) => RelatedRecordBinding | undefined) | string;
+
+/** [#24197] Why a hop was not served where no reader supplied one. */
+const FORMULA_HOP_NOT_SERVED =
+  'this evaluation reads no related record — only a read (`find` / `findOne`) or a write\'s response '
+  + 'preloads the one hop a formula reads through a reference';
+
+/**
+ * [#24197] The record ONE formula is evaluated against: a shallow copy whose
+ * reference fields this formula reads through carry the related row, or the
+ * reason it cannot be evaluated at all.
+ *
+ * The validation path's verdicts, kept ({@link RelatedFieldBinding}): a related
+ * record that was not found — or that this reader may not read, which a
+ * caller-authority read cannot tell apart and must not — a related object that
+ * declares no such field, and a failed read each leave the formula UNEVALUATED,
+ * so it reads `null` WITH a reason, never a value computed over a record that
+ * was not there. ⛔ Never a fallback evaluated in its place: an optional read
+ * would turn "not found" into the author's empty-reference default, which is
+ * data the reader cannot tell from a real answer.
+ *
+ * An EMPTY reference is the one case that is evaluated: the author can say
+ * what an empty reference means (`record.book.?title.orValue('—')`), and the
+ * field keeps its stored empty value, so a plain read through it faults
+ * exactly as before and the fault names the repair (`empty`).
+ *
+ * Per formula, onto a copy: hydrating replaces a reference's stored id with a
+ * row, and a sibling formula that reads the id, and the record the read
+ * returns, must keep seeing the id.
+ */
+function formulaHopScope(
+  rec: Record<string, unknown>,
+  hops: ReadonlyMap<string, ReadonlySet<string>>,
+  related: FormulaRelated | undefined,
+): { ok: true; record: Record<string, unknown>; empty: string[] } | { ok: false; reason: string } {
+  if (typeof related !== 'function') return { ok: false, reason: related ?? FORMULA_HOP_NOT_SERVED };
+  const binding = related(rec);
+  let copy: Record<string, unknown> | undefined;
+  const empty: string[] = [];
+  for (const [field, named] of hops) {
+    const b = binding?.[field];
+    if (!b) return { ok: false, reason: FORMULA_HOP_NOT_SERVED };
+    // ⛔ Only the row this record's own foreign key names.
+    if (b.row && b.row.id != null && String(b.row.id) === String(rec[field])) {
+      if (!copy) copy = { ...rec };
+      copy[field] = b.row;
+      continue;
+    }
+    if (!b.row && b.unavailable === 'no-reference') { empty.push(field); continue; }
+    return { ok: false, reason: formulaHopRefusal(field, b, named) };
+  }
+  return { ok: true, record: copy ?? rec, empty };
+}
+
+/**
+ * [#24197] The sentence a formula that could not read its hop reports. It names
+ * the RELATED object and field, as the validation path's refusal does, and it
+ * never says WHICH of "not found" and "not readable by this reader" held: a
+ * reader who may not see the related record learns nothing from the formula.
+ */
+function formulaHopRefusal(field: string, b: RelatedFieldBinding, named: ReadonlySet<string>): string {
+  const columns = [...named].sort().map((n) => `'${n}'`).join(', ');
+  const on = `\`${field}\` (object '${b.object}')`;
+  switch (b.unavailable) {
+    case 'undeclared-field': {
+      const missing = (b.undeclaredFields ?? []).map((n) => `'${n}'`).join(', ') || columns;
+      return `the formula reads ${missing} through ${on}, but '${b.object}' declares no such field: fix the `
+        + `expression, or declare ${missing} on '${b.object}' — not on the object carrying this formula`;
+    }
+    case 'unreadable':
+      return `the formula reads ${columns} through ${on}, and that read failed, so it has no value`;
+    case 'no-reference':
+    case 'unresolved':
+    default:
+      return `the formula reads ${columns} through ${on}, and the record it names was not found by this `
+        + 'read (it does not exist, or this reader may not read it), so it has no value';
+  }
+}
+
 function applyFormulaPlan(
   plan: FormulaPlanEntry[],
   records: any[],
   execCtx?: ExecutionContext,
   permissions?: EvalPermissions,
   onFault?: FormulaFaultSink,
+  related?: FormulaRelated,
 ): void {
   if (!plan.length) return;
   const now = new Date();
@@ -2595,7 +2708,26 @@ function applyFormulaPlan(
   for (const rec of records) {
     if (rec == null) continue;
     for (const fp of plan) {
-      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, record: rec });
+      // [#24197] A traversal the one-hop read cannot serve is not evaluated:
+      // it reads null and says why, in the lint's own words.
+      if (fp.hopConflict) {
+        rec[fp.name] = null;
+        onFault?.(fp.name, { kind: 'runtime', message: fp.hopConflict });
+        continue;
+      }
+      let scope: Record<string, unknown> = rec;
+      let empty: string[] = [];
+      if (fp.hops) {
+        const hop = formulaHopScope(rec, fp.hops, related);
+        if (!hop.ok) {
+          rec[fp.name] = null;
+          onFault?.(fp.name, { kind: 'runtime', message: hop.reason });
+          continue;
+        }
+        scope = hop.record;
+        empty = hop.empty;
+      }
+      const r = ExpressionEngine.evaluate(fp.expression, { now, timezone, user, org, permissions, record: scope });
       if (r.ok) {
         rec[fp.name] = roundFormulaValue(r.value, fp.scale);
         continue;
@@ -2606,7 +2738,14 @@ function applyFormulaPlan(
       // call site must not silently turn a bad expression into `null`): the
       // sink names the field and the evaluator's error.
       rec[fp.name] = null;
-      onFault?.(fp.name, r.error);
+      onFault?.(fp.name, empty.length === 0 ? r.error : {
+        ...r.error,
+        // [#24197] The fault on a record whose reference is EMPTY names the
+        // repair first; the evaluator's own message follows it.
+        message: `${empty.map((f) => `\`${f}\``).join(', ')} holds no single reference on this record (it is `
+          + 'empty, or holds several), so the formula has no related record to read through it; to give the '
+          + `formula a value while it is empty, write the optional read \`record.${empty[0]}.?<related field>.orValue('…')\`.\n${r.error.message}`,
+      });
     }
   }
 }
@@ -2658,6 +2797,8 @@ async function hydrateWriteFormulas(
   execCtx: ExecutionContext | undefined,
   permissionsFor: (plan: FormulaPlanEntry[], records: readonly unknown[]) => Promise<EvalPermissions | undefined>,
   onFault?: FormulaFaultSink,
+  /** [#24197] The hops the plan reads, resolved over `records` as a read resolves them. */
+  relatedFor?: (plan: FormulaPlanEntry[], records: ReadonlyArray<Record<string, unknown>>) => Promise<FormulaRelated | undefined>,
 ): Promise<void> {
   const records = results.filter(
     (r): r is Record<string, unknown> => r != null && typeof r === 'object',
@@ -2665,7 +2806,7 @@ async function hydrateWriteFormulas(
   if (records.length === 0) return;
   const { plan } = planFormulaProjection(schema, undefined);
   if (plan.length === 0) return;
-  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records), onFault);
+  applyFormulaPlan(plan, records, execCtx, await permissionsFor(plan, records), onFault, await relatedFor?.(plan, records));
 }
 
 /**
@@ -2707,7 +2848,8 @@ async function hydrateWriteFormulas(
  * ⚠️ One scope difference, named rather than hidden [#20082]: this helper is
  * synchronous and passes NO permission map, so a formula that calls
  * `current_user.can(…)` does not evaluate here and yields `null` by the rule
- * above. The read and write paths resolve the map first
+ * above. [#24197] For the same reason it preloads no relationship hop, so a
+ * formula reading `record.<reference>.<field>` yields `null` here too. The read and write paths resolve the map first
  * ({@link ObjectQL.resolveFormulaPermissions}); a helper with no resolver cannot.
  *
  * Returns `undefined` when `field` is not a declared formula field, which is
@@ -2725,6 +2867,8 @@ export function evaluateFormulaField(
   const { plan } = planFormulaProjection(schema as any, [field]);
   if (plan.length === 0) return undefined;
   const scratch: Record<string, unknown> = { ...record };
+  // [#24197] Synchronous, so it preloads no hop: a formula reading through a
+  // reference yields `null` here, as a `can()` formula does above.
   applyFormulaPlan(plan, [scratch], execCtx);
   return scratch[field];
 }
@@ -6011,6 +6155,64 @@ export class ObjectQL implements IObjectQLEngine {
       );
       return undefined;
     }
+  }
+
+  /**
+   * [#24197] The query objects {@link resolveOneHopRelated} issues to read a
+   * formula's hop. A `find` handed one of them computes the related object's
+   * formulas but serves them no hop of their own — see
+   * {@link resolveFormulaRelated}. Keyed on the object identity, so the marker
+   * never rides a context, a hook or a middleware anywhere else.
+   */
+  private readonly formulaHopReads = new WeakSet<object>();
+
+  /**
+   * [#24197] The related rows a formula plan reads ONE hop through a
+   * reference field, resolved for a whole page of `rows` at once — the
+   * formula half of {@link resolveOneHopRelated}, read under the CALLER's
+   * own authority.
+   *
+   * ## What it costs
+   *
+   * Nothing for a plan that traverses nothing (no query, no closure). For one
+   * that does: one batched read per reference field per call — per PAGE of a
+   * `find` (the rows the driver returned, after `limit` / `offset`), per row of
+   * a `findOne`, per write response — never one per row. A formula whose
+   * traversal cannot be served (`hopConflict`) asks for nothing.
+   *
+   * ## One hop, and only one
+   *
+   * A `find` that IS a hop read ({@link formulaHopReads}) serves no hop of its
+   * own: the related object's own formulas over its own columns are computed,
+   * one that reads through a reference of ITS own reads `null` and says so.
+   * That is the declared depth (a second hop is not loaded — the lint refuses
+   * one written out, this refuses one reached through a formula), and it is
+   * what keeps two objects whose titles read each other from recursing.
+   */
+  private async resolveFormulaRelated(
+    schema: any,
+    plan: readonly FormulaPlanEntry[],
+    rows: ReadonlyArray<Record<string, unknown> | undefined | null>,
+    context: unknown,
+    query?: EngineQueryOptions,
+  ): Promise<FormulaRelated | undefined> {
+    const wanted = new Map<string, Set<string>>();
+    for (const entry of plan) {
+      if (entry.hopConflict) continue;
+      for (const [fk, named] of entry.hops ?? []) {
+        let set = wanted.get(fk);
+        if (!set) wanted.set(fk, (set = new Set()));
+        for (const name of named) set.add(name);
+      }
+    }
+    if (wanted.size === 0) return undefined;
+    if (query && this.formulaHopReads.has(query)) {
+      return `this object was itself read one hop through a reference by another object's formula, and a `
+        + 'formula resolves ONE hop: a formula read this way does not read through a reference of its own '
+        + '(a second hop). Store the value on this object as a field of its own to read it from there';
+    }
+    const lookup = await this.resolveOneHopRelated(schema, wanted, rows, context, 'caller');
+    return (row) => lookup(row);
   }
 
   /**
@@ -9763,11 +9965,54 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
+    return this.resolveOneHopRelated(schema, wanted, rows, context, 'predicate');
+  }
+
+  /**
+   * [#24197] Resolve the related rows a page of `rows` reads ONE hop through a
+   * reference field — the one loader behind both seams that serve a hop:
+   * validation predicates ({@link resolvePredicateRelated}, `authority:
+   * 'predicate'`) and formula fields ({@link resolveFormulaRelated},
+   * `authority: 'caller'`).
+   *
+   * Everything but the AUTHORITY of the value read is shared, so the two seams
+   * cannot disagree about it: which reference fields and related fields to
+   * read ({@link collectReferenceTraversals}), the declared-field intersection
+   * and its `undeclared-field` report, the id set (one batched read per
+   * reference field per call, never one per row; a multi-value or already
+   * expanded slot names no single row), the `null` materialisation of a
+   * declared column the driver omitted, and the per-row
+   * {@link RelatedFieldBinding} with its reason when there is no row.
+   *
+   * ## The authority, and why the two differ
+   *
+   *  - `predicate`: a rule's output is a pass/fail the SYSTEM enforces, so the
+   *    values are read as SYSTEM behind the caller's read doors — see
+   *    {@link resolvePredicateRelated} for the whole argument.
+   *  - `caller`: a formula's output is DATA handed to the reader. Reading the
+   *    hop as SYSTEM would hand any reader of the junction row a related
+   *    column it could not read directly, so the hop is read under the
+   *    caller's OWN context, through every enforcement layer `find` applies
+   *    (row-level security, field-level security, the organization wall). A
+   *    related row that read does not return is `unresolved` — whether it
+   *    exists nowhere or the reader may not see it, the formula answers the
+   *    same, so the answer discloses neither.
+   */
+  private async resolveOneHopRelated(
+    schema: any,
+    wanted: ReadonlyMap<string, ReadonlySet<string>>,
+    rows: ReadonlyArray<Record<string, unknown> | undefined | null>,
+    context: unknown,
+    authority: 'predicate' | 'caller',
+  ): Promise<((row: Record<string, unknown> | undefined | null) => RelatedRecordBinding | undefined)> {
+    const unbound = () => undefined;
     // ⛔ Every bound below keys on "not SYSTEM", never on `userId`: a public-form
     // submitter or a principal-less caller is bound exactly like a user. Walled
     // posture: such a caller with no `tenantId` cannot be scoped here, so it reads nothing.
+    // [#24197] The caller-authority read applies the wall itself (it IS the
+    // caller's own `find`), so it computes no bound of its own.
     const caller = context as ExecutionContext | undefined;
-    const bound = !caller?.isSystem;
+    const bound = authority === 'predicate' && !caller?.isSystem;
     const readsNothing = bound && !carriesOrganization(caller?.tenantId)
       && postureEnforcesWall(this.resolveEnginePosture());
 
@@ -9877,8 +10122,16 @@ export class ObjectQL implements IObjectQLEngine {
         const query: EngineQueryOptions = {
           where: { id: { $in: [...readSet] } },
           fields: [...new Set(['id', ...named])],
-          context: { ...(context as Record<string, unknown> ?? {}), isSystem: true } as EngineQueryOptions['context'],
+          // [#24197] A formula's hop is read as the CALLER (see the docblock).
+          context: (authority === 'caller'
+            ? context
+            : { ...(context as Record<string, unknown> ?? {}), isSystem: true }) as EngineQueryOptions['context'],
         };
+        // [#24197] ONE hop: the related object's own formulas are computed on
+        // this read, but none of them reads a hop of its own — that would be
+        // the second hop the formula contract does not serve, and two objects
+        // whose titles read each other would recurse without end.
+        if (authority === 'caller') this.formulaHopReads.add(query);
         const related = await this.find(target, query) as Array<Record<string, unknown>>;
         const byId = new Map<string, Record<string, unknown>>();
         // Materialise the named DECLARED columns to `null`. A driver omits a key
@@ -9895,7 +10148,9 @@ export class ObjectQL implements IObjectQLEngine {
         }
         resolved.set(fk, { object: target, byId, ownRead });
       } catch (err) {
-        this.logger?.warn?.('predicate relationship read failed — the rule will reject the write', {
+        this.logger?.warn?.(authority === 'caller'
+          ? 'formula relationship read failed — the formulas reading through this reference read null'
+          : 'predicate relationship read failed — the rule will reject the write', {
           object: target, field: fk, error: err,
         });
         resolved.set(fk, { object: target, byId: new Map(), blocked: true });
@@ -13708,7 +13963,11 @@ export class ObjectQL implements IObjectQLEngine {
           if (Array.isArray(result)) {
             applyFormulaPlan(_findFormula.plan, result, opCtx.context, await this.resolveFormulaPermissions(
               object, _findFormula.plan, result, opCtx.context, this.permissionResolution(opCtx.context),
-            ), this.formulaFaultSink(object));
+            ), this.formulaFaultSink(object), await this.resolveFormulaRelated(
+              // [#24197] One batched read per reference field for this PAGE —
+              // the rows the driver returned, after limit/offset.
+              _findSchema, _findFormula.plan, result, opCtx.context, query,
+            ));
           }
 
           // Post-process: expand related records if expand is requested
@@ -13993,7 +14252,9 @@ export class ObjectQL implements IObjectQLEngine {
       if (result != null) {
         applyFormulaPlan(_findOneFormula.plan, [result], opCtx.context, await this.resolveFormulaPermissions(
           objectName, _findOneFormula.plan, [result], opCtx.context, this.permissionResolution(opCtx.context),
-        ), this.formulaFaultSink(objectName));
+        ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(
+          _findOneSchema, _findOneFormula.plan, [result], opCtx.context, query,
+        ));
       }
 
       // Post-process: expand related records if expand is requested
@@ -15734,6 +15995,7 @@ export class ObjectQL implements IObjectQLEngine {
           schemaForValidation, resultRows, opCtx.context,
           (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
           this.formulaFaultSink(object),
+          (plan, records) => this.resolveFormulaRelated(schemaForValidation, plan, records, opCtx.context),
         );
         for (let k = 0; k < liveIndexes.length; k++) {
           const rowCtx = rowHookContexts[liveIndexes[k]];
@@ -17533,6 +17795,7 @@ export class ObjectQL implements IObjectQLEngine {
                opCtx.context,
                (plan, records) => this.resolveFormulaPermissions(object, plan, records, opCtx.context, permissionResolution),
                this.formulaFaultSink(object),
+               (plan, records) => this.resolveFormulaRelated(updateSchema, plan, records, opCtx.context),
              );
            }
            // Coerce boolean fields (SQLite 0/1 → JS bool) on the after-hook view

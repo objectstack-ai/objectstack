@@ -124,6 +124,7 @@ const VOCABULARY = 'names the column in a name vocabulary; it reads no row';
 const SYNC_ROUTE = 'routes a federated object to the DDL-free binding; it reads no row';
 const PLATFORM_ROW = 'stamps a row of a platform table the engine itself writes';
 const VALIDATION_RULE = "a validation rule's own relation path, which the author wrote";
+const VALIDATION_FORMULA = "a validation rule's or a formula field's own relation path, which the author wrote";
 
 const READERS: Record<string, Row> = {
   // ── The readers this family fixed, and the one decision they ask ─────────
@@ -169,15 +170,18 @@ const READERS: Record<string, Row> = {
     disposition: 'exempt',
     why: 'resolves the wall column only after the federated exemption',
   },
-  'engine.ts#resolvePredicateRelated :: isFederatedObject()': {
+  // [#24197] The one-hop loader moved out of `resolvePredicateRelated` so
+  // validation predicates and formula fields share it; a formula's hop is read
+  // as the caller outright, so its federated answer is the caller's own read.
+  'engine.ts#resolveOneHopRelated :: isFederatedObject()': {
     disposition: 'exempt',
     why: "a federated related object is read through the caller's own read, never through a wall",
   },
-  'engine.ts#resolvePredicateRelated :: referenceTargetOf()': {
+  'engine.ts#resolveOneHopRelated :: referenceTargetOf()': {
     disposition: 'exempt',
     why: 'reads the related object by id; a federated one is routed through the caller',
   },
-  'engine.ts#resolvePredicateRelated :: resolveTenantFieldName()': {
+  'engine.ts#resolveOneHopRelated :: resolveTenantFieldName()': {
     disposition: 'exempt',
     why: 'decides the routing beside the federated test, on the related object, never as a filter',
   },
@@ -229,9 +233,13 @@ const READERS: Record<string, Row> = {
     disposition: 'caller-predicate',
     why: "lowers a relation condition the caller wrote; it names an injected column only when the caller did",
   },
-  'validation/rule-validator.ts#collectPredicateRelationships :: referenceTargetOf()': {
+  'validation/rule-validator.ts#addReferenceTraversals :: referenceTargetOf()': {
     disposition: 'caller-predicate',
-    why: VALIDATION_RULE,
+    why: VALIDATION_FORMULA,
+  },
+  'validation/rule-validator.ts#referenceTraversalConflicts :: referenceTargetOf()': {
+    disposition: 'caller-predicate',
+    why: VALIDATION_FORMULA,
   },
   'validation/rule-validator.ts#readsAnOwnColumnItLacks :: referenceTargetOf()': {
     disposition: 'caller-predicate',
