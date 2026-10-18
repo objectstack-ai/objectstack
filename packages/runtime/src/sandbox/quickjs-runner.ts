@@ -858,7 +858,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
     //
     //   ctx.title()             → this record. Resolved from the record state
     //                             the hook is already firing on, formula title
-    //                             included. NO read, so no `api.read`.
+    //                             included. No `api.read`: no read over the
+    //                             record's own columns, and [#24197] the hop a
+    //                             title formula reads through a reference is
+    //                             the declaration's, read on the body's channel.
     //   ctx.title('account_id') → a related record. Exactly one `findOne`
     //                             through the body's own read channel, so
     //                             `api.read` — the same token the equivalent

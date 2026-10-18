@@ -44,8 +44,8 @@ import { createDispatcherPlugin } from './dispatcher-plugin.js';
  * every answer here comes before a domain touches storage. The `auth` slot
  * answers a session only when the request carries `x-test-session`. A stub
  * `analytics` slot makes the standalone server mount `/analytics`, and a stub
- * `mcp` slot lets `/mcp` reach its anonymous decision (which follows its
- * enabled and available checks).
+ * `mcp` slot lets a signed-in `/mcp` caller past the domain's available check
+ * to the body read (its anonymous decision comes first, #24251).
  */
 
 const SESSION_HEADER = 'x-test-session';
