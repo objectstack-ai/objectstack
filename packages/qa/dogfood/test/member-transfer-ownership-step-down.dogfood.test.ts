@@ -114,6 +114,12 @@ describe('sys_member.transfer_ownership makes the target an owner; the caller st
     // The other organization: the same two people, the grades reversed.
     await ql.insert('sys_member', { user_id: owner.userId, organization_id: otherOrgId, role: 'member' }, { context: SYSTEM_CTX });
     await ql.insert('sys_member', { user_id: target.userId, organization_id: otherOrgId, role: 'owner' }, { context: SYSTEM_CTX });
+    // The session's grade (`positions`) is the ACTIVE organization's, as in the
+    // console after the organization switcher: activate the one under test.
+    for (const who of [owner, target]) {
+      const res = await stack.apiAs(who.token, 'POST', '/auth/organization/set-active', { organizationId: orgId });
+      expect(res.status, `activates the organization: ${await res.clone().text()}`).toBe(200);
+    }
 
     const meta = await stack.apiAs(owner.token, 'GET', '/meta/object/sys_member');
     expect(meta.status).toBe(200);
@@ -165,6 +171,7 @@ describe('sys_member.transfer_ownership makes the target an owner; the caller st
     const session = await stack.apiAs(owner.token, 'GET', '/auth/get-session');
     expect(session.status).toBe(200);
     const user = ((await session.json()) as { user: Record<string, unknown> }).user;
+    expect(user.positions as string[], 'the caller is an owner on the session face').toContain('org_owner');
     const [ownRow] = await findRows(ql, 'sys_member', { id: owner.rowId }, 1);
     const verdict = celEngine.evaluate(changeRole!.visible as never, { record: ownRow, user: user as never, extra: { features } });
     if (!verdict.ok) throw new Error(`update_member_role faulted: ${JSON.stringify(verdict)}`);
