@@ -124,6 +124,11 @@ const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
  * `registerMetadataEndpointsInner`' body to `meta-collection-routes.ts`, with
  * their three: the `_drafts` and `_migrate-stored` doors' and the per-type
  * list's, each locally caught (the list's on its continuation line), as before.
+ *
+ * [#23050 slice 13b] …and the fourth, the per-item reads, to
+ * `meta-item-read-routes.ts`, with its one: the item read's, locally caught on
+ * its continuation line, as before — one of §7's and §8's four continuation
+ * sites, which those sections find there because they read every file here.
  */
 const SITE_FILES = REST_SERVER_REGISTRAR_FILES;
 const SOURCES = new Map<string, string>(SITE_FILES.map((file) => [
@@ -139,9 +144,9 @@ const siteKey = (file: string, line: number) => `${file}:${line}`;
  * `registerSecurityExplainEndpoints`, `registerSecurityEndpoints`,
  * `registerOpenApiEndpoints`, `registerEmailEndpoints`,
  * `registerSearchEndpoints`, `registerUiEndpoints`,
- * `registerCrudEndpoints`) hands its moved body — and the one
- * `registerMetadataEndpointsInner` builds for its moved `/meta` groups (#23050
- * slice 13a), counted as the moved module's registrar —
+ * `registerCrudEndpoints`) hands its moved body — and each one
+ * `registerMetadataEndpointsInner` builds for a moved `/meta` group's module
+ * (#23050 slices 13a and 13b), counted as that module's registrar —
  * forwards each member to the server with `(...a) => this.<member>(...a)`, so
  * a moved site's stack shows
  * that forwarder above the site itself. The site is the first censused frame
@@ -748,9 +753,22 @@ describe('[#13160] §2 the consumer surface, counted from the tree', () => {
         // forwarder's two mentions in). Fourteen forwarders now: (14 - 1) + 3 - 2,
         // the module carrying one host literal that reads the seam, so neither map
         // gains an entry.
-        expect(SITE_FILES).toHaveLength(14);
+        //
+        // [#23050 slice 13b] 62 sites UNCHANGED / 133 → 137 mentions — the same MOVE.
+        // The fourth `/meta` group, the per-item reads, left for
+        // `meta-item-read-routes.ts` with its one LOCALLY CAUGHT site (the item read's,
+        // on its continuation line, as before):
+        // 12 + 9 + 5 + 7 + 8 + 1 + 5 + 2 + 1 + 1 + 1 + 0 + 6 + 3 + 1 = 62 sites. The
+        // body also carries one prose mention, which moved with it. The four new
+        // mentions are this slice's seam, the two spellings once (the second host
+        // literal the inner method builds, its forwarder, two; the host interface's
+        // member, two): `rest-server.ts` stays at 55 (the site and the prose mention
+        // out, one forwarder's two mentions in). Fifteen forwarders now:
+        // (15 - 1) + 3 - 2, the module carrying one host literal that reads the
+        // seam, so neither map gains an entry.
+        expect(SITE_FILES).toHaveLength(15);
         expect(SITES.length).toBe(62);
-        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(133);
+        expect([...SOURCES.values()].reduce((n, text) => n + text.split('resolveExecCtx').length - 1, 0)).toBe(137);
         const extraMovedRegistrars = Object.values(EXTRA_MOVED_REGISTRARS).reduce((n, k) => n + (k ?? 0), 0);
         expect(extraMovedRegistrars).toBe(3);
         const registrarsReadingNoExecCtx = Object.values(MOVED_REGISTRARS_READING_NO_EXECCTX).reduce((n, k) => n + (k ?? 0), 0);

@@ -1153,7 +1153,13 @@ describe('[#13214] §4 preconditions', () => {
         // three call sites moved and are counted in both readings. The
         // moved groups never call the ownership guard, so it is still 1 call site
         // and 1 forwarder.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(14);
+        // [#23050 slice 13b] 14 → 15 (`meta-item-read-routes.ts`): 60 unchanged
+        // and 76 → 77, the same shape: the per-item reads call `resolveExecCtx` at
+        // one site and `enforceAuth` at none, so the second host literal the inner
+        // method builds forwards the first only; the call site moved and is
+        // counted in both readings. The per-item reads never call the ownership
+        // guard either, so it is still 1 call site and 1 forwarder.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(15);
         expect(REGISTRAR_SOURCES.split('this.enforceAuth(').length - 1).toBeGreaterThan(40);
         expect(REGISTRAR_SOURCES.split('this.resolveExecCtx(').length - 1).toBeGreaterThan(40);
         // ...and the ownership guard is NOT sprayed across the file — it is a

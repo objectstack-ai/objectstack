@@ -25,6 +25,13 @@
  *  3. a plain `member` still cannot invite at all — so it is the ROLE that
  *     opened the endpoint, not some unrelated loosening.
  *
+ * [#23945] Each cap refusal is pinned on its ADR-0112 `code`, the way
+ * better-auth's own `owner` refusal on this endpoint carries one — a client
+ * (the console's Invite User dialog) branches on it, never on the prose. The
+ * cap's third code, `INVITE_ISSUER_UNVERIFIED`, has no input that reaches it
+ * through this door (better-auth refuses a non-member before the hook runs);
+ * it is pinned at the unit level in plugin-auth's `auth-manager.test.ts`.
+ *
  * Harness note: `bootStack` boots the production `single` shape, so the
  * Default Organization exists from the boot (ADR-0131 D3); this file sets
  * membership roles in system context, which is the only writer
@@ -137,11 +144,30 @@ describe('#3697: delegated_admin may invite — as `member` only', () => {
       organizationId: orgId,
     });
 
-    expect(res.status).toBe(403);
-    expect(JSON.stringify(await res.json())).toMatch(/never confer a role above the issuer/);
+    const body = await res.clone().json();
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body?.code).toBe('INVITE_ROLE_ABOVE_ISSUER');
     // Rejecting throws out of the endpoint BEFORE the row is written.
     expect(
       (await findRows(ql, 'sys_invitation', { email: 'invitee.admin.3697@example.com' }, 5)).length,
+    ).toBe(0);
+  }, 30_000);
+
+  it('the same delegate minting another delegate is REFUSED as member-only, with no invitation row', async () => {
+    // [#23945] Not outranked — `delegated_admin` grades as a member — but a
+    // delegated issuer may invite only as `member`: a distinct refusal, so a
+    // distinct code.
+    const res = await stack.apiAs(delegateToken, 'POST', '/auth/organization/invite-member', {
+      email: 'invitee.subdelegate.3697@example.com',
+      role: 'delegated_admin',
+      organizationId: orgId,
+    });
+
+    const body = await res.clone().json();
+    expect(res.status, JSON.stringify(body)).toBe(403);
+    expect(body?.code).toBe('INVITE_ISSUER_MEMBER_ONLY');
+    expect(
+      (await findRows(ql, 'sys_invitation', { email: 'invitee.subdelegate.3697@example.com' }, 5)).length,
     ).toBe(0);
   }, 30_000);
 

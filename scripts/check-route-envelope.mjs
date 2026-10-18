@@ -413,7 +413,15 @@ const MODULES = {
     // go through `handleRouteError`), so this count does not move and that module
     // declares 0 below; the sum is unchanged
     // (8 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 + 0 = 39).
-    stringError: 8,
+    //
+    // 8 → 7 (#23050 slice 13b): NOT progress — the same MOVE as slices 1–3, 8 and
+    // 10–12. The fourth `/meta` group, the per-item reads, left this file for
+    // `meta-item-read-routes.ts` with its one literal string `error` body (the
+    // `/layers` door's 501 `NOT_IMPLEMENTED`, `'Layered metadata view not
+    // supported by protocol implementation'`), declared below at the count it had
+    // here; the sum is unchanged
+    // (7 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 + 0 + 1 = 39).
+    stringError: 7,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -520,7 +528,12 @@ const MODULES = {
     // `{ code, error }` body either, so this count does not move and
     // `meta-collection-routes.ts` declares 0 below; the sum is unchanged
     // (4 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 + 0 = 54).
-    siblingCode: 4,
+    //
+    // 4 → 3 (#23050 slice 13b): NOT progress — the same MOVE as `stringError`
+    // above. That same `{ error, code }` body left with the per-item reads for
+    // `meta-item-read-routes.ts`, declared below; the sum is unchanged
+    // (3 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 + 0 + 1 = 54).
+    siblingCode: 3,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -787,6 +800,24 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 0,
     siblingCode: 0,
+  },
+
+  // [#23050 slice 13b] The fourth `/meta` group of
+  // `RestServer#registerMetadataEndpointsInner`' body — the per-item reads
+  // (`/references`, `/layers`, the book tree and the item read) — moved out of
+  // `rest-server.ts` on exactly slice 1's terms above: a MOVE, no wire answer
+  // changed, so it inherits `dialectOnly` and the two dialect facts, and no
+  // write-site count. Both counts were measured on the moved file and equal what
+  // left `rest-server.ts` in the same PR (stringError 8 → 7, siblingCode 4 → 3:
+  // the `/layers` door's one 501 body), so each sum is unchanged. Both only ever
+  // tick down. Discovered by the `*-routes.ts` convention and declared in the same
+  // PR that created the module, so the gap never exists.
+  'packages/rest/src/meta-item-read-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13b and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 1,
+    siblingCode: 1,
   },
 };
 

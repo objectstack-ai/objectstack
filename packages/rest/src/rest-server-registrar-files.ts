@@ -56,6 +56,9 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // [#23050 slice 13a] The first three `/meta` groups of
     // `registerMetadataEndpointsInner`' body — see {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-collection-routes.ts',
+    // [#23050 slice 13b] The fourth `/meta` group of `registerMetadataEndpointsInner`'
+    // body, the per-item reads — see {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-item-read-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
@@ -81,6 +84,9 @@ export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = 
     // [#23050 slice 13a] The type list, the whole-store maintenance family and the
     // per-type list.
     'meta-collection-routes.ts',
+    // [#23050 slice 13b] The per-item reads: `/references`, `/layers`, the book tree
+    // and the item read.
+    'meta-item-read-routes.ts',
 ];
 
 /**

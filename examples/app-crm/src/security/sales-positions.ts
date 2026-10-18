@@ -62,12 +62,23 @@ export const SalesUserPermissionSet = definePermissionSet({
 });
 
 /**
- * Guest profile for the public Web-to-Lead form (lead.view.ts `web_to_lead`).
+ * The `guest_portal` permission set — the name the public form doors' submit
+ * context requests. ADR-0138 records this declaration as the reference for that
+ * name (fate: keep), which is why the example keeps it.
  *
- * Applied to anonymous (unauthenticated) visitors who POST the public form. The
- * anonymous permission path checks the FULL object name, so this MUST key
- * `crm_lead` (not a short `lead`). INSERT-only — guests can never read, edit, or
- * delete any record.
+ * It does NOT authorize the public Web-to-Lead form (lead.view.ts
+ * `web_to_lead`). That form's own declaration does: the submit route derives a
+ * `publicFormGrant` on `crm_lead` (create + read-back on that object only,
+ * ADR-0056 Option A), and the SecurityPlugin admits on that grant before any
+ * permission set resolves. The form works the same without this set.
+ *
+ * What the name reaches: the submit's context carries
+ * `permissions: ['guest_portal']`, so a set registered under this name is the
+ * one the grant's result masker reads over what the grant hands back, through
+ * its `fields` and the capabilities it holds against a field's
+ * `requiredPermissions`. Its `objects` bits are not read on that path. This
+ * declaration has object bits only, so on the form path it changes nothing, and
+ * the submit answers the created id only.
  */
 export const GuestPortalProfile = definePermissionSet({
   name: 'guest_portal',
