@@ -143,8 +143,10 @@ export interface AuditWriterOptions {
   /**
    * Resolve the workspace default locale (ADR-0053 `localization.locale`) for
    * the write's tenant/user scope. Called per audited write but memoized here
-   * with a short TTL, so implementations may hit the settings service
-   * directly. Absent → summaries stay English (status quo).
+   * per scope, so implementations may hit the settings service directly. A
+   * held answer lasts until the next write to `sys_setting` or
+   * `sys_platform_setting` through this engine, or a short TTL, whichever
+   * comes first. Absent → summaries stay English (status quo).
    */
   getLocale?(tenantId?: string, userId?: string): Promise<string | undefined>;
 }
@@ -1273,25 +1275,71 @@ export function installAuditWriters(
     }
   };
 
-  // Workspace locale changes rarely, but writeAudit runs on every CRUD write —
-  // memoize the settings lookup per principal scope with a short TTL so audit
-  // logging doesn't add a settings query to every mutation's hot path.
+  // [#24235] The write locale, held per principal scope. Asking for it costs
+  // the settings cascade (one `sys_platform_setting` and one `sys_setting`
+  // read on a stock boot) and writeAudit runs on every CRUD write, so the
+  // answer is held — but a summary line is stored ONCE, at write time, so a
+  // held answer that outlives a language change stores the old language for
+  // good. It is therefore held only until the first of:
+  //
+  //  1. A write to either settings store, seen by this writer's own
+  //     after-hooks (`retireHeldLocales`, registered below). `SettingsService`
+  //     persists through this engine, so a `localization` change made through
+  //     the settings API is one; a direct row write (a seeder) is the other,
+  //     and it emits no settings event at all. Those are the writes that
+  //     retire the core resolver's success cache beneath this one
+  //     (`resolveLocalizationContext`: the settings generation and the engine
+  //     write epoch), so this memo no longer outlives the layer it sits on.
+  //  2. `LOCALE_TTL_MS` — the residual bound, for what (1) cannot see: a host
+  //     resolver's own storage (`AuditPluginOptions.getLocale` offers no
+  //     seam), and a peer node's settings write.
+  //
+  // ⛔ Not the engine write epoch itself, and not a read through the core
+  // resolver with no memo here. Every audited write IS an engine write, so the
+  // epoch has always moved by the time this writer asks: either shape costs
+  // the full settings read on every audited write (measured on a real engine:
+  // two settings reads per audited write, against none for a held answer).
   const LOCALE_TTL_MS = 30_000;
-  const localeCache = new Map<string, { value: string | undefined; expires: number }>();
+  /** Advanced by every settings-store write; an entry held at an older value is dead. */
+  let localeGeneration = 0;
+  const localeCache = new Map<string, { value: string | undefined; expires: number; generation: number }>();
   const resolveWriteLocale = async (tenantId?: string, userId?: string): Promise<string | undefined> => {
     if (!opts.getLocale) return undefined;
     const cacheKey = `${tenantId ?? ''}|${userId ?? ''}`;
+    // Read BEFORE the lookup and stored with its answer: a settings write that
+    // lands while the lookup is in flight moves the generation past it, so a
+    // pre-write answer is never held (the clear-then-repopulate-from-a-stale-
+    // read shape the core resolver guards against the same way).
+    const generation = localeGeneration;
     const now = Date.now();
     const hit = localeCache.get(cacheKey);
-    if (hit && hit.expires > now) return hit.value;
+    if (hit && hit.generation === generation && hit.expires > now) return hit.value;
     let value: string | undefined;
     try {
       value = await opts.getLocale(tenantId, userId);
     } catch {
       value = undefined;
     }
-    localeCache.set(cacheKey, { value, expires: now + LOCALE_TTL_MS });
+    if (generation === localeGeneration) {
+      localeCache.set(cacheKey, { value, expires: now + LOCALE_TTL_MS, generation });
+    }
     return value;
+  };
+  /**
+   * The two objects the settings cascade answers from (ADR-0131 D7: the global
+   * rung has its own store). Coarse on purpose — any write to either retires
+   * every held locale, whatever its namespace: a predicate update names no
+   * namespace the hook can read without fetching the row, and settings writes
+   * are rare, so the over-retirement costs one locale read per scope.
+   */
+  const LOCALE_SOURCE_OBJECTS: ReadonlySet<string> = new Set(['sys_setting', 'sys_platform_setting']);
+  const retireHeldLocales = (ctx: HookContext): void => {
+    // Defence in depth, as `writeAudit`'s early return is for its exclusions:
+    // the registration is object-scoped, but a dispatcher that ignored the
+    // scope would otherwise retire on every write — a memo that never hits.
+    if (!LOCALE_SOURCE_OBJECTS.has(ctx.object)) return;
+    localeGeneration += 1;
+    localeCache.clear();
   };
 
   // Translate function bound to a locale. Returns undefined on any miss
@@ -1315,6 +1363,15 @@ export function installAuditWriters(
   // Remove any prior installation so we can safely re-install on hot reload.
   if (typeof engine.unregisterHooksByPackage === 'function') {
     engine.unregisterHooksByPackage(packageId);
+  }
+
+  // [#24235] The held write locale's retirement seam — see `resolveWriteLocale`.
+  // One registration per object, in the string form every registration in this
+  // file uses; `retireHeldLocales` re-checks the object either way.
+  for (const object of LOCALE_SOURCE_OBJECTS) {
+    for (const event of ['afterInsert', 'afterUpdate', 'afterDelete']) {
+      engine.registerHook(event, retireHeldLocales, { object, packageId });
+    }
   }
 
   // Whether a given object's *registered* schema declares a field — see
