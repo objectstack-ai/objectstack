@@ -222,7 +222,7 @@ Errors:
 | `400 INVALID_REQUEST` | missing / blank slug (an empty body is coerced to `{}` and surfaces as `VALIDATION_FAILED` below, not here) |
 | `400 VALIDATION_ERROR` | the form's sections declare **no** fields, so it collects nothing — wire the fields and resubmit (#6920) |
 | `400 VALIDATION_FAILED` | object schema validators fail (`required`, `format`, `length`, …) |
-| `403 PERMISSION_DENIED` | the resolved profile does not allow create on the target object |
+| `403 PERMISSION_DENIED` | never a permission set refusing the create (section 2). It answers when the security layer fails closed: the permission sets for the submission could not be resolved ("permission subsystem unavailable"), or the target object's security posture could not be resolved. It also answers when a write made under the submission's context leaves the grant, such as an `afterInsert` hook writing a **different** object through `ctx.api` (the grant covers only the form's object), or when a hook registered in code throws a `403` refusal of its own (`PermissionDeniedError`). A declarative hook's `throw` answers `400`, not `403`. |
 | `404 FORM_NOT_FOUND` | slug not registered on any view whose form has `sharing.enabled: true` and `sharing.allowAnonymous: true` |
 | `5xx` (generic) | driver / hook threw — submit errors are mapped by `mapDataError`; there is no dedicated `FORM_SUBMIT_FAILED` code |
 
