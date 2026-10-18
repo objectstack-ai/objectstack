@@ -56,6 +56,10 @@ function makeEngine() {
         if (!(rv >= (v as any).$gte)) return false;
         continue;
       }
+      if (v != null && typeof v === 'object' && '$gt' in (v as any)) {
+        if (!(rv > (v as any).$gt)) return false;
+        continue;
+      }
       if (rv !== v) return false;
     }
     return true;
@@ -2347,21 +2351,24 @@ describe('[ADR-0131 D2] declared sharing rules are read from the registry, never
 // ─────────────────────────────────────────────────────────────────────
 
 describe('[ADR-0131 D2] resolveDeclaredRuleScopes', () => {
-  /** A `sys_organization` reader honouring the walk's `id > after` seek, `id` order and page size. */
+  /**
+   * `sys_organization` on the file's engine fake (rows inserted in `id` order,
+   * so its insertion order IS the walk's `id` order), its reads counted, the
+   * `orderBy` each page asked for recorded, and one call failing on demand.
+   */
   function organizations(count: number, failOnCall?: number) {
-    const ids = Array.from({ length: count }, (_, i) => `org_${String(i + 1).padStart(4, '0')}`);
+    const engine: any = makeEngine();
+    engine._tables.sys_organization = Array.from({ length: count }, (_, i) => ({ id: `org_${String(i + 1).padStart(4, '0')}` }));
+    const base = engine.find.bind(engine);
     let calls = 0;
-    return {
-      calls: () => calls,
-      async find(object: string, opts: any) {
-        calls += 1;
-        if (object !== 'sys_organization') throw new Error(`unexpected read of ${object}`);
-        if (calls === failOnCall) throw new Error('connection reset');
-        const after = opts?.where?.id?.$gt;
-        expect(opts?.orderBy).toEqual([{ field: 'id', order: 'asc' }]);
-        return ids.filter((id) => after === undefined || id > after).slice(0, opts.limit).map((id) => ({ id }));
-      },
+    const orders: unknown[] = [];
+    engine.find = async (o: string, opts?: any) => {
+      calls += 1;
+      if (calls === failOnCall) throw new Error('connection reset');
+      orders.push(opts?.orderBy);
+      return base(o, opts);
     };
+    return Object.assign(engine, { calls: () => calls, orders });
   }
 
   it('reads every organization past the former 500-row cap, in pages', async () => {
@@ -2370,6 +2377,8 @@ describe('[ADR-0131 D2] resolveDeclaredRuleScopes', () => {
     expect(scopes).toHaveLength(1201);
     expect(scopes?.at(-1)).toBe('org_1201');
     expect(engine.calls()).toBe(3);
+    // Seek pagination needs the id order on every page.
+    expect(engine.orders).toEqual(Array(3).fill([{ field: 'id', order: 'asc' }]));
   });
 
   it('a page boundary that lands exactly on the last organization still ends the walk', async () => {
