@@ -115,6 +115,22 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         expect(served).not.toHaveProperty('activityMilestones');
     });
 
+    it('drops the default row scope whose predicate reads the denied field WHOLE, and keeps one that does not (#24338)', () => {
+        // One row policy (`defaultRowScope`), a rule entry in all but arity: deleting
+        // only its `using` would serve a policy that reads as restricting nothing.
+        const scope = (using: string) => ({ name: 'thing_self', operation: 'select', using });
+        const denied = mask({
+            name: 'thing',
+            fields: fieldsWith(),
+            defaultRowScope: scope('secret_score > 0 && owner_id == current_user.id'),
+        });
+        expect(denied).not.toHaveProperty('defaultRowScope');
+
+        const readable = scope('title != null && owner_id == current_user.id');
+        const served = mask({ name: 'thing', fields: fieldsWith(), defaultRowScope: readable });
+        expect(served.defaultRowScope).toEqual(readable);
+    });
+
     it('scrubs the nested policy blocks: tenancy, lifecycle, publicSharing, external, userActions', () => {
         const served = mask({
             name: 'thing',
