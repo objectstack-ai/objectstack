@@ -34,11 +34,12 @@
  *      `plugin-security`'s `resolvePlatformAdminStanding` serves the audit
  *      surface with, so the account this helper binds is the account the
  *      audit surface reports as holding standing.
- *   2. **Legacy grant anchor** (Choice 4A), **under a NON-WALLED posture
- *      only**: the oldest unscoped `sys_user_permission_set` row on
- *      `admin_full_access`. This is what still anchors `single`-posture
- *      deployments — first-user promotion keeps writing the grant row there,
- *      by ruling, and #11979 is the card that disposes of it.
+ *   2. **Grant anchor** (Choice 4A), **under a NON-WALLED posture
+ *      only**: the oldest `sys_user_permission_set` row on `admin_full_access`
+ *      owned by the Default Organization, or by none (a row written before
+ *      ADR-0131 D5 moved its owner). This is what still anchors
+ *      `single`-posture deployments — first-user promotion keeps writing the
+ *      grant row there, by ruling, owned by the Default Organization (#11979).
  *
  *      ⛔ Under a walled posture this anchor is RETIRED. P5's honoured
  *      migration window closed with the legacy-grant removal leg (design §5
@@ -85,6 +86,7 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
+import { resolveDefaultOrgId } from './tenancy-service.js';
 
 interface BootstrapLogger {
   info: (message: string, meta?: Record<string, any>) => void;
@@ -443,8 +445,9 @@ export async function ensureDefaultOrganization(
   //    exactly as before (Choice 4A).
   let adminUserId: string | undefined = await findConfigAnchoredAdminUserId(ql);
 
-  // 2. LEGACY grant anchor (oldest cross-tenant `admin_full_access` grant) —
-  //    still what anchors `single` posture (Choice 4A; #11979 disposes of it),
+  // 2. GRANT anchor (oldest `admin_full_access` grant owned by the Default
+  //    Organization or by none) — what anchors `single` posture (Choice 4A;
+  //    ADR-0131 D5 owns the promotion's row by the Default Organization),
   //    and ⛔ RETIRED under a wall [#11663 L5].
   //
   //    The key is the derivation site's own expression, read from the
@@ -489,12 +492,24 @@ export async function ensureDefaultOrganization(
     // confers nothing. The answer is then `no_admin`, which decides nothing
     // (`default-org-bootstrap-once.ts` records no decision on it), so a later
     // trigger binds once the grant names its set.
-    const adminGrants = await tryFind(
-      ql,
-      'sys_user_permission_set',
-      { [GRANT_SET_NAME_FIELD]: 'admin_full_access', organization_id: null },
-      50,
-    );
+    //
+    // [ADR-0131 D5] …owned by the Default Organization, which is the owner
+    // `single`'s first-user promotion writes, or by no organization, which is
+    // the row an earlier release's promotion wrote before D10's ceremony
+    // attributed it — the two the derivation site reads as the anchor
+    // (`grantAnchorsPlatformStanding`, `resolve-authz-context.ts`). Reading only
+    // the organization-less row would answer `no_admin` on every deployment
+    // promoted since, and never bind its administrator.
+    const defaultOrgId = await resolveDefaultOrgId(ql);
+    const adminGrants: any[] = [];
+    for (const organizationId of defaultOrgId ? [null, defaultOrgId] : [null]) {
+      adminGrants.push(...await tryFind(
+        ql,
+        'sys_user_permission_set',
+        { [GRANT_SET_NAME_FIELD]: 'admin_full_access', organization_id: organizationId },
+        50,
+      ));
+    }
     if (adminGrants.length === 0) {
       return { defaultOrgCreated: false, memberCreated: false, reason: 'no_admin' };
     }
