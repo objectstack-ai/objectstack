@@ -11402,10 +11402,15 @@ export class ObjectStackProtocolImplementation implements
                 activeRows = [];
             }
         }
-        const contentPackageId = request.packageId
-            || (readState === 'draft'
-                ? undefined
-                : await this.packagelessReadAddress(request.type, request.name, member, activeRows));
+        // The package-less binding ({@link packagelessReadAddress}'s), selected
+        // from those rows; the `version` below ({@link readVersionToken})
+        // takes the same binding instead of reading it again.
+        const packagelessBinding = readState === 'active' && !request.packageId
+            ? (await this.packagelessAddress(
+                PLURAL_TO_SINGULAR[request.type] ?? request.type, request.name, member, 'active', activeRows,
+            )).packageId
+            : undefined;
+        const contentPackageId = request.packageId || (packagelessBinding ?? undefined);
 
         // ADR-0033 draft-overlay preview (non-strict): when the caller opts in
         // (admin-gated upstream), prefer a `state='draft'` row if one exists, else
@@ -11832,7 +11837,11 @@ export class ObjectStackProtocolImplementation implements
             // editor reads `state: 'draft'` or the plain read.
             ...(request.previewDrafts
                 ? {}
-                : { version: storedRowServed ? await this.readVersionToken({ ...request, member }, 'active') : null }),
+                : {
+                    version: storedRowServed
+                        ? await this.readVersionToken({ ...request, member }, 'active', packagelessBinding)
+                        : null,
+                }),
             ...(readRegistration ? { registration: readRegistration(request.name) } : {}),
         };
     }
@@ -19545,6 +19554,12 @@ export class ObjectStackProtocolImplementation implements
         /** [#22877] `member` — the bundle member the read addressed; omitted, the canonical one. */
         request: { type: string; name: string; packageId?: string; member?: string },
         state: 'active' | 'draft',
+        /**
+         * [#24371] The item's package-less binding ({@link packagelessAddress}
+         * at `active`) when the caller has already resolved it; omitted, it is
+         * read here.
+         */
+        packagelessPackageId?: string | null,
     ): Promise<string | null> {
         const repo = this.getOverlayRepo();
         const ref = {
@@ -19553,7 +19568,9 @@ export class ObjectStackProtocolImplementation implements
             org: 'env',
         } as Parameters<typeof repo.headAt>[0];
         const packageId = request.packageId == null && state === 'active'
-            ? (await this.packagelessAddress(ref.type, ref.name, request.member)).packageId
+            ? packagelessPackageId !== undefined
+                ? packagelessPackageId
+                : (await this.packagelessAddress(ref.type, ref.name, request.member)).packageId
             : request.packageId ?? null;
         const stored = await this.storedHeadAt(repo, ref, state, packageId, request.member);
         return stored === null ? null : this.receiptVersion(stored);
@@ -19570,15 +19587,8 @@ export class ObjectStackProtocolImplementation implements
      * strict draft read asks {@link strictDraftReadAddress} instead: the draft
      * its `version` names.
      */
-    private async packagelessReadAddress(
-        type: string,
-        name: string,
-        member?: string,
-        /** [#24371] See {@link packagelessAddress}. */
-        activeRows?: readonly StoredOverlayRow[],
-    ): Promise<string | undefined> {
-        return (await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member, 'active', activeRows)).packageId
-            ?? undefined;
+    private async packagelessReadAddress(type: string, name: string, member?: string): Promise<string | undefined> {
+        return (await this.packagelessAddress(PLURAL_TO_SINGULAR[type] ?? type, name, member)).packageId ?? undefined;
     }
 
     /**
