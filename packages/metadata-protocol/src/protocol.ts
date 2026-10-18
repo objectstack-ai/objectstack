@@ -25531,6 +25531,14 @@ export class ObjectStackProtocolImplementation implements
      * promote and discard by, with the canonical member spelled out, as the
      * by-name doors' `member` selector takes it back
      * ({@link bundleMemberDiscriminator}); absent for a type with no members.
+     *
+     * [#7557, #24210] A disabled package's drafts are omitted, as the list
+     * read omits its items and the by-name draft read answers them `404
+     * NO_DRAFT`: each row's `packageId`, asked of the same predicate ({@link
+     * isItemOfDisabledPackage}); `package` is never hidden. This method serves
+     * the `_drafts` doors only. The package batch doors (publish, discard, the
+     * batch closure) read the repository's `listDrafts` directly, so a
+     * disabled package's drafts still publish and discard.
      */
     async listDrafts(request?: {
         packageId?: string;
@@ -25558,8 +25566,10 @@ export class ObjectStackProtocolImplementation implements
         // [#23073] The declared header (`ListDraftsResponseSchema`), with the
         // row's stored member on every draft of a bundled type: absent there
         // means the canonical member, which is spelled out here.
+        const served = drafts.filter((draft) => draft.type === 'package'
+            || !isItemOfDisabledPackage(this.engine?.registry, { _packageId: draft.packageId }));
         return {
-            drafts: drafts.map(({ member: stored, ...header }) => {
+            drafts: served.map(({ member: stored, ...header }) => {
                 const member = bundleMemberDiscriminator(header.type, stored);
                 return member === undefined ? header : { ...header, member };
             }),

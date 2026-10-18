@@ -3723,6 +3723,12 @@ export class RestServer {
      * Only the types {@link metaItemReadGate} judges per caller are fetched at
      * all, so every other type's door is untouched: no extra read, no new
      * failure mode. Answers the refusal to send, or `undefined` to go on.
+     *
+     * [#7557, #24210] A withheld item's absence (a disabled package's item,
+     * which {@link fetchCurrentMetaDocument} throws) is answered in the plain
+     * read's own body, {@link sendMetaItemAbsent}, recognised as the plain
+     * read's catch recognises it ({@link thrownAnswerIsBareNotFound}), not in
+     * the classification door's flat one.
      */
     private async eventDoorRefusal(
         environmentId: string | undefined,
@@ -3732,7 +3738,13 @@ export class RestServer {
         const metaType = RestServer.metaTypeSingular(req.params.type);
         const policy: MetaReadGatePolicy = { arms: 'per-caller', app: 'gate' };
         if (!RestServer.gatesPerCaller(metaType)) return undefined;
-        const current = await this.fetchCurrentMetaDocument(req, p);
+        let current: any;
+        try {
+            current = await this.fetchCurrentMetaDocument(req, p);
+        } catch (error: any) {
+            if (thrownAnswerIsBareNotFound(error)) return sendMetaItemAbsent;
+            throw error;
+        }
         if (current == null) return undefined;
         const verdict = await this.metaItemReadGate(
             environmentId, req, p, metaType, req.params.name, [current], policy,
@@ -7356,9 +7368,21 @@ export class RestServer {
                         throw maskError;
                     }
                     const diffGated = RestServer.gatesPerCaller(diffMetaType);
-                    const diffCurrent = diffGated
-                        ? await this.fetchCurrentMetaDocument(req, p)
-                        : undefined;
+                    let diffCurrent: any;
+                    try {
+                        diffCurrent = diffGated
+                            ? await this.fetchCurrentMetaDocument(req, p)
+                            : undefined;
+                    } catch (currentError: any) {
+                        // [#7557, #24210] A withheld item (a disabled package's)
+                        // is answered in the plain read's body, as
+                        // {@link eventDoorRefusal} answers it.
+                        if (thrownAnswerIsBareNotFound(currentError)) {
+                            sendMetaItemAbsent(res);
+                            return;
+                        }
+                        throw currentError;
+                    }
                     // [#22639] A list view's and a dashboard's per-caller gate
                     // is the item's OWN `requiredPermissions`. With no
                     // published row there is no current document to judge, so
@@ -7539,7 +7563,23 @@ export class RestServer {
                         Boolean(this.objectQLProvider),
                         () => this.objectQLProvider!(environmentId),
                     );
-                    const schema = (ql as any)?.registry?.getObject?.(name);
+                    // [#7557, #24210] The registry is a resolution reader and
+                    // keeps serving a disabled package's object, so this API
+                    // door asks first and answers what `GET /meta/object/:name`
+                    // answers: the protocol's own refusal, `404
+                    // OBJECT_PACKAGE_DISABLED` (the dispatcher twin's
+                    // `disabledObjectAnswer`); any other throw of that read is
+                    // answered as itself, never as an absence. A protocol that
+                    // does not refuse it gets this door's own answer for no
+                    // object, below. The schema is never read for such a name.
+                    const registry = (ql as any)?.registry;
+                    const disabledObject = typeof registry?.isObjectPackageDisabled === 'function'
+                        && registry.isObjectPackageDisabled(name) === true;
+                    if (disabledObject) {
+                        const p = await this.resolveProtocol(environmentId, req);
+                        await p.getMetaItem({ type: 'object', name });
+                    }
+                    const schema = disabledObject ? undefined : registry?.getObject?.(name);
                     if (!schema) {
                         // `{ error: { code, message } }`, the envelope
                         // `BaseResponseSchema` declares — not the bare
@@ -7740,8 +7780,31 @@ export class RestServer {
                         // READ, and a gate fault raised while serving must reach
                         // `handleRouteError` as itself — never fall through to
                         // the snapshot as though no overlay existed.
+                        // [#7557, #24210] A disabled package's item is answered
+                        // as a name with nothing behind it, as the plain read
+                        // and the list answer it. Neither store below knows a
+                        // disable (the layered read keeps serving its resolution
+                        // reader, and the snapshot carries no owner), so the
+                        // owner is the one the plain read's kept protection
+                        // envelope names, `packageId`, asked of the registry's
+                        // `isPackageDisabled`: the predicate the protocol asks of
+                        // that same field. An object is the layered read's own
+                        // refusal below; `package` is never hidden.
+                        let withheld = false;
+                        if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
+                            && typeof publishedProtocol?.getMetaItem === 'function') {
+                            const ql = await wiredEngineOrLoud(
+                                Boolean(this.objectQLProvider),
+                                () => this.objectQLProvider!(environmentId),
+                            );
+                            const registry = (ql as any)?.registry;
+                            if (typeof registry?.isPackageDisabled === 'function') {
+                                const envelope = await publishedProtocol.getMetaItem({ type, name });
+                                withheld = registry.isPackageDisabled(envelope?.packageId) === true;
+                            }
+                        }
                         let publishedOverlay: unknown;
-                        if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
+                        if (!withheld && typeof publishedProtocol?.getMetaItemLayered === 'function') {
                             try {
                                 const layered = await publishedProtocol.getMetaItemLayered({
                                     type,
@@ -7829,7 +7892,9 @@ export class RestServer {
                         // CANONICAL types; handed the raw segment it answered
                         // 404 for a recognised plural and 200 for the singular
                         // twin of the same code-published item.
-                        const data = await (svc as any).getPublished(canonicalMetaUrlType(type), name);
+                        const data = withheld
+                            ? undefined
+                            : await (svc as any).getPublished(canonicalMetaUrlType(type), name);
                         // The 404 this route could never produce before. An
                         // item that exists but was never published still
                         // answers 200 with its current definition — that is
