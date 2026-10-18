@@ -62,6 +62,9 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // [#23050 slice 13c] The fifth `/meta` group of `registerMetadataEndpointsInner`'
     // body, the per-item writes — see {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-item-write-routes.ts',
+    // [#23050 slice 13d] The sixth `/meta` group of `registerMetadataEndpointsInner`'
+    // body, the history family — see {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-item-history-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
@@ -94,6 +97,10 @@ export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = 
     // module here that registers nothing on the route manager itself: both routes go
     // through the inner method's per-item registrar, handed over in its scope.
     'meta-item-write-routes.ts',
+    // [#23050 slice 13d] The history family: `/history`, `/audit`, `/publish`,
+    // `/rollback` and `/diff`. Like the per-item writes, all five routes go through the
+    // inner method's per-item registrar, handed over in its scope.
+    'meta-item-history-routes.ts',
 ];
 
 /**
