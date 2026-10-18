@@ -242,6 +242,9 @@ const FROM_HARNESS = `from ${Q}./helpers/serve-process.js${Q};`;
 const BIN_SEGMENT = `${Q}bin${Q}`;
 const RUN_SEGMENT = `${Q}run.js${Q}`;
 const RUN_DEV_SEGMENT = `${Q}run-dev.js${Q}`;
+// Spelled in pieces as well: the literal call shape in this file's code would put it in the
+// `integration` tier, whose predicate (`vitest-tiers.ts`) reads `runServe` + `(` in code position.
+const RUN_SERVE = 'runServe';
 
 const FIXTURES: Array<{ name: string; source: string; population: boolean; draws: number }> = [
   {
@@ -283,8 +286,8 @@ const FIXTURES: Array<{ name: string; source: string; population: boolean; draws
     draws: 1,
   },
   {
-    name: 'runServe() from the harness, handed a released draw',
-    source: `import { randomPort, runServe } ${FROM_HARNESS}\nawait runServe(dir, ['--port', randomPort()], opts);\n`,
+    name: 'the harness runServe helper, handed a released draw',
+    source: `import { randomPort, ${RUN_SERVE} } ${FROM_HARNESS}\nawait ${RUN_SERVE}(dir, ['--port', randomPort()], opts);\n`,
     population: true,
     draws: 1,
   },
@@ -361,8 +364,8 @@ describe('#24295 / #24342: no file that spawns the CLI draws a released port', (
       // …two files spell it in path segments…
       ['published-entry-stderr-error-listener.test.ts', 'spells bin/run.js in segments'],
       ['published-entry-stderr-nonblocking.e2e.test.ts', 'spells bin/run.js in segments'],
-      // …and the development column (#24342): a runServe() caller, a harness-CLI spawner, a run-dev.js speller.
-      ['serve-boot-diagnostics.e2e.test.ts', 'calls runServe()'],
+      // …and the development column (#24342): a runServe caller, a harness-CLI spawner, a run-dev.js speller.
+      ['serve-boot-diagnostics.e2e.test.ts', 'calls the runServe helper'],
       ['package-install-local-handlers.integration.test.ts', 'spawns the harness CLI'],
       ['start-signal-forwarding.e2e.test.ts', 'spells bin/run-dev.js'],
     ]) {
@@ -388,7 +391,7 @@ describe('#24295 / #24342: no file that spawns the CLI draws a released port', (
       'A file that spawns the CLI draws a released port. A port taken between reservePort()/randomPort() '
       + 'and the child\'s bind is a red in either posture: production refuses to auto-shift, development '
       + 'shifts and the read-back reds the drift. Spawn with `--port KERNEL_ASSIGNED_PORT` and read the '
-      + 'port back with readKernelAssignedPort() (helpers/serve-process.ts), or call runServe() with no '
+      + 'port back with readKernelAssignedPort() (helpers/serve-process.ts), or give the runServe helper no '
       + '`--port` and use the port it returns; a port the test must know but the child must not bind is '
       + 'a holdPort() kept for the whole boot. A site with no closed alternative goes in '
       + 'RELEASED_DRAW_LEDGER with its reason and exact draw count.',
