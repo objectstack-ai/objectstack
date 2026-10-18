@@ -13,10 +13,12 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
+import { AppPlugin } from './app-plugin.js';
 import {
   assertOrganizationOwnershipMigrated,
   isOrganizationOwnershipBootRefusal,
   OrganizationOwnershipBootGuardPlugin,
+  ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME,
   ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE,
 } from './organization-ownership-boot-guard.js';
 
@@ -121,13 +123,63 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5)', () => {
     await expect(assertOrganizationOwnershipMigrated(engine())).resolves.toBeUndefined();
   });
 
-  it('⭐ a migrated database (the columns dropped) boots, marker or not', async () => {
+  /** What the ceremony's column-drops step leaves: no table in the v17 shape, the ledger beside it. */
+  const migrated = (): void => {
     db.exec(`
       CREATE TABLE sys_job (id TEXT PRIMARY KEY, status TEXT);
       CREATE TABLE sys_metadata (id TEXT PRIMARY KEY, type TEXT, name TEXT);
       CREATE TABLE crm_deal (id TEXT PRIMARY KEY, amount REAL, organization_id TEXT);
+      CREATE TABLE sys_migration (id TEXT PRIMARY KEY, last_run_at TEXT, verified_at TEXT, applied_at TEXT, blocking INTEGER, advisory INTEGER);
     `);
+  };
+
+  it('⭐ a migrated database (the columns dropped) whose ceremony verified boots', async () => {
+    migrated();
+    marker('2026-10-14T01:00:00Z');
     await expect(assertOrganizationOwnershipMigrated(engine())).resolves.toBeUndefined();
+  });
+
+  it('⭐ a migrated database (the columns dropped) whose ceremony did NOT verify is refused: its post-check found rows it has not carried', async () => {
+    migrated();
+    marker(null, 602);
+    const err = await refusalOf(() => assertOrganizationOwnershipMigrated(engine()));
+    expect(isOrganizationOwnershipBootRefusal(err)).toBe(true);
+    expect(err.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
+    expect(err.tables).toEqual([]);
+    expect(err.message).toMatch(/^The organization-ownership ceremony has not finished on this database: its marker \(sys_migration 'adr-0131-organization-ownership'\) is not verified/);
+    expect(err.message).toContain(
+      "Resolve what the apply report names, then run 'os migrate organization-ownership --out PLAN' again, review it, run " +
+        "'os migrate organization-ownership --apply --plan-file PLAN --backup-taken', and start again.",
+    );
+    // A verified_at with blocking left is not verified either (`isDataMigrationFlagVerified`).
+    db.exec('DELETE FROM sys_migration');
+    marker('2026-10-14T01:00:00Z', 3);
+    expect(isOrganizationOwnershipBootRefusal(await refusalOf(() => assertOrganizationOwnershipMigrated(engine())))).toBe(true);
+  });
+
+  it('a migrated database whose marker cannot be read is refused, never passed', async () => {
+    migrated();
+    const failing = { ...engine(), findOne: async () => { throw new Error('SQLITE_BUSY: database is locked'); } };
+    const err = await refusalOf(() => assertOrganizationOwnershipMigrated(failing));
+    expect(err.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
+    expect(err.message).toMatch(/its marker \(sys_migration 'adr-0131-organization-ownership'\) could not be read/);
+  });
+
+  it('a boot with no storage — no driver serves the ledger, and the engine refuses its read — has no database to judge, and boots', async () => {
+    const storageless = {
+      ...engine(),
+      getDriverForObject: () => undefined,
+      findOne: async () => { throw new Error("[ObjectQL] No driver available for object 'sys_migration'"); },
+    };
+    await expect(assertOrganizationOwnershipMigrated(storageless)).resolves.toBeUndefined();
+  });
+
+  it('a migrated database with no marker (no ceremony ran on it) boots; so does a composition with no ledger object', async () => {
+    migrated();
+    await expect(assertOrganizationOwnershipMigrated(engine())).resolves.toBeUndefined();
+    marker(null, 1);
+    const noLedger = { ...engine(), getObject: () => undefined };
+    await expect(assertOrganizationOwnershipMigrated(noLedger)).resolves.toBeUndefined();
   });
 
   it('⭐ a fresh database boots: no table it creates carries a retired column, and no marker is needed', async () => {
@@ -154,7 +206,7 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5)', () => {
     await expect(assertOrganizationOwnershipMigrated(engine({ client: 'memory' }))).resolves.toBeUndefined();
   });
 
-  it('the plugin refuses at kernel:ready: its hook throws the refusal, which stops the boot', async () => {
+  it('⭐ the plugin refuses in its own start(), registering no hook: a refused boot stops before any later plugin starts', async () => {
     v17Shape();
     const hooks = new Map<string, () => Promise<void>>();
     const ctx: any = {
@@ -164,11 +216,22 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5)', () => {
     };
     const plugin = new OrganizationOwnershipBootGuardPlugin();
     await plugin.init(ctx);
-    await plugin.start(ctx);
-    expect([...hooks.keys()]).toEqual(['kernel:ready']);
-    const err = await refusalOf(() => hooks.get('kernel:ready')!());
+    const err = await refusalOf(() => plugin.start(ctx));
     expect(err.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
+    expect([...hooks.keys()]).toEqual([]);
   });
+
+  it('starts after the engine and the platform objects (sys_migration), order-if-present', () => {
+    const plugin = new OrganizationOwnershipBootGuardPlugin();
+    expect(plugin.name).toBe(ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME);
+    expect(plugin.dependencies).toEqual([]);
+    expect(plugin.optionalDependencies).toEqual(['com.objectstack.engine.objectql', 'com.objectstack.platform-objects']);
+  });
+
+  it('the writers at start declare the guard ahead of them: AppPlugin (the inline seed)', () => {
+    expect(new AppPlugin({}).optionalDependencies).toContain(ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME);
+  });
+
 
   it('no escape hatch: no environment variable stands the refusal down', async () => {
     v17Shape();

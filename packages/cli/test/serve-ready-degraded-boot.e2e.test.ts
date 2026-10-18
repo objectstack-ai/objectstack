@@ -10,9 +10,8 @@ import { fileURLToPath } from 'node:url';
 import {
   childEnv,
   E2E_SECRET_KEY,
-  portContentionError,
+  KERNEL_ASSIGNED_PORT,
   requireBuiltCli,
-  reservePort,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
 
@@ -90,8 +89,10 @@ interface Boot {
  * is on the stream. Extra `env` entries override the base; `undefined` unsets.
  */
 async function boot(env: Record<string, string | undefined> = {}): Promise<Boot> {
-  const port = reservePort();
-  const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--port', String(port)], {
+  // A kernel-assigned port (#24295): production posture refuses to auto-shift,
+  // so a port drawn and released beforehand is a red whenever another process
+  // takes it in the gap. Nothing here talks to the port.
+  const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--port', KERNEL_ASSIGNED_PORT], {
     cwd: fixtureDir,
     stdio: ['ignore', 'pipe', 'pipe'],
     // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
@@ -132,13 +133,7 @@ async function boot(env: Record<string, string | undefined> = {}): Promise<Boot>
     child.stderr.on('data', (d) => { err += String(d); onData(); });
     child.on('exit', (code) => {
       clearTimeout(timer);
-      // A lost port race gets its own failure before the generic one (#12441):
-      // `serve exited 1 before the banner` is what it produces otherwise, and
-      // that reads as a verdict about this file's subject when it is not.
-      fail(
-        portContentionError(out + err, 'os serve (bin/run.js, NODE_ENV unset ⇒ production)', port)
-        ?? new Error(`serve exited ${code} before the ready banner\n--- stdout ---\n${out}\n--- stderr ---\n${err}`),
-      );
+      fail(new Error(`serve exited ${code} before the ready banner\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
     });
   });
 

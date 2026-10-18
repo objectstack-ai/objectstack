@@ -13,9 +13,8 @@ import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-f
 import {
   childEnv,
   E2E_SECRET_KEY,
-  portContentionError,
+  KERNEL_ASSIGNED_PORT,
   requireBuiltCli,
-  reservePort,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
 
@@ -101,8 +100,10 @@ interface Boot {
  * child is then stopped) or on its own — so the stores are closed when read.
  */
 async function boot(cwd: string): Promise<Boot> {
-  const port = reservePort();
-  const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--port', String(port)], {
+  // A kernel-assigned port (#24295): production posture refuses to auto-shift,
+  // so a port drawn and released beforehand is a red whenever another process
+  // takes it in the gap. Nothing here talks to the port.
+  const child = spawn(process.execPath, [CLI, 'serve', 'objectstack.config.ts', '--port', KERNEL_ASSIGNED_PORT], {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
@@ -143,11 +144,7 @@ async function boot(cwd: string): Promise<Boot> {
     child.stderr.on('data', onData);
     child.on('exit', () => {
       clearTimeout(timer);
-      const contention = ready
-        ? null
-        : portContentionError(output, 'os serve (bin/run.js, NODE_ENV unset ⇒ production)', port);
-      if (contention) fail(contention);
-      else done({ output, ready });
+      done({ output, ready });
     });
   });
 }
