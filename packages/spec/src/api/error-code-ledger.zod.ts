@@ -591,7 +591,7 @@ export const ERROR_CODE_LEDGER = {
     // (`beforeCreateOrganization`, `beforeUpdateOrganization`), registered AHEAD
     // of their producer: today both are a bare `FORBIDDEN`, and #24243 stamps these.
     'ORGANIZATION_CREATION_DISABLED', // [#24254] 403: the deployment's effective tenancy posture enforces no organization wall (ADR-0105), so creating an organization is refused for every caller; the same derivation `/auth/config` publishes as `features.multiOrgEnabled: false`, a deployment setting and not a grant the caller lacks
-    'ORGANIZATION_SLUG_REFERENCED_BY_ENVIRONMENTS', // [#24254] 403: a slug change is refused while an environment of the organization that is neither archived nor failed still carries the slug in its hostname; a guard read that could not answer is `SERVICE_UNAVAILABLE` (503) instead
+    'ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS', // [#24254] 403: a change to a new slug is refused while the organization has an active environment, meaning a `sys_environment` row with its `organization_id` whose `status` is neither `archived` nor `failed` (a row with no status counts), and no hostname is read; a guard read that could not answer is `SERVICE_UNAVAILABLE` (503) instead
     'PASSWORD_ALREADY_SET',       // pass-through from better-auth
     'PASSWORD_EXPIRED',
     'PASSWORD_POLICY_VIOLATION',

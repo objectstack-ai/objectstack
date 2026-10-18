@@ -252,7 +252,7 @@ describe('ErrorCode (standard ∪ registered)', () => {
       'INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE',
       'INVITE_PLACEMENT_UNSUPPORTED',
       'ORGANIZATION_CREATION_DISABLED',
-      'ORGANIZATION_SLUG_REFERENCED_BY_ENVIRONMENTS',
+      'ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS',
     ]) {
       expect(ErrorCode.parse(code)).toBe(code);
       expect(ERROR_CODE_LEDGER['@objectstack/plugin-auth'], `${code} registered under plugin-auth`).toContain(code);
