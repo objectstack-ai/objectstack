@@ -823,6 +823,18 @@ export default defineConfig({
         find: /^@objectstack\/plugin-audit$/,
         replacement: path.resolve(__dirname, '../plugins/plugin-audit/src/index.ts'),
       },
+      // [ADR-0131 C3 stage 9] `utils/organization-ownership-apply.ts` asks
+      // `@objectstack/plugin-sharing`'s own `translateDeclaredSharingRule`
+      // which declared sharing rules are served before the ceremony renames a
+      // mirror's grants onto one, and `organization-ownership-apply.declared-rule-mirrors.test.ts`
+      // pins that judgement. Resolved to source for the reason its neighbours
+      // give. Anchored (plugin-sharing publishes only `"."`).
+      // `check:test-source-alias` names this import and is the gate that fails
+      // without the entry.
+      {
+        find: /^@objectstack\/plugin-sharing$/,
+        replacement: path.resolve(__dirname, '../plugins/plugin-sharing/src/index.ts'),
+      },
     ],
   },
   test: {
