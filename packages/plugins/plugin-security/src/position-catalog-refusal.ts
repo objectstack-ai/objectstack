@@ -111,10 +111,11 @@
  * `validationFailure`, the shared constructor both HTTP doors map to 400), and
  * the field-level code is a member of the closed ADR-0114 catalog. The message
  * names the value, says the column takes the position's NAME, and names the
- * fix — the name itself when the value is the record id of a `sys_position`
- * row the writer's organization holds and the catalog resolves that row's
- * name (the id is a row fact, read under {@link catalogReadContext}, so never
- * another organization's).
+ * fix. `constraint` names what the value was judged against: the security
+ * catalog type and the key it is read by, `{ target: 'position', targetField:
+ * 'name' }` — the spelling the sibling `sys_user_permission_set.permission_set`
+ * refusal answers with (`target: 'permission'`). There is no id-to-name hint:
+ * the catalog holds definitions by name only, so no record id maps to one.
  *
  * ## Fails open
  *
@@ -131,7 +132,6 @@ import type { FieldErrorCode } from '@objectstack/spec/api';
 import {
   ALL_OPERATORS,
   RETIRED_FILTER_OPERATORS,
-  classifyFilterToken,
   isPlainRecord,
 } from '@objectstack/spec/data';
 import { validationFailure } from '@objectstack/types';
@@ -139,34 +139,18 @@ import { SysUserPosition } from './objects/sys-user-position.object.js';
 
 /** The assignment object this refusal is registered on. */
 export const POSITION_ASSIGNMENT_OBJECT = 'sys_user_position';
-/** The row table the id-spelling hint reads a record id in — never the verdict. */
-export const POSITION_CATALOG_OBJECT = 'sys_position';
-/** The security catalog type a `position` value must name an item of. */
+/** The security catalog type a `position` value must name an item of — and the refusal's `constraint.target`. */
 const POSITION_CATALOG_TYPE = 'position';
 /** The column judged, on {@link POSITION_ASSIGNMENT_OBJECT}. */
 export const POSITION_FIELD = 'position';
 
 /**
  * The by-id PRE-IMAGE read only (is the stored `position` being changed?) —
- * never a catalog read. Bare, because the security middleware has already
- * refused, identically, every row id the writer cannot update (see "Where it
- * runs"); the id-spelling hint's row read goes through {@link catalogReadContext}.
+ * the one row this refusal reads, and never a catalog read. Bare, because the
+ * security middleware has already refused, identically, every row id the
+ * writer cannot update (see "Where it runs").
  */
 const SYSTEM_CTX = { isSystem: true } as const;
-
-/**
- * The context the id-spelling hint's `sys_position` read runs under: the
- * writer's own context with `isSystem` set — the engine lookup probe's
- * `sudo()`-shaped spelling. The spread carries the writer's `tenantId`, so the
- * read sees the writer's organization plus organization-less rows; a context
- * naming no organization reads every organization. ⛔ Never a bare
- * `{ isSystem: true }` here: that spans every organization, and a hint naming
- * another organization's row would be a cross-tenant existence oracle.
- */
-function catalogReadContext(context: unknown): Record<string, unknown> {
-  const own = context && typeof context === 'object' ? (context as Record<string, unknown>) : {};
-  return { ...own, isSystem: true };
-}
 
 /**
  * One `fields[]` entry of the refusal. `code` is typed to the closed ADR-0114
@@ -371,51 +355,8 @@ export async function namesWithoutCatalogRow(
   return missing;
 }
 
-/**
- * For each missing value that is the record ID of a `sys_position` row the
- * writer's organization holds, that row's NAME — the exact fix, offered only
- * when the security catalog resolves that name, so the hint never names a
- * position the check would refuse. The id is a row fact, read under
- * {@link catalogReadContext} (never another organization's row). A read that
- * fails yields no hint.
- */
-export async function idSpellingHints(
-  deps: PositionCatalogRefusalDeps,
-  values: readonly string[],
-  context: unknown,
-): Promise<Map<string, string>> {
-  const hints = new Map<string, string>();
-  const { ql } = deps;
-  if (!ql || typeof ql.find !== 'function') return hints;
-  const catalog = securityCatalogReaderOf(ql);
-  if (!catalog) return hints;
-  const readCtx = catalogReadContext(context);
-  for (const value of values) {
-    // A placeholder-shaped value is never a record id, and in `where` it would
-    // be resolved as a filter token rather than compared.
-    if (classifyFilterToken(value) !== null) continue;
-    try {
-      const rows = await ql.find(POSITION_CATALOG_OBJECT, { where: { id: value }, limit: 1, context: readCtx });
-      const row = Array.isArray(rows) ? rows[0] : null;
-      const name = row && typeof row.name === 'string' && row.name !== '' ? row.name : null;
-      if (!name || !(await catalog.resolve(POSITION_CATALOG_TYPE, name))) continue;
-      hints.set(value, name);
-    } catch {
-      // No hint — the refusal still stands and still names the column's contract.
-    }
-  }
-  return hints;
-}
-
 /** The sentence an author reads — names the value, the column's contract and the fix. */
-export function positionNotInCatalogMessage(value: string, idOfPosition?: string): string {
-  if (idOfPosition) {
-    return (
-      `${POSITION_LABEL}: no position is named '${value}' — that is the record id of the position ` +
-      `'${idOfPosition}'. ${POSITION_ASSIGNMENT_OBJECT}.${POSITION_FIELD} takes the position's machine name, ` +
-      `never its id: write '${idOfPosition}'.`
-    );
-  }
+export function positionNotInCatalogMessage(value: string): string {
   return (
     `${POSITION_LABEL}: no position is named '${value}'. ${POSITION_ASSIGNMENT_OBJECT}.${POSITION_FIELD} ` +
     `takes the machine name of a position in the security catalog (a package's position, a built-in, or one ` +
@@ -428,17 +369,14 @@ export function positionNotInCatalogMessage(value: string, idOfPosition?: string
  * The refusal: `VALIDATION_FAILED` (400 at both HTTP doors) with one
  * `reference_not_found` entry per offending value at `field: 'position'`.
  */
-export function positionNotInCatalogError(
-  values: readonly string[],
-  hints: ReadonlyMap<string, string> = new Map(),
-): Error {
+export function positionNotInCatalogError(values: readonly string[]): Error {
   const fields = values.map((value): PositionFieldError => ({
     field: POSITION_FIELD,
     code: 'reference_not_found',
-    message: positionNotInCatalogMessage(value, hints.get(value)),
+    message: positionNotInCatalogMessage(value),
     label: POSITION_LABEL,
     value,
-    constraint: { target: POSITION_CATALOG_OBJECT, targetField: 'name' },
+    constraint: { target: POSITION_CATALOG_TYPE, targetField: 'name' },
   }));
   return validationFailure(fields.map((f) => f.message).join('; '), fields);
 }
@@ -457,8 +395,7 @@ export async function assertPositionNamesCatalogRow(
   if (names.length === 0) return;
   const missing = await namesWithoutCatalogRow(deps, names, opCtx.context);
   if (!missing || missing.length === 0) return;
-  const hints = await idSpellingHints(deps, missing, opCtx.context);
-  throw positionNotInCatalogError(missing, hints);
+  throw positionNotInCatalogError(missing);
 }
 
 /**

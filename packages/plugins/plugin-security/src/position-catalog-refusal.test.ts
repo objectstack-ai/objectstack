@@ -255,7 +255,7 @@ describe('a position spelled as a record id is refused, and the account is prova
       field: 'position',
       code: 'reference_not_found',
       value: AUDITOR_POSITION_ID,
-      constraint: { target: 'sys_position', targetField: 'name' },
+      constraint: { target: 'position', targetField: 'name' },
     });
     // The remedy names the column's contract: a position's machine name, never a record id.
     expect(env.fields[0].message).toBe(positionNotInCatalogMessage(AUDITOR_POSITION_ID));
@@ -567,7 +567,7 @@ describe('walled posture, two organizations — the predicate reads the environm
       field: 'position',
       code: 'reference_not_found',
       value: 'qa_undeclared',
-      constraint: { target: 'sys_position', targetField: 'name' },
+      constraint: { target: 'position', targetField: 'name' },
     });
     expect(undeclared.fields[0].message).toBe(positionNotInCatalogMessage('qa_undeclared'));
     // The same envelope, key for key, as another name nobody carries.
@@ -658,6 +658,7 @@ describe('walled posture, two organizations — the predicate reads the environm
 
   it('a record id is refused from inside an organization with the remedy, never an id-to-name hint', async () => {
     const h = await bootTwoOrgs();
+    const reads = vi.spyOn(h.engine, 'find');
     for (const position of ['pos_b_only', 'pos_a_own']) {
       const env = envelopeOf(await refusalOf(() => h.engine.insert(
         'sys_user_position', { user_id: 'u_wc', position }, { context: ORG_A_ADMIN } as any,
@@ -666,6 +667,9 @@ describe('walled posture, two organizations — the predicate reads the environm
       expect(env.fields[0], position).toMatchObject({ field: 'position', code: 'reference_not_found', value: position });
       expect(env.fields[0].message, position).toBe(positionNotInCatalogMessage(position));
     }
+    // [ADR-0131 D3] The catalog holds definitions by name only, so no record id
+    // is looked up to offer one — least of all in the retired catalog table.
+    expect(reads.mock.calls.map(([object]) => object)).not.toContain('sys_position');
   });
 });
 
