@@ -47,6 +47,7 @@ import {
   type TemplatePort,
 } from './organization-ownership-apply.js';
 import { backfillOrgAdminGrants } from '@objectstack/plugin-security';
+import { ensureDefaultOrganizationExists } from '@objectstack/plugin-auth';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { describeSecurityPluginComposition, type SchemaMigrationComposition } from './schema-migration-plugins.js';
 
@@ -2291,6 +2292,21 @@ describe('ADR-0131 D10 --apply — under a wall, the rewrite gate names the act 
   });
 });
 
+/** Run `body` against a database holding `schema` alone (a fresh file per call). */
+let ownDatabases = 0;
+async function withDatabase(schema: string, body: () => Promise<void>): Promise<void> {
+  const own = new Database(join(dir, `own-${++ownDatabases}.db`));
+  own.exec(schema);
+  const saved = db;
+  db = own;
+  try {
+    await body();
+  } finally {
+    db = saved;
+    own.close();
+  }
+}
+
 describe('ADR-0131 D10 --apply — a single-posture database that holds no organization (D3: the Default Organization exists before the first write that needs an owner)', () => {
   /** What a 17.x single-posture install whose seed ran before any organization existed left: rows, and no owner. */
   const NO_ORGANIZATION = `
@@ -2300,20 +2316,6 @@ describe('ADR-0131 D10 --apply — a single-posture database that holds no organ
     CREATE TABLE sys_job (id TEXT PRIMARY KEY, organization_id TEXT);
     INSERT INTO sys_job VALUES ('job_1', NULL);
   `;
-
-  /** Run `body` against a database holding `schema` alone. */
-  async function withDatabase(schema: string, body: () => Promise<void>): Promise<void> {
-    const own = new Database(join(dir, 'no-organization.db'));
-    own.exec(schema);
-    const saved = db;
-    db = own;
-    try {
-      await body();
-    } finally {
-      db = saved;
-      own.close();
-    }
-  }
 
   /** The producer double: the Default Organization a single-posture boot creates, written where the plan reads it. */
   function defaultOrganizationPort(opts: { fails?: string } = {}): DefaultOrganizationPort & { calls: number } {
@@ -2520,7 +2522,6 @@ describe('one definition of the Default Organization: the plan names the organiz
       const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
       expect(plan.defaultOrganization).toEqual(expected.plan);
       expect(plan.defaultOrganizationCreatedByApply).toBe(false);
-      const { ensureDefaultOrganizationExists } = await import('@objectstack/plugin-auth');
       expect(await ensureDefaultOrganizationExists(invariantEngine())).toEqual(expected.invariant);
       expect(plan.defaultOrganization?.id).toBe(expected.invariant.organizationId);
     });
@@ -2530,7 +2531,6 @@ describe('one definition of the Default Organization: the plan names the organiz
     await withDatabase(fixture(''), async () => {
       const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
       expect(plan).toMatchObject({ defaultOrganization: null, defaultOrganizationCreatedByApply: true });
-      const { ensureDefaultOrganizationExists } = await import('@objectstack/plugin-auth');
       const created = await ensureDefaultOrganizationExists(invariantEngine());
       expect(created).toMatchObject({ created: true, organizationId: expect.any(String) });
       const again = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
