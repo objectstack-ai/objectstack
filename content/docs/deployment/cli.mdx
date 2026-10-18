@@ -2209,8 +2209,9 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    `filterBindings.dateRange` names, or on the dashboard's `dateRange.field`
    (`created_at` when unauthored), resolved against the object behind the
    widget's dataset, and must be a `date` or `datetime` field; a widget with
-   `filterBindings: { dateRange: false }` is reported `unbound`. For each count
-   measure of a bound widget, fixture rows are written through the seed door
+   `filterBindings: { dateRange: false }` is reported `unbound`. For each
+   measure of a bound widget that is a count, a sum, or a derived measure over
+   those, fixture rows are written through the seed door
    on every preset's first and last day and the day either side (never after
    today), stamped at UTC noon, owned by the caller and holding every column
    the widget's own filter, the dataset's filter and the measure's filter
@@ -2230,8 +2231,9 @@ os verify --dashboard-windows                  # Also prove each dashboard date 
    probe whose fixtures do not meet the widget's own selection, or that cannot
    be written or read back as written, is reported inconclusive, never proven.
    A held column is an equality, an `$in`, a `$nin` or `$ne` on a field that
-   declares its options, or `{current_user_id}`; an average, a sum or a derived
-   measure, and a filter the ground truth cannot model (`$or`, a range, a
+   declares its options, or `{current_user_id}`; an average, a minimum or
+   maximum, a distinct count, or a derived measure over one, and a filter the
+   ground truth cannot model (`$or`, a range, a
    relationship path, a condition on the window's own field), are reported
    `excluded`.
    `--multi-tenant` boots org-scoped so tenant-isolation RLS policies
