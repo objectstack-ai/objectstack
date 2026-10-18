@@ -8,12 +8,22 @@
  * (`POST {metaPath}/:type/:name/rollback`) and the comparison of two stored
  * versions (`GET {metaPath}/:type/:name/diff`) — moved out of `rest-server.ts`.
  * They were the sixth group of `RestServer#registerMetadataEndpointsInner`'s
- * body, five statements, and that method now calls the function below at their
- * old position, so the `/meta` routes still register in one order: after the
- * per-item writes, and above the object FSM read.
+ * body, five statements, and that method now calls the first function below at
+ * their old position, so the `/meta` routes still register in one order: after
+ * the per-item writes, and above the object FSM read.
  *
- * A MOVE, not a redesign. The function below is those five statements as they
- * stood, re-indented one level: the same five routes per base, by the same
+ * [#23050 slice 13e] The second function below,
+ * {@link registerMetaItemPublishedRoute}, is the eighth and last group of that
+ * body: the published read (`GET {metaPath}/:type/:name/published`), one bare
+ * block holding one route. It is a member of the same per-item face and goes
+ * through the same per-item registrar, so it lives beside the family. It is a
+ * function of its own because the object FSM read (now
+ * `meta-object-state-routes.ts`), which is no member of that face, registers
+ * between the two, and the inner method calls each at its own position. Its
+ * section is the last one in this header.
+ *
+ * A MOVE, not a redesign. The first function below is those five statements as
+ * they stood, re-indented one level: the same five routes per base, by the same
  * handlers, answering the same bodies, each still registered through the
  * per-item switch's registrar. The moved comments are moved text too: where one
  * says "the reset door above", "a few hundred lines up" or "this file", it
@@ -85,29 +95,71 @@
  *
  * ## Module-level names
  *
- * Ten names declared in `rest-server.ts` stay there and are imported from it:
- * the five doors' closed query sets (their tests import them from there), the
- * declared numeric query read and its whole-number schema (the approvals,
- * data-action and search modules import both from there too), the package
- * binding, the absence answer (the class's event-door refusal sends it too),
- * and the authoring-door refusal, which stays beside the predicate it asks
- * (that predicate is a docs anchor) and gained `export` there rather than a
- * second home. Every one of them is read only at request time, so the two
- * modules importing each other cannot see one uninitialised. The imports only
- * this body read left `rest-server.ts` with it: the two declared request
- * schemas the change log and the audit trail parse their numbers through, the
- * three declared request types and the member selector. Every other name is
- * imported from the module `rest-server.ts` imports it from. The package entry
- * re-exports nothing from here, and the published surface does not move.
+ * The history family reads ten names declared in `rest-server.ts`, which stay
+ * there and are imported from it: the five doors' closed query sets (their
+ * tests import them from there), the declared numeric query read and its
+ * whole-number schema (the approvals, data-action and search modules import
+ * both from there too), the package binding, the absence answer (the class's
+ * event-door refusal sends it too), and the authoring-door refusal, which stays
+ * beside the predicate it asks (that predicate is a docs anchor) and gained
+ * `export` there rather than a second home. Every one of them is read only at
+ * request time, so the two modules importing each other cannot see one
+ * uninitialised. The imports only this body read left `rest-server.ts` with
+ * it: the two declared request schemas the change log and the audit trail
+ * parse their numbers through, the three declared request types and the member
+ * selector. Every other name is imported from the module `rest-server.ts`
+ * imports it from. The package entry re-exports nothing from here, and the
+ * published surface does not move.
+ *
+ * ## The published read
+ *
+ * [#23050 slice 13e] {@link registerMetaItemPublishedRoute} is that bare block
+ * as it stood, re-indented one level, braces included: the same route per
+ * base, by the same handler, answering the same bodies, still registered
+ * through the per-item switch's registrar, which reaches it in the same
+ * {@link MetaRouteScope} as the ONE closure the inner head declares. So, as for
+ * the history family, there is no `routeManager` member, and ⛔ never a
+ * module-local registrar. Its host, {@link MetaItemPublishedRouteHost}, was
+ * walked on its own, not inherited from the history family's:
+ *
+ * - `objectQLProvider` goes as a GETTER, the one member in this module that
+ *   does. The disabled-owner check reads that provider FIELD at REQUEST time,
+ *   twice (its presence, then the call, both through `wiredEngineOrLoud`), and
+ *   the field is not `readonly`, so a value copied at registration could part
+ *   from it. The getter reads the field the handler read, when it read it:
+ *   slice 2's batch shape, unbound, per the seat's provider ruling (no shipped
+ *   provider reads `this`).
+ * - The masker, the protocol, the read gate, the schema mask and the metadata
+ *   service are each resolved per request by a METHOD of the class, and every
+ *   method goes as a closure.
+ * - The door names the requested type through the private static
+ *   `metaTypeSingular`, which it used to call as
+ *   `RestServer.metaTypeSingular(…)`; for the reason the section above gives,
+ *   it now reaches it through the host, as `this.metaTypeSingular(…)`, a
+ *   closure that calls the static with the same argument. That receiver is the
+ *   only token of the body that changed.
+ *
+ * It destructures the same three scope bindings. Two more names declared in
+ * `rest-server.ts` are imported from it: `wiredEngineOrLoud` (the class head,
+ * the batch door and the object FSM read reach the engine through it too) and
+ * the `RestProtocol` type, the read gate's protocol annotation; both are read
+ * only at request time. The imports only this body read left `rest-server.ts`
+ * with it: the door's closed query set (its re-export there stays), the
+ * URL-type canonicaliser, the mask's posture relation and the unknown-parameter
+ * refusal; so did the route-error answer, whose one other reader there, the
+ * object FSM read, left in the same slice. Every other name is imported from
+ * the module `rest-server.ts` imported it from.
  */
 
 import { rethrowAuthzStoreUnavailable } from '@objectstack/core';
 // [#12702 · #20156] The `/meta` item write doors' capability predicate — see
 // `rest-server.ts`' import of the same name for why it is shared — and the
-// metadata-plane FLS names the comparison door's mask reads.
+// metadata-plane FLS names the comparison door's and the published read's mask
+// reads.
 import {
     ObjectSchemaMaskEvaluationError,
     metaWriteCapabilityVerdict,
+    relateObjectSchemaMaskPosture,
     type ObjectSchemaMaskPosture,
 } from '@objectstack/metadata-core';
 // [#20061 / #20062 / #20139] The DECLARED request schemas the change log and the
@@ -115,9 +167,10 @@ import {
 // `readDeclaredQueryNumber` in `rest-server.ts`.
 import { AuditMetaItemRequestSchema, HistoryMetaItemRequestSchema } from '@objectstack/spec/api';
 import type { AuditMetaItemRequest, HistoryMetaItemRequest, PublishMetaItemRequest } from '@objectstack/spec/api';
+import { canonicalMetaUrlType } from '@objectstack/spec/shared';
 import { handleRouteError, sendFieldVisibilityFault, thrownAnswerIsBareNotFound } from './error-response.js';
 import type { MetaRouteScope, TransportScopedMetaRequest } from './meta-collection-routes.js';
-import { META_ITEM_MEMBER_PARAM, metaMemberSelector } from './meta-item-read-gate.js';
+import { META_ITEM_MEMBER_PARAM, META_ITEM_PUBLISHED_PARAMS, metaMemberSelector } from './meta-item-read-gate.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import {
@@ -131,6 +184,8 @@ import {
     readDeclaredQueryNumber,
     refuseNonAuthoringCaller,
     sendMetaItemAbsent,
+    wiredEngineOrLoud,
+    type RestProtocol,
     type RestServer,
 } from './rest-server.js';
 
@@ -994,4 +1049,320 @@ export function registerMetaItemHistoryRoutes(this: MetaItemHistoryRouteHost, sc
             tags: ['metadata'],
         },
     });
+}
+
+/**
+ * The `RestServer` members {@link registerMetaItemPublishedRoute} reads — every
+ * one of them, and no other, in the order the body first reads them. Each is
+ * typed AS the class member (an indexed access on the class), so a change to a
+ * member's signature on the class is a change here too, and naming a member the
+ * class does not have is a compile error. `metaTypeSingular` is the class's
+ * private STATIC, typed as the static it is. The module header's last section
+ * says why there is no `routeManager` member, why the provider field is a
+ * getter and why the body reaches the static through the host.
+ */
+export interface MetaItemPublishedRouteHost {
+    metaTypeSingular: (typeof RestServer)['metaTypeSingular'];
+    resolveObjectMasker: RestServer['resolveObjectMasker'];
+    resolveProtocol: RestServer['resolveProtocol'];
+    metaItemReadGate: RestServer['metaItemReadGate'];
+    maskObjectDocument: RestServer['maskObjectDocument'];
+    readonly objectQLProvider: RestServer['objectQLProvider'];
+    resolveMetadataService: RestServer['resolveMetadataService'];
+}
+
+/**
+ * Register the `/meta` published read — the eighth and last group of
+ * `RestServer#registerMetadataEndpointsInner`' body, called by that method at
+ * its position in its registration order, after the object state-machine read,
+ * with the server's members as `this` and the method's head bindings as
+ * `scope`. The method's own docblock, which the published declaration carries,
+ * names the families, their switches and the ordering facts the route below
+ * keeps.
+ */
+export function registerMetaItemPublishedRoute(this: MetaItemPublishedRouteHost, scope: MetaRouteScope): void {
+    const { metaPath, isScoped, registerPerItemRoute } = scope;
+
+    // GET /meta/:type/:name/published — ADR-0033 published snapshot. [#7526]
+    //
+    // Ledgered since #3563 (`meta.getPublished`) and implemented in the
+    // dispatcher, but never mounted here — so the request fell into the
+    // compound-name route below with `section=:name, name='published'`,
+    // which answered a protection-envelope stub. Identical before and
+    // after publish, identical for a name that does not exist: a route
+    // that structurally could not 404.
+    //
+    // ONE arity since commit 7986d973f (stage 3 of the maintainer-ruled
+    // retirement of compound-name addressing, 2026-08-25). This route used
+    // to be mounted twice — the second registration was
+    // `/:type/:section/:name/published`, folding `section` and `name` back
+    // into one slash-bearing key so the SDK's
+    // `getPublished('lead', 'views/all_leads')` could reach it.
+    //
+    // Stage 1 (commit 311433f6b) declared the item-name grammar and refuses every
+    // slash-bearing name at the publish door, so no name reachable ONLY
+    // through that arity can exist any more. What remains addressable is a
+    // pre-grammar residue row, and it is reachable HERE: a percent-encoded
+    // `%2F` matches this single-segment pattern and Hono decodes the
+    // parameter back to `views/all_leads` (measured, not assumed), which is
+    // the spelling the SDK now sends for every name. So the compound arity
+    // was removed WITHOUT removing the capability — D1's "any stored junk
+    // name remains listable and clearable" still holds through this door.
+    {
+        registerPerItemRoute({
+            method: 'GET',
+            path: `${metaPath}/:type/:name/published`,
+            handler: async (req: any, res: any) => {
+                try {
+                    // [#23072] Recognition first, over the measured closed
+                    // set — empty: this door reads no query parameter.
+                    if (refuseUnknownQueryParams(req, res, META_ITEM_PUBLISHED_PARAMS)) return;
+                    const environmentId = isScoped ? req.params?.environmentId : undefined;
+                    const type = String(req.params?.type ?? '');
+                    // [commit 7986d973f] No `section` fold: this route has one arity.
+                    // A percent-encoded slash arrives already decoded here,
+                    // so a residue name reads exactly as it is stored.
+                    const name = String(req.params?.name ?? '');
+                    // [#8278] The AUTHORITATIVE published store is consulted
+                    // first: the `state:'active'` `sys_metadata` overlay row.
+                    // Mirrors the dispatcher fix (#8031 / PR #8254,
+                    // `packages/runtime/src/domains/meta.ts`) onto the
+                    // transport that actually serves the cloud runtime — the
+                    // two doors answered the same question from two stores,
+                    // and only one of them had been corrected.
+                    //
+                    // Two publish lifecycles write to two different places:
+                    //
+                    //   - `MetadataManager.publishPackage` snapshots a body
+                    //     into the row-local `publishedDefinition` key of its
+                    //     own in-memory registry — the ADR-0016-era package
+                    //     publish, which is what `getPublished` below reads.
+                    //   - `publishPackageDrafts` / `promoteDraft` flips the
+                    //     artifact's `sys_metadata` row `state:'draft' →
+                    //     'active'`. ADR-0027 (E)(5) defines sealing a publish
+                    //     as exactly that flip, `SysMetadataRepository` names
+                    //     `'active'` "the published, live overlay", and
+                    //     ADR-0033 §2 routes EVERY runtime authoring write
+                    //     into that same ADR-0027 draft — so promoting it is
+                    //     what "published" means for anything authored at
+                    //     runtime. Those items were absent from the registry
+                    //     `getPublished` consults, so this route answered 404
+                    //     about an item that IS published.
+                    //
+                    // `getMetaItemLayered` is the narrow primitive on purpose.
+                    // Its overlay layer is a strict `state:'active'` lookup
+                    // that never reads a draft, and it reports that layer
+                    // SEPARATELY from the code layer — so a null overlay is
+                    // positively "no runtime-published row" and falls through
+                    // to the untouched `getPublished` path below, which keeps a
+                    // code-published item resolving to byte-identical bytes.
+                    // The broader `getMetaItem` would not do: it folds the code
+                    // layer into its own answer, so this route could no longer
+                    // tell the two stores apart.
+                    //
+                    // [ADR-0131 D6] NO `organizationId`: the per-organization
+                    // overlay axis is retired, so every publish this
+                    // transport produces lands environment-wide, and this
+                    // door resolves exactly those. A legacy
+                    // organization-scoped row is not served; its promotion is
+                    // ADR-0131 C7's.
+                    //
+                    // Environment scoping still holds: it comes from WHICH
+                    // protocol `resolveProtocol` hands back, not from the
+                    // request payload (`getMetaItemLayered` declares no
+                    // `environmentId` member).
+                    // [#20156] This door serves ONE document, the same
+                    // representation the plain read serves — so it answers
+                    // exactly what the plain read answers this caller: every
+                    // gate arm (`all`), a partly-withheld app PRUNED, and the
+                    // ADR-0106 object mask, its posture resolved BEFORE the
+                    // fetch (D2/D3's `fetch → mask → send`). It ran none of
+                    // them, so a member the plain read refuses
+                    // `crm_admin_runbook` read its body here, and an object's
+                    // unreadable fields were served whole. Both exits below
+                    // send through `servePublished`.
+                    const publishedMetaType = this.metaTypeSingular(type);
+                    let publishedMaskPosture: ObjectSchemaMaskPosture;
+                    try {
+                        publishedMaskPosture = await (await this.resolveObjectMasker(environmentId, req, publishedMetaType))(name);
+                    } catch (maskError: any) {
+                        if (maskError instanceof ObjectSchemaMaskEvaluationError) {
+                            sendFieldVisibilityFault(res, name);
+                            return;
+                        }
+                        throw maskError;
+                    }
+                    let publishedProtocol: any;
+                    try {
+                        publishedProtocol = await this.resolveProtocol(environmentId, req);
+                    } catch { /* fall through to the code/package snapshot below */ }
+                    const servePublished = async (document: any): Promise<void> => {
+                        // The gate reads the protocol for its inputs (books,
+                        // the doc corpus, the object registry). The swallowed
+                        // resolution above is a fall-through for the SNAPSHOT;
+                        // a gate input is never read as absent, so a type the
+                        // gate judges resolves it again and lets it throw.
+                        const gateProtocol: RestProtocol = publishedProtocol
+                            ?? await this.resolveProtocol(environmentId, req);
+                        const verdict = await this.metaItemReadGate(
+                            environmentId, req, gateProtocol, publishedMetaType, name, [document],
+                            { arms: 'all', app: 'gate' },
+                        )(document);
+                        if (verdict.kind === 'refuse') {
+                            verdict.send(res);
+                            return;
+                        }
+                        let served = verdict.document;
+                        if (publishedMaskPosture.kind === 'project') {
+                            const related = await relateObjectSchemaMaskPosture(publishedMaskPosture, served); // [#21884]
+                            const masked = this.maskObjectDocument(res, related, name, served);
+                            if (!masked) return;
+                            served = masked.document;
+                        } else if (publishedMaskPosture.kind === 'undetermined') {
+                            res.header('Cache-Control', 'private, no-store');
+                        }
+                        res.json(served);
+                    };
+                    // [#20156] The overlay found is SERVED outside the
+                    // `try` below: that `catch` classifies a failed overlay
+                    // READ, and a gate fault raised while serving must reach
+                    // `handleRouteError` as itself — never fall through to
+                    // the snapshot as though no overlay existed.
+                    // [#7557, #24210] A disabled package's item is answered
+                    // as a name with nothing behind it, as the plain read
+                    // and the list answer it. Neither store below knows a
+                    // disable (the layered read keeps serving its resolution
+                    // reader, and the snapshot carries no owner), so the
+                    // owner is the one the plain read's kept protection
+                    // envelope names, `packageId`, asked of the registry's
+                    // `isPackageDisabled`: the predicate the protocol asks of
+                    // that same field. An object is the layered read's own
+                    // refusal below; `package` is never hidden.
+                    let withheld = false;
+                    if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
+                        && typeof publishedProtocol?.getMetaItem === 'function') {
+                        const ql = await wiredEngineOrLoud(
+                            Boolean(this.objectQLProvider),
+                            () => this.objectQLProvider!(environmentId),
+                        );
+                        const registry = (ql as any)?.registry;
+                        if (typeof registry?.isPackageDisabled === 'function') {
+                            const envelope = await publishedProtocol.getMetaItem({ type, name });
+                            withheld = registry.isPackageDisabled(envelope?.packageId) === true;
+                        }
+                    }
+                    let publishedOverlay: unknown;
+                    if (!withheld && typeof publishedProtocol?.getMetaItemLayered === 'function') {
+                        try {
+                            const layered = await publishedProtocol.getMetaItemLayered({
+                                type,
+                                name,
+                            });
+                            if (layered?.overlay !== undefined && layered?.overlay !== null) {
+                                // [#21002, #21986, ADR-0126 §2, ADR-0062 D4]
+                                // When the layered read put a code layer
+                                // over this stored row, this door serves
+                                // that effective layer, not the row. The
+                                // protocol decides it with one predicate,
+                                // `declinesStoredRow`, for both name
+                                // classes: a shipped flow name (the
+                                // loader's body; `flow` is Regime C,
+                                // "never an overlay read path") and a
+                                // code-defined datasource name (the code
+                                // definition; "code wins on collision").
+                                // The predicate is ASKED of its owner with
+                                // the answer's own `type` / `name`, never
+                                // re-derived here, so this door, the
+                                // by-name read, the list and
+                                // `getMetaItemLayered` read one rule. Every
+                                // other stored row is served exactly as
+                                // before — an `object` too, whose effective
+                                // layer differs from its row by folding, not
+                                // by this decision — and so is every row of a
+                                // protocol that brings no such predicate.
+                                const decliner: { declinesStoredRow?(type: string, name: unknown): boolean } = publishedProtocol;
+                                publishedOverlay = typeof decliner.declinesStoredRow === 'function'
+                                    && decliner.declinesStoredRow(layered.type, layered.name)
+                                    ? layered.effective
+                                    : layered.overlay;
+                            }
+                        } catch (overlayError: any) {
+                            // [#5532] The overlay read is NOT blanket-swallowed,
+                            // and this is the second deliberate divergence from
+                            // the dispatcher twin. `getMetaItemLayered` documents
+                            // that it throws `503 SERVICE_UNAVAILABLE` ONLY when a
+                            // read that would decide a layer did not happen; the
+                            // benign "table not provisioned yet" case genuinely
+                            // means "no overlay row" and returns normally with
+                            // `overlay: null`. So a throw here is an availability
+                            // failure, and falling through would let it reach the
+                            // client as `404 Not found` — an availability failure
+                            // reported as an existence fact, which is exactly the
+                            // #5532 defect this package pins in
+                            // `rest-meta-outage-vs-miss.test.ts`. A declared
+                            // status is re-thrown so `handleRouteError` renders
+                            // the producer's own 503; anything undeclared (a
+                            // third-party protocol throwing something shapeless)
+                            // still falls through, so this cannot make the
+                            // code-published path newly fail closed.
+                            if (typeof overlayError?.status === 'number') throw overlayError;
+                        }
+                    }
+                    if (publishedOverlay !== undefined) {
+                        await servePublished(publishedOverlay);
+                        return;
+                    }
+
+                    const svc = await this.resolveMetadataService(environmentId, req);
+                    if (typeof (svc as any)?.getPublished !== 'function') {
+                        // [#8297] Reached ONLY when the overlay consult above
+                        // found nothing (a null `layered.overlay`) — so this is
+                        // no longer "this kernel cannot answer /published" (the
+                        // pre-#8278 reading); it is the narrower, rarer
+                        // condition the message below actually states: nothing
+                        // is runtime-published for this item, AND this kernel's
+                        // metadata slot has no code/package store to fall back
+                        // to (`getPublished` is optional on `IMetadataService`
+                        // and unimplemented here). Status, `code`, and routing
+                        // order are unchanged — only the prose was stale.
+                        res.status(501).json({
+                            error: {
+                                code: 'NOT_IMPLEMENTED',
+                                message: 'Nothing is runtime-published for this item, and this kernel has no code/package store (metadata.getPublished() is not available).',
+                            },
+                        });
+                        return;
+                    }
+                    // [commit 26f3588fb] FOLDED here too — the smaller second site
+                    // of the same class. The layered consult above folds
+                    // internally (protocol boundary), but this fallback
+                    // reads the code/package registry, which stores
+                    // CANONICAL types; handed the raw segment it answered
+                    // 404 for a recognised plural and 200 for the singular
+                    // twin of the same code-published item.
+                    const data = withheld
+                        ? undefined
+                        : await (svc as any).getPublished(canonicalMetaUrlType(type), name);
+                    // The 404 this route could never produce before. An
+                    // item that exists but was never published still
+                    // answers 200 with its current definition — that is
+                    // `getPublished`'s documented fallback, and it is a
+                    // different fact from "no such item".
+                    if (data === undefined) {
+                        res.status(404).json({
+                            error: { code: 'NOT_FOUND', message: 'Not found' },
+                        });
+                        return;
+                    }
+                    await servePublished(data);
+                } catch (error: any) {
+                    handleRouteError(res, error);
+                }
+            },
+            metadata: {
+                summary: 'Get the published version of a metadata item',
+                tags: ['metadata'],
+            },
+        });
+    }
 }

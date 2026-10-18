@@ -63,8 +63,12 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // body, the per-item writes — see {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-item-write-routes.ts',
     // [#23050 slice 13d] The sixth `/meta` group of `registerMetadataEndpointsInner`'
-    // body, the history family — see {@link REST_SERVER_META_ROUTE_FILES}.
+    // body, the history family — see {@link REST_SERVER_META_ROUTE_FILES}. [#23050 slice
+    // 13e] It holds the eighth and last too, the published read, as a second registrar.
     'meta-item-history-routes.ts',
+    // [#23050 slice 13e] The seventh `/meta` group of `registerMetadataEndpointsInner`'
+    // body, the object state-machine read — see {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-object-state-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
@@ -84,7 +88,9 @@ export type RestServerRegistrarFile = (typeof REST_SERVER_REGISTRAR_FILES)[numbe
  *
  * Named file by file, ⛔ never by a naming convention: a module joins this
  * subset in the slice that moves a `/meta` group into it, and a reader that
- * depends on it pins it against the module calls inside the inner method.
+ * depends on it pins it against the module calls inside the inner method (one
+ * per file, and two for `meta-item-history-routes.ts`, the one module the inner
+ * method calls at two positions).
  */
 export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = [
     // [#23050 slice 13a] The type list, the whole-store maintenance family and the
@@ -99,8 +105,14 @@ export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = 
     'meta-item-write-routes.ts',
     // [#23050 slice 13d] The history family: `/history`, `/audit`, `/publish`,
     // `/rollback` and `/diff`. Like the per-item writes, all five routes go through the
-    // inner method's per-item registrar, handed over in its scope.
+    // inner method's per-item registrar, handed over in its scope. [#23050 slice 13e]
+    // The published read joined them, the same way, through a second function the inner
+    // method calls at its own position: the one module here it calls twice.
     'meta-item-history-routes.ts',
+    // [#23050 slice 13e] The object state-machine read, `GET {metaPath}/object/:name/state/:field`.
+    // It is in no per-family switch and registers on the route manager itself, by value
+    // from a host literal built inside the inner method.
+    'meta-object-state-routes.ts',
 ];
 
 /**

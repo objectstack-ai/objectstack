@@ -73,7 +73,7 @@ import {
 } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
-import type { StandardErrorCode } from '@objectstack/spec/api';
+import type { RegisteredErrorCode, StandardErrorCode } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
@@ -604,6 +604,11 @@ export function isOAuthEligibleBaseUrl(url: string): boolean {
  * plugin-auth gains no dependency on plugin-security.
  */
 export interface InvitationPlacementServiceLike {
+  /**
+   * Refuses with the gate's `PermissionDeniedError` (`code: 'PERMISSION_DENIED'`)
+   * when the issuer may not place this invitation. Any other throw is a failure
+   * to reach that verdict, such as a store that could not answer.
+   */
   assertIssuable(args: {
     intent: { businessUnitId: string; positions: string[] };
     /** The ISSUER's user id — the service resolves their grants itself. */
@@ -1153,9 +1158,13 @@ export function ipMatchesRange(ip: string, range: string): boolean {
  * plugin-auth's `normalizePhoneNumber` … kept local: the two packages must not
  * depend on each other").
  *
- * Only the CODE crosses the boundary — a closed-vocabulary ADR-0112 error code,
- * not prose. The message half of the envelope is service-owned and may be
- * reworded without touching this file.
+ * Only the envelope's CODE token crosses the boundary, never its prose: the
+ * message half is service-owned and may be reworded without touching this
+ * file. That token is the service's own spelling, which is better-call's
+ * status NAME for 429; it is not an ADR-0112 error code (`ErrorCode` refuses
+ * it as a reason-phrase alias of `RATE_LIMIT_EXCEEDED`). So it is only ever
+ * MATCHED here, never put in a body: the code the 429 carries to the caller
+ * is {@link PHONE_OTP_SEND_REFUSAL_CODE}.
  */
 const SMS_QUOTA_EXCEEDED_CODE = 'TOO_MANY_REQUESTS';
 
@@ -1337,11 +1346,30 @@ function acceptLanguageHeader(source: unknown): string | undefined {
  * which budget they hit, and a legitimate caller needs no more than "not now".
  * (The per-number wall names its own retry window because it can compute one;
  * this wall states no time it cannot honestly promise.)
+ *
+ * The status is spelled out as better-call's name for 429 rather than read off
+ * {@link SMS_QUOTA_EXCEEDED_CODE}: that constant is the service envelope's
+ * token, matched on the way in, and the HTTP status is this endpoint's own.
  */
 async function smsQuotaExceededApiError(message: string): Promise<Error> {
   const { APIError } = await import('better-auth/api');
-  return new APIError(SMS_QUOTA_EXCEEDED_CODE, { message });
+  return new APIError('TOO_MANY_REQUESTS', { message, code: PHONE_OTP_SEND_REFUSAL_CODE });
 }
+
+/**
+ * [#24243, ADR-0112] The ONE code both phone-OTP send walls answer with: the
+ * deployment's daily SMS quota ({@link smsQuotaExceededApiError}) and the
+ * per-number cooldown and hourly cap
+ * ({@link AuthManager.assertPhoneOtpSendAllowed}). One code, not one per wall:
+ * #2814 requires the two walls to be indistinguishable from outside, so a
+ * caller learns "not now" and never which budget it hit. The standard
+ * catalog's member for request pacing; `QUOTA_EXCEEDED` would name the first
+ * wall alone, and so would tell them apart.
+ */
+const PHONE_OTP_SEND_REFUSAL_CODE: StandardErrorCode = 'RATE_LIMIT_EXCEEDED';
+
+/** [#24243] The standard ADR-0112 code the slug guard's read fault answers with — the status's own name. */
+const SLUG_GUARD_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
 
 /**
  * [#21941] The organization slug guard's answer when one of its own reads
@@ -1357,9 +1385,10 @@ async function slugGuardReadFaultApiError(object: string, cause: unknown): Promi
   const { APIError } = await import('better-auth/api');
   const err = new APIError('SERVICE_UNAVAILABLE', {
     message:
-      `The organization slug guard could not read \`${object}\`, so whether an active environment ` +
-      `still references this organization was never determined, and the slug was not changed. ` +
+      `The organization slug guard could not read \`${object}\`, so whether this organization has an ` +
+      `active environment was never determined, and the slug was not changed. ` +
       `This is a server-side outage, not a refusal of the new slug: retry once the data store is reachable.`,
+    code: SLUG_GUARD_READ_FAULT_CODE,
   });
   (err as { cause?: unknown }).cause = cause;
   return err;
@@ -1376,9 +1405,9 @@ const INVITATION_ROLE_CAP_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILA
  * Not the cap's `403 INVITE_ISSUER_UNVERIFIED`: that code is a verdict — the
  * store answered and established no role — while a read that threw reached no
  * verdict, so it must not wear the refusal's code. Still fail-closed: the
- * throw ends the endpoint, so no invitation row is written. Unlike the slug
- * guard's body, this one carries the code too, so every answer from the
- * invitation endpoint has one. The driver's own failure rides `cause`.
+ * throw ends the endpoint, so no invitation row is written. Like the slug
+ * guard's body (#24243), this one carries the code too, so every answer from
+ * the invitation endpoint has one. The driver's own failure rides `cause`.
  */
 async function invitationRoleCapReadFaultApiError(cause: unknown): Promise<Error> {
   const { APIError } = await import('better-auth/api');
@@ -1388,6 +1417,64 @@ async function invitationRoleCapReadFaultApiError(cause: unknown): Promise<Error
       'determined, and no invitation was created. This is a server-side outage, not a refusal of the ' +
       'invitation: retry once the data store is reachable.',
     code: INVITATION_ROLE_CAP_READ_FAULT_CODE,
+  });
+  (err as { cause?: unknown }).cause = cause;
+  return err;
+}
+
+// [#24243, ADR-0112] The organization plugin's hook refusals, one code each, so
+// a client (the console's organization and Invite User dialogs among them)
+// branches on the code and never on the prose. A registered code is typed
+// `RegisteredErrorCode` and a standard one `StandardErrorCode`, so a removed or
+// misspelled ledger row fails `tsc` here instead of shipping a code
+// `ApiErrorSchema` rejects.
+
+/** `beforeCreateOrganization`: the reserved `__global__` id or slug (ADR-0120 D3), a value the request may not carry. */
+const ORGANIZATION_RESERVED_IDENTIFIER_CODE: StandardErrorCode = 'VALIDATION_ERROR';
+/** `beforeCreateOrganization`: the effective tenancy posture enforces no organization wall, so no caller may create one. */
+const ORGANIZATION_CREATION_DISABLED_CODE: RegisteredErrorCode = 'ORGANIZATION_CREATION_DISABLED';
+/** `beforeCreateInvitation`: placement intent, and no delegated-administration runtime to authorize it. */
+const INVITE_PLACEMENT_UNSUPPORTED_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_UNSUPPORTED';
+/** `beforeCreateInvitation`: the delegated-administration gate's own verdict that the placement is outside the issuer's scope. */
+const INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE_CODE: RegisteredErrorCode = 'INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE';
+/** `beforeCreateInvitation`: the placement check failed before the gate reached a verdict — the status's own name. */
+const INVITE_PLACEMENT_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
+/** `beforeUpdateOrganization`: a change to a new slug while the organization has an active environment. */
+const ORGANIZATION_SLUG_LOCKED_CODE: RegisteredErrorCode = 'ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS';
+
+/**
+ * [#24243] Is this throw out of `assertIssuable` the delegated-administration
+ * gate's own refusal? The service's contract is that the gate refuses with its
+ * `PermissionDeniedError` (`invitation-placement.ts`), whose ADR-0112 code is
+ * `PERMISSION_DENIED`. Read by that code, structurally, because plugin-auth has
+ * no runtime dependency on plugin-security (see
+ * {@link InvitationPlacementServiceLike}).
+ */
+function isInvitationPlacementGateRefusal(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'PERMISSION_DENIED';
+}
+
+/**
+ * [#24243] The invitation placement check's answer when it failed BEFORE the
+ * gate reached a verdict: `503 SERVICE_UNAVAILABLE`, as the role cap's read
+ * fault answers ({@link invitationRoleCapReadFaultApiError}). `assertIssuable`
+ * resolves the issuer's grants from the store before it runs the gate, and a
+ * store that cannot answer throws there (`AuthzStoreUnavailableError`).
+ *
+ * Not `403 INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE`: that code is the gate's own
+ * verdict, and a check that failed reached none, so it must not wear the
+ * refusal's code. Still fail-closed: the throw ends the endpoint, so no
+ * invitation row is written. The thrown failure rides `cause`, and its message
+ * is not relayed, so a driver's text does not reach the caller.
+ */
+async function invitationPlacementReadFaultApiError(cause: unknown): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  const err = new APIError('SERVICE_UNAVAILABLE', {
+    message:
+      'The invitation placement check failed before it reached a verdict, so whether the issuer may ' +
+      'place this invitation was never determined, and no invitation was created. This is a ' +
+      'server-side outage, not a refusal of the placement: retry once the data store is reachable.',
+    code: INVITE_PLACEMENT_READ_FAULT_CODE,
   });
   (err as { cause?: unknown }).cause = cause;
   return err;
@@ -3465,6 +3552,7 @@ export class AuthManager {
                 message:
                   "'__global__' is reserved for the platform (no-organization) bucket " +
                   '(ADR-0120 D3) and cannot be used as an organization id or slug.',
+                code: ORGANIZATION_RESERVED_IDENTIFIER_CODE,
               });
             }
             if (!this.multiOrgPostureEffective()) {
@@ -3472,6 +3560,7 @@ export class AuthManager {
               throw new APIError('FORBIDDEN', {
                 message:
                   'Creating additional organizations is disabled on this deployment.',
+                code: ORGANIZATION_CREATION_DISABLED_CODE,
               });
             }
           },
@@ -3540,6 +3629,7 @@ export class AuthManager {
               throw new APIError('FORBIDDEN', {
                 message:
                   'Invitation placement (business unit + positions) requires the delegated-administration runtime; this deployment cannot authorize it.',
+                code: INVITE_PLACEMENT_UNSUPPORTED_CODE,
               });
             }
 
@@ -3554,9 +3644,17 @@ export class AuthManager {
                 organizationId,
               });
             } catch (err: any) {
+              // [#24243] Only the gate's own refusal is a scope verdict. A throw
+              // that is not one (the issuer's grants could not be read) reached
+              // no verdict, so it answers 503 with its code rather than wearing
+              // the refusal's 403, its code and a driver's message.
+              if (!isInvitationPlacementGateRefusal(err)) {
+                throw await invitationPlacementReadFaultApiError(err);
+              }
               const { APIError } = await import('better-auth/api');
               throw new APIError('FORBIDDEN', {
                 message: err?.message ?? 'Invitation placement is outside your delegated administration scope.',
+                code: INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE_CODE,
               });
             }
           },
@@ -3665,11 +3763,15 @@ export class AuthManager {
 
             if (activeEnvs > 0) {
               const { APIError } = await import('better-auth/api');
+              // [#24243] The message states only what the guard read: environment
+              // rows by `organization_id`, counted by `status`. No hostname is
+              // read, so none is named as a remedy.
               throw new APIError('FORBIDDEN', {
                 message:
-                  `Cannot change organization slug while ${activeEnvs} active ` +
-                  `environment(s) still reference it. Archive those environments ` +
-                  `or rename their hostnames first.`,
+                  `Cannot change the organization slug while the organization has ${activeEnvs} ` +
+                  `active environment(s), meaning any environment that is neither archived nor ` +
+                  `failed. Archive those environments first, or keep the current slug.`,
+                code: ORGANIZATION_SLUG_LOCKED_CODE,
               });
             }
           },
@@ -5760,6 +5862,8 @@ export class AuthManager {
       const { APIError } = await import('better-auth/api');
       throw new APIError('TOO_MANY_REQUESTS', {
         message: `Too many verification codes requested for this phone number. Retry in ${decision.retryAfterSeconds ?? 60}s.`,
+        // The quota wall's code too (#2814): see PHONE_OTP_SEND_REFUSAL_CODE.
+        code: PHONE_OTP_SEND_REFUSAL_CODE,
       });
     }
   }

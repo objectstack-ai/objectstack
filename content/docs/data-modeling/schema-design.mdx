@@ -102,7 +102,10 @@ To control exactly which fields are matched, set `searchableFields` on the objec
 Queries then pass a top-level `$search` parameter to match across `searchableFields`
 (e.g. `{ $search: 'acme' }`); a request may narrow the set with
 `$searchFields`. When `searchableFields` is unset, search falls back to the
-name/title field plus short-text fields.
+name/title field plus short-text fields. When neither leaves a stored field to scan — a
+junction object of lookups with a `formula` title, say — a list search is refused
+`400 INVALID_FIELD` rather than answered with every row, and global search skips the
+object; mirror the title onto a stored text field, as below.
 
 #### Searching by a related record's title — mirror the value
 
