@@ -101,6 +101,20 @@ describe('[#24314] an extension adds its own fields and none of the platform pla
     }
   }
 
+  it("an audit field an extension declares is governed by the base layer's plan (#4447)", () => {
+    const writable = { type: 'datetime', label: 'Created', readonly: false };
+    const extendWith = (owner: any) => {
+      const reg = registry();
+      reg.registerObject(structuredClone(owner), 'owner.pkg', undefined, 'own');
+      reg.registerObject({ name: owner.name, fields: { created_at: writable } } as any, 'extender.pkg', undefined, 'extend', 200);
+      return reg.getObject(owner.name) as any;
+    };
+    // The base carries the audit family: the extender cannot make the anchor writable.
+    expect(extendWith(TARGETS[5][1]).fields.created_at).toMatchObject({ label: 'Created', readonly: true });
+    // The base's plan governs nothing (better-auth): the extender's field stands as written.
+    expect(extendWith(TARGETS[0][1]).fields.created_at).toMatchObject({ label: 'Created', readonly: false });
+  });
+
   it('the extension contributor itself carries only what its author wrote', () => {
     const reg = registry();
     reg.registerObject(structuredClone(TARGETS[5][1]), 'owner.pkg', undefined, 'own');

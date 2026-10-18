@@ -6,6 +6,7 @@ import { ServiceObject, ObjectSchema, ObjectOwnership, provisionPrimary, resolve
 // package `objectql` and `metadata-protocol` both depend on.
 import {
   AUDIT_FIELD_GOVERNANCE,
+  applyAuditFieldGovernance,
   AUDIT_FIELD_DEFS,
   TENANT_SCOPE_FIELD_DEF,
   OWNER_FIELD_DEF,
@@ -3338,10 +3339,16 @@ export class SchemaRegistry {
     // scalar look "authored" to the next extender and silently invert
     // extender-vs-extender precedence (D9.3: declared numbers order peers).
     const tenantAuthored = this.tenantAuthoredScalars(contributors, baseDefinition);
+    // [#24314] An `extend` body is not planned at registration, so an audit
+    // field it declares is governed HERE, by the base layer's plan: where the
+    // base carries the audit family, a `created_at` an extender declares cannot
+    // replace the platform's read-only definition with a writable one (#4447).
+    const governAudit = resolveInjectedSystemColumns(baseDefinition).audit;
     let merged = { ...baseDefinition };
     for (const contrib of contributors) {
       if (contrib.ownership === 'extend') {
-        merged = mergeObjectDefinitions(merged, contrib.definition, tenantAuthored);
+        const extension = governAudit ? applyAuditFieldGovernance(contrib.definition) : contrib.definition;
+        merged = mergeObjectDefinitions(merged, extension, tenantAuthored);
       }
     }
     // A picklist-bound field is served with its list's options resolved onto
