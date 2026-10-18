@@ -57,7 +57,7 @@ const NARROWED_ID = 'ui-cloud-connection-widgets-unknown-keys-refused';
 const FIRST_SENTENCE =
   /^`marketplace:installed-list` was removed in @objectstack\/spec 18 \(ADR-0049\) — the separate Installed Apps view it drew was retired, so no renderer draws the type and the console would show "Unknown component type" in its place\./;
 const FIX =
-  "Delete the `marketplace:installed-list` component node; to send users to that list, add a navigation item of type `component` with `componentRef: 'developer:packages'` and `params: { source: 'marketplace' }` instead.";
+  "Delete the `marketplace:installed-list` component node; to link to that view, add a `component` navigation item with `componentRef: 'developer:packages'` and `params: { source: 'marketplace' }`.";
 // `check:doc-authoring`: a prescription printed at the customer carries no
 // citation-shaped issue id.
 const ISSUE_ID = /#\d{3,}/;

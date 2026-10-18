@@ -183,9 +183,9 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
     + 'draws the type and the console would show "Unknown component type" in its place. The '
     + 'Installed Apps list is Setup → Packages filtered to Source = marketplace: the console\'s '
     + '`developer:packages` component opened with `params: { source: \'marketplace\' }`. Delete '
-    + 'the `marketplace:installed-list` component node; to send users to that list, add a '
-    + 'navigation item of type `component` with `componentRef: \'developer:packages\'` and '
-    + '`params: { source: \'marketplace\' }` instead.'],
+    + 'the `marketplace:installed-list` component node; to link to that view, add a `component` '
+    + 'navigation item with `componentRef: \'developer:packages\'` and '
+    + '`params: { source: \'marketplace\' }`.'],
   ['element:form', '`element:form` was removed in @objectstack/spec 17 '
     + '(ADR-0049) — the whole `element:form` element is retired: no renderer for it '
     + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
