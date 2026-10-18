@@ -165,6 +165,21 @@ export interface MetaItemReadGateSources extends MetaReadGateAudienceSources, Me
     serviceProbe(caller: MetaReadGateCaller | undefined): ((name: string) => Promise<boolean>) | null;
     /** Where the nav-servability prune log records what it has already said (one line per key). */
     readonly navPruneLogged: Set<string>;
+    /**
+     * [#7557, #24210] Does the by-name read withhold this item because its
+     * owning package is disabled? The owner is the one the plain read's kept
+     * protection envelope names (`packageId`, the served item's `_packageId`,
+     * read under the same `?package=` scope), asked of the engine registry's
+     * `isPackageDisabled`: the field and predicate the protocol's list and
+     * by-name reads ask. The layered answer cannot say it itself: a
+     * runtime-saved item's layers carry no owner.
+     *
+     * Read by the layered chain ({@link createMetaLayeredAnswer}) only.
+     * Absent, or a registry that cannot answer, is "not withheld": the answer
+     * before #24210. A REJECTION is a fault and propagates, ⛔ never "not
+     * withheld".
+     */
+    isItemOfDisabledPackage?(item: { type: string; name: string; packageId?: string }): Promise<boolean>;
 }
 
 // ── The caller's organization ─────────────────────────────────────────────────
@@ -3671,6 +3686,12 @@ export interface MetaLayeredRequest {
     readonly metaType: string;
     readonly name: string;
     /**
+     * [ADR-0048] The `?package=` scope the transport read the layers under,
+     * absent for none. The same name can be stored in two packages, so the
+     * owner step 1b asks about is the one this scope resolves.
+     */
+    readonly packageId?: string;
+    /**
      * [ADR-0106 D2/D3] The caller's field-visibility posture for this item,
      * resolved by the transport BEFORE the read, the not-applicable passthrough
      * for every type but `object`. A tier-3 fault is the transport's to answer
@@ -3738,6 +3759,17 @@ export type MetaLayeredAnswer =
  *     that difference told a member which unpublished apps exist. The
  *     protocol's `effective` is never null while another layer is present, so
  *     this is the name resolving to nothing at all, for every caller.
+ *  1b. [#7557, #24210] A disabled package's item — every type but `object`
+ *     and `package` — is that same `absent`: the list read omits it and the
+ *     by-name read answers it as a name with nothing behind it, so both
+ *     spellings on both transports take the missing name's exit. Asked of
+ *     {@link MetaItemReadGateSources.isItemOfDisabledPackage}, BEFORE the
+ *     gate, so an author who may write the item is not served it whole
+ *     either. An object is the protocol's own `OBJECT_PACKAGE_DISABLED`
+ *     refusal, thrown by the read before this chain; `package` is never
+ *     hidden. The protocol's layered read keeps serving every layer, because
+ *     its resolution readers (the security catalog echo, the
+ *     packaged-permission-set lock gate) need them: the door answers here.
  *  2. [#20156] THE per-caller gate on EVERY present layer, `effective` first
  *     (it is what the plain read serves, so its refusal is the plain read's
  *     own), under {@link STORED_VERSION_DOOR_POLICY}: per-caller arms only
@@ -3763,7 +3795,7 @@ export function createMetaLayeredAnswer(
     sources: MetaItemReadGateSources,
     request: MetaLayeredRequest,
 ): (layered: unknown) => Promise<MetaLayeredAnswer> {
-    const { metaType, name, maskPosture } = request;
+    const { metaType, name, packageId, maskPosture } = request;
     return async (raw) => {
         const layered = raw as Record<string, unknown> | null | undefined;
         const present = META_ITEM_LAYERS.filter((layer) => layered?.[layer] != null);
@@ -3771,6 +3803,13 @@ export function createMetaLayeredAnswer(
         // 1. [#20507] Absence — ADR-0045 §3: a name with no layer behind it is
         //    the plain read's absence, answered before the gate.
         if (present.length === 0) return { kind: 'refuse', refusal: { reason: 'absent' } };
+
+        // 1b. [#7557, #24210] A disabled package's item is that same absence,
+        //     for every caller: before the gate, so no author is served it.
+        if (metaType !== 'object' && metaType !== 'package'
+            && await sources.isItemOfDisabledPackage?.({ type: metaType, name, ...(packageId ? { packageId } : {}) }) === true) {
+            return { kind: 'refuse', refusal: { reason: 'absent' } };
+        }
 
         // 2. [#20156] THE per-caller gate, on every present layer.
         const served = new Map<string, unknown>();
