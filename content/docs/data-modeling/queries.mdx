@@ -477,7 +477,10 @@ dotted `fields` path (`'customer.name'`) for a single related column:
 
 `search` takes the query text; the server resolves which fields to search from object
 metadata (ADR-0061). Pass `searchFields` to narrow that set — it is intersected with what
-the object allows, so it can only narrow, never widen.
+the object allows, so it can only narrow, never widen. When the object allows nothing —
+no `searchableFields` entry names a stored field, and the default search scans none
+(`internal: true` fields never count) — a non-blank `search` is refused with
+`400 INVALID_FIELD` instead of answering every row, engine calls included.
 
 ```typescript
 {
