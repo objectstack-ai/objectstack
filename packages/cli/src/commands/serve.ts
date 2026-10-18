@@ -4086,10 +4086,15 @@ export default class Serve extends Command {
       }
 
       // 5c-ter. [ADR-0131 D10 item 5] The v18 boot refusal, beside the
-      // recovery scan and in its shape: at `kernel:ready` it refuses to start
-      // a database still in the v17 organization-ownership shape whose
-      // ceremony marker is not verified, naming `os migrate
-      // organization-ownership`. Composed HERE, on served kernels only —
+      // recovery scan: it refuses to start a database still in the v17
+      // organization-ownership shape whose ceremony marker is not verified,
+      // or one whose ceremony ran and did not verify, naming `os migrate
+      // organization-ownership`. It judges in its own `start()`, right after
+      // the engine's (the additive schema sync the ceremony waits for), and
+      // ahead of every plugin that writes rows at start — so a refused boot
+      // writes none. Composed HERE, before the auth family and the app
+      // plugins (which also declare it in `optionalDependencies`), on served
+      // kernels only —
       // ⛔ never in `createStandaloneStack`, which every CLI data and schema
       // boot shares, the ceremony's own boot among them. A host that composes
       // its own instance keeps it; a guard that cannot be composed fails the
@@ -5783,14 +5788,22 @@ export default class Serve extends Command {
       // it again (`utils/dev-organization-ownership-upgrade.ts`) — so the
       // refusal is not printed as this boot's failure. Any other boot refuses
       // as before, naming the ceremony.
-      if (isDev && typeof process.send === 'function') {
-        const { isOrganizationOwnershipBootRefusal } = await import('@objectstack/runtime');
-        if (isOrganizationOwnershipBootRefusal(error)) {
-          const sent = await announceOrganizationOwnershipRequired([...error.tables]);
-          if (sent) this.exit(1);
-        }
+      //
+      // The guard refuses from its `start()` (before any plugin writes a row),
+      // so the kernel hands it on as the `cause` of its own start-failure
+      // error: the refusal is looked for down the chain, and its own text is
+      // what this boot prints.
+      const { isOrganizationOwnershipBootRefusal } = await import('@objectstack/runtime');
+      let ownershipRefusal: { tables: readonly string[]; message: string } | undefined;
+      for (let cause: unknown = error, depth = 0; !ownershipRefusal && cause && typeof cause === 'object' && depth < 8; depth++) {
+        if (isOrganizationOwnershipBootRefusal(cause)) ownershipRefusal = cause;
+        cause = (cause as { cause?: unknown }).cause;
       }
-      printError(error.message || String(error));
+      if (ownershipRefusal && isDev && typeof process.send === 'function') {
+        const sent = await announceOrganizationOwnershipRequired([...ownershipRefusal.tables]);
+        if (sent) this.exit(1);
+      }
+      printError(ownershipRefusal?.message || error.message || String(error));
       // A boot that died is when its warnings matter most, and the banner that
       // would normally carry them never printed (#4012).
       const diagnostics = collectBootDiagnostics();

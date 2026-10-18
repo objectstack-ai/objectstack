@@ -442,7 +442,20 @@ export interface OrganizationOwnershipPlan {
   database: string;
   client: string | null;
   posture: string;
-  defaultOrganization: { id: string; slug: 'default' } | null;
+  /**
+   * The organization a `single` install derives every owner from, named as the
+   * boot names it: `slug = 'default'`, else the sole organization (its own
+   * slug here). `null` when the database holds none, or several and none of
+   * them `default`.
+   */
+  defaultOrganization: { id: string; slug: string | null } | null;
+  /**
+   * `true` under `single` on a database that holds no organization at all and
+   * rows no anchor names: `--apply` creates the Default Organization before
+   * attribution, and those rows are counted as attributed to it (ADR-0131 D3,
+   * D10 fate 3). One of the plan's {@link warnings} says so.
+   */
+  defaultOrganizationCreatedByApply: boolean;
   organizations: number;
   /** sha256 of the inventory this plan was computed from. */
   inventoryDigest: string;
@@ -742,6 +755,13 @@ interface PlanContext {
   homeOf: (object: string) => string | undefined;
   posture: string;
   defaultOrganizationId: string | null;
+  /**
+   * Under `single` with no organization at all: `--apply` creates the Default
+   * Organization before attribution when a row falls to it
+   * ({@link OrganizationOwnershipPlan.defaultOrganizationCreatedByApply}), so
+   * those rows are counted as attributed, never reported.
+   */
+  defaultOrganizationCreatable: boolean;
   onAttribution?: AttributionSink;
 }
 
@@ -1170,14 +1190,22 @@ async function walkNullRows(
         if (pending.length === 0) break;
         pending = await applyAnchor(ctx, anchor, pending, derived, assigned);
       }
-      if (pending.length > 0 && ctx.posture === 'single' && ctx.defaultOrganizationId !== null) {
+      if (pending.length > 0 && ctx.posture === 'single' && (ctx.defaultOrganizationId !== null || ctx.defaultOrganizationCreatable)) {
         derived['default-organization'] = (derived['default-organization'] ?? 0) + pending.length;
-        for (const row of pending) {
+        // The plan's own run counts the rows the Default Organization `--apply`
+        // creates will take; the apply's walk runs only once it exists.
+        if (ctx.defaultOrganizationId === null && ctx.onAttribution) {
+          throw new Error(
+            'Attribution reached the Default Organization before it was created: --apply creates it before its first ' +
+              'attribution pass (ADR-0131 D3). This is a defect of the ceremony, not of the database.',
+          );
+        }
+        for (const row of ctx.defaultOrganizationId === null ? [] : pending) {
           assigned.push({
             id: row.id,
             table: row.shard,
             ...(ctx.database !== PRIMARY_DATABASE ? { database: ctx.database } : {}),
-            organizationId: ctx.defaultOrganizationId,
+            organizationId: ctx.defaultOrganizationId!,
             via: 'default-organization',
           });
         }
@@ -1190,7 +1218,8 @@ async function walkNullRows(
         id: row.id,
         reason:
           entry.fate === 'attribution' && ctx.posture === 'single' && ctx.defaultOrganizationId === null
-            ? `${row.reason}; no Default Organization (slug '${DEFAULT_ORGANIZATION_SLUG}') exists to fall back to`
+            ? `${row.reason}; no Default Organization exists to fall back to (no organization has slug ` +
+              `'${DEFAULT_ORGANIZATION_SLUG}', and the database does not hold exactly one)`
             : row.reason,
         ...(plan.tables.length > 1 ? { shard: row.shard } : {}),
       });
@@ -1272,15 +1301,43 @@ export async function buildOrganizationOwnershipPlan(opts: {
   const organizations = hasOrganizations
     ? await sql.count('sys_organization', `SELECT COUNT(*) AS n FROM ${sql.q('sys_organization', 'sys_organization')}`)
     : 0;
-  let defaultOrganizationId: string | null = null;
-  if (hasOrganizations && catalog.columns.get('sys_organization')?.has('slug')) {
-    const rows = await sql.read(
-      'sys_organization',
-      `SELECT ${sql.q(ID, 'sys_organization')} AS id FROM ${sql.q('sys_organization', 'sys_organization')} WHERE ${sql.q('slug', 'sys_organization')} = ?`,
-      [DEFAULT_ORGANIZATION_SLUG],
-    );
-    defaultOrganizationId = rows.length > 0 ? nonEmpty(rows[0]!.id) : null;
+  // [ADR-0131 D3; ADR-0093 D3] The Default Organization, named exactly as the
+  // boot names it — `ensureDefaultOrganizationExists` (plugin-auth, the find
+  // half) and the tenancy service's `defaultOrgId()`: the organization with
+  // `slug = 'default'`, else the SOLE organization whatever its slug ("or the
+  // sole org row if a deployment renamed it"). Several organizations, none of
+  // them `default`, name none: there is no single owner to derive, and the
+  // rows are reported. ⛔ One definition: the ceremony attributing to an
+  // organization the boot would not (or the reverse) leaves rows the post-check
+  // calls blocking on a database v18 would serve. The "one definition of the
+  // Default Organization" pin (organization-ownership-apply.test.ts) holds the
+  // two together over the same fixtures.
+  const hasSlug = hasOrganizations && catalog.columns.get('sys_organization')?.has('slug') === true;
+  let defaultOrganization: { id: string; slug: string | null } | null = null;
+  if (hasOrganizations) {
+    const t = sql.q('sys_organization', 'sys_organization');
+    const select = `SELECT ${sql.q(ID, 'sys_organization')} AS id${hasSlug ? `, ${sql.q('slug', 'sys_organization')} AS slug` : ''} FROM ${t}`;
+    const bySlug = hasSlug
+      ? await sql.read('sys_organization', `${select} WHERE ${sql.q('slug', 'sys_organization')} = ?`, [DEFAULT_ORGANIZATION_SLUG])
+      : [];
+    const named = bySlug.length > 0 ? bySlug : await sql.read('sys_organization', `${select} ORDER BY ${sql.q(ID, 'sys_organization')} LIMIT 2`, []);
+    const id = bySlug.length > 0 || named.length === 1 ? nonEmpty(named[0]?.id) : null;
+    if (id !== null) defaultOrganization = { id, slug: hasSlug ? nonEmpty(named[0]!.slug) : null };
   }
+  const defaultOrganizationId = defaultOrganization?.id ?? null;
+  // [ADR-0131 D3, D10 fate 3] Under `single` the Default Organization owns
+  // every row no anchor names, and it exists before the first write that needs
+  // an owner. A 17.x database that holds NO organization (its seed ran before
+  // any was created) has none for attribution to name, and the boot that
+  // would have created it is the one the v18 guard refuses before any plugin
+  // writes. So when a row falls to it, `--apply` creates it first, through the
+  // boot invariant's own producer, and the plan counts the rows it will take
+  // as attributed, never as unattributable — the ceremony decides that on the
+  // operator's behalf, so it is a warning too. With no such row nothing needs
+  // an owner, and the boot creates it once the guard lets it start. A
+  // database that holds organizations, none of them the Default
+  // Organization, is not this case: nothing is created there.
+  const defaultOrganizationCreatable = opts.posture === 'single' && hasSlug && organizations === 0;
 
   const tables: TablePlan[] = [];
   const staleCopies: StaleCopy[] = [];
@@ -1295,6 +1352,7 @@ export async function buildOrganizationOwnershipPlan(opts: {
       homeOf,
       posture: opts.posture,
       defaultOrganizationId,
+      defaultOrganizationCreatable,
       ...(opts.onAttribution ? { onAttribution: opts.onAttribution } : {}),
     };
     for (const [base, physical] of [...db.catalog.bases].sort(([a], [b]) => a.localeCompare(b))) {
@@ -1346,6 +1404,18 @@ export async function buildOrganizationOwnershipPlan(opts: {
   staleCopies.sort((a, b) => a.object.localeCompare(b.object));
 
   const warnings: string[] = [];
+  const taking = defaultOrganizationCreatable
+    ? tables.reduce((n, t) => n + (t.attribution?.['default-organization'] ?? 0), 0)
+    : 0;
+  const defaultOrganizationCreatedByApply = taking > 0;
+  if (defaultOrganizationCreatedByApply) {
+    warnings.push(
+      'This database holds no organization, and the tenancy posture is single: --apply creates the Default ' +
+        `Organization (slug '${DEFAULT_ORGANIZATION_SLUG}') before its first write and gives it the ${taking} ` +
+        'organization-less row(s) no anchor names, as a single-posture boot gives it every row it writes (ADR-0131 ' +
+        'D3, D10 fate 3).',
+    );
+  }
   const legacySets = tables.find((t) => t.object === LEGACY_SET_OBJECT && t.physical === 'present')
     ?.categories.find((c) => c.id === LEGACY_SHIPPED_SET_SEEDS_CATEGORY);
   if (legacySets && legacySets.rows > 0) {
@@ -1397,7 +1467,8 @@ export async function buildOrganizationOwnershipPlan(opts: {
     database: opts.database,
     client: opts.reader.client ?? null,
     posture: opts.posture,
-    defaultOrganization: defaultOrganizationId === null ? null : { id: defaultOrganizationId, slug: 'default' },
+    defaultOrganization,
+    defaultOrganizationCreatedByApply,
     organizations,
     inventoryDigest: inventoryDigest(inventory),
     ...(opts.siblings?.length ? { siblings: opts.siblings.map((d) => ({ name: d.name, database: d.database })) } : {}),
