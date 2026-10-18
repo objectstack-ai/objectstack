@@ -10085,6 +10085,18 @@ export class ObjectQL implements IObjectQLEngine {
     for (const [fk, namedFields] of wanted) {
       const target = referenceTargetOf(fields[fk]);
       if (!target) continue;
+      // [#24316] ⛔ A hop into the stored-metadata-body family is never read,
+      // under either authority. The family's projection runs at its doors and
+      // never here, so this `find` would hand the formula (or the rule) the
+      // stored body and its content hash unprojected — material the family's
+      // own door withholds from the same reader. The binding is `unreadable`,
+      // the disclosure-safe shape: a formula reads `null` with its reason, a
+      // rule has no verdict and refuses the write, and neither says anything
+      // about the row. The lint refuses the same hop at author time.
+      if (isStoredMetadataBodyObject(target)) {
+        resolved.set(fk, { object: target, byId: new Map(), blocked: true });
+        continue;
+      }
       const named = [...namedFields];
 
       // ── The READ SET is the intersection of "what the predicate names" and

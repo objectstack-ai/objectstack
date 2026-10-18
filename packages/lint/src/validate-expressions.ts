@@ -116,6 +116,7 @@ import type { FlowNodeParsed, FlowEdgeParsed } from '@objectstack/spec/automatio
 // shared refusal to prevent.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec/shared';
 import { referenceCarrierOf, REFERENCE_VALUE_TYPES } from '@objectstack/spec/data';
+import { isStoredMetadataBodyObject } from '@objectstack/spec/kernel';
 // [#22394] The acting user's declared members — the contract half of the option
 // verdict's member allowlist for `current_user` and its ADR-0068 aliases. Read
 // off the schema at first use, never restated here.
@@ -1724,6 +1725,49 @@ function singleMasterOf(obj: AnyRec): string | undefined {
 }
 
 /**
+ * [#24316] An object's reference fields whose target is a stored-metadata-body
+ * table ({@link isStoredMetadataBodyObject}), field → target. A hop through one
+ * of them is the read ObjectQL's one-hop loader refuses for both seams that
+ * serve a hop, so the lint refuses it where it is written.
+ *
+ * The literal `.reference` read stays in the argument for the #5017 receiver
+ * scan, exactly as in {@link masterDetailCount}. A type whose target is implied
+ * (`user`, `tree`) never names the family, so the authored carrier is the only
+ * one read.
+ */
+function storedMetadataBodyReferencesOf(obj: AnyRec): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const [name, def] of fieldEntries(obj)) {
+    if (typeof def.type !== 'string' || !REFERENCE_VALUE_TYPES.has(def.type)) continue;
+    const ref = referenceCarrierOf({ reference: def.reference }, 'validate-expressions storedMetadataBodyReferencesOf');
+    if (ref !== undefined && isStoredMetadataBodyObject(ref.trim())) out.set(name, ref.trim());
+  }
+  return out;
+}
+
+/**
+ * [#24316] The refusal of a one-hop read into a stored-metadata-body table, at
+ * one of the two sites that serve a hop. It names the reference, the table and
+ * the columns read, and never anything a row holds.
+ */
+function storedMetadataBodyHopMessage(
+  site: 'formula' | 'rule',
+  field: string,
+  target: string,
+  columns: readonly string[],
+): string {
+  const consequence = site === 'formula'
+    ? 'so this formula reads null on every row'
+    : 'so this rule has no verdict and every write it judges is refused';
+  return `\`record.${field}\` is a reference to '${target}', a stored-metadata table, and this ${site} reads `
+    + `${columns.map((c) => `'${c}'`).join(', ')} through it. A formula or a validation rule never reads through `
+    + `a reference into a stored-metadata table: the hop is not read, ${consequence}. Those rows carry stored `
+    + 'metadata bodies, which are served only through the metadata API (`GET /api/v1/meta/:type/:name`), '
+    + `where the body is projected. Remove the read through \`${field}\`; \`record.${field}\` alone is the `
+    + 'stored id, if the id is what you need.';
+}
+
+/**
  * [#17495] Why a structural condition whose SHAPE is fine is still not
  * authorable: its source is blank. The author-time twin of the gate #17322 put
  * in `AutomationEngine.registerFlow`, spelled the same way against the same
@@ -1857,6 +1901,45 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(objects);
   const nullableIndex = buildNullableFieldIndex(objects);
+  // [#24316] object name → its references into a stored-metadata-body table;
+  // only objects that declare one are present.
+  const storedMetadataBodyReferenceIndex = new Map<string, Map<string, string>>();
+  for (const obj of objects) {
+    const name = typeof obj.name === 'string' ? obj.name : undefined;
+    if (!name) continue;
+    const refs = storedMetadataBodyReferencesOf(obj);
+    if (refs.size > 0) storedMetadataBodyReferenceIndex.set(name, refs);
+  }
+  /**
+   * [#24316] Refuse a one-hop read through a reference into a
+   * stored-metadata-body table, at the two sites that serve a hop: a
+   * validation rule's hydrated `condition` ({@link check} with
+   * `traversalHydration`) and a formula field's `expression`
+   * ({@link judgeFieldFormula}). ObjectQL's one-hop loader never reads that
+   * hop, so as written the field reads null or the rule refuses every write;
+   * this says so where the expression is written, with the prescription.
+   */
+  const refuseStoredMetadataBodyHop = (
+    where: string,
+    raw: unknown,
+    objectName: string,
+    site: 'formula' | 'rule',
+  ): void => {
+    const refs = storedMetadataBodyReferenceIndex.get(objectName);
+    if (!refs) return;
+    const source = celSourceOf(raw);
+    if (!source) return;
+    for (const [field, columns] of analyzeRelationshipTraversals(source, 'record')?.traversals ?? []) {
+      const target = refs.get(field);
+      if (!target) continue;
+      issues.push({
+        where,
+        message: storedMetadataBodyHopMessage(site, field, target, [...columns].sort()),
+        source,
+        severity: 'error',
+      });
+    }
+  };
 
   // [#8116] object name → the injected anchors registered with NO storage
   // behind them (non-empty only for ADR-0015 `external` objects). The other
@@ -2036,6 +2119,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       issues.push({ where, message: e.message, source: e.source, severity: 'error' });
     }
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
+    if (objectName && traversalHydration) refuseStoredMetadataBodyHop(where, raw, objectName, 'rule');
     // [#8116] Provenance rides every object-bound predicate this helper
     // validates, whichever scope: the `record`/`previous` roots are explicit
     // in the source, so flattened flow conditions are covered without ever
@@ -2756,6 +2840,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         const fieldWhere = `object '${objectName}' · field '${fname}' expression`;
         for (const e of res.errors) issues.push({ where: fieldWhere, message: e.message, source: e.source, severity: 'error' });
         for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
+        if (objectName) refuseStoredMetadataBodyHop(fieldWhere, f.expression, objectName, 'formula');
         // [#8116] Formulas read the same record binding the predicates do, so
         // a `record.<anchor>` read inside one degrades identically.
         warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);
