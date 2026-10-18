@@ -676,16 +676,19 @@ const DEFAULT_ROW_SCOPE_OBJECT_GUIDANCE =
  * policy schema, each shared by reference rather than copied:
  *
  * - **the members**: the policy schema's own `shape` minus `object`, so every
- *   member, its describe and both `retiredKey()` tombstones (`priority`,
- *   `tags`) are the same schema instances;
+ *   member and its describe are the same schema instances. The two
+ *   `retiredKey()` tombstones (`priority`, `tags`) are left out with it: they
+ *   accept no value, so leaving them out changes nothing this schema accepts,
+ *   and their prescriptions are upgrade text for `rowLevelSecurity[]`, a path
+ *   this surface never had. Either key is refused here as an unknown key;
  * - **the rules**: {@link refineRowLevelSecurityPolicy}, which reads
  *   `operation`, `using` and `check` and never `object`, so both rules hold as
  *   written: at least one of `using` / `check`, and no `check` on a `select` or
  *   `delete` policy;
  * - **the near-miss table**: {@link RLS_POLICY_ALIASES}.
  *
- * What differs is the surface name, the `object` guidance and the history
- * sentence. `object` is refused as an unknown key, with the guidance above, so
+ * What differs is the surface name, the `object` guidance, the history
+ * sentence and the two absent tombstones. `object` is refused as an unknown key, with the guidance above, so
  * a policy copied from a permission set fails loudly instead of parsing with a
  * target the runtime would never read.
  *
@@ -694,7 +697,7 @@ const DEFAULT_ROW_SCOPE_OBJECT_GUIDANCE =
  * objects (#24341). Until the reader lands, no server reads the key.
  */
 export const DefaultRowScopeSchema = lazySchema(() => {
-  const { object: _implied, ...members } = RowLevelSecurityPolicySchema.shape;
+  const { object: _implied, priority: _priority, tags: _tags, ...members } = RowLevelSecurityPolicySchema.shape;
   return strictObject(
     {
       surface: "this object's default row scope",

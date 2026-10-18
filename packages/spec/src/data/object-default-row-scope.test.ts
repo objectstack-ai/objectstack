@@ -16,7 +16,8 @@
  * And, because "minus `object`" must keep every other rule of the policy
  * shape: both cross-field rules still hold (at least one of `using` / `check`;
  * no `check` on a `select` policy), the members are the policy schema's own
- * instances, and the input type is exactly the policy type without `object`.
+ * instances, and the input type is the policy type without `object` and its two
+ * value-less tombstones (`priority`, `tags`), which are refused here as well.
  *
  * No runtime reads the key until the security plugin's collection step does
  * (#24340), so nothing here asserts a filter: this is the contract's shape.
@@ -113,15 +114,29 @@ describe('ObjectSchema.defaultRowScope — every rule of the policy shape that d
     expect(issue.path).toEqual(['defaultRowScope', 'check']);
   });
 
-  it('its input type is exactly the policy type without `object` (compile-time; tsconfig.test.json)', () => {
-    const scopeIsPolicyMinusObject: Assert<Equal<DefaultRowScope, Omit<RowLevelSecurityPolicy, 'object'>>> = true;
+  it('its input type is the policy type without `object` and the two tombstones (compile-time; tsconfig.test.json)', () => {
+    // `priority` / `tags` are `retiredKey()` tombstones on the policy: they accept no
+    // value, so leaving them out changes nothing either schema accepts.
+    const scopeIsPolicyMinusObject: Assert<
+      Equal<DefaultRowScope, Omit<RowLevelSecurityPolicy, 'object' | 'priority' | 'tags'>>
+    > = true;
     expect(scopeIsPolicyMinusObject).toBe(true);
   });
 
-  it('its members are the policy schema\'s own member instances, `object` alone left out', () => {
+  it('its members are the policy schema\'s own member instances: `object` and the two tombstones left out', () => {
     const policy = RowLevelSecurityPolicySchema.shape as Record<string, unknown>;
     const scope = DefaultRowScopeSchema.shape as Record<string, unknown>;
-    expect(Object.keys(scope)).toEqual(Object.keys(policy).filter((k) => k !== 'object'));
+    const leftOut = ['object', 'priority', 'tags'];
+    expect(Object.keys(scope)).toEqual(Object.keys(policy).filter((k) => !leftOut.includes(k)));
     for (const key of Object.keys(scope)) expect(scope[key], key).toBe(policy[key]);
+  });
+
+  it('a tombstoned policy key is refused here too, as an unknown key', () => {
+    for (const key of ['priority', 'tags']) {
+      const issue = onlyIssue(ObjectSchema.safeParse(withScope({ ...SCOPE, [key]: key === 'tags' ? ['a'] : 1 })));
+      expect(issue.code, key).toBe('unrecognized_keys');
+      expect(issue.path, key).toEqual(['defaultRowScope']);
+      expect((issue as { keys?: string[] }).keys, key).toEqual([key]);
+    }
   });
 });
