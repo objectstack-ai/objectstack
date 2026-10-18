@@ -401,7 +401,7 @@ for (const [doorName, boot] of DOORS) {
             ok(await door.save('s_abs', 'live'));
             ok(await door.save('s_abs', 'staged', { query: { mode: 'draft', surface: 'studio' } }));
             expect(await changes(door, 's_abs')).toHaveLength(1);
-            for (const query of [{}, { preview: 'draft' }]) {
+            for (const query of [{}, { preview: 'draft' }] as Array<Record<string, string>>) {
                 const answer = await door.read('s_abs', query);
                 expect(answer.status, JSON.stringify(query)).toBe(200);
                 expect('draftChanges' in (answer.envelope ?? {}), JSON.stringify(query)).toBe(false);
