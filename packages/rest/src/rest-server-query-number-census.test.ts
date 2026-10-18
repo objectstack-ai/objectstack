@@ -351,7 +351,12 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // the item save and the reset read their switches as strings and coerce no
         // number of the query:
         // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 15 → 16.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
+        // [#23050 slice 13d] The history family (`meta-item-history-routes.ts`) moved
+        // with the one coercion of the query `rest-server.ts` held inside the `/meta`
+        // block: the rollback's `Number(toVersionRaw)`, an exemption row. Its key names
+        // the route, never the file, so no ledger row changed:
+        // 9 = 7 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1, length 16 → 17.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(17);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });

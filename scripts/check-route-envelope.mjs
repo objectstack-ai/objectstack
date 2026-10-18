@@ -421,7 +421,16 @@ const MODULES = {
     // supported by protocol implementation'`), declared below at the count it had
     // here; the sum is unchanged
     // (7 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 + 0 + 1 = 39).
-    stringError: 7,
+    //
+    // 7 → 2 (#23050 slice 13d): NOT progress — the same MOVE as slices 1–3, 8, 10–12
+    // and 13b. The sixth `/meta` group, the history family, left this file for
+    // `meta-item-history-routes.ts` with its five literal string `error` bodies (the
+    // 501 `NOT_IMPLEMENTED` of `/history`, `/publish`, `/rollback` and `/diff`, and
+    // the rollback's 400 `INVALID_REQUEST` on a missing or invalid `toVersion`),
+    // declared below at the count they had here. The two left here are class-head
+    // sites; the sum is unchanged, `meta-item-write-routes.ts`' 0 included
+    // (2 + 13 + 8 + 1 + 0 + 0 + 0 + 0 + 1 + 0 + 1 + 4 + 3 + 0 + 1 + 0 + 5 = 39).
+    stringError: 2,
     // 77 → 75 (#7981): registerSecurityEndpoints' two `handleError` arms moved
     // off the `{ code, error }` sibling-code literal onto the shared
     // `respondError` helper, banking that progress per the ratchet's own rule.
@@ -533,7 +542,14 @@ const MODULES = {
     // above. That same `{ error, code }` body left with the per-item reads for
     // `meta-item-read-routes.ts`, declared below; the sum is unchanged
     // (3 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 + 0 + 1 = 54).
-    siblingCode: 3,
+    //
+    // 3 → 2 (#23050 slice 13d): NOT progress — the same MOVE as `stringError`
+    // above. The rollback's one `{ error, code }` body (its 400 `INVALID_REQUEST`)
+    // left with the history family for `meta-item-history-routes.ts`, declared
+    // below; the two left here are class-head sites, and the sum is unchanged,
+    // `meta-item-write-routes.ts`' 0 included
+    // (2 + 15 + 8 + 9 + 4 + 1 + 0 + 0 + 3 + 0 + 1 + 6 + 3 + 0 + 1 + 0 + 1 = 54).
+    siblingCode: 2,
   },
 
   // [#8850] The ADR-0112 error/fault-classification prologue, extracted from
@@ -836,6 +852,26 @@ const MODULES = {
     ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
     stringError: 0,
     siblingCode: 0,
+  },
+
+  // [#23050 slice 13d] The sixth `/meta` group of
+  // `RestServer#registerMetadataEndpointsInner`' body — the history family (the
+  // change log, the audit trail, the publish, the rollback and the version
+  // comparison, `{metaPath}/:type/:name/history`, `/audit`, `/publish`, `/rollback`
+  // and `/diff`) — moved out of `rest-server.ts` on exactly slice 1's terms above: a
+  // MOVE, no wire answer changed, so it inherits `dialectOnly` and the two dialect
+  // facts, and no write-site count. Both counts were measured on the moved file and
+  // equal what left `rest-server.ts` in the same PR (stringError 7 → 2, siblingCode
+  // 3 → 2: the four 501 bodies and the rollback's 400, which is also the one
+  // sibling-`code` body), so each sum is unchanged. Both only ever tick down.
+  // Discovered by the `*-routes.ts` convention and declared in the same PR that
+  // created the module, so the gap never exists.
+  'packages/rest/src/meta-item-history-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13d and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 5,
+    siblingCode: 1,
   },
 };
 

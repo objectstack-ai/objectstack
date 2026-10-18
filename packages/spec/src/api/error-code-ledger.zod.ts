@@ -574,6 +574,11 @@ export const ERROR_CODE_LEDGER = {
     // each thrown 403 from `beforeCreateInvitation` with its code (#23945).
     'INVITE_ISSUER_MEMBER_ONLY',  // [#24082] 403: an issuer below admin grade may invite only as a plain `member`; the requested role does not outrank theirs but may carry capability of its own
     'INVITE_ISSUER_UNVERIFIED',   // [#24082] 403, fail-closed: the issuer's `sys_member` role was not established (the read answered with no usable row, or the composition has no data engine to read), so the invitation may confer nothing beyond `member`; a read that throws answers `SERVICE_UNAVAILABLE` (503) instead
+    // [#24254] The invitation placement gate's two refusals (ADR-0105 D8), thrown
+    // 403 from `beforeCreateInvitation` after the role cap, registered AHEAD of
+    // their producer: today both are a bare `FORBIDDEN`, and #24243 stamps these.
+    'INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE', // [#24254] 403: the delegated-administration gate refused the invitation's placement intent (its business unit, or a position's permission sets, lies outside the issuer's `adminScope`, ADR-0090 D12), so no invitation is created; the gate's own verdict, not a failure to reach one
+    'INVITE_PLACEMENT_UNSUPPORTED', // [#24254] 403, fail-closed: the invitation carries placement intent (a business unit and positions) and this deployment has no delegated-administration runtime (plugin-security's `invitation-placement` service) to authorize it, so no invitation is created; the same invitation without placement is unaffected
     'INVITE_REQUIRES_EMAIL',
     'INVITE_ROLE_ABOVE_ISSUER',   // [#24082] 403: the requested role grades above the issuer's own (an invitation never confers authority above its issuer)
     'INVALID_REQUEST',
@@ -582,6 +587,11 @@ export const ERROR_CODE_LEDGER = {
     'LAST_LOCAL_CREDENTIAL',      // refusing to remove the user's only local credential
     'NO_IDENTITY',                // import row has neither email nor phone
     'NO_PENDING_VERIFICATION',    // pass-through from better-auth
+    // [#24254] The organization hooks' two refusals no standard member names
+    // (`beforeCreateOrganization`, `beforeUpdateOrganization`), registered AHEAD
+    // of their producer: today both are a bare `FORBIDDEN`, and #24243 stamps these.
+    'ORGANIZATION_CREATION_DISABLED', // [#24254] 403: the deployment's effective tenancy posture enforces no organization wall (ADR-0105), so creating an organization is refused for every caller; the same derivation `/auth/config` publishes as `features.multiOrgEnabled: false`, a deployment setting and not a grant the caller lacks
+    'ORGANIZATION_SLUG_LOCKED_BY_ACTIVE_ENVIRONMENTS', // [#24254] 403: a change to a new slug is refused while the organization has an active environment, meaning a `sys_environment` row with its `organization_id` whose `status` is neither `archived` nor `failed` (a row with no status counts), and no hostname is read; a guard read that could not answer is `SERVICE_UNAVAILABLE` (503) instead
     'PASSWORD_ALREADY_SET',       // pass-through from better-auth
     'PASSWORD_EXPIRED',
     'PASSWORD_POLICY_VIOLATION',
