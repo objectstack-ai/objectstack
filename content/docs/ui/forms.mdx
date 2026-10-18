@@ -47,9 +47,10 @@ Only the spec'd whitelist of form fields is accepted; everything else (status, o
 > exactly that object, never anything else and never the anonymous fall-open. So
 > public forms work under the unconditional anonymous-deny posture (v17
 > retired the `requireAuth: false` opt-out, #3963) with **no**
-> `guest_portal` permission set. The `guest_portal` permission set + `anonymous` flag
-> are still attached for **back-compat** (object hooks that detect a guest via a
-> falsy `ctx.user?.id`), but they are no longer the authorization mechanism.
+> `guest_portal` permission set. The submit's context also carries
+> `permissions: ['guest_portal']` and `anonymous: true`. Neither authorizes
+> anything and neither reaches an object hook; section 2 says the one thing the
+> `guest_portal` name does.
 
 ## 1. Declare the form view
 
@@ -102,32 +103,27 @@ export default defineView({
 > - Multiple form views per object are fine — only the one(s) with `sharing.enabled === true` and `sharing.allowAnonymous === true` are exposed.
 > - On a **walled** tenancy posture (`group` or `isolated` in force), a form whose object is walled by an organization column is **not offered**. An anonymous submission carries no organization, and an insert without one into a walled object is refused, so both anonymous endpoints answer the form exactly as they answer a withdrawn one (`404 FORM_NOT_FOUND`). The administrator is told why, at the form's `sharing`: the view's read (`GET /api/v1/meta/view/:name`) carries it in `_diagnostics.warnings`, and a save or publish of the view answers success with a `public-form-intake-unavailable` warning in `advisories`. If the object's rows belong to no organization, declare `tenancy: { enabled: false }` on it and the form is offered again.
 
-## 2. (Optional) Create the `guest_portal` permission set
+## 2. No permission set to create — what the `guest_portal` name does
 
-The submit's authorization no longer depends on this set — the
-declaration-derived `publicFormGrant` (see the note above) is what permits the
-insert. For the submit you only need a `guest_portal` permission set if you rely
-on the legacy back-compat path (e.g. an older runtime, or object hooks that
-branch on the `guest_portal` permission). When present the set is attached to
-the anonymous context, so keep it INSERT-only on the form's target object — the
-guest-safe shape (ADR-0090 D9).
+The submit is authorized by the declaration-derived `publicFormGrant` (see the
+note above). The grant is decided before any permission set resolves, so the
+form works the same whether or not a `guest_portal` permission set exists. The
+submit's execution context still names `guest_portal` in `permissions`, and that
+name reaches one thing only:
 
-{/* os:check */}
-```ts
-// hotcrm/src/security/guest-portal.permission.ts
-import { definePermissionSet } from '@objectstack/spec/security';
-
-// Guest-safe capability: INSERT-only on the intake objects. (`isProfile` no
-// longer exists — the Profile concept was removed by ADR-0090 D2.)
-export default definePermissionSet({
-  name: 'guest_portal',
-  label: 'Public Form Submitters',
-  objects: {
-    lead: { allowCreate: true },  // no read/edit/delete
-    case: { allowCreate: true },
-  },
-});
-```
+- **The result masker, where a deployment registers a set of that name.** Only
+  the set's field permissions (`fields`, such as `readable: false`) and the
+  capabilities it holds against a field's `requiredPermissions` are read, to mask
+  the created record the server hands back to the route. The set's object
+  permissions (`allowCreate`, `allowRead`, …) are not read on this path, so they
+  neither grant nor limit the insert.
+- **The visitor never sees that record.** The submit answers with the new
+  record's `id` only (section 4). Register a `guest_portal` set only if you want
+  fields masked on the record the route gets back; nothing else needs one.
+- **No object hook can read it.** A hook's `ctx.session` and `ctx.user` carry
+  neither `permissions` nor `anonymous`, and on a public submission both are
+  unset because the context carries no user. Tell a public submission apart by
+  the missing `ctx.user` (section 3), not by a permission.
 
 ## 3. Stamp server-controlled defaults in a hook
 
@@ -247,7 +243,7 @@ lookup route.
 ### Auth model
 
 - Neither route calls `enforceAuth`, so both work under the always-on anonymous-deny default (there is no `requireAuth` knob to configure since v17).
-- The execution context the **submit** route hands to ObjectQL is `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin honors `publicFormGrant` first — a create + read-back grant scoped to exactly the declared object — so authorization holds even without a `guest_portal` profile. `permissions: ['guest_portal']` is retained for back-compat.
+- The execution context the **submit** route hands to ObjectQL is `{ publicFormGrant: { object }, permissions: ['guest_portal'], anonymous: true }` with no `userId`. The Security plugin admits on `publicFormGrant` alone — a create + read-back grant scoped to exactly the declared object, decided before any permission set resolves — so no `guest_portal` set is needed. Neither `permissions` nor `anonymous` authorizes anything or reaches an object hook; where a set named `guest_portal` is registered, the result masker reads its field permissions (section 2).
 - No CSRF or auth header is needed; embed the form on any domain.
 
 ## 5. Embedding from a front-end
