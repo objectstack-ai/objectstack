@@ -62,11 +62,13 @@ export const SysApprovalRequest = ObjectSchema.create({
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{process_name} · {record_id}',
   // [ADR-0085] The flow is named by its label, `process_label`, never by the
-  // machine source `process_name` (`flow:NAME`), as the request lists name it.
-  // The record page's highlights strip is this list minus `record_id`, and the
-  // page's bare `record:details` node draws this list minus the strip, so the
-  // two move together (`sys-approval-request.page.ts` says why).
-  highlightFields: ['process_label', 'object_name', 'record_id', 'status', 'current_step', 'submitter_id', 'updated_at'],
+  // machine source `process_name` (`flow:NAME`), and the step by its label,
+  // `current_step_label`, never by the node id `current_step`, as the request
+  // lists name them. The record page's highlights strip is this list minus
+  // `record_id`, and the page's bare `record:details` node draws this list
+  // minus the strip, so the two move together (`sys-approval-request.page.ts`
+  // says why).
+  highlightFields: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
 
   // Curated built-in list views — render as segmented tabs in the console.
   // Filters use {current_user_id} substitution wired by the console.
