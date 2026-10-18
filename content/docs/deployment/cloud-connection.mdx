@@ -168,11 +168,11 @@ explicit one before you connect if you want a readable, stable name. Whether
 the cloud account also lets you rename the entry directly is decided by the
 cloud account.
 
-The version shown next to the name is `OS_RUNTIME_VERSION` when the deployment
-sets it. Unset, the server sends the Cloud Connection plugin's own version
-string, which is not your server's release, so set `OS_RUNTIME_VERSION` if
-approvers should see the release you run. That fallback is a known defect,
-tracked in [#24150](https://github.com/objectstack-ai/objectstack/issues/24150).
+The version shown next to the name is the release your server runs: the
+`version` its discovery document (`GET /api/v1/discovery`) reports. You do not
+need to set anything for it. `OS_RUNTIME_VERSION` is an override: set it to
+report something else, such as an image tag or a commit, and the server sends
+that value as it is.
 
 ## Disconnect [#disconnect]
 

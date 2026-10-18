@@ -168,6 +168,15 @@ interface EnvironmentKernel {
 }
 
 /**
+ * [#24150] The slice of the `protocol` service this surface reads: the
+ * discovery document's `version`, which is the release `GET
+ * /api/v1/discovery` reports for this server.
+ */
+interface DiscoveryVersionSource {
+    getDiscovery?(): Promise<{ version?: unknown }>;
+}
+
+/**
  * A signed-in caller of this surface, and the ADR-0069 posture its session
  * carries (`authGate`, present only for a session the policy holds).
  */
@@ -268,6 +277,35 @@ export class CloudConnectionPlugin implements Plugin {
             const authHeaders = (): Record<string, string> => {
                 const cred = credential();
                 return cred ? { Authorization: `Bearer ${cred}` } : {};
+            };
+
+            /**
+             * [#24150] The release this server reports to the cloud as
+             * `runtime_version`: on the approval link `bind/start` returns,
+             * and in the registration claim `bind/poll` sends to `/bind`.
+             *
+             * A set `OS_RUNTIME_VERSION` is the operator's stamp and wins, as
+             * it always has. Unset, the value is the one `GET
+             * /api/v1/discovery` reports, read from the discovery document
+             * itself through the `protocol` service when the handler runs —
+             * never a copy of discovery's resolver, so the two answers cannot
+             * drift. ⛔ Not this plugin's own `version`: that names the
+             * plugin, not the release the approver is authorizing.
+             *
+             * A read that yields nothing (no `protocol` service, or one that
+             * throws) sends nothing; both sites already drop an empty value.
+             * No version is honest, while a wrong one is what the approval
+             * page would show as fact.
+             */
+            const reportedRuntimeVersion = async (): Promise<string | undefined> => {
+                const stamped = process.env.OS_RUNTIME_VERSION;
+                if (stamped !== undefined) return stamped || undefined;
+                try {
+                    const discovery = await ctx.getService<DiscoveryVersionSource>('protocol')?.getDiscovery?.();
+                    return typeof discovery?.version === 'string' && discovery.version ? discovery.version : undefined;
+                } catch {
+                    return undefined;
+                }
             };
 
             const hostOf = (c: any): string => {
@@ -571,12 +609,12 @@ export class CloudConnectionPlugin implements Plugin {
                     // WHAT they are authorizing. Display-only — informed
                     // consent, not an authenticity proof (the page carries
                     // the "only approve if you started this" warning).
+                    const ver = await reportedRuntimeVersion();
                     const withContext = (uri: unknown): string | undefined => {
                         if (typeof uri !== 'string' || !uri) return undefined;
                         try {
                             const u = new URL(uri);
                             try { u.searchParams.set('runtime_name', hostname()); } catch { /* no hostname */ }
-                            const ver = (process.env.OS_RUNTIME_VERSION ?? this.version) || '';
                             if (ver) u.searchParams.set('runtime_version', ver);
                             return u.toString();
                         } catch { return uri; }
@@ -663,6 +701,7 @@ export class CloudConnectionPlugin implements Plugin {
                     // the device; a stored runtime_id keeps the identity
                     // stable across re-binds (claim verified cloud-side).
                     const stored = this.store.read();
+                    const runtimeVersion = await reportedRuntimeVersion();
                     const bindResp = await fetch(`${cloudUrl}/api/v1/cloud-connection/bind`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', ...(cloudApiKey ? { Authorization: `Bearer ${cloudApiKey}` } : {}) },
@@ -670,7 +709,7 @@ export class CloudConnectionPlugin implements Plugin {
                             ...(environmentId ? { environment_id: environmentId } : {}),
                             ...(stored?.runtimeId ? { runtime_id: stored.runtimeId } : {}),
                             name: (() => { try { return hostname(); } catch { return undefined; } })(),
-                            runtime_version: (process.env.OS_RUNTIME_VERSION ?? this.version) || undefined,
+                            runtime_version: runtimeVersion,
                             token: accessToken,
                             scope: deviceScope,
                         }),

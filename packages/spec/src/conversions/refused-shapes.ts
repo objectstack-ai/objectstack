@@ -254,7 +254,7 @@ const viewDataApiProvider: RefusedStoredShape = {
   id: 'view-data-api-provider-retired',
   toMajor: 18,
   surface: 'view.data — a list or form view\'s data source, in a view body or an object\'s listViews, '
-    + 'and the `data` prop of a page component that takes one (object-grid, object-map, object-gantt, object-tree)',
+    + 'and the `data` prop of a page component that takes one (object-grid, object-map, object-gantt, object-tree, list-view)',
   detect(stack, report) {
     const judge = (payload: Dict, path: string, where: string): void => {
       const prescription = apiBindingRefusal(payload.data);

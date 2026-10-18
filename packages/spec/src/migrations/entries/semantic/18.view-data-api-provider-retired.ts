@@ -19,7 +19,7 @@ export const entry: SemanticMigration = {
   id: 'view-data-api-provider-retired',
   surface: "view.data (`provider: 'api'`, with its `read` / `write` request blocks) — the view-level API data source, "
     + "in a view and in the `data` prop of each page component that takes a view data source (`object-grid`, "
-    + '`object-map`, `object-gantt`, `object-tree`)',
+    + '`object-map`, `object-gantt`, `object-tree`, `list-view`)',
   replacement: "A view binds its object (`provider: 'object'`) or static rows (`provider: 'value'`), and so does a "
     + "page component's `data` prop; the API read "
     + "moves onto a page component's `dataSource` binding — `{ provider: 'api', read: { url }, path? }` under a "

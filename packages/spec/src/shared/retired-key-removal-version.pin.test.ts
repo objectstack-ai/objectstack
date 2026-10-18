@@ -98,6 +98,7 @@ import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
   ActionButtonPropsSchema,
   ActionGroupPropsSchema,
+  ComponentPropsMap,
   ActionIconPropsSchema,
   ActionMenuPropsSchema,
   ElementNumberPropsSchema,
@@ -350,6 +351,14 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       'isDefault',
     ),
   ],
+  // #22444: the page carrier's two aliases, undeclared on the `list-view` row
+  // and answered by name with the row's guidance.
+  'page-list-view-object-name-view-type-to-data-type': (['objectName', 'viewType'] as const).map((alias) =>
+    refusal(
+      `a page list-view node's properties.${alias}`,
+      () => ComponentPropsMap['list-view'].safeParse({ [alias]: alias === 'objectName' ? 'deal' : 'kanban' }),
+    ),
+  ),
   'page-template-full-width-to-default': [
     refusal(
       "page template 'full-width'",
