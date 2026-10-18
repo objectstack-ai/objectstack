@@ -942,31 +942,16 @@ const TRIAGE = new Map([
       + 'skills, IS declared beside the constant: that one is small, is the surface the gate '
       + 'exists for, and naming a skills-only card is the discoverability this idiom is for',
   }],
-  ['scripts/check-position-name-fold-loaders.mjs SCAN_ROOTS packages', {
-    verdict: 'REFUSE-WIDE',
-    why: 'every text file under the root is walked and any one of them could name the #13419 '
-      + 'fixture — 5562 of 5625 (99%), measured 2026-08-31. The population is not a subset of the '
-      + 'root that a narrower glob could describe; it IS the root. A true declaration here would '
-      + 'name this gate on every card touching a package, which is the precision trade this '
-      + 'verdict refuses',
-  }],
-  ['scripts/check-position-name-fold-loaders.mjs SCAN_ROOTS examples', {
-    verdict: 'REFUSE-WIDE',
-    why: '240 of 243 (99%). Refused with its packages half rather than split from it: the loader '
-      + 'this gate hunts is a COMPOSITION site, and nothing says one lands under examples/ rather '
-      + 'than packages/ — declaring only the small root would read as a claim about where that '
-      + 'happens, which is exactly what is not known',
-  }],
-  ['scripts/check-position-name-fold-loaders.mjs SCAN_ROOTS apps', {
-    verdict: 'REFUSE-WIDE',
-    why: '36 of 40 (90%) — same trade, same reason as the examples half',
-  }],
-  ['scripts/check-position-name-fold-loaders.mjs SCAN_ROOTS scripts', {
-    verdict: 'REFUSE-WIDE',
-    why: '295 of 298 (99%). This root is where the gate own allowed readers live '
-      + '(DECLARED_INSTRUMENTS), so it is walked wholesale for the same reason as the others: a '
-      + 'new reader is found, then classified, never assumed absent',
-  }],
+  // WITHDRAWN 2026-10-18 (#24037): the four REFUSE-WIDE rows of
+  // check-position-name-fold-loaders.mjs SCAN_ROOTS (packages 99%, examples
+  // 99%, apps 90%, scripts 99%, measured 2026-08-31). Ruling 6243472660 (the
+  // maintainer's letter B on #24171, term 3) orders that gate's roots made the
+  // ROOT_DIR_WATCH_HINTS declaration the derivation reads, on a MEASURED
+  // consumer — PR #24028 reconciled its local gate union complete and met this
+  // gate red in CI. The gate now declares the whole roots and derives
+  // SCAN_ROOTS from that literal, so the bare words these rows judged no longer
+  // exist and the verdicts left with them (the STALE remedy below). The
+  // measured reasons stand in this file's history at f5ef054a.
   ['scripts/check-single-authz-resolver.mjs SCAN_ROOTS packages', {
     verdict: 'REFUSE-WIDE',
     why: 'walks every non-test TS source under the root — 1898 of 4903 (39%). True, and it would '
@@ -1349,7 +1334,8 @@ const TRIAGE = new Map([
  * `check:type-check-coverage`/`check:type-check-debt` 55.8%). Each is measured on this tree by the SAME method as
  * every other row here, and the ratio does not change the verdict either
  * direction — existing `TRIAGE` rows already span 39% (`check:authz-resolver`)
- * to 99% (`scripts/check-position-name-fold-loaders.mjs`) under the identical
+ * to 99% (`scripts/check-position-name-fold-loaders.mjs`, a row since withdrawn
+ * when that gate declared its roots — #24037) under the identical
  * REFUSE-WIDE trade, wide or narrow within that span is still the same
  * width-alone trade. Recorded as measured rather than clipped to the summary
  * range; the discrepancy against the issue's own "32–52%" framing is stated
@@ -2113,7 +2099,10 @@ const SELF_TEST_BATTERIES = Object.freeze({
   // ⭐ 43 → 128 (#15926): the loop now runs over EVERY recorded row rather than
   // the eleven DECLARED-NARROWER ones, and the RED end of the new direction is
   // driven on constructed gates beside it. A FLOOR, measured on a run.
-  "The DECLARATION a row describes, read from the gate's own SOURCE": 128,
+  // 128 → 126 (#24037): the loop registers two cases per recorded row, and the
+  // four check-position-name-fold-loaders rows were withdrawn (134 → 126 on a
+  // run) — fewer rows to judge, not cases that stopped registering.
+  "The DECLARATION a row describes, read from the gate's own SOURCE": 126,
   'CENSUS_REFUSE_WIDE, pinned on its OWN terms (#14695)': 5,
 });
 
