@@ -43,6 +43,12 @@ import { writeBuildShapedArtifact } from './build-shaped-artifact.js';
 /** Contributed by the extension ONLY — `showcase_account` declares none of them. */
 const EXTENSION_FIELDS = ['loyalty_tier', 'linkedin_url', 'csat_score'];
 
+/** The fields the showcase's own `showcase_account` declaration names — the owner layer, raw. */
+function declaredFieldNames(): string[] {
+  const objects = (showcaseStack as unknown as { objects?: Array<{ name?: string; fields?: Record<string, unknown> }> }).objects ?? [];
+  return Object.keys(objects.find((o) => o?.name === 'showcase_account')?.fields ?? {});
+}
+
 function fieldNamesOf(item: unknown): string[] {
   const fields = (item as { fields?: unknown } | null | undefined)?.fields;
   if (!fields) return [];
@@ -123,9 +129,15 @@ describe('dogfood: an object extension reaches every /meta read (#7556)', () => 
     // layer resolution rather than REST plumbing. `code` is the owner's
     // declaration with its extenders folded on (ADR-0029 D9.6); `effective` is
     // `overlay ?? code`, and the showcase customises nothing, so both must
-    // carry the extension and both must equal the list read.
-    expect(fieldNamesOf(body?.code)).toEqual(listed);
+    // carry the extension and `effective` must equal the list read.
+    for (const field of EXTENSION_FIELDS) expect(fieldNamesOf(body?.code)).toContain(field);
     expect(fieldNamesOf(body?.effective)).toEqual(listed);
+    // [#24314] `code` is the RAW layer (the read exits govern `effective`,
+    // never `code`), so it is the owner's declaration plus the extension's
+    // fields and no platform column. It used to equal the list read only
+    // because the registry planned the extension body as an ordinary object
+    // and the fold grafted the injected columns on.
+    expect(fieldNamesOf(body?.code)).toEqual([...declaredFieldNames(), ...EXTENSION_FIELDS].sort());
     // No tenant customisation exists, and an extension is not one: the overlay
     // layer stays empty rather than being handed the extension to report.
     expect(body?.overlay ?? null).toBeNull();

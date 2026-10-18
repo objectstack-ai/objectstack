@@ -115,7 +115,7 @@ export const PERMISSION_SET_CLONE_DROPPED_KEYS: readonly string[] = Object.freez
  * copy grants nobody until it is given to someone.
  */
 export const PERMISSION_SET_CLONE_NOTICE =
-    'The copy is a new permission set authored in this environment, with no link to the set it was copied '
+    'The copy is a new permission set authored in this system, with no link to the set it was copied '
     + 'from: changes to that set do not reach it. Not copied: delegated-admin scope (`adminScope`) and the '
     + 'everyone-baseline suggestion (`isDefault`) — grant either deliberately on the copy if it needs one. '
     + 'The copy is held by nobody yet: add it to a position, or assign it to users.';
