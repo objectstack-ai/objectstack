@@ -228,11 +228,13 @@ export function unprovisionedAnchorVerdict(objectName: string, field: string): s
  * column by declaring it, drop the reference, opt the object out of the
  * injection — in one clause each. The rule's `os explain` entry
  * (`rule-explanations.ts`) carries how (`columnMap`, `ownership: 'none'`,
- * `systemFields: { audit: false }`). Every unprovisioned-anchor rule in this
- * package prints this one wording, so the converted rules cannot drift apart:
- * the long form it replaced (`unprovisionedAnchorHint`) lost its last two
- * callers, `page-field-unprovisioned` and `flow-template-field-unprovisioned`,
- * when their `fix:` lines were shortened, and was deleted with them.
+ * `systemFields: { audit: false }`). It is the one shared anchor fix, so the
+ * converted rules cannot drift apart: the long form it replaced
+ * (`unprovisionedAnchorHint`) lost its last two callers,
+ * `page-field-unprovisioned` and `flow-template-field-unprovisioned`, when
+ * their `fix:` lines were shortened, and was deleted with them. The two copies
+ * the note on {@link unprovisionedAnchorCause} names (`validate-expressions.ts`,
+ * `validate-semantic-roles.ts`) still word their own fix.
  */
 export function unprovisionedAnchorFix(objectName: string, field: string): string {
   return (
