@@ -14,8 +14,13 @@
  *    does not place (`PAGE_TEMPLATE_SLOTS`) is refused at that region's name,
  *    naming the template's slots. The console stacked such a region under
  *    `main` at full width and dropped its `width`.
+ *  - **`main`'s width.** A region named `main` takes only `width: 'full'`
+ *    (page-wide: the page drops its max-width cap); `'small'`, `'medium'` and
+ *    `'large'` are refused at that region's `width`, on every page kind and
+ *    template. No layout reads them: `main` is drawn at the width its
+ *    template leaves it. Every other region keeps the widths it accepted.
  *
- * Bookkeeping shapes, pinned below: both refusals are exported object-level
+ * Bookkeeping shapes, pinned below: the refusals are exported object-level
  * checks attached to `PageSchema` (parity in
  * `object-refinement-check-exports.test.ts`); each has a D3
  * entry.
@@ -42,6 +47,8 @@ import {
 
 const Q1_D3 = 'page-is-default-off-record-page-refused';
 const Q2_D3 = 'page-template-closed-region-unplaced-refused';
+const MAIN_WIDTH_D3 = 'page-main-region-width-refused';
+const MAIN_WIDTH_D2 = 'page-main-region-width-removed';
 
 const region = (name: string, width?: 'small' | 'medium' | 'large' | 'full') => ({
   name,
@@ -225,8 +232,78 @@ describe('Q2 — a region the template does not place', () => {
   });
 });
 
-describe('the ledger — two D3 entries, and the retired D2 entries data at rest replays', () => {
-  it.each([Q1_D3, Q2_D3])('step 18 carries `%s`, judging no mechanical edit on the authoring surface', (id) => {
+describe('a region named `main` takes only `width: \'full\'`', () => {
+  it.each(['small', 'medium', 'large'] as const)(
+    'refuses `width: \'%s\'` on a `three-column` page\'s `main`, at that region\'s `width`, naming the region and `\'full\'`',
+    (width) => {
+      const issues = refusalOf({
+        name: 'sales_home_page',
+        label: 'Home',
+        type: 'home',
+        template: 'three-column',
+        regions: [region('header', 'full'), region('sidebar', 'small'), region('main', width), region('aside', 'medium')],
+      });
+      expect(issues.map((i) => ({ path: i.path.join('.'), code: i.code }))).toEqual([{ path: 'regions.2.width', code: 'custom' }]);
+      const [issue] = issues;
+      expect(issue!.message.startsWith(`Region \`main\` is refused with \`width: '${width}'\``)).toBe(true);
+      expect(issue!.message).toContain("a `main` region takes only `width: 'full'`");
+      expect(issue!.message).toContain('@objectstack/spec 18');
+      // The one-key edit that keeps the page as it renders.
+      expect(issue!.message).toContain('Delete `width`');
+      // Runtime prose carries no tracker number (`check:doc-authoring`).
+      expect(issue!.message).not.toMatch(/#\d/);
+    },
+  );
+
+  it('matches the name case-insensitively, as the renderer does, and names the region as written', () => {
+    const issues = refusalOf({ name: 'pg_page', label: 'P', type: 'home', regions: [region('Main', 'large')] });
+    expect(issues.map((i) => i.path.join('.'))).toEqual(['regions.0.width']);
+    expect(issues[0]!.message.startsWith("Region `Main` is refused with `width: 'large'`")).toBe(true);
+  });
+
+  it.each([
+    ['a page that names no template (`default`)', {}],
+    ['`header-sidebar-main`', { template: 'header-sidebar-main' }],
+    ['`dashboard` — `main` is one grid cell there', { template: 'dashboard' }],
+    ['a `slotted` record page', { type: 'record', object: 'account', kind: 'slotted' }],
+    ['an `html` page', { kind: 'html', source: '<box />' }],
+  ])('refuses it on %s too — no layout reads it on any', (_label, extra) => {
+    const issues = refusalOf({ name: 'pg_page', label: 'P', type: 'home', ...extra, regions: [region('main', 'medium')] });
+    expect(issues.map((i) => ({ path: i.path.join('.'), code: i.code }))).toEqual([{ path: 'regions.0.width', code: 'custom' }]);
+  });
+
+  it('`definePage` throws, and the stack door wraps the refusal at `pages.N.regions.M.width` in the ADR-0112 envelope', () => {
+    expect(() => definePage({ name: 'pgs_home', label: 'Home', type: 'home', regions: [region('main', 'large')] }))
+      .toThrow(/a `main` region takes only `width: 'full'`/);
+    const refusal = stackRefusalOf([
+      { name: 'pgs_landing', label: 'Landing', type: 'home', regions: [region('main')] },
+      { name: 'pgs_home', label: 'Home', type: 'home', template: 'three-column', regions: [region('sidebar', 'small'), region('main', 'large')] },
+    ]);
+    expect({ code: refusal.code, status: refusal.status }).toEqual({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+    expect(refusal.issues!.map((i) => ({ path: i.path.join('.'), code: i.code }))).toEqual([
+      { path: 'pages.1.regions.1.width', code: 'custom' },
+    ]);
+  });
+
+  it('CONTROL — `width: \'full\'` on `main` parses and keeps its page-wide value', () => {
+    const r = PageSchema.safeParse({ name: 'pg_page', label: 'P', type: 'home', template: 'three-column', regions: [region('sidebar', 'small'), region('main', 'full')] });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+    expect(r.success && r.data.regions[1]!.width).toBe('full');
+  });
+
+  it.each([
+    ['`large` on `header`', { regions: [region('header', 'large'), region('main')] }],
+    ['each width on `sidebar` and `aside`', { template: 'three-column', regions: [region('sidebar', 'large'), region('main'), region('aside', 'medium')] }],
+    ['`small` on a `dashboard` cell named for no slot', { template: 'dashboard', regions: [region('kpis', 'small'), region('main')] }],
+    ['a `main` that declares no width', { regions: [region('main')] }],
+  ])('CONTROL — %s parses: the rule is `main`\'s alone', (_label, extra) => {
+    const r = PageSchema.safeParse({ name: 'pg_page', label: 'P', type: 'home', ...extra });
+    expect(r.success, JSON.stringify(r.error?.issues ?? [])).toBe(true);
+  });
+});
+
+describe('the ledger — the D3 entries, and the retired D2 entries data at rest replays', () => {
+  it.each([Q1_D3, Q2_D3, MAIN_WIDTH_D3])('step 18 carries `%s`, judging no mechanical edit on the authoring surface', (id) => {
     const entry = MIGRATIONS_BY_MAJOR[18]!.semantic.find((e) => e.id === id);
     expect(entry, id).toBeDefined();
     expect(entry!.conversionIds ?? []).toEqual([]);
@@ -246,6 +323,17 @@ describe('the ledger — two D3 entries, and the retired D2 entries data at rest
     const rehydrated = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) });
     expect(rehydrated).toEqual(converted);
     expect(notices.map((n) => [n.conversionId, n.path])).toEqual([[conversionId, `pages[0].${path}`]]);
+    const parsed = PageSchema.safeParse(rehydrated);
+    expect(parsed.success, JSON.stringify(parsed.success ? [] : parsed.error.issues)).toBe(true);
+  });
+
+  it('a STORED row with a `large` main converts on read (`page-main-region-width-removed`), with the named notice, and the converted row parses', () => {
+    const row = { name: 'sales_home_page', label: 'Home', type: 'home', template: 'three-column', regions: [region('sidebar', 'small'), region('main', 'large')] };
+    expect(refusalOf(row).map((i) => i.path.join('.'))).toEqual(['regions.1.width']);
+    const notices: ConversionNotice[] = [];
+    const rehydrated = applyConversionsToStoredItem('page', row, { onNotice: (n) => notices.push(n) });
+    expect(rehydrated).toEqual({ ...row, regions: [region('sidebar', 'small'), region('main')] });
+    expect(notices.map((n) => [n.conversionId, n.path])).toEqual([[MAIN_WIDTH_D2, 'pages[0].regions[1].width']]);
     const parsed = PageSchema.safeParse(rehydrated);
     expect(parsed.success, JSON.stringify(parsed.success ? [] : parsed.error.issues)).toBe(true);
   });

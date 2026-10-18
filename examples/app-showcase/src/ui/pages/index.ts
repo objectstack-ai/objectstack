@@ -63,7 +63,6 @@ export const ComponentGalleryPage = definePage({
     },
     {
       name: 'main',
-      width: 'large',
       components: [
         { type: 'element:text', properties: { content: 'A working project-delivery workspace that exercises every metadata type, view, chart, and capability chain. Use the navigation to explore — start with My Work, the Delivery Operations dashboard, or the eight Task visualizations.' } },
         // Live KPI row over the seeded data (object-metric in the layout grid).

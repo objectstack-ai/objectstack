@@ -35,7 +35,6 @@ export const ProjectWorkspacePage = definePage({
     },
     {
       name: 'main',
-      width: 'large',
       components: [
         {
           type: 'object-master-detail-form',

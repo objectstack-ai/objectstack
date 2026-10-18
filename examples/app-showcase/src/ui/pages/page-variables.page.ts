@@ -45,7 +45,6 @@ export const PageVariablesPage = definePage({
     },
     {
       name: 'main',
-      width: 'large',
       components: [
         {
           type: 'element:text',
