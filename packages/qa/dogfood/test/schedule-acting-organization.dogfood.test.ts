@@ -582,7 +582,9 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
      *    claiming it pinned a 503 refusal: opposite polarity, no delivery check,
      *    so it certified nothing in either direction. What is pinned instead is
      *    the REASON the control is unavailable, measured at the seam that makes
-     *    it so — a tenant-scoped read on this driver produces NO ANSWER. The
+     *    it so — a tenant-scoped call on this driver produces NO ANSWER (since
+     *    ADR-0131 D8 an org-bound write: under `single` a read carries no
+     *    tenant scope to refuse). The
      *    day the driver gains isolation that goes red and whoever fixes it
      *    enables the real control here.
      */
@@ -590,22 +592,35 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       if (databaseDriver === 'memory') {
         // Not the control — the control cannot run here. This pins the reason,
         // so the exemption expires by itself.
+        //
+        // [ADR-0131 D8] The probe is an org-bound WRITE. Under this suite's
+        // `single` posture an org-bound READ no longer reaches the driver with
+        // a tenant scope at all (the driver's read scope is the wall's verdict,
+        // `none` here), but a write still carries its organization as the
+        // write target in every posture — and that is the scope a run triggered
+        // by an org-bound session hands this driver when it delivers.
         let thrown: unknown = null;
         let answered: unknown = null;
         try {
-          answered = await ql.find(INBOX_OBJECT, { where: {}, context: { userId: recipientId, tenantId: orgA } });
+          answered = await ql.insert(
+            INBOX_OBJECT,
+            { user_id: recipientId, title: 'tenancy probe', topic: 'sched.probe', severity: 'info' },
+            // Elevated, as the run that delivers is: the probe asks the driver
+            // seam, not the caller's object permissions.
+            { context: { isSystem: true, tenantId: orgA } },
+          );
         } catch (err) {
           thrown = err;
         }
 
         expect(
           thrown,
-          `driver-memory ANSWERED a tenant-scoped read (${JSON.stringify(answered)}) — it has gained row-level isolation, so an org-bound session is now possible here: boot this driver with orgContext and enable the real control B (#16589 / #6915)`,
+          `driver-memory ANSWERED a tenant-scoped write (${JSON.stringify(answered)}) — it has gained row-level isolation, so an org-bound session is now possible here: boot this driver with orgContext and enable the real control B (#16589 / #6915)`,
         ).toBeTruthy();
-        // ⛔ Taken as a nullable value, not with `.toHaveLength`: a refused call
-        // must produce NO row count at all, and `.not.toHaveLength` passes over
-        // a null target for the wrong reason.
-        expect(Array.isArray(answered) ? answered.length : null).toBeNull();
+        // ⛔ Taken as a nullable value: a refused call must produce NO row at
+        // all, and a matcher that tolerates a null target passes for the wrong
+        // reason.
+        expect(answered ?? null).toBeNull();
         expect(
           String((thrown as { code?: string }).code ?? (thrown as Error).message),
           'the refusal must be the driver\'s own tenancy refusal, not some unrelated failure that happens to throw',

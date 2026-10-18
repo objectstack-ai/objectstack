@@ -217,6 +217,13 @@ for (const databaseDriver of ['sqlite-wasm', 'memory'] as const) {
       priorPosture = process.env.OS_TENANCY_POSTURE;
       process.env[SCHEDULED_WORK_ENV] = 'true';
       process.env.OS_TENANCY_POSTURE = 'isolated';
+      // [ADR-0131 D8] …and the ENGINE is told the same thing. The driver's
+      // read scope is the organization wall's verdict, computed from the
+      // posture the engine holds — the stack's `tenancy` service, which still
+      // reads `single` here. Under `single` the verdict is `none`: the sweep's
+      // declared organization would narrow nothing, and both drivers would
+      // answer a different subject (all three rows; no refusal on memory).
+      ql.setTenancyPostureProvider(() => 'isolated');
 
       automation.registerFlow(SWEEP_FLOW, declaringTimeRelativeFlow(orgA, recipientId));
 
