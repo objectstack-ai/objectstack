@@ -20,9 +20,11 @@
  *  - A database whose ceremony completed while a seeding release kept the
  *    mirrors (advisory then) has them deleted by a re-run: the step runs
  *    again on a checkpointed run while a mirror stands.
- *  - A mirror whose rule no package declares any more blocks with nothing
+ *  - A mirror whose rule no package declares any more, or whose declaration
+ *    plugin-sharing refuses to serve (the reason named), blocks with nothing
  *    written while a grant still names it (one no grant names goes); so does a
- *    run with no registry to ask.
+ *    run with no registry to ask. `judgeDeclaredSharingRules` asks the
+ *    plugin's own translation which declared names are served.
  *  - While a release's boot still seeds them (`advisoryDepartureReason`), they
  *    stay advisory and nothing deletes them.
  *  - The rule is keyed on the table AND the departure id: a host fate
@@ -42,6 +44,7 @@ import { buildOrganizationOwnershipPlan, inventoryDigest } from './organization-
 import {
   applyOrganizationOwnership,
   CEREMONY_STEPS,
+  judgeDeclaredSharingRules,
   reviewedConflictsOf,
   type ApplyExecutor,
   type CeremonyCheckpoint,
@@ -51,6 +54,8 @@ import {
   type TableOutcome,
 } from './organization-ownership-apply.js';
 import { mergeHostFateSupplement, type InventoryEntry } from './organization-ownership-inventory.js';
+// Loaded at module top: the plugin's first load is paid here, not inside a clocked test.
+import { translateDeclaredSharingRule } from '@objectstack/plugin-sharing';
 
 /**
  * The seeding-release case answers as a release whose boot still seeds them
@@ -121,11 +126,16 @@ function ledger(): CeremonyLedgerPort & { verdicts: Verdict[] } {
 /** Every rule the fixture's packages declare: the eleven mirrors' names and the customized one's. */
 const DECLARED = [...Array.from({ length: MIRRORS }, (_, i) => `share_declared_${i + 1}`), 'share_custom'];
 
-/** Plan, then apply that reviewed plan, under `single`, as the command does. */
+/**
+ * Plan, then apply that reviewed plan, under `single`, as the command does.
+ * `declared` are the rules plugin-sharing serves; `refused` are declared ones
+ * its translation refuses, each with the reason.
+ */
 async function apply(
   l: ReturnType<typeof ledger>,
   inventory?: readonly InventoryEntry[],
   declared: readonly string[] | null = DECLARED,
+  refused: ReadonlyArray<{ name: string; reason: string }> = [],
 ): Promise<OrganizationOwnershipApplyReport> {
   const database = join(dir, 'fixture.db');
   const reviewed = await buildOrganizationOwnershipPlan({
@@ -148,7 +158,15 @@ async function apply(
       conflicts: reviewedConflictsOf(reviewed),
     },
     catalog: { async resolve() { return undefined; } },
-    ...(declared ? { declaredSharingRules: { async names() { return declared; } } } : {}),
+    ...(declared
+      ? {
+          declaredSharingRules: {
+            async rules() {
+              return [...declared.map((name) => ({ name, refused: null })), ...refused.map((r) => ({ name: r.name, refused: r.reason }))];
+            },
+          },
+        }
+      : {}),
     door: {
       async save(type, name) {
         throw new Error(`no environment save is expected here (${type} ${name})`);
@@ -296,6 +314,29 @@ describe('the declared sharing-rule mirrors, once their seeder has retired', () 
     expect(writes.filter((w) => /^(UPDATE "sys_record_share"|DELETE FROM "sys_sharing_rule")/i.test(w))).toEqual([]);
   });
 
+  it('a mirror whose rule its package declares but plugin-sharing refuses to serve, and that a grant names, blocks with the reason; nothing is renamed or deleted', async () => {
+    const reason = 'its condition does not translate (unsupported-function: matches() is not supported)';
+    const l = ledger();
+    const report = await apply(l, undefined, DECLARED.filter((n) => n !== 'share_declared_5'), [{ name: 'share_declared_5', reason }]);
+    expect(report.complete).toBe(false);
+    expect(l.verdicts.at(-1)).toMatchObject({ complete: false });
+    const step = report.steps.find((s) => s.step === 'mirror-deletion')!;
+    expect(step.status).toBe('blocked');
+    expect(step.blockers).toHaveLength(1);
+    expect(step.blockers[0]).toMatch(/^1 declared-rule mirror\(s\) on sys_sharing_rule name the sharing rule share_declared_5 \(rows rule_declared_05\), which its package declares but plugin-sharing does not serve: /);
+    expect(step.blockers[0]).toContain(reason);
+    expect(rows(`SELECT COUNT(*) AS n FROM sys_sharing_rule`)).toEqual([{ n: MIRRORS + 2 }]);
+    expect(writes.filter((w) => /^(UPDATE "sys_record_share"|DELETE FROM "sys_sharing_rule")/i.test(w))).toEqual([]);
+    expect(rows(`SELECT source_id FROM sys_record_share WHERE id = 'share_declared_grant_5'`)).toEqual([{ source_id: 'rule_declared_05' }]);
+  });
+
+  it('a refused declaration no grant names is a copy of nothing that grants nothing: its mirror goes', async () => {
+    db.exec(`DELETE FROM sys_record_share WHERE source_id = 'rule_declared_05'`);
+    const report = await apply(ledger(), undefined, DECLARED.filter((n) => n !== 'share_declared_5'), [{ name: 'share_declared_5', reason: 'refused' }]);
+    expect([report.complete, report.blocking]).toEqual([true, 0]);
+    expect(rows(`SELECT COUNT(*) AS n FROM sys_sharing_rule`)).toEqual([{ n: 2 }]);
+  });
+
   it('a mirror whose rule no package declares, and that no grant names, goes like every fate-2 mirror', async () => {
     db.exec(`DELETE FROM sys_record_share WHERE source_id = 'rule_declared_03'`);
     const report = await apply(ledger(), undefined, DECLARED.filter((n) => n !== 'share_declared_3'));
@@ -374,5 +415,24 @@ describe('the declared sharing-rule mirrors, once their seeder has retired', () 
     expect(copy.remaining).toBe(2);
     expect(copy.departures).toEqual([{ id: 'declared-rule-mirrors', label: expect.any(String), as: 'mirror-deletion', rows: 2 }]);
     expect(tableOf(report, 'sys_sharing_rule').remaining).toBe(0);
+  });
+});
+
+describe('judgeDeclaredSharingRules — which declared names plugin-sharing serves', () => {
+  it('asks the plugin\'s own translation: a served rule answers null, a refused one its reason; a nameless item is left out', async () => {
+    const base = { object: 'crm_deal', sharedWith: { type: 'user', value: 'alice' }, accessLevel: 'read' };
+    const judged = await judgeDeclaredSharingRules([
+      { ...base, name: 'served', condition: 'record.amount >= 100000' },
+      { ...base, name: 'untranslatable', condition: 'size(record.tags) > 0' },
+      { ...base, name: 'dotted', sharedWith: { type: 'field', value: 'owner.manager_id' }, condition: 'record.amount > 1' },
+      { ...base, name: 'match_all', condition: 'true' },
+      { ...base, condition: 'record.amount > 1' },
+    ]);
+    expect(judged.map((r) => r.name)).toEqual(['served', 'untranslatable', 'dotted', 'match_all']);
+    expect(judged[0]!.refused).toBeNull();
+    expect(translateDeclaredSharingRule({ ...base, name: 'served', condition: 'record.amount >= 100000' }).rule?.name).toBe('served');
+    expect(judged[1]!.refused).toMatch(/^its condition does not translate \(/);
+    expect(judged[2]!.refused).toMatch(/^its recipient \(sharedWith type "field"\)/);
+    expect(judged[3]!.refused).toMatch(/match-all-criteria/);
   });
 });

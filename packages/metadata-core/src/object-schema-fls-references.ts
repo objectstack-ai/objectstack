@@ -359,6 +359,9 @@ function arrayOf(element: Scrub): Scrub {
  */
 const ruleEntries: Scrub = arrayOf((entry, denied) => (mentionsDenied(entry, denied, 'include', 'classified') ? REMOVE : entry));
 
+/** ONE rule entry outside an array, dropped whole on the same test {@link ruleEntries} applies per entry. */
+const ruleEntry: Scrub = (entry, denied) => (mentionsDenied(entry, denied, 'include', 'classified') ? REMOVE : entry);
+
 /** An object block scrubbed key by key; an unclassified key goes the {@link unclassified} way. */
 function block(table: Readonly<Record<string, Scrub>>): Scrub {
     return (value, denied, scope) => {
@@ -745,6 +748,11 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     validations: ruleEntries,
     indexes: ruleEntries,
     activityMilestones: ruleEntries,
+    // [#24338] The object's default row scope: ONE row-level security policy whose
+    // `using` / `check` are CEL over this object's record, so a rule entry in all
+    // but arity, dropped whole when it mentions a denied field. It is server
+    // policy the caller cannot evaluate, and its text describes the field.
+    defaultRowScope: ruleEntry,
     // Blocks.
     userActions: block({ create: crudFlag, import: crudFlag, edit: crudFlag, delete: crudFlag, exportCsv: keep }),
     external: block({

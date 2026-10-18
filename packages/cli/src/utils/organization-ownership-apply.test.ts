@@ -5,7 +5,8 @@
  * fate comes through `--apply` with effective access IDENTICAL (and a positive
  * control: a grant the rewrite would lose reddens the comparison), mirrors
  * gone, attributed rows carrying their organization, the unattributable row
- * still present and reported, and row counts reconciling. Plus the ceremony's
+ * still present, reported, and holding certification (ruling C on the C8
+ * decision) until the operator resolves it by hand, and row counts reconciling. Plus the ceremony's
  * guarantees: idempotent, resumable from the recorded checkpoint, gated
  * (nothing deleted while a reference does not resolve by name), and no
  * deletion outside fate 2.
@@ -32,6 +33,7 @@ import {
   reviewedConflictsOf,
   reviewedPlanFromFile,
   TemplateChoiceRefusal,
+  UNATTRIBUTABLE_REMEDY,
   type ApplyExecutor,
   type CatalogPort,
   type CeremonyCheckpoint,
@@ -452,7 +454,9 @@ const apply = (
     ...(opts.metadataChoices ? { metadataChoices: opts.metadataChoices } : {}),
     ...(opts.securityPlugin ? { securityPlugin: opts.securityPlugin } : {}),
     ...(opts.defaultOrganization ? { defaultOrganization: opts.defaultOrganization } : {}),
-    ...(opts.declaredSharingRules ? { declaredSharingRules: { names: async () => opts.declaredSharingRules! } } : {}),
+    ...(opts.declaredSharingRules
+      ? { declaredSharingRules: { rules: async () => opts.declaredSharingRules!.map((name) => ({ name, refused: null })) } }
+      : {}),
     posture: opts.posture ?? 'single',
     database: file,
     catalog: c,
@@ -512,7 +516,7 @@ afterEach(() => {
 });
 
 describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
-  it('comes through with effective access identical, mirrors gone, owners written, the orphan reported, counts reconciling', async () => {
+  it('comes through with effective access identical, mirrors gone, owners written, the orphan reported and holding certification, counts reconciling', async () => {
     const before = accessBefore();
     const countsBefore = counts();
     const c = catalog();
@@ -532,8 +536,10 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
       ['column-drops', 'done'],
     ]);
     expect(report.complete).toBe(true);
-    expect(report.blocking).toBe(0);
-    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 1 });
+    // Ruling C: the fate-4 orphan is the one discrepancy — the marker is not verified.
+    expect(report.blocking).toBe(1);
+    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 1, advisory: 0 });
+    expect(report.tables.filter((t) => t.remaining > 0).map((t) => [t.object, t.remaining])).toEqual([['sys_saved_report', 1]]);
 
     // Effective access: identical, read the 17.x way before and the v18 way after.
     expect(before.length).toBeGreaterThan(0);
@@ -582,9 +588,11 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     expect(rows(`SELECT organization_id FROM crm_deal WHERE id = 'deal_2'`)).toEqual([{ organization_id: 'org_default' }]);
     expect(rows(`SELECT organization_id FROM sys_user_permission_set WHERE id = 'grant_2'`)).toEqual([{ organization_id: 'org_default' }]);
 
-    // The unattributable row is still present, still NULL, and reported by id.
+    // The unattributable row is still present, still NULL — never guessed,
+    // never deleted — reported by id, and held with its count and remedy.
     expect(rows(`SELECT organization_id FROM sys_saved_report`)).toEqual([{ organization_id: null }]);
     expect(tableOf(report, 'sys_saved_report').unattributable.map((u) => u.id)).toEqual(['report_orphan']);
+    expect(tableOf(report, 'sys_saved_report').held).toEqual({ rows: 1, remedy: UNATTRIBUTABLE_REMEDY });
 
     // Fate 1: the column is gone through the column-drop port.
     expect(tableOf(report, 'sys_job').columnDropped).toBe(true);
@@ -604,6 +612,31 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     // Every delete is fate 2's, or the moved rows leaving sys_setting.
     expect(writes.filter((w) => /^DELETE/.test(w)).every((w) =>
       /sys_permission_set|sys_position|sys_position_permission_set|sys_capability|sys_email_template|"sys_setting" WHERE \(\("scope" = \?\) AND "organization_id" IS NULL\)/.test(w))).toBe(true);
+  });
+
+  it('ruling C: the operator resolves the orphan by hand — deleted, or given its organization — and the re-run certifies', async () => {
+    for (const remedy of [`DELETE FROM sys_saved_report WHERE id = 'report_orphan'`, `UPDATE sys_saved_report SET organization_id = 'org_b'`]) {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+      dir = mkdtempSync(join(tmpdir(), 'os-c7b-apply-'));
+      file = join(dir, 'fixture.db');
+      db = new Database(file);
+      seed();
+      const c = catalog();
+      const l = ledger();
+      const first = await apply(c, l);
+      expect([first.complete, first.blocking], remedy).toEqual([true, 1]);
+      // The ceremony wrote nothing to the row: still there, still NULL.
+      expect(rows(`SELECT id, organization_id FROM sys_saved_report`)).toEqual([{ id: 'report_orphan', organization_id: null }]);
+
+      db.exec(remedy);
+      writes = [];
+      const again = await apply(c, l);
+      expect(again.resumedFrom, remedy).toEqual([...CEREMONY_STEPS]);
+      expect([again.complete, again.blocking, again.advisory], remedy).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1), remedy).toEqual({ complete: true, blocking: 0, advisory: 0 });
+      expect(tableOf(again, 'sys_saved_report').held, remedy).toBeUndefined();
+    }
   });
 
   it('positive control: a grant the rewrite would lose reddens the effective-access pin', async () => {
@@ -802,7 +835,9 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(c.templates.get('crm.late|en-US')).toMatchObject({ subject: 'Edited late' });
     expect(rows(`SELECT id FROM sys_email_template`)).toEqual([]);
     expect(resumed.complete).toBe(true);
-    expect(resumed.blocking).toBe(0);
+    // Nothing remains but the fixture's fate-4 orphan, which holds certification (ruling C).
+    expect(resumed.tables.filter((t) => t.remaining > 0).map((t) => t.object)).toEqual(['sys_saved_report']);
+    expect(resumed.blocking).toBe(1);
   });
 
   it('a customized template with no name blocks: kept, named, and verified_at stays null', async () => {
@@ -904,12 +939,12 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     // is a copy of a declaration the registry serves (ADR-0131 D2), so the
     // mirror-deletion step removes it — after renaming its grant — and nothing
     // of it remains (the blocking and seeding legs:
-    // `organization-ownership-apply.declared-rule-mirrors.test.ts`).
-    const unattributable = report.tables.reduce((n, t) => n + t.unattributable.length, 0);
+    // `organization-ownership-apply.declared-rule-mirrors.test.ts`). The one
+    // discrepancy left is the fixture's fate-4 orphan (ruling C).
     expect(report.complete).toBe(true);
-    expect(report.blocking).toBe(0);
-    expect(report.advisory).toBe(unattributable);
-    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: unattributable });
+    expect(report.tables.filter((t) => t.remaining > 0).map((t) => t.object)).toEqual(['sys_saved_report']);
+    expect([report.blocking, report.advisory]).toEqual([1, 0]);
+    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 1, advisory: 0 });
     expect(tableOf(report, 'sys_setting').departures).toEqual([]);
     const rule = tableOf(report, 'sys_sharing_rule');
     expect(rule.remaining).toBe(0);
@@ -2480,6 +2515,81 @@ describe('ADR-0131 D10 --apply — a single-posture database that holds no organ
       expect(rows('SELECT DISTINCT organization_id FROM crm_event')).toEqual([{ organization_id: 'org_boot' }]);
       expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
       expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+    });
+  });
+});
+
+describe('ruling C on the C8 decision — an unattributable row holds certification (ADR-0131 D10 fate 4: never guessed, never deleted)', () => {
+  /** A walled database: one fate-3 row whose anchor names a file that is gone, beside an attributable one. */
+  const WALLED = `
+    CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT, name TEXT);
+    INSERT INTO sys_organization VALUES ('org_a', 'acme', 'Acme'), ('org_b', 'beta', 'Beta');
+    CREATE TABLE sys_file (id TEXT PRIMARY KEY, organization_id TEXT, ref_object TEXT, ref_id TEXT);
+    INSERT INTO sys_file VALUES ('file_a', 'org_a', NULL, NULL);
+    CREATE TABLE sys_upload_session (id TEXT PRIMARY KEY, organization_id TEXT, file_id TEXT);
+    INSERT INTO sys_upload_session VALUES ('us_ok', NULL, 'file_a'), ('us_orphan', NULL, 'file_gone');
+    CREATE TABLE sys_job (id TEXT PRIMARY KEY, organization_id TEXT);
+    INSERT INTO sys_job VALUES ('job_1', NULL);
+  `;
+
+  it('⭐ under a wall, a fate-3 row whose anchor is missing blocks: named with its table, count and remedy; the marker is not verified; the row is untouched', async () => {
+    await withDatabase(WALLED, async () => {
+      const l = ledger();
+      const report = await apply(catalog(), l, { posture: 'isolated' });
+
+      expect(report.complete).toBe(true);
+      expect([report.blocking, report.advisory]).toEqual([1, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 1, advisory: 0 });
+      const sessions = tableOf(report, 'sys_upload_session');
+      expect(sessions).toMatchObject({ attributed: 1, remaining: 1, held: { rows: 1, remedy: UNATTRIBUTABLE_REMEDY } });
+      expect(sessions.unattributable).toEqual([{ id: 'us_orphan', reason: 'sys_file row file_gone not found' }]);
+      expect(report.tables.filter((t) => t.held).map((t) => t.object)).toEqual(['sys_upload_session']);
+      // Never guessed, never deleted.
+      expect(rows('SELECT id, organization_id FROM sys_upload_session ORDER BY id')).toEqual([
+        { id: 'us_ok', organization_id: 'org_a' },
+        { id: 'us_orphan', organization_id: null },
+      ]);
+      expect(writes.filter((w) => /^DELETE/i.test(w) && /sys_upload_session/.test(w))).toEqual([]);
+    });
+  });
+
+  it('the remedy the report names clears it: the operator assigns the organization by hand, and the re-run verifies', async () => {
+    await withDatabase(WALLED, async () => {
+      const l = ledger();
+      await apply(catalog(), l, { posture: 'isolated' });
+      db.exec(`UPDATE sys_upload_session SET organization_id = 'org_b' WHERE id = 'us_orphan'`);
+      const again = await apply(catalog(), l, { posture: 'isolated' });
+      expect([again.complete, again.blocking, again.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+      expect(rows(`SELECT organization_id FROM sys_upload_session WHERE id = 'us_orphan'`)).toEqual([{ organization_id: 'org_b' }]);
+    });
+  });
+
+  it('control — a clean database still certifies: every row attributed, nothing held, nothing advisory', async () => {
+    await withDatabase(`${WALLED} UPDATE sys_upload_session SET file_id = 'file_a';`, async () => {
+      const l = ledger();
+      const report = await apply(catalog(), l, { posture: 'isolated' });
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+      expect(report.tables.filter((t) => t.held || t.unattributable.length)).toEqual([]);
+    });
+  });
+
+  it('control — on a table whose column is not the tenancy anchor (notNullExempt), an organization-less row is legitimate: reported, advisory, and the marker verifies', async () => {
+    await withDatabase(`
+      CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT, name TEXT);
+      INSERT INTO sys_organization VALUES ('org_a', 'default', 'Default');
+      CREATE TABLE sys_sso_provider (id TEXT PRIMARY KEY, organization_id TEXT, provider_id TEXT);
+      INSERT INTO sys_sso_provider VALUES ('sso_global', NULL, 'okta');
+    `, async () => {
+      const l = ledger();
+      const report = await apply(catalog(), l);
+      const sso = tableOf(report, 'sys_sso_provider');
+      expect(sso.unattributable.map((u) => u.id)).toEqual(['sso_global']);
+      expect(sso.held).toBeUndefined();
+      expect(sso.remaining).toBe(0);
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 1]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 1 });
     });
   });
 });

@@ -1140,7 +1140,7 @@ function protectionBlockRefusal(
     const err = new Error(
         `Remove the \`protection\` block from ${type} '${saveName}' and send it again. Nothing was written. `
         + 'This door does not translate the block, so it would lock nothing: an item saved through the metadata API '
-        + 'is authored in this environment (ADR-0010 §3.5). To lock an item, declare `protection` on it in a code '
+        + 'is authored in this system (ADR-0010 §3.5). To lock an item, declare `protection` on it in a code '
         + "package's source, where the package loader translates it into the item's lock (ADR-0010 Phase 4.3).",
     ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
     err.code = 'VALIDATION_ERROR';
@@ -1244,7 +1244,7 @@ function authoredLockFamilyRefusal(
     const err = new Error(
         `Remove ${keys.map((key) => `\`${key}\``).join(', ')} from ${type} '${saveName}' and send it again. `
         + `Nothing was written. They would ${effect}, and the metadata API never sets, changes or removes a lock: `
-        + 'an item saved here is authored in this environment (ADR-0010 §3.5). To lock an item, declare `protection` '
+        + 'an item saved here is authored in this system (ADR-0010 §3.5). To lock an item, declare `protection` '
         + "on it in a code package's source, where the package loader translates it into the item's lock "
         + '(ADR-0010 Phase 4.3).',
     ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
@@ -22212,7 +22212,7 @@ export class ObjectStackProtocolImplementation implements
             return true;
         });
         const describe = (h: Holder) =>
-            h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this environment`;
+            h.packageId ? `page '${h.page}' of package '${h.packageId}'` : `page '${h.page}', authored in this system`;
         const named = unique.map(describe);
         const others = named.length === 1 ? `${named[0]} already is` : `${named.join(' and ')} already are`;
         const remedy = unique.some((h) => h.shipped)

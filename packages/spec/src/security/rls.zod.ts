@@ -137,6 +137,100 @@ const RLS_POLICY_TAGS_RETIRED =
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
+ * The curated near-miss answers of a row policy's unknown keys, shared by both
+ * carriers of the policy shape: {@link RowLevelSecurityPolicySchema} and
+ * {@link DefaultRowScopeSchema}. One table, so the two surfaces cannot answer
+ * the same slip differently. Declared above its first eager reader, for the
+ * TDZ reason {@link RLS_POLICY_TAGS_RETIRED} gives.
+ *
+ * The suggestion pool is `Object.keys(shape)` minus anything that accepts
+ * nothing (#5593). `priority` and `tags` are exactly that case and the
+ * exclusion is deliberate: each is a {@link retiredKey} tombstone, declared so
+ * its rejection carries the upgrade prescription, never offered as a rename
+ * target. The hand-transcribed list this replaced had to state the same
+ * exclusion in prose and be trusted to keep it.
+ */
+const RLS_POLICY_ALIASES: Readonly<Record<string, string>> = {
+  // ADR-0090 D3 renamed the pre-D3 `roles` vocabulary to `positions`.
+  roles: 'positions',
+  role: 'positions',
+  // PostgreSQL spells the write-side clause `WITH CHECK`.
+  withcheck: 'check',
+  // The read-side clause under other names an author reaches for first.
+  condition: 'using',
+  filter: 'using',
+  where: 'using',
+};
+
+/**
+ * The policy members the two rules below read. Neither reads `object`, which
+ * is why a carrier that implies the object ({@link DefaultRowScopeSchema})
+ * takes both rules unchanged.
+ */
+interface RowLevelSecurityPolicyClauses {
+  operation: z.infer<typeof RLSOperation>;
+  using?: string;
+  check?: string;
+}
+
+/**
+ * The cross-field rules of a row policy, named so both carriers of the policy
+ * shape run the same function: {@link RowLevelSecurityPolicySchema} and
+ * {@link DefaultRowScopeSchema}. Named rather than inherited because zod 4
+ * refuses `.omit()` / `.pick()` on an object schema that carries a refinement
+ * (`.omit() cannot be used on object schemas containing refinements`), so the
+ * object-implied shape cannot be cut from the refined policy schema and keep
+ * its rules; it is rebuilt from the same members and given the same rules.
+ */
+function refineRowLevelSecurityPolicy(data: RowLevelSecurityPolicyClauses, ctx: z.RefinementCtx): void {
+  // Ensure at least one of USING or CHECK is provided
+  if (!data.using && !data.check) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'At least one of "using" or "check" must be specified. A `select` or `delete` policy takes "using": ' +
+        'the rows it lets a caller read or delete. An `insert` policy takes "check", which judges each row ' +
+        'an insert writes; a "using" alone is that check when no applicable insert policy declares one. ' +
+        'An `update` or `all` policy takes either or both: "using" limits the existing rows it admits, and ' +
+        '"check" judges each row written.',
+    });
+  }
+
+  // [ADR-0049 · ADR-0058 D4] `check` judges the post-image of a write — the
+  // new row of an insert, the changed row of an update. A `select` or `delete`
+  // policy has no post-image, and the runtime's write gate never collects one
+  // (plugin-security `writeCheckPolicies` is handed only the policies whose
+  // `operation` is the write's own or `all`). A `check` there was stored and
+  // never evaluated, so an author who wrote one on a `delete` policy believed
+  // it guarded deletes. Declared ≠ enforced ⇒ refused here, at the key's own
+  // path, naming the operation and what to write instead. "Declares" is the
+  // runtime's test (a non-blank string): a blank `check` declares nothing and
+  // is left to the rule above.
+  if (
+    (data.operation === 'select' || data.operation === 'delete') &&
+    typeof data.check === 'string' &&
+    data.check.trim() !== ''
+  ) {
+    const verb = data.operation === 'select' ? 'read' : 'delete';
+    const act = data.operation === 'select' ? 'a read' : 'a delete';
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['check'],
+      message:
+        `\`check\` is never evaluated on a \`${data.operation}\` policy: it validates the new row an insert ` +
+        `or an update writes, and ${act} writes none. Remove \`check\` from this policy. To limit which ` +
+        `rows the policy lets a caller ${verb}, write that predicate as \`using\`; to validate rows as ` +
+        'they are written, declare the `check` on a policy whose `operation` is `insert`, `update` or `all`.',
+    });
+  }
+
+  // With both rules above, a non-blank `using` is the only predicate a
+  // `select` or `delete` policy can carry. An `insert`, `update` or `all`
+  // policy may carry either clause or both; what each does per operation is
+  // on the `using` and `check` docs.
+}
+
+/**
  * Row-Level Security Policy Schema
  * 
  * Defines a single RLS policy that filters records based on conditions.
@@ -239,23 +333,9 @@ const RLS_POLICY_TAGS_RETIRED =
 export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
   {
     surface: 'this RLS policy',
-    // The suggestion pool is `Object.keys(shape)` minus anything that accepts
-    // nothing (#5593). `priority` and `tags` are exactly that case and the
-    // exclusion is deliberate: each is a {@link retiredKey} tombstone, declared so its
-    // rejection carries the upgrade prescription, never offered as a rename
-    // target. The hand-transcribed list this replaced had to state the same
-    // exclusion in prose and be trusted to keep it.
-    aliases: {
-      // ADR-0090 D3 renamed the pre-D3 `roles` vocabulary to `positions`.
-      roles: 'positions',
-      role: 'positions',
-      // PostgreSQL spells the write-side clause `WITH CHECK`.
-      withcheck: 'check',
-      // The read-side clause under other names an author reaches for first.
-      condition: 'using',
-      filter: 'using',
-      where: 'using',
-    },
+    // Shared with the object-implied carrier; the table's docblock carries
+    // why the two tombstones are not in the suggestion pool.
+    aliases: RLS_POLICY_ALIASES,
     history:
       'Until this shape was closed, these were dropped silently — the policy still parsed, so a ' +
       'row-level restriction the author wrote was never compiled into the filter.',
@@ -570,53 +650,67 @@ export const RowLevelSecurityPolicySchema = lazySchema(() => strictObject(
    * of an unknown-key verdict with no upgrade text.
    */
   tags: retiredKey(RLS_POLICY_TAGS_RETIRED),
-}).superRefine((data, ctx) => {
-  // Ensure at least one of USING or CHECK is provided
-  if (!data.using && !data.check) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message:
-        'At least one of "using" or "check" must be specified. A `select` or `delete` policy takes "using": ' +
-        'the rows it lets a caller read or delete. An `insert` policy takes "check", which judges each row ' +
-        'an insert writes; a "using" alone is that check when no applicable insert policy declares one. ' +
-        'An `update` or `all` policy takes either or both: "using" limits the existing rows it admits, and ' +
-        '"check" judges each row written.',
-    });
-  }
+}).superRefine(refineRowLevelSecurityPolicy));
 
-  // [ADR-0049 · ADR-0058 D4] `check` judges the post-image of a write — the
-  // new row of an insert, the changed row of an update. A `select` or `delete`
-  // policy has no post-image, and the runtime's write gate never collects one
-  // (plugin-security `writeCheckPolicies` is handed only the policies whose
-  // `operation` is the write's own or `all`). A `check` there was stored and
-  // never evaluated, so an author who wrote one on a `delete` policy believed
-  // it guarded deletes. Declared ≠ enforced ⇒ refused here, at the key's own
-  // path, naming the operation and what to write instead. "Declares" is the
-  // runtime's test (a non-blank string): a blank `check` declares nothing and
-  // is left to the rule above.
-  if (
-    (data.operation === 'select' || data.operation === 'delete') &&
-    typeof data.check === 'string' &&
-    data.check.trim() !== ''
-  ) {
-    const verb = data.operation === 'select' ? 'read' : 'delete';
-    const act = data.operation === 'select' ? 'a read' : 'a delete';
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ['check'],
-      message:
-        `\`check\` is never evaluated on a \`${data.operation}\` policy: it validates the new row an insert ` +
-        `or an update writes, and ${act} writes none. Remove \`check\` from this policy. To limit which ` +
-        `rows the policy lets a caller ${verb}, write that predicate as \`using\`; to validate rows as ` +
-        'they are written, declare the `check` on a policy whose `operation` is `insert`, `update` or `all`.',
-    });
-  }
+/**
+ * What an author who writes `object` on a default row scope is told. Hoisted
+ * above its eager reader, for the TDZ reason {@link RLS_POLICY_TAGS_RETIRED}
+ * gives.
+ */
+const DEFAULT_ROW_SCOPE_OBJECT_GUIDANCE =
+  '`object` is implied on a default row scope: the scope belongs to the object that declares it, so it '
+  + 'names no target. Delete the key. A policy for some other object is written in a permission set\'s '
+  + '`rowLevelSecurity`, where `object` names its target.';
 
-  // With both rules above, a non-blank `using` is the only predicate a
-  // `select` or `delete` policy can carry. An `insert`, `update` or `all`
-  // policy may carry either clause or both; what each does per operation is
-  // on the `using` and `check` docs.
-}));
+/**
+ * An object's default row scope: {@link RowLevelSecurityPolicySchema} without
+ * `object`, which the declaring object implies. It is the value of
+ * `ObjectSchema.defaultRowScope` (`data/object.zod.ts`), whose describe states
+ * the contract the security plugin's row-policy collection is to meet.
+ *
+ * ## Why it is rebuilt, not cut
+ *
+ * The obvious spelling, `RowLevelSecurityPolicySchema.omit({ object: true })`,
+ * throws in zod 4 (`.omit() cannot be used on object schemas containing
+ * refinements`). So this schema is built from the same three parts as the
+ * policy schema, each shared by reference rather than copied:
+ *
+ * - **the members**: the policy schema's own `shape` minus `object`, so every
+ *   member and its describe are the same schema instances. The two
+ *   `retiredKey()` tombstones (`priority`, `tags`) are left out with it: they
+ *   accept no value, so leaving them out changes nothing this schema accepts,
+ *   and their prescriptions are upgrade text for `rowLevelSecurity[]`, a path
+ *   this surface never had. Either key is refused here as an unknown key;
+ * - **the rules**: {@link refineRowLevelSecurityPolicy}, which reads
+ *   `operation`, `using` and `check` and never `object`, so both rules hold as
+ *   written: at least one of `using` / `check`, and no `check` on a `select` or
+ *   `delete` policy;
+ * - **the near-miss table**: {@link RLS_POLICY_ALIASES}.
+ *
+ * What differs is the surface name, the `object` guidance, the history
+ * sentence and the two absent tombstones. `object` is refused as an unknown key, with the guidance above, so
+ * a policy copied from a permission set fails loudly instead of parsing with a
+ * target the runtime would never read.
+ *
+ * Reader and writers (#24164 ruling E′): the reader is to be the security
+ * plugin's `collectRLSPolicies` (#24340); the writers are to be the platform
+ * identity objects (#24341). Neither exists yet: until the reader lands, no
+ * server reads the key, and until the writers land, no object declares it.
+ */
+export const DefaultRowScopeSchema = lazySchema(() => {
+  const { object: _implied, priority: _priority, tags: _tags, ...members } = RowLevelSecurityPolicySchema.shape;
+  return strictObject(
+    {
+      surface: "this object's default row scope",
+      aliases: RLS_POLICY_ALIASES,
+      guidance: { object: DEFAULT_ROW_SCOPE_OBJECT_GUIDANCE },
+      history:
+        'A key this scope does not declare is refused rather than dropped: a dropped member of a row '
+        + 'scope would be a row restriction its author believes is in force.',
+    },
+    members,
+  ).superRefine(refineRowLevelSecurityPolicy);
+});
 
 // RLSAuditEventSchema / RLSAuditConfigSchema / RLSConfigSchema were REMOVED
 // per ADR-0056 D8 "design+enforce or remove": the global RLSConfig
@@ -731,6 +825,10 @@ export const RLSEvaluationResultSchema = lazySchema(() => z.object({
 export type RowLevelSecurityPolicy = z.input<typeof RowLevelSecurityPolicySchema>;
 /** Post-parse shape of {@link RowLevelSecurityPolicy} — defaults applied, transforms run (ADR-0122). */
 export type RowLevelSecurityPolicyParsed = z.infer<typeof RowLevelSecurityPolicySchema>;
+/** An object's default row scope — {@link RowLevelSecurityPolicy} without `object`. */
+export type DefaultRowScope = z.input<typeof DefaultRowScopeSchema>;
+/** Post-parse shape of {@link DefaultRowScope} — defaults applied (ADR-0122). */
+export type DefaultRowScopeParsed = z.infer<typeof DefaultRowScopeSchema>;
 export type RLSUserContext = z.input<typeof RLSUserContextSchema>;
 export type RLSEvaluationResult = z.input<typeof RLSEvaluationResultSchema>;
 

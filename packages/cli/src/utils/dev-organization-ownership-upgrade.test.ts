@@ -4,7 +4,8 @@
  * `os dev`'s in-place upgrade of a v17-shape development database (ADR-0131
  * D10, development exception): a copy of the database and its `telemetry`
  * sibling first, then the ceremony's plan and the apply of that plan, both
- * with `--dev`; the server boots again only on the ceremony's own "complete".
+ * with `--dev`; the server boots again only on the ceremony's own verdict:
+ * "complete" with nothing left (`blocking` 0), the marker the boot guard reads.
  * The CLI runs are faked here — what they write is the ceremony's contract
  * (`--out` files), and the real runs are the command's own suites.
  */
@@ -68,7 +69,7 @@ afterEach(() => {
 
 describe('os dev — the in-place upgrade of a v17-shape development database', () => {
   it('⭐ copies the database and its telemetry sibling, plans, applies that plan, and boots on "complete"', () => {
-    const result = upgradeDevelopmentDatabase(input(fakeRun({ report: { complete: true, warnings: ['8 shipped permission set row(s) …'], steps: [] } })));
+    const result = upgradeDevelopmentDatabase(input(fakeRun({ report: { complete: true, blocking: 0, warnings: ['8 shipped permission set row(s) …'], steps: [] } })));
     expect(result).toMatchObject({ ok: true, backupDir: BACKUP(), warnings: ['8 shipped permission set row(s) …'] });
     expect(readdirSync(BACKUP()).sort()).toEqual(['apply.json', 'ceremony.log', 'dev.db', 'dev.db-wal', 'dev.telemetry.db', 'plan.json']);
     expect(readFileSync(join(BACKUP(), 'dev.db-wal'), 'utf8')).toBe('primary-wal');
@@ -93,6 +94,27 @@ describe('os dev — the in-place upgrade of a v17-shape development database', 
     })));
     expect(result.ok).toBe(false);
     expect(result.lines[0]).toBe('authored-conversion: The authored permission x differs …');
+    expect(result.lines.at(-1)).toContain(`--apply --plan-file ${join(BACKUP(), 'plan.json')} --backup-taken`);
+  });
+
+  it('every step finished but the post-check holds an unattributable row: boots nothing, names the table, count and remedy', () => {
+    const remedy = 'assign each row its organization …, or delete it by hand, then re-run --apply';
+    const result = upgradeDevelopmentDatabase(input(fakeRun({
+      report: {
+        complete: true,
+        blocking: 2,
+        warnings: [],
+        steps: [{ step: 'attribution', status: 'done', blockers: [] }],
+        tables: [
+          { object: 'sys_saved_report', remaining: 2, held: { rows: 2, remedy } },
+          { object: 'sys_job', remaining: 0 },
+        ],
+      },
+    })));
+    expect(result.ok).toBe(false);
+    expect(result.lines[0]).toBe(`sys_saved_report: 2 row(s) whose owner cannot be derived — ${remedy}`);
+    expect(result.lines).toHaveLength(2);
+    expect(result.lines.at(-1)).toContain('is not certified');
     expect(result.lines.at(-1)).toContain(`--apply --plan-file ${join(BACKUP(), 'plan.json')} --backup-taken`);
   });
 

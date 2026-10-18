@@ -72,7 +72,11 @@ function refusal(fn: () => unknown): Envelope | null {
 const shared = (out: ObjectStackDefinition) =>
   (out.objects ?? []).find((o) => o.name === 'shared') as Record<string, unknown> | undefined;
 
-/** The ruling's eight, in the object shape's declaration order. */
+/**
+ * The ruling's eight, in the object shape's declaration order, plus each fixed-shape
+ * config object the shape has gained since: `defaultRowScope` (#24338), refused under
+ * `'merge'` by the unedited composer, which is the ARRIVAL leg below in production.
+ */
 const CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER = [
   'userActions',
   'external',
@@ -80,6 +84,7 @@ const CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER = [
   'access',
   'lifecycle',
   'enable',
+  'defaultRowScope',
   'publicSharing',
   'protection',
 ] as const;
@@ -270,7 +275,7 @@ function refusedConfigObjectsOf(compose: typeof composeStacks, define: typeof de
 describe('DERIVATION — the refused config-object set equals the shape walk', () => {
   const derived = configObjectKeysOf(shapeOf(ObjectSchema));
 
-  it("the shape walk yields the ruling's eight, in shape order (a new config object lands here as a one-line diff)", () => {
+  it("the shape walk yields the ruling's eight plus the keys added since, in shape order (a new config object lands here as a one-line diff)", () => {
     expect(derived).toEqual([...CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER]);
   });
 

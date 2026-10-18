@@ -84,6 +84,7 @@ const CONFIG_OBJECT_KEYS_IN_SHAPE_ORDER = [
   'access',
   'lifecycle',
   'enable',
+  'defaultRowScope',
   'publicSharing',
   'protection',
 ] as const;
