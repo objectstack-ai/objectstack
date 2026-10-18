@@ -38,6 +38,14 @@
  * declares the values the door passes. Its CONTROL names the parameters the
  * requests do tell apart there.
  *
+ * A door can answer a request BEFORE its composition runs, from a fact that
+ * is the door's own wiring rather than the composition: the storage door's
+ * family gate reader refuses a held session while a gate is active, and a host
+ * with no auth service binds no storage download authorizer at all. Such a
+ * door declares those requests ({@link DoorRow.answeredBeforeComposition}),
+ * hands nothing on for them, and its CONTROL reads the answer the door gave
+ * instead.
+ *
  * ## Why the requests are these
  *
  * Each named parameter changes the answer for at least one request below, so a
@@ -53,6 +61,10 @@
  * | an ex-member's organization-stamped key under a walled posture | `tenancy` |
  * | an API key on a host with no auth service | `sessionApi` |
  *
+ * The storage door binds no authorizer on a host with no auth service, so its
+ * `sessionApi` is told apart in its CONTROL instead, on a host whose auth
+ * service exposes no session read.
+ *
  * The runtime door's `/mcp` face (an OAuth access token) is not a row: its
  * verification and scope interpretation are the door's own, ahead of the call,
  * and its pins are `resolve-execution-context.oauth-organization.test.ts` and
@@ -60,6 +72,9 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IHttpRequest, IHttpResponse, RouteHandler } from '@objectstack/spec/contracts';
@@ -68,6 +83,7 @@ import { resolveRequestExecutionContext, type RequestExecutionContextInput } fro
 
 import { RestServer } from '@objectstack/rest';
 import { SettingsServicePlugin, type SettingsContext } from '@objectstack/service-settings';
+import { StorageServicePlugin } from '@objectstack/service-storage';
 
 import { hashApiKey } from './api-key.js';
 import { resolveExecutionContext } from './resolve-execution-context.js';
@@ -98,13 +114,21 @@ const KEY = 'osk_conformance_key';
 const EX_MEMBER_KEY = 'osk_conformance_ex_member';
 const FUTURE = '2999-01-01T00:00:00Z';
 
+/** The private field-owned file the storage drive downloads, and the record that owns it. */
+const OWNED_FILE = 'file_conformance';
+const OWNER_OBJECT = 'contract';
+const OWNER_RECORD = 'rec_conformance';
+
 /** One deployment every row is driven against: its engine and its kernel services. */
 interface World {
   ql: unknown;
   services: Record<string, unknown>;
+  /** The context each read of {@link OWNER_OBJECT} received: the storage door's verdict read. */
+  ownerReads: unknown[];
 }
 
-function world(opts: { auth: boolean; gateActive?: boolean }): World {
+function world(opts: { auth: boolean; gateActive?: boolean; sessionApi?: boolean }): World {
+  const ownerReads: unknown[] = [];
   const tables: Record<string, Array<Record<string, unknown>>> = {
     sys_api_key: [
       { id: 'k_live', key: hashApiKey(KEY), revoked: false, user_id: 'u_key', active_organization_id: ORG, expires_at: FUTURE },
@@ -122,17 +146,31 @@ function world(opts: { auth: boolean; gateActive?: boolean }): World {
     ],
     sys_position: [{ id: 'pos_sales', name: 'sales_rep', organization_id: null }],
     sys_position_permission_set: [{ position_id: 'pos_sales', permission_set_id: 'ps_sales' }],
+    // The storage drive's download: a private file one record owns, uploaded
+    // by nobody a request signs in as, so only the owner read decides.
+    sys_file: [{
+      id: OWNED_FILE, key: 'files/conformance.pdf', name: 'conformance.pdf', mime_type: 'application/pdf', size: 1,
+      scope: 'record', status: 'committed', acl: 'private', owner_id: 'u_uploader',
+      ref_object: OWNER_OBJECT, ref_id: OWNER_RECORD, ref_field: 'attachment',
+    }],
+    [OWNER_OBJECT]: [{ id: OWNER_RECORD }],
+  };
+  const find = async (object: string, q: { where?: Record<string, unknown>; limit?: number; context?: unknown } | undefined) => {
+    if (object === OWNER_OBJECT) ownerReads.push(q?.context);
+    const rows = (tables[object] ?? []).filter((row) => Object.entries(q?.where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fixture: unsupported combinator ${k}`);
+      if (v !== null && typeof v === 'object') {
+        return Array.isArray((v as { $in?: unknown[] }).$in) ? (v as { $in: unknown[] }).$in.includes(row[k]) : true;
+      }
+      return (v ?? null) === (row[k] ?? null);
+    }));
+    return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
   };
   const ql = bindCatalogFromTables({
-    async find(object: string, q: { where?: Record<string, unknown>; limit?: number } | undefined) {
-      const rows = (tables[object] ?? []).filter((row) => Object.entries(q?.where ?? {}).every(([k, v]) => {
-        if (k.startsWith('$')) throw new Error(`fixture: unsupported combinator ${k}`);
-        if (v !== null && typeof v === 'object') {
-          return Array.isArray((v as { $in?: unknown[] }).$in) ? (v as { $in: unknown[] }).$in.includes(row[k]) : true;
-        }
-        return (v ?? null) === (row[k] ?? null);
-      }));
-      return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
+    find,
+    // The storage door reads `sys_file` by id.
+    async findOne(object: string, q: { where?: Record<string, unknown> } | undefined) {
+      return (await find(object, { where: q?.where, limit: 1 }))[0] ?? null;
     },
   }, tables);
 
@@ -147,20 +185,23 @@ function world(opts: { auth: boolean; gateActive?: boolean }): World {
   };
   if (opts.auth) {
     services.auth = {
-      api: {
-        async getSession(input: { headers: Headers }) {
-          if (input.headers.get('cookie') !== COOKIE) return undefined;
-          return {
-            user: { id: 'u_ses', email: 'ses@example.com', authGate: { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' } },
-            session: { id: 'sess_1', userId: 'u_ses', token: 'sess_bearer', activeOrganizationId: ORG },
-          };
+      // `sessionApi: false`: an auth service that exposes no session read.
+      ...(opts.sessionApi === false ? {} : {
+        api: {
+          async getSession(input: { headers: Headers }) {
+            if (input.headers.get('cookie') !== COOKIE) return undefined;
+            return {
+              user: { id: 'u_ses', email: 'ses@example.com', authGate: { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' } },
+              session: { id: 'sess_1', userId: 'u_ses', token: 'sess_bearer', activeOrganizationId: ORG },
+            };
+          },
         },
-      },
+      }),
       isAuthGateActive: () => opts.gateActive ?? true,
       resolveUserAuthGates: async () => [],
     };
   }
-  return { ql, services };
+  return { ql, services, ownerReads };
 }
 
 interface Request {
@@ -169,6 +210,8 @@ interface Request {
   auth: boolean;
   /** Whether the auth service says a gate feature is active (default: active). */
   gateActive?: boolean;
+  /** The session user's ADR-0069 posture holds it (the world's session user is gated). */
+  held?: true;
   /** Who the request resolves to, or `undefined` for none; see {@link expectedPrincipal}. */
   principal: string | undefined;
 }
@@ -179,6 +222,7 @@ const REQUESTS: Request[] = [
     name: 'a session cookie for a gated user, with a language preference',
     headers: { cookie: COOKIE, 'accept-language': 'zh-CN,zh;q=0.9' },
     auth: true,
+    held: true,
     principal: 'u_ses',
   },
   {
@@ -186,6 +230,7 @@ const REQUESTS: Request[] = [
     headers: { cookie: COOKIE, 'accept-language': 'zh-CN,zh;q=0.9' },
     auth: true,
     gateActive: false,
+    held: true,
     principal: 'u_ses',
   },
   { name: 'an API key', headers: { 'x-api-key': KEY }, auth: true, principal: 'u_key' },
@@ -210,6 +255,12 @@ interface DoorRow<Answer = ExecutionContext | undefined> {
   project?(context: ExecutionContext | undefined): Answer;
   /** The facts that say WHO the caller is, as this door hands them on. Default: {@link IDENTITY}. */
   identity?: readonly string[];
+  /**
+   * The door fact that answers `request` before the door's composition runs,
+   * or `undefined` when the composition decides it. The door hands nothing on
+   * for such a request. Absent: the composition decides every request.
+   */
+  answeredBeforeComposition?(request: Request): string | undefined;
 }
 
 /** The caller a door's answer names, whatever its shape. */
@@ -385,7 +436,97 @@ const SETTINGS_ROW: DoorRow<SettingsContext> = {
   identity: ['userId', 'tenantId', 'permissions'],
 };
 
-const DOORS: ReadonlyArray<DoorRow<unknown>> = [RUNTIME_ROW, REST_ROW, SETTINGS_ROW];
+/** The storage family's base path, as the plugin mounts it by default. */
+const STORAGE_BASE = '/api/v1/storage';
+
+/**
+ * The storage door, the download authorizer `composeStorageRoutes` binds
+ * (`@objectstack/service-storage`), through its public entry: the plugin
+ * booted on a plugin context over the world's services, and one download of a
+ * private field-owned file, `GET /files/:fileId/url`. The authorizer answers a
+ * verdict, not a context, so the drive reads the context where the door hands
+ * it on: the read of the record that owns the file ({@link World.ownerReads}),
+ * asked once for a caller the door resolved and never for one it did not.
+ */
+async function storageDownload(w: World, headers: Record<string, string>): Promise<{
+  status: number;
+  code: string | undefined;
+  handedOn: ExecutionContext | undefined;
+}> {
+  const routes = new Map<string, RouteHandler>();
+  const mount = (verb: string) => (path: string, handler: RouteHandler) => { routes.set(`${verb} ${path}`, handler); };
+  const http = {
+    get: mount('GET'), post: mount('POST'), put: mount('PUT'), delete: mount('DELETE'), patch: mount('PATCH'),
+    use() {}, async listen() {}, async close() {},
+  };
+  const services: Record<string, unknown> = { ...w.services, objectql: w.ql, 'http-server': http };
+  const ready: Array<() => Promise<void> | void> = [];
+  const context = {
+    logger: { info() {}, warn() {}, error() {}, debug() {} },
+    registerService(name: string, service: unknown) { services[name] = service; },
+    getService: (name: string) => services[name],
+    hook: (event: string, fn: () => Promise<void> | void) => { if (event === 'kernel:ready') ready.push(fn); },
+    // The async registry the door reaches the `tenancy` service through.
+    getKernel: () => ({ getServiceAsync: async (name: string) => services[name] }),
+  };
+  const rootDir = mkdtempSync(join(tmpdir(), 'os-conformance-storage-'));
+  try {
+    const plugin = new StorageServicePlugin({
+      adapter: 'local',
+      basePath: STORAGE_BASE,
+      local: { rootDir, signingSecret: 'conformance-storage' },
+      bindToSettings: false,
+    });
+    await plugin.init(context as never);
+    await plugin.start(context as never);
+    for (const fn of ready) await fn();
+    const download = routes.get(`GET ${STORAGE_BASE}/files/:fileId/url`);
+    if (!download) throw new Error('fixture: the storage family did not mount its download route');
+    const answer: { status: number; body?: { error?: { code?: string } } } = { status: 200 };
+    const res = {
+      status(code: number) { answer.status = code; return res; },
+      json(body: typeof answer.body) { answer.body = body; return res; },
+      send() { return res; },
+      header() { return res; },
+    };
+    w.ownerReads.length = 0;
+    await download(
+      { params: { fileId: OWNED_FILE }, query: {}, headers, method: 'GET', path: `${STORAGE_BASE}/files/${OWNED_FILE}/url` } as unknown as IHttpRequest,
+      res as unknown as IHttpResponse,
+    );
+    expect(w.ownerReads.length, 'the door reads the owner record at most once').toBeLessThanOrEqual(1);
+    return { status: answer.status, code: answer.body?.error?.code, handedOn: w.ownerReads[0] as ExecutionContext | undefined };
+  } finally {
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+}
+
+const STORAGE_ROW: DoorRow = {
+  door: 'packages/services/service-storage/src/storage-service-plugin.ts',
+  drive: async (w, headers) => (await storageDownload(w, headers)).handedOn,
+  parameters: (w) => ({
+    tenancy: () => w.services.tenancy as never,
+    anonymous: 'fail-closed',
+    authGate: 'resolved',
+    credentials: 'api-key-and-session',
+    sessionApi: 'optional',
+    session: 'request',
+    localization: 'withhold',
+    requestLocale: undefined,
+    accessToken: 'carry',
+    oauth: undefined,
+    onAdmission: undefined,
+  }),
+  answeredBeforeComposition: (request) => {
+    if (!request.auth) return 'a host with no auth service binds no download authorizer, so the download is served unasked';
+    if (request.held && request.gateActive !== false) {
+      return "the family door's ADR-0069 gate reader refuses the held session before the authorizer runs";
+    }
+    return undefined;
+  },
+};
+
+const DOORS: ReadonlyArray<DoorRow<unknown>> = [RUNTIME_ROW, REST_ROW, SETTINGS_ROW, STORAGE_ROW];
 
 /** The facts that say WHO the caller is; equal at every door that resolves one. */
 const IDENTITY = ['userId', 'tenantId', 'email', 'positions', 'permissions', 'systemPermissions', 'posture', 'org_user_ids', 'accessible_org_ids', 'principalKind'] as const;
@@ -396,6 +537,12 @@ describe('[ruling 6227928430 item 4] one request, the function and every convert
       for (const row of DOORS) {
         const w = world({ auth: request.auth, gateActive: request.gateActive });
         const viaDoor = await row.drive(w, request.headers);
+        const first = row.answeredBeforeComposition?.(request);
+        if (first) {
+          // The door's own fact answered; its CONTROL reads that answer.
+          expect(viaDoor, `${row.door}: ${first}`).toBeUndefined();
+          continue;
+        }
         const headers = new Headers(request.headers);
         const parameters = row.parameters(w, headers);
         const viaFunction = await resolveRequestExecutionContext({
@@ -535,5 +682,63 @@ describe('[ruling 6227928430 item 4] one request, the function and every convert
     const lastRequest = REQUESTS[REQUESTS.length - 1]!;
     expect(principalOf(await settings.drive(noAuth, lastRequest.headers))).toBe('u_key');
     expect(await viaFunction(noAuth, new Headers(lastRequest.headers), { sessionApi: 'required' })).toBeUndefined();
+  });
+
+  it('CONTROL: the requests tell the storage door\'s named parameters apart, and its door facts answer what they declare', async () => {
+    const storage = STORAGE_ROW;
+    const viaFunction = (w: World, headers: Headers, flip: Partial<RequestExecutionContextInput>) => resolveRequestExecutionContext({
+      headers,
+      ql: w.ql,
+      authService: w.services.auth as RequestExecutionContextInput['authService'],
+      ...storage.parameters(w, headers),
+      ...flip,
+    });
+    // `anonymous: 'fail-closed'`: nothing is handed on and the door answers
+    // 401, and the guest entry would have handed on a guest context.
+    const w = world({ auth: true });
+    expect(await storageDownload(w, REQUESTS[0]!.headers)).toMatchObject({ status: 401, code: 'AUTH_REQUIRED', handedOn: undefined });
+    expect((await viaFunction(w, new Headers(), { anonymous: 'guest' }))?.principalKind).toBe('guest');
+    // `authGate: 'resolved'`, `accessToken: 'carry'`, `localization` and
+    // `requestLocale` withheld: with no gate active the held session is served,
+    // and the context it is read with carries the posture the admitting read
+    // decided and the session bearer, and no locale or time zone.
+    const inactive = world({ auth: true, gateActive: false });
+    const session = await storageDownload(inactive, REQUESTS[2]!.headers);
+    expect(session.status).toBe(200);
+    expect(session.handedOn).toMatchObject({
+      userId: 'u_ses',
+      principalKind: 'human',
+      accessToken: 'sess_bearer',
+      authGate: { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' },
+    });
+    expect(session.handedOn?.locale).toBeUndefined();
+    expect(session.handedOn?.timezone).toBeUndefined();
+    const flipped = await viaFunction(inactive, new Headers(REQUESTS[2]!.headers), {
+      authGate: 'reread-when-active',
+      accessToken: 'withhold',
+      localization: { settings: () => inactive.services.settings },
+    });
+    expect(flipped?.authGate).toBeUndefined();
+    expect(flipped?.accessToken).toBeUndefined();
+    expect(flipped?.timezone).toBe('Europe/Paris');
+    // `credentials: 'api-key-and-session'`: a door reading no key admits nobody here.
+    expect(principalOf((await storageDownload(w, REQUESTS[3]!.headers)).handedOn)).toBe('u_key');
+    expect(await viaFunction(w, new Headers(REQUESTS[3]!.headers), { credentials: 'session-only' })).toBeUndefined();
+    // `tenancy`: the ex-member's key is refused under the walled posture, and
+    // a door reading no posture would admit it.
+    expect(await storageDownload(w, REQUESTS[4]!.headers)).toMatchObject({ status: 401, handedOn: undefined });
+    expect((await viaFunction(w, new Headers(REQUESTS[4]!.headers), { tenancy: undefined }))?.userId).toBe('u_ex');
+    // `sessionApi: 'optional'`: a key on a host whose auth service exposes no
+    // session read is admitted, and `'required'` would admit nobody.
+    const noSessionApi = world({ auth: true, sessionApi: false });
+    const key = REQUESTS[3]!.headers;
+    expect(principalOf((await storageDownload(noSessionApi, key)).handedOn)).toBe('u_key');
+    expect(await viaFunction(noSessionApi, new Headers(key), { sessionApi: 'required' })).toBeUndefined();
+    // The door facts its row declares: the held session is refused by the
+    // family's gate before the authorizer runs, and a host with no auth
+    // service serves the download unasked.
+    expect(await storageDownload(w, REQUESTS[1]!.headers)).toMatchObject({ status: 403, code: 'PASSWORD_EXPIRED', handedOn: undefined });
+    expect(await storageDownload(world({ auth: false }), REQUESTS[REQUESTS.length - 1]!.headers))
+      .toMatchObject({ status: 200, handedOn: undefined });
   });
 });

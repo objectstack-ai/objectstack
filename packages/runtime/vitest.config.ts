@@ -205,6 +205,14 @@ export default defineConfig({
         find: /^@objectstack\/service-settings$/,
         replacement: path.resolve(__dirname, '../services/service-settings/src/index.ts'),
       },
+      // Dev-only: the same conformance test drives the REAL storage door (the
+      // download authorizer `StorageServicePlugin` binds) as its next row, so
+      // the row reads the door in the checkout, never a built copy of it.
+      // Anchored: the package publishes only its root entry.
+      {
+        find: /^@objectstack\/service-storage$/,
+        replacement: path.resolve(__dirname, '../services/service-storage/src/index.ts'),
+      },
       // Dev-only: app-plugin.disabled-seed.test.ts drives the REAL
       // `sys_packages` → registry rehydration (#5047), so the empty-env seed
       // regression is proven against the actual hydration code rather than a

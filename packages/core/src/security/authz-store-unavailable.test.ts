@@ -182,14 +182,13 @@ const TRANSPORT_LEDGER: Record<string, 'guarded' | 'propagates'> = {
   // The one request-to-ExecutionContext composition (ruling record 6227928430,
   // letter A). It catches nothing around the resolver: every door that calls
   // it — the runtime dispatcher's `resolve-execution-context.ts` first, REST's
-  // `rest-server.ts` second and the settings door's
-  // `settings-service-plugin.ts` third, each of the last two through a
-  // fail-closed `catch` that re-raises the outage — receives the outage and
-  // answers it at its own net.
+  // `rest-server.ts` second, the settings door's `settings-service-plugin.ts`
+  // third and the storage download door's `storage-service-plugin.ts` fourth,
+  // each of the last three through a fail-closed `catch` that re-raises the
+  // outage — receives the outage and answers it at its own net.
   'packages/core/src/security/request-execution-context.ts': 'propagates',
   'packages/mcp/src/plugin.ts': 'propagates',
   'packages/services/service-datasource/src/admin-routes.ts': 'guarded',
-  'packages/services/service-storage/src/storage-service-plugin.ts': 'guarded',
   'packages/plugins/plugin-sharing/src/sharing-plugin.ts': 'guarded',
   'packages/plugins/plugin-hono-server/src/current-user-endpoints.ts': 'guarded',
   'packages/cloud-connection/src/marketplace-install-local-plugin.ts': 'guarded',

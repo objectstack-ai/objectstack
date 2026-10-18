@@ -221,6 +221,7 @@ const DELEGATORS = new Map([
   ['packages/rest/src/rest-server.ts', 'resolveRequestExecutionContext'],
   ['packages/runtime/src/security/resolve-execution-context.ts', 'resolveRequestExecutionContext'],
   ['packages/services/service-settings/src/settings-service-plugin.ts', 'resolveRequestExecutionContext'],
+  ['packages/services/service-storage/src/storage-service-plugin.ts', 'resolveRequestExecutionContext'],
   ['packages/core/src/security/request-execution-context.ts', 'resolveAuthzContext'],
 ]);
 
