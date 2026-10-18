@@ -276,7 +276,11 @@ describe('[#20338] census: every draft switch in rest-server.ts is ledgered', ()
         // with the last one `rest-server.ts` held: the reset's `?state=draft` (a
         // `write` row). Its key names the route, so again no ledger row changed:
         // 8 = 0 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3 + 2 + 1, length 15 → 16.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
+        // [#23050 slice 13d] The history family moved to `meta-item-history-routes.ts`
+        // carrying no draft switch: none of its five doors reads one, so no ledger row
+        // changed:
+        // 8 = 0 + 0 + 0 + 0 + 0 + 2 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 3 + 2 + 1 + 0, length 16 → 17.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(17);
         expect(SOURCE_FILES.map((file) => file.fileName)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(SITES).toHaveLength(8);
     });
