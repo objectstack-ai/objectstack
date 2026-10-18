@@ -14468,9 +14468,10 @@ const pageAssignedProfilesRemoved: MetadataConversion = {
  * reads the master FK from the incoming body. The update nulling it was not.
  * On a by-id update that gate reads the STORED row's FK, never the incoming
  * value, so the write was accepted and left a detail row with a null master
- * FK, which the `controlled_by_parent` read filter (`masterFK IN …`) never
- * matches. The refusal for that update is the record validator's ADR-0113
- * check, a PATCH may not null out a required field (the update branch of
+ * FK, which the `controlled_by_parent` read filter
+ * (`masterFK IN (accessible master ids)`) never matches. The refusal for that
+ * update is the record validator's ADR-0113 check, a PATCH may not null out a
+ * required field (the update branch of
  * `packages/objectql/src/validation/record-validator.ts#validateRecordInScope`),
  * and only `required: true` arms it. So the converted row loses no write the
  * contract allows: it gains the refusal the builder's force already gives an
