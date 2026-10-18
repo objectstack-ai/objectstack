@@ -11,10 +11,12 @@
  * open namespace for custom components, and that HALF IS DELIBERATE (maintainer
  * ruling 2026-08-05 on the props-gate direction; re-affirmed by every
  * registered-through-the-string-arm widget since: `cloud-connection:panel`,
- * `marketplace:installed-list`, `mcp:connect-agent`, the `object-*` SDUI block
- * family, objectui's kebab legacy `page-header`, and the `custom.*` shapes
- * pinned in `page.test.ts`). Collapsing the union to the enum would reject all
- * of them — measured, not assumed.
+ * `mcp:connect-agent`, the `object-*` SDUI block family, objectui's kebab
+ * legacy `page-header`, and the `custom.*` shapes pinned in `page.test.ts`).
+ * Collapsing the union to the enum would reject all of them — measured, not
+ * assumed. (`marketplace:installed-list` was one of those widgets until #24230
+ * retired it by name: an open-arm type can be retired too, and its kept
+ * `ComponentPropsMap` row is then the only thing that keeps the name known.)
  *
  * What was NOT deliberate is that the open arm also swallowed the spec's OWN
  * namespaces: `global:serch` parsed as happily as `global:search`, validated
@@ -82,8 +84,8 @@ export const RESERVED_COMPONENT_TYPE_NAMESPACES: ReadonlySet<string> = new Set(
  * `record:line_items`, the plugin console widgets, the `object-*` blocks — plus
  * every type the vocabulary RETIRED by name, whose row is kept on purpose so the
  * readers that dispatch on it keep recognising the name: `user:profile`,
- * `ai:chat_window`, and the retired-with-tombstones `element:filter` /
- * `element:form`), and the
+ * `ai:chat_window`, `record:json`, `marketplace:installed-list`, and the
+ * retired-with-tombstones `element:filter` / `element:form`), and the
  * string-arm ledger above.
  *
  * KNOWN is not the same as WRITABLE. A retired type stays known here — that is

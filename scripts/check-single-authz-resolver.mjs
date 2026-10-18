@@ -218,7 +218,7 @@ const ALLOW = new Map([
 // 6227928430, letter A). A door converted onto that composition moves its row's
 // call, and the composition is itself a delegator of the resolver.
 const DELEGATORS = new Map([
-  ['packages/rest/src/rest-server.ts', 'resolveAuthzContext'],
+  ['packages/rest/src/rest-server.ts', 'resolveRequestExecutionContext'],
   ['packages/runtime/src/security/resolve-execution-context.ts', 'resolveRequestExecutionContext'],
   ['packages/core/src/security/request-execution-context.ts', 'resolveAuthzContext'],
 ]);
