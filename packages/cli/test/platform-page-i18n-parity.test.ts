@@ -1086,6 +1086,9 @@ describe('`pages.*` default-locale parity (#8764, moved off the nav roster by #1
   //    verdict moved without them is a verdict nobody has seen fail. The
   //    sample is a synthetic page shaped like the retired `marketplace_installed`
   //    page (#23933); it is a fixture, and no shipped population carries it.
+  //    Its header copy is all the gate reads, so its body is a live block: the
+  //    retired page's own `marketplace:installed-list` widget is refused by
+  //    name since #24230.
   const SAMPLE_PAGE = {
     name: 'marketplace_installed',
     label: 'Installed Apps',
@@ -1102,7 +1105,7 @@ describe('`pages.*` default-locale parity (#8764, moved off the nav roster by #1
           },
         ],
       },
-      { name: 'main', components: [{ type: 'marketplace:installed-list', properties: {} }] },
+      { name: 'main', components: [{ type: 'element:divider', properties: {} }] },
     ],
   };
   const SAMPLE_SOURCES = new Map([[SAMPLE_PAGE.name, pageSourceCopy(SAMPLE_PAGE)]]);

@@ -2904,6 +2904,20 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'carries, and on the assembled-manifest `viewItems` channel.',
   },
   {
+    id: 'ui-marketplace-installed-list-retired',
+    order: 102,
+    text:
+      'It also retires the `marketplace:installed-list` page element (ADR-0049 enforce-or-remove), '
+      + 'the plugin console widget that drew the separate Installed Apps view. That view was retired: '
+      + 'its one renderer was deleted and its one page had already left the cloud-connection plugin, '
+      + 'whose "Installed Apps" navigation entry opens Setup → Packages filtered to Source = '
+      + 'marketplace instead. The name was never a `PageComponentType` member, so it is refused by '
+      + 'name at the node, and its `ComponentPropsMap` row stays as a whole-bag refusal carrying the '
+      + 'same prescription. No conversion is registered: the only edit is deleting the node, a layout '
+      + 'decision that is the author\'s. Its D3 record is the semantic entry '
+      + '`ui-marketplace-installed-list-retired`.',
+  },
+  {
     id: 'ui-object-form-custom-fields-typed',
     order: 78,
     text:

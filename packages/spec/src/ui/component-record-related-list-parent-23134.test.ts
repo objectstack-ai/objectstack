@@ -166,7 +166,7 @@ describe('C — every other component row refuses the key: the per-type door', (
     expect(notRefused).toEqual([]);
     // The whole-bag set is the retired types only — a live row landing here
     // would be refusing for a reason this test does not mean to accept.
-    expect(wholeBag.sort()).toEqual(['ai:chat_window', 'record:json', 'user:profile']);
+    expect(wholeBag.sort()).toEqual(['ai:chat_window', 'marketplace:installed-list', 'record:json', 'user:profile']);
   });
 
   it('CONTROL: the related list itself does not report the key as unknown', () => {
