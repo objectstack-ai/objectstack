@@ -336,13 +336,13 @@ function buildTitleSurface(
  * removes another handler's accessor, and nothing serialising the context
  * finds a new key on it.
  */
-export function withInProcessHookTitle<H extends (ctx: any) => unknown>(
-  handler: H,
+export function withInProcessHookTitle(
+  handler: (ctx: any) => unknown,
   ql: unknown,
   hookName: string,
-): (ctx: any) => Promise<Awaited<ReturnType<H>>> {
-  return async function inProcessHookHandler(engineCtx: any) {
-    if (engineCtx === null || typeof engineCtx !== 'object') return (await handler(engineCtx)) as Awaited<ReturnType<H>>;
+): (ctx: any) => Promise<unknown> {
+  return async function inProcessHookHandler(engineCtx: any): Promise<unknown> {
+    if (engineCtx === null || typeof engineCtx !== 'object') return handler(engineCtx);
     const surface = buildTitleSurface(engineCtx, ql, { kind: 'hook', name: hookName });
     const title = async (field?: unknown): Promise<string | null> =>
       (await surface(field === undefined || field === null ? undefined : String(field), undefined)) ?? null;
@@ -350,7 +350,7 @@ export function withInProcessHookTitle<H extends (ctx: any) => unknown>(
       get: (target, prop) => (prop === 'title' ? title : Reflect.get(target, prop)),
       has: (target, prop) => prop === 'title' || Reflect.has(target, prop),
     });
-    return (await handler(view)) as Awaited<ReturnType<H>>;
+    return handler(view);
   };
 }
 
