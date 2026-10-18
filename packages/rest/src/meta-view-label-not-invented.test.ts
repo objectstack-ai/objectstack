@@ -109,6 +109,12 @@ const CELLS = LOCALES.flatMap((locale) => [BARE, NAMED, TAGGED, SELF].map((name)
     expected: EXPECTED[locale][name] === undefined ? 'no label' : JSON.stringify(EXPECTED[locale][name]),
 })));
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 /** The served `label`, asserting the key is absent where nothing was authored or translated. */
 function expectServedLabel(doc: any, name: string, locale: string): void {
     const expected = EXPECTED[locale][name];
@@ -160,7 +166,7 @@ function makeHost(i18n: unknown = i18nService) {
     const matches = (r: Record<string, unknown>, w: Record<string, unknown>) =>
         Object.entries(w ?? {}).every(([k, v]) => {
             if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-            return (r[k] ?? null) === (v ?? null);
+            return whereValueMatches(r[k] ?? null, v ?? null);
         });
     const engine = {
         registry,

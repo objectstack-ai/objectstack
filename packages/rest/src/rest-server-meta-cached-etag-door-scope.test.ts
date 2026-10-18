@@ -97,6 +97,12 @@ const row = (type: string, organization_id: string | null = null): Row => ({
     ),
 });
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 function matchesWhere(r: Record<string, unknown>, where: Record<string, unknown>): boolean {
     for (const [k, v] of Object.entries(where)) {
         // ⛔ REFUSE a combinator rather than reading it as a field name: a
@@ -106,7 +112,7 @@ function matchesWhere(r: Record<string, unknown>, where: Record<string, unknown>
             throw new Error(`stub engine: unsupported WHERE combinator \`${k}\``);
         }
         if (v === undefined) continue;
-        if (r[k] !== v) return false;
+        if (!whereValueMatches(r[k], v)) return false;
     }
     return true;
 }

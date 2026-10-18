@@ -84,6 +84,12 @@ const OFF_PACKAGE = 'pkg_off';
 
 const DATA_METHODS = ['findData', 'getData', 'createData', 'updateData', 'deleteData'] as const;
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 function createMockServer() {
     return {
         get: vi.fn(), post: vi.fn(), put: vi.fn(), delete: vi.fn(), patch: vi.fn(),
@@ -124,7 +130,7 @@ function host(opts: { environmentId?: string; withoutByName?: boolean } = {}): H
     const matches = (r: Record<string, unknown>, w: Record<string, unknown>) =>
         Object.entries(w).every(([k, v]) => {
             if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
-            return (r[k] ?? null) === (v ?? null);
+            return whereValueMatches(r[k] ?? null, v ?? null);
         });
     const engine = {
         registry,
