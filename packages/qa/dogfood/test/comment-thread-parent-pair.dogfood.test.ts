@@ -277,17 +277,27 @@ describe('[ADR-0139 E7] the comment-thread gate leafs over the parent pair: ever
     expect(gatedWheres.some(hasLeaf)).toBe(true);
   });
 
-  it('a member’s historical import (treatAsHistorical) naming a foreign pair stores its thread’s pair', async () => {
+  it('a member’s historical import (treatAsHistorical) naming a foreign pair is refused at the door; without the flag it stores its thread’s pair', async () => {
     const posted = await stack.apiAs(token.member, 'POST', `/data/${COMMENT}`, { thread_id: `${OBJ}:${id.mine}`, body: 'ctp import probe' });
     expect(posted.status, 'fixture comment').toBeLessThan(300);
     const j = (await posted.json()) as any;
     const commentId = String(j.id ?? j.record?.id ?? j.data?.id);
+    const rows = [{ id: commentId, object_name: OBJ, record_id: id.other }];
+    // [#24348] The import doors refuse `treatAsHistorical: true` to every caller
+    // but the system principal, before a row is read. The engine-side half of
+    // this pin (the pair re-derived under `preserveAudit`) is held in
+    // plugin-audit's `comment-parent-pair.integration.test.ts`.
+    const historical = await stack.apiAs(token.member, 'POST', `/data/${COMMENT}/import`, {
+      format: 'json', writeMode: 'update', matchFields: ['id'], treatAsHistorical: true, rows,
+    });
+    expect(historical.status).toBe(403);
+    expect(((await historical.json()) as any).error?.code).toBe('PERMISSION_DENIED');
+    const untouched = await ql.findOne(COMMENT, { where: { id: commentId }, context: { ...SYS } });
+    expect({ object_name: untouched.object_name, record_id: untouched.record_id }).toEqual({ object_name: OBJ, record_id: id.mine });
+    // Without the flag the member's import updates the comment it owns (the
+    // body carries the change), and the pair it names is the engine's to strip.
     const res = await stack.apiAs(token.member, 'POST', `/data/${COMMENT}/import`, {
-      format: 'json',
-      writeMode: 'update',
-      matchFields: ['id'],
-      treatAsHistorical: true,
-      rows: [{ id: commentId, object_name: OBJ, record_id: id.other }],
+      format: 'json', writeMode: 'update', matchFields: ['id'], rows: [{ ...rows[0], body: 'ctp import probe, edited' }],
     });
     expect(res.status).toBe(200);
     const report: any = await res.json();

@@ -1461,12 +1461,12 @@ const RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION: RuleExplanation = {
 
 /** What happens to a declared sharing rule whose `condition` does not lower — the two condition ids. */
 const SHARING_RULE_SKIPPED =
-  'A declared sharing rule\'s `condition` is compiled ONCE, at boot: `bootstrapDeclaredSharingRules` lowers it ' +
-  'to a static `criteria_json` filter with no variables bound. A condition that does not lower is not ' +
-  'degraded, partially applied or deferred — the rule is SKIPPED: it is never written to `sys_sharing_rule`, ' +
-  'no `sys_record_share` grant is ever materialised, and the only signal is one WARN line in the boot log. An ' +
-  'unlowerable condition is never seeded as a permissive match-all (ADR-0049), so the rule is declared and ' +
-  'grants nothing.';
+  'A declared sharing rule\'s `condition` is compiled where enforcement reads the rule from the registry: ' +
+  '`createDeclaredSharingRuleSource` lowers it to a static `criteria` filter with no variables bound. A ' +
+  'condition that does not lower is not degraded, partially applied or deferred — the rule is SKIPPED: ' +
+  'enforcement never serves it, no `sys_record_share` grant is ever materialised, and the only signal is one ' +
+  'WARN line in the log, once per process. An unlowerable condition is never served as a permissive match-all ' +
+  '(ADR-0049), so the rule is declared and grants nothing.';
 
 /** Why a grant on the rule's anchor object can be refused outright — the two anchor ids. */
 const SHARING_INERT_GRANT =
@@ -1501,7 +1501,7 @@ const SHARING_RULE_UNLOWERABLE_CONDITION_EXPLANATION: RuleExplanation = {
     CROSS_CLASS_LISTING,
     'To keep the rule without a second column, compare with a literal — "one of these values" is ' +
       '`record.status in [\'open\', \'pending\']` — or test a file field with `!= null`.',
-    'Such a comparison lowers, so the rule IS seeded into `sys_sharing_rule`, but every criteria query it runs ' +
+    'Such a comparison lowers, so the rule IS served to enforcement, but every criteria query it runs ' +
       'is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses the comparison by the ' +
       'columns\' declared types), and `SharingRuleService` reads a refused query as matching no record. No ' +
       '`sys_record_share` grant is ever materialised, at boot or on any later write, and the only signal is a ' +
@@ -1515,7 +1515,7 @@ const SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION: RuleExplanation = {
   rule: 'sharing-rule-runtime-variable-condition',
   covers: 'why a sharing condition cannot read current_user',
   paragraphs: [
-    'A criteria sharing rule is MATERIALISED: the seeder compiles one static `criteria_json` per rule and the ' +
+    'A criteria sharing rule is MATERIALISED: its registry read compiles one static `criteria` filter per rule and the ' +
       'evaluator writes `sys_record_share` rows from it, so there is no "current user" at compile time and the ' +
       'compiler refuses a `current_user.*` read.',
     SHARING_RULE_SKIPPED,

@@ -28,8 +28,8 @@
  *    every catalog row and every table's rows, before and after), and names the
  *    remote database, not the placeholder Knex client;
  *  - the apply completes with `blocking 0`, the declared sharing-rule mirrors a
- *    17.x seeder left reported as advisory (this release's boot still seeds
- *    them: `DECLARED_SHARING_RULE_SEEDER_RUNS`), not as discrepancies;
+ *    17.x seeder left deleted by its mirror-deletion step (ADR-0131 C3 stage 9:
+ *    the registry serves declared rules, and no grant names these copies);
  *  - each column and the index keyed on it are gone from the server, the rows
  *    are not, and the `adr-0131-organization-ownership` marker is verified.
  *
@@ -248,7 +248,8 @@ describe.skipIf(!SQLD)('os migrate organization-ownership on a Turso REMOTE data
     expect([apply.exitCode, apply.payload.report.complete, apply.payload.report.blocking]).toEqual([0, true, 0]);
     expect(apply.payload.report.tables.find((t: { object: string }) => t.object === 'sys_sharing_rule')).toMatchObject({
       remaining: 0,
-      departures: [{ id: 'declared-rule-mirrors', rows: RULE_MIRRORS, advisory: expect.any(String) }],
+      departures: [],
+      deleted: RULE_MIRRORS,
     });
 
     for (const t of leftovers) expect(await hasOrganizationColumn(t)).toBe(false);
@@ -263,6 +264,6 @@ describe.skipIf(!SQLD)('os migrate organization-ownership on a Turso REMOTE data
       jobs: leftovers.includes('sys_job') ? Number((await exec('SELECT count(*) AS n FROM "sys_job"'))[0]!.n) : 2,
       rules: Number((await exec('SELECT count(*) AS n FROM "sys_sharing_rule" WHERE "organization_id" IS NULL'))[0]!.n),
     }));
-    expect(after).toEqual({ indexes: [], marker: [{ applied: 1, verified: 1 }], jobs: 2, rules: RULE_MIRRORS });
+    expect(after).toEqual({ indexes: [], marker: [{ applied: 1, verified: 1 }], jobs: 2, rules: 0 });
   }, CASE_TIMEOUT_MS);
 });

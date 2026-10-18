@@ -96,7 +96,7 @@ import { describe, it, expect, afterAll } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runServe, randomPort } from './helpers/serve-process.js';
+import { runServe } from './helpers/serve-process.js';
 
 /** `OS_CLUSTER_DRIVER` for every boot below — see the header for why `custom`. */
 const DRIVER = 'custom';
@@ -224,7 +224,7 @@ function writeApp(prefix: string, fixture: Fixture): string {
 /** Boot the fixture app and return everything the child printed, both streams. */
 async function boot(prefix: string, fixture: Fixture): Promise<string> {
   const dir = writeApp(prefix, fixture);
-  const { stdout, stderr } = await runServe(dir, ['--port', randomPort()], {
+  const { stdout, stderr } = await runServe(dir, [], {
     // The boot dies at `defineCluster()`; `runServe` resolves on exit either
     // way, so this only shortens the happy path rather than deciding it.
     waitFor: /is not registered/,

@@ -799,6 +799,24 @@ export default class MigrateOrganizationOwnership extends Command {
         posture,
         database: stack.dbLabel,
         catalog,
+        declaredSharingRules: {
+          // [ADR-0131 C3 stage 9] What plugin-sharing's enforcement reads: the
+          // registry's declared rules, else the metadata service's.
+          names: async () => {
+            const nameOf = (item: unknown): string | undefined => {
+              const name = (item as { name?: unknown } | null)?.name;
+              return typeof name === 'string' && name !== '' ? name : undefined;
+            };
+            const registry = engine.registry as { listItems?(type: string): unknown[] | undefined } | undefined;
+            let items: unknown[] = registry?.listItems?.('sharing_rule') ?? [];
+            if (items.length === 0) {
+              const metadata = kernel.getService('metadata') as { list?(type: string): unknown } | undefined;
+              const listed = await metadata?.list?.('sharing_rule');
+              items = Array.isArray(listed) ? listed : [];
+            }
+            return items.map(nameOf).filter((name): name is string => name !== undefined);
+          },
+        },
         door: {
           save: async (type, name, body, target) => {
             if (typeof protocol?.saveMetaItem !== 'function') {

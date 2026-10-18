@@ -40,6 +40,10 @@
  *    (`engine-formula-hop-stored-metadata-body.test.ts`: the engine never reads
  *    a hop into the family), and its author-time refusal → `@objectstack/lint`
  *    (`validate-expressions.stored-metadata-body-hop.test.ts`);
+ *  - [#24358] the engine's two relationship hydrations outside that loader,
+ *    `expand` and the master-detail `parent` root → `@objectstack/objectql`
+ *    (`engine-hydration-stored-metadata-body.test.ts`: the engine never
+ *    hydrates a reference or a header into the family);
  *  - the generic data door reads / groupBy / filter+sort → this package
  *    (`protocol.data-door-stored-metadata-redaction.test.ts`, and the behaviour
  *    asserted below).
@@ -148,6 +152,20 @@ const FAMILY_SURFACES = [
     disposition: 'refuses',
     pin: '@objectstack/lint (validate-expressions.stored-metadata-body-hop.test.ts)',
   },
+  // [#24358] The engine's two relationship hydrations outside the one-hop
+  // loader. `expand` never reads a reference into the family, so the field
+  // keeps its stored id, and the master-detail `parent` root never reads a
+  // family header, so a `parent.*` rule has no verdict whatever the row holds.
+  {
+    surface: 'expand of a reference into the family: the carrying object\'s data read (expand / $expand, the nested form), findOne, a hook body\'s ctx.api read',
+    disposition: 'withheld',
+    pin: '@objectstack/objectql (engine-hydration-stored-metadata-body.test.ts)',
+  },
+  {
+    surface: 'master-detail parent root over a family header: requiredWhen / readonlyWhen on insert and update, the validate() preview',
+    disposition: 'refuses',
+    pin: '@objectstack/objectql (engine-hydration-stored-metadata-body.test.ts)',
+  },
 ] as const;
 
 /** A stored datasource body as it sits in the `metadata` column: serialized JSON with credential material. */
@@ -219,8 +237,9 @@ describe('[#21120] stored-metadata-body family — the data door exposes only co
     // (audit, analytics, realtime, and the MCP stdio reader's seam and refusal),
     // + [#21207] the thirteen surfaces of the stored content hash, and the two
     // of the history change note that can quote one, + [#24316] the three of
-    // the one-hop read through a reference.
-    expect(FAMILY_SURFACES).toHaveLength(26);
+    // the one-hop read through a reference, + [#24358] the two relationship
+    // hydrations outside it.
+    expect(FAMILY_SURFACES).toHaveLength(28);
   });
 });
 

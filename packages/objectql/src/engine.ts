@@ -9767,6 +9767,14 @@ export class ObjectQL implements IObjectQLEngine {
   ): Promise<Record<string, unknown> | null> {
     const rel = resolveMasterDetailRelation(schema);
     if (!rel) return null;
+    // [#24358] ⛔ A header in the stored-metadata-body family is never read,
+    // under either authority. Read 2 below is a whole-row read the family's
+    // projection never reaches, so a `parent.*` predicate would be judged over
+    // the stored body and its content hash unprojected: one bit of material the
+    // family's own door withholds, per write. `parent` stays unbound, the
+    // fail-closed signal (#4889) an unreadable header already gives, so the
+    // verdict says nothing about the row.
+    if (isStoredMetadataBodyObject(rel.master)) return null;
     const parentId = masterIdOf(rel.fk, data, priorRow);
     if (parentId == null) return null;
     // [#22519] 1. The caller's read door: a header it does not return binds as
@@ -9824,6 +9832,9 @@ export class ObjectQL implements IObjectQLEngine {
     const unbound = () => null;
     const rel = resolveMasterDetailRelation(schema);
     if (!rel) return unbound;
+    // [#24358] ⛔ The single-id twin's family guard, for the batch: a
+    // stored-metadata-body header is never read, and every row binds unbound.
+    if (isStoredMetadataBodyObject(rel.master)) return unbound;
     const ids = new Set<string>();
     for (const row of priorRows ?? []) {
       const id = masterIdOf(rel.fk, data, row);
@@ -9919,7 +9930,9 @@ export class ObjectQL implements IObjectQLEngine {
     priorIds.forEach((id, i) => { if (repoints[i]) ids.add(String(id)); });
 
     const headers = new Map<string, Record<string, unknown>>();
-    if (rel && ids.size > 0) {
+    // [#24358] ⛔ A stored-metadata-body header is never read here either, as
+    // the write's own header read never reads one: every header binds unbound.
+    if (rel && ids.size > 0 && !isStoredMetadataBodyObject(rel.master)) {
       // 1. The read door, under the caller's own context.
       const served = new Map<string, Record<string, unknown>>();
       try {
@@ -12977,6 +12990,15 @@ export class ObjectQL implements IObjectQLEngine {
       if (!REFERENCE_VALUE_TYPES.has(fieldDef.type)) continue;
       const referenceObject = referenceTargetOf(fieldDef);
       if (!referenceObject) continue;
+      // [#24358] ⛔ A reference into the stored-metadata-body family is never
+      // expanded, at any depth and for any caller. The family's projection runs
+      // at its doors and only for the object a request names, so this sub-read
+      // would nest the stored body and its content hash unprojected under the
+      // requested rows — material the family's own door withholds from the same
+      // reader. The field keeps the stored id, the answer a reference the
+      // caller may not expand gets (an unexposed target, #22661, or a refused
+      // sub-read, below), so it says nothing about the row.
+      if (isStoredMetadataBodyObject(referenceObject)) continue;
 
       // Collect all foreign key IDs from records (handle both single and multiple values)
       const allIds: any[] = [];

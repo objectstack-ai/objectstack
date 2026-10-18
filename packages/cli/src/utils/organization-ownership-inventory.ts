@@ -534,12 +534,17 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
     fate: 'attribution',
     citation: `${D3_ORG_ROWS} (sharing rules an organization authors); ${D10_SINGLE}`,
     anchors: [],
-    // Advisory, not blocking, while this release's boot still seeds these rows:
-    // DECLARED_SHARING_RULE_SEEDER_RUNS below.
+    // Executed by the apply's mirror-deletion step (C3 stage 9, #23952 — ruling
+    // β item 6 asks the label to name that card; the label names the stage and
+    // the step instead, because a runtime string carries no tracker id): the
+    // grants are renamed to the rule's name, then the rows go. Blocking until
+    // then: DECLARED_SHARING_RULE_SEEDER_RUNS below.
     departures: [
       {
         id: 'declared-rule-mirrors',
-        label: 'uncustomized declared sharing rules — seeded copies of code (D2 retires bootstrapDeclaredSharingRules)',
+        label:
+          'uncustomized declared sharing rules — seeded copies of code, which the registry now serves; deleted by ' +
+          'the mirror-deletion step (ADR-0131 C3 stage 9)',
         citation: 'ADR-0131 D2, D10 fate 2',
         as: 'mirror-deletion',
         where: [{ column: 'managed_by', in: ['package', 'platform'] }, { column: 'customized', notTrue: true }],
@@ -639,40 +644,36 @@ export function inventoryEntryFor(object: string): InventoryEntry | undefined {
   return BY_OBJECT.get(object);
 }
 
-// ── A departure this release cannot perform: the declared sharing-rule mirrors ─
+// ── The declared sharing-rule mirrors, and the seeder that wrote them ─────────
 
 /**
  * Does a served boot of this release still write the package-declared sharing
  * rules into `sys_sharing_rule`?
  *
- * It does: `@objectstack/plugin-sharing`'s `start()` runs
- * `bootstrapDeclaredSharingRules` on every `os serve` / `os dev` boot, and
- * under `single` it writes each declared rule organization-less, as
- * `managed_by 'package'`, uncustomized — exactly the population the
- * `declared-rule-mirrors` departure on `sys_sharing_rule` names. That includes
- * the first v18 boot, the one the organization-ownership refusal stops: its
- * plugins start before `kernel:ready`, so it seeds before the ceremony has run.
- * (The ceremony's own boot does not: it composes the sharing plugin for its
- * declarations, its `start()` suppressed.)
+ * It does not. `@objectstack/plugin-sharing` reads declared rules from the
+ * registry at enforcement and writes no row for them: ADR-0131 D2 retired its
+ * seeder (`bootstrapDeclaredSharingRules`) at C3 stage 9. While that seeder
+ * ran, every `os serve` / `os dev` boot wrote each declared rule
+ * organization-less under `single`, as `managed_by 'package'`, uncustomized —
+ * exactly the population the `declared-rule-mirrors` departure on
+ * `sys_sharing_rule` names — so no step of such a release could remove them,
+ * and the ceremony reported them as advisory ({@link advisoryDepartureReason})
+ * under the ordering ruled for ADR-0131 C3 (ruling β: stage 9 first, the
+ * verified marker after it).
  *
- * So on this release that departure cannot happen: the step that removes the
- * mirrors is ADR-0131 D2's retirement of that seeder, and the boot keeps
- * re-creating them until then. The ceremony therefore reports those rows as
- * advisory — named, counted, never deleted, and still NULL, so their table
- * does not receive NOT NULL — and does not hold its certification on them
- * ({@link advisoryDepartureReason}). That is the ordering ruled for ADR-0131
- * C3: the D13/D14 zero-NULL gate is read as satisfied by a D10 report whose
- * only remaining NULL rows are these mirrors, and any other NULL row keeps
- * blocking.
+ * Now that departure is the apply's to perform: its mirror-deletion step
+ * renames every grant naming a mirror to the rule's name and deletes the
+ * mirrors, and until it has, they hold certification like every other NULL
+ * row.
  *
- * ⛔ Set it to `false` in the change that retires that seeder, and in no other:
- * a release that seeds the rows must not hold certification on them, and a
- * release that has stopped seeding them must hold it again until its ceremony
- * deletes them. `commands/migrate/organization-ownership.declared-rule-mirrors.integration.test.ts`
+ * ⛔ It was set to `false` in the change that retired that seeder, and in no
+ * other: a release that seeds the rows must not hold certification on them,
+ * and a release that has stopped seeding them holds it again until its
+ * ceremony deletes them. `commands/migrate/organization-ownership.declared-rule-mirrors.integration.test.ts`
  * boots a served stack declaring one sharing rule and fails, naming this
  * constant, while what that boot writes disagrees with it.
  */
-export const DECLARED_SHARING_RULE_SEEDER_RUNS: boolean = true;
+export const DECLARED_SHARING_RULE_SEEDER_RUNS: boolean = false;
 
 /** The one departure {@link DECLARED_SHARING_RULE_SEEDER_RUNS} decides, by its table and its id. */
 const DECLARED_RULE_MIRRORS = { object: 'sys_sharing_rule', departure: 'declared-rule-mirrors' } as const;

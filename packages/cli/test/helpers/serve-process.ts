@@ -212,7 +212,7 @@ function probeBind(want: number): number | null {
  * nobody re-examined the draw until a real run in this fleet went red on
  * `✗ Port 49402 is already in use`. **Do not write another one here.**
  *
- * ## Where the race is closed, and where this draw is still allowed (#24295)
+ * ## Where the race is closed, and where this draw is still allowed (#24295, #24342)
  *
  * The residual race reached `main` once: an hourly run went red on
  * `start-mcp-stdio-early-initialize.integration.test.ts`, whose `os start`
@@ -220,18 +220,23 @@ function probeBind(want: number): number | null {
  * refuses to auto-shift by design, so for that column the gap is a red, and it
  * is now CLOSED rather than narrowed: such a spawn passes
  * {@link KERNEL_ASSIGNED_PORT} and reads the port back with
- * {@link readKernelAssignedPort}, so no number crosses a gap at all.
- * `released-port-production-spawn.pin.test.ts` holds it: a file that names the
- * production-capable entry (`bin/run.js`) may call this or `randomPort()` only
- * as often as its ledger entry there allows — zero without one, and an entry is
- * a file whose every spawn of that entry is development posture.
+ * {@link readKernelAssignedPort}, so no number crosses a gap at all. A
+ * development-posture child hops instead, and `portDriftError()` reds the hop
+ * just as surely, so that column closes the same way: `runServe()` hands its
+ * child a kernel-assigned port whenever the caller passes no `--port`, and
+ * returns the port the child bound (#24342).
+ * `released-port-production-spawn.pin.test.ts` holds both: a file that spawns
+ * the CLI may call this or `randomPort()` only as often as its ledger entry
+ * there allows — zero without one.
  *
  * What may still call it, each with the race still real and unclosed there:
  *
- *   • the DEVELOPMENT column — `runServe()` and every other child of
- *     `bin/run-dev.js`, which pins `NODE_ENV=development` before argv is
- *     parsed. A lost race there is a hop to the next port, not an exit, and
- *     `portDriftError()` below is what turns that hop into a red;
+ *   • the development-column spawners slice 2 of #24342 has yet to convert —
+ *     the files that spawn `CLI` themselves (the `package-install-local-*`
+ *     `os start` family among them) and the four `bin/run.js --dev` / `os dev`
+ *     files, each ledgered in the pin with its exact count. A lost race there
+ *     is a hop to the next port, and `portDriftError()` below turns it into a
+ *     red on a correct tree;
  *   • instruments that need a number NOTHING is listening on (a closed-port
  *     probe), or that measure this draw itself (`serve-port-bind-probe`).
  *
@@ -312,10 +317,11 @@ export function holdPort(): Promise<{ port: number; release: () => Promise<void>
  *
  * ⚠️ The name is kept — and is now a slight misnomer, which is cheaper than the
  * alternative. It is `String(reservePort())` and nothing else; the draw, the
- * guarantees, the residual race and the columns it may still serve (the
- * development column and instruments — never a production-capable spawn) are
- * all documented on `reservePort()` above, and there is no second mechanism
- * hiding behind this name.
+ * guarantees, the residual race and the callers it may still serve
+ * (instruments, and the development-column files the pin's ledger names until
+ * slice 2 of #24342 converts them — never another CLI spawn) are all
+ * documented on `reservePort()` above, and there is no second mechanism hiding
+ * behind this name.
  */
 export function randomPort(): string {
   return String(reservePort());
@@ -551,10 +557,11 @@ export type BannerPortReadback =
  * the sentence that made this population look half its real size. Which files
  * are in the loud row is ⛔ not counted here either — an earlier count here
  * ("the ONLY file") went stale as `bin/run.js` spawners were added. The loud row
- * can only be reached through `bin/run.js`, so
- * `released-port-production-spawn.pin.test.ts` enumerates every file that names
- * it, and holds each of them to {@link KERNEL_ASSIGNED_PORT} unless its ledger
- * entry there says why not (#24295).
+ * can only be reached through `bin/run.js`, but a lost race reds a correct tree
+ * in the silent rows too, so `released-port-production-spawn.pin.test.ts`
+ * enumerates every file that spawns the CLI — either entry, either posture —
+ * and holds each of them to {@link KERNEL_ASSIGNED_PORT} unless its ledger entry
+ * there says why not (#24295, #24342).
  *
  * And the port `runServe()` hands over is an opaque element of an argv list, so
  * until this read-back the harness never learned the child's real one. A test
@@ -592,7 +599,8 @@ export function boundPortFromBanner(output: string): BannerPortReadback {
  * the port between this harness's bind probe and the child's `listen()`. The
  * production column would die loudly, which is why it no longer draws (it takes
  * {@link KERNEL_ASSIGNED_PORT}, #24295); the development column drifts and gets
- * this — the race is still real there, and this is what makes it a red.
+ * this. `runServe()` without a `--port` no longer draws either (#24342); the
+ * spawners still ledgered in the pin do, and this is what makes their race a red.
  *
  * ## Why `unreadable` is an ERROR and not a skip
  *
@@ -609,7 +617,8 @@ export function boundPortFromBanner(output: string): BannerPortReadback {
  * `/Nothing to serve/` case does. Such a child announced no bound port, so
  * there is nothing to compare and this returns `null`. Every `runServe()`
  * caller that boots successfully today waits for `Press Ctrl+C to stop` — the
- * banner tail — so all of them are covered.
+ * banner tail — so all of them are covered: by this check when the caller
+ * passed its own `--port`, by {@link readKernelAssignedPort} when it passed none.
  */
 export function portDriftError(
   output: string,
@@ -873,6 +882,13 @@ export function childEnv(
 export interface ServeRun {
   stdout: string;
   stderr: string;
+  /**
+   * The port the child BOUND, read back out of its own ready banner — the only
+   * number a caller may address the child on. `undefined` when the run ended
+   * without a complete banner (a boot that died, or a `waitFor` that matched
+   * an earlier line, as `serve-no-artifact`'s refusals do).
+   */
+  port: number | undefined;
 }
 
 /**
@@ -922,8 +938,17 @@ function portOf(args: string[]): string | undefined {
  *     free port and boots clean. Read the docblock there for why a green is the
  *     more expensive outcome of the two.
  *
- * Only the SECOND needs the caller to have passed `--port`; both read the
+ * Both apply only to a caller that passed `--port` itself; both read the
  * child's own output for the port they name, never the harness's expectation.
+ *
+ * ⭐ A caller that passes NO `--port` gets {@link KERNEL_ASSIGNED_PORT} (#24342):
+ * the child's own `listen()` picks the port, so no released number crosses a
+ * gap and there is nothing to contend for or drift from. The drift check then
+ * becomes the read-back: a complete banner must name the non-zero port the
+ * child bound ({@link readKernelAssignedPort} — an unreadable `API:` row or an
+ * announced `localhost:0` rejects), and that port is the returned `port`.
+ * ⛔ So a test of the port doors themselves (`OS_PORT`, `PORT`, the built-in
+ * default) cannot ride this default; it passes the port it means explicitly.
  *
  * `waitFor` is matched against **stdout and stderr together** (#7915). `serve`
  * writes every human line — banner, boot progress, kernel logs — to stderr now,
@@ -941,8 +966,10 @@ export function runServe(
   // exercises use `??` and an empty string is not nullish.
   opts: { waitFor: RegExp; timeoutMs?: number; config?: string; env?: Record<string, string | undefined> },
 ): Promise<ServeRun> {
+  const requested = portOf(args);
+  const argv = requested === undefined ? [...args, '--port', KERNEL_ASSIGNED_PORT] : args;
   return new Promise((resolveRun, rejectRun) => {
-    const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...args], {
+    const child = spawn(TSX, [CLI, 'serve', opts.config ?? 'objectstack.config.ts', ...argv], {
       cwd,
       // `childEnv`, never a bare `...process.env` — see its header for the
       // measured reason (commit 1ddda1d00).
@@ -980,7 +1007,20 @@ export function runServe(
         return;
       }
       const what = 'os serve (bin/run-dev.js, via runServe)';
-      const contended = portContentionError(stdout + stderr, what, portOf(args));
+      const output = stdout + stderr;
+      if (requested === undefined) {
+        // Kernel-assigned (#24342): no `portContentionError()` — this child was
+        // handed no number to lose, so a port it could not bind is not that race.
+        if (boundPortFromBanner(output).state === 'no-banner') {
+          resolveRun({ stdout, stderr, port: undefined });
+          return;
+        }
+        const bound = readKernelAssignedPort(output, what);
+        if (bound instanceof Error) rejectRun(bound);
+        else resolveRun({ stdout, stderr, port: bound });
+        return;
+      }
+      const contended = portContentionError(output, what, requested);
       if (contended) {
         rejectRun(contended);
         return;
@@ -989,12 +1029,13 @@ export function runServe(
       // succeeded. `bin/run-dev.js` pins `NODE_ENV=development`, so the branch
       // above (a loud refusal to bind) is not the one these children take; this
       // is. See `portDriftError`.
-      const drifted = portDriftError(stdout + stderr, what, portOf(args));
+      const drifted = portDriftError(output, what, requested);
       if (drifted) {
         rejectRun(drifted);
         return;
       }
-      resolveRun({ stdout, stderr });
+      const readback = boundPortFromBanner(output);
+      resolveRun({ stdout, stderr, port: readback.state === 'bound' ? readback.port : undefined });
     };
 
     const timer = setTimeout(

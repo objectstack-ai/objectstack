@@ -155,7 +155,7 @@ export default class Verify extends Command {
       default: false,
     }),
     'dashboard-windows': Flags.boolean({
-      description: "Also prove, for every dashboard that declares a dateRange, that each widget it binds counts, under each date-range preset of the picker, the rows that window selects: fixture rows written on known days, the widget asked through the dataset door with and without the window (date and datetime fields; count measures)",
+      description: "Also prove, for every dashboard that declares a dateRange, that each widget it binds counts, under each date-range preset of the picker, the rows that window selects: fixture rows written on known days, the widget asked through the dataset door with and without the window (date and datetime fields; count, sum and derived measures)",
       default: false,
     }),
     'parent-write-reach': Flags.boolean({

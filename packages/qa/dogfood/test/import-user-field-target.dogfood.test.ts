@@ -73,14 +73,16 @@ describe('[#22785] a user field without reference resolves to sys_user at the im
     await stack?.stop?.();
   });
 
+  // [#24348] No `runAutomations: false`: the fixture binds no automation, and the import
+  // doors refuse that opt-out to every caller but the system principal.
   const doors = {
     sync: async (rows: object[]): Promise<Row[]> => {
-      const res = await stack.apiAs(token, 'POST', '/data/iuf_task/import', { format: 'json', rows, runAutomations: false });
+      const res = await stack.apiAs(token, 'POST', '/data/iuf_task/import', { format: 'json', rows });
       expect(res.status, await res.clone().text()).toBe(200);
       return ((await res.json()) as { results: Row[] }).results;
     },
     jobs: async (rows: object[]): Promise<Row[]> => {
-      const res = await stack.apiAs(token, 'POST', '/data/iuf_task/import/jobs', { format: 'json', rows, runAutomations: false });
+      const res = await stack.apiAs(token, 'POST', '/data/iuf_task/import/jobs', { format: 'json', rows });
       expect(res.status, await res.clone().text()).toBe(201);
       const { jobId } = (await res.json()) as { jobId: string };
       for (let i = 0; i < 200; i++) {

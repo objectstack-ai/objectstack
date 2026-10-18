@@ -143,7 +143,7 @@ export const EXPRESSION_SURFACE: ExprSurface[] = [
     id: 'sharing-condition',
     summary: 'sharing-rule `condition` → criteria_json (ADR-0058 D3: compiled from the authored CEL, a faithful lowering rather than a divergent hand-written filter)',
     dialect: 'cel', mode: 'compile', state: 'enforced', failPolicy: 'fail-closed',
-    enforcement: 'plugin-sharing/bootstrap-declared-sharing-rules.ts celToFilter → compileCelToFilter; matched by sharing-rule-service findMatchingRecords',
+    enforcement: 'plugin-sharing/declared-sharing-rules.ts celToFilter → compileCelToFilter; matched by sharing-rule-service findMatchingRecords',
     covers: ['security/sharing.zod.ts:CriteriaSharingRuleSchema.condition'],
     proof: 'packages/plugins/plugin-sharing/src/sharing-rule.test.ts',
   },

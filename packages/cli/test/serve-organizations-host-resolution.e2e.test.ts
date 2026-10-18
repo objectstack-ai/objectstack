@@ -34,7 +34,7 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runServe, randomPort } from './helpers/serve-process.js';
+import { runServe } from './helpers/serve-process.js';
 
 const CONFIG = `
 export default {
@@ -159,8 +159,7 @@ describe('os serve — enterprise organizations resolution (cloud#1013)', () => 
   it(
     'boots a walled posture with the package installed in the APP, not the framework',
     async () => {
-      const port = randomPort();
-      const { stdout, stderr } = await runServe(appWithPackage, ['--port', port], {
+      const { stdout, stderr } = await runServe(appWithPackage, [], {
         waitFor: /Press Ctrl\+C to stop/,
         env: { ...SERVE_ENV },
         timeoutMs: 240_000,
@@ -189,8 +188,7 @@ describe('os serve — enterprise organizations resolution (cloud#1013)', () => 
       // fail-fast into a lenient skip. An app that requests isolation without
       // the enterprise runtime must still die rather than serve traffic with
       // the organization wall inactive.
-      const port = randomPort();
-      const { stdout, stderr } = await runServe(appWithoutPackage, ['--port', port], {
+      const { stdout, stderr } = await runServe(appWithoutPackage, [], {
         waitFor: /Press Ctrl\+C to stop/,
         env: { ...SERVE_ENV },
         timeoutMs: 240_000,
@@ -218,8 +216,7 @@ describe('os serve — enterprise organizations resolution (cloud#1013)', () => 
       // this change that single environment variable was enough to boot the
       // organization wall off a package the app had never declared, so whether
       // ADR-0093 D5 fired came down to HOW the process was started.
-      const port = randomPort();
-      const { stdout, stderr } = await runServe(appWithoutPackage, ['--port', port], {
+      const { stdout, stderr } = await runServe(appWithoutPackage, [], {
         waitFor: /Press Ctrl\+C to stop/,
         env: { ...SERVE_ENV, NODE_PATH: hoistedStore },
         timeoutMs: 240_000,

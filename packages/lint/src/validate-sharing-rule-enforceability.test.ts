@@ -74,10 +74,10 @@ describe('validateSharingRuleEnforceability — the declared-but-never-read case
       where: 'sharing rule "high_value_opps" on object "opportunity"',
     });
     // It must say what actually happens at boot, not merely "unsupported"…
-    expect(findings[0].message).toMatch(/^condition is not lowerable \(.+\), so the rule is never seeded and grants nothing$/);
+    expect(findings[0].message).toMatch(/^condition is not lowerable \(.+\), so the rule is never served and grants nothing$/);
     // …and `os explain` says how.
     expect(explanationOf(SHARING_RULE_UNLOWERABLE_CONDITION)).toMatch(/the rule is SKIPPED/);
-    expect(explanationOf(SHARING_RULE_UNLOWERABLE_CONDITION)).toMatch(/never written to `sys_sharing_rule`/);
+    expect(explanationOf(SHARING_RULE_UNLOWERABLE_CONDITION)).toMatch(/enforcement never serves it/);
     // …and prescribe the fix that works on THIS surface: the `fix:` line in
     // one line, and why `has()` is wrong here in the explanation (#22161).
     expect(findings[0].hint).toMatch(/record\.x != null/);
@@ -182,9 +182,9 @@ describe('validateSharingRuleEnforceability — conditions the runtime DOES read
     expect(validateSharingRuleEnforceability({ sharingRules: [] })).toEqual([]);
   });
 
-  it('checks inactive rules too — the seeder compiles the condition regardless of `active`', () => {
-    // `bootstrapDeclaredSharingRules` carries `active` through to `defineRule`;
-    // it does not skip the compile. A rule that is off today and unlowerable is
+  it('checks inactive rules too — the reader compiles the condition regardless of `active`', () => {
+    // `createDeclaredSharingRuleSource` carries `active` through to the rule it
+    // serves; it does not skip the compile. A rule that is off today and unlowerable is
     // still a rule that will grant nothing the day someone switches it on.
     expect(ids({ sharingRules: [{ name: 'r', object: 'o', active: false, condition: 'has(record.x)' }] }))
       .toEqual([SHARING_RULE_UNLOWERABLE_CONDITION]);
@@ -225,7 +225,7 @@ describe('validateSharingRuleEnforceability — the verdict IS the seeder\'s ver
 
   it('agrees with `compileCelToFilter({ variables: {} })` on every source, in both directions', () => {
     for (const source of corpus) {
-      // This is exactly the call `bootstrap-declared-sharing-rules.ts` makes.
+      // This is exactly the call plugin-sharing's `declared-sharing-rules.ts` makes.
       const seederWouldSeed = compileCelToFilter(source, { variables: {} }).ok;
       const lintIsClean = validateSharingRuleEnforceability(ruleWith(source)).length === 0;
       expect({ source, lintIsClean }).toEqual({ source, lintIsClean: seederWouldSeed });
@@ -487,7 +487,7 @@ describe('SHARING_RULE_RUNTIME_VARIABLE_CONDITION — the explanation qualifies 
 
   it('keeps the WHY — the most useful part of the diagnostic — in the explanation', () => {
     expect(explanation()).toContain(
-      'A criteria sharing rule is MATERIALISED: the seeder compiles one static `criteria_json` per rule and the ' +
+      'A criteria sharing rule is MATERIALISED: its registry read compiles one static `criteria` filter per rule and the ' +
         'evaluator writes `sys_record_share` rows from it, so there is no "current user"',
     );
   });
@@ -652,7 +652,7 @@ describe('[#22161] one-line verdicts — the four ids', () => {
 
   // What each verdict stopped saying, which `os explain RULE_ID` now prints.
   const MOVED: Record<string, readonly string[]> = {
-    [SHARING_RULE_UNLOWERABLE_CONDITION]: ['`bootstrapDeclaredSharingRules`', 'one WARN line in the boot log', 'ADR-0049', 'SharingRuleService', 'INVALID_FILTER'],
+    [SHARING_RULE_UNLOWERABLE_CONDITION]: ['`createDeclaredSharingRuleSource`', 'one WARN line in the log', 'ADR-0049', 'SharingRuleService', 'INVALID_FILTER'],
     [SHARING_RULE_RUNTIME_VARIABLE_CONDITION]: ['MATERIALISED', 'no "current user"', 'the rule is SKIPPED'],
     [SHARING_RULE_OBJECT_NOT_SHAREABLE]: ['WIDENS', 'ADR-0090 D1', '`assertNotInertGrant`', 'not under record-sharing enforcement', 'restriction that does not exist'],
     [SHARING_RULE_OBJECT_CONTROLLED_BY_PARENT]: ['ADR-0055', 'no shares to widen', '`assertNotInertGrant`', 'whatever the MASTER grants them'],

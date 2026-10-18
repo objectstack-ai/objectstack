@@ -37,8 +37,8 @@
  *  6. **The column must hold users** — when the object's schema can say:
  *     a `user` field or a `sys_user` lookup is read, anything else grants
  *     nobody and warns once; a failing read fails closed and warns once.
- *  7. **Authoring seams** — the declared-rule bootstrap seeds a `field` rule
- *     (it used to skip it), `defineRule` holds a `field` `recipientId` to the
+ *  7. **Authoring seams** — a declared `field` rule is served from the
+ *     registry (it used to be skipped), `defineRule` holds a `field` `recipientId` to the
  *     field-name grammar, and the `sys_sharing_rule.recipient_type` select can
  *     store every authorable `ShareRecipientType` member.
  */
@@ -50,7 +50,7 @@ import { SharingService } from './sharing-service.js';
 import { SharingRuleService } from './sharing-rule-service.js';
 import { bindRuleHooks, unbindAllRuleHooks, SHARING_RULE_HOOK_PACKAGE } from './rule-hooks.js';
 import { bindBusinessUnitTreeRecompute } from './bu-tree-recompute.js';
-import { bootstrapDeclaredSharingRules } from './bootstrap-declared-sharing-rules.js';
+import { createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { SysSharingRule } from './objects/sys-sharing-rule.object.js';
 
 interface Row { [k: string]: any }
@@ -720,48 +720,53 @@ describe('#15072 the recipient column must EXIST and HOLD USERS — judged from 
 
 // ─────────────────────────────────────────────────────────────────────────
 describe('#15072 authoring seams', () => {
-  describe('the declared-rule bootstrap seeds a `field` rule (it used to skip it as unmappable)', () => {
-    function seedHarness(declared: any[]) {
-      const engine = { _registry: { listItems: (type: string) => (type === 'sharing_rule' ? declared : []) } };
-      const defineRule = vi.fn(async (input: any) => ({ id: `id_${input.name}` }));
+  describe('a declared `field` rule is served from the registry (it used to be skipped as unmappable)', () => {
+    function sourceHarness(declared: any[]) {
+      const engine = { registry: { listItems: (type: string) => (type === 'sharing_rule' ? declared : []) } };
       const warns: Array<{ msg: string; meta: any }> = [];
       const logger = { warn: (msg: string, meta?: any) => { warns.push({ msg, meta }); }, info: () => {} };
-      return { engine, ruleService: { defineRule } as any, logger, warns, defineRule };
+      return { source: createDeclaredSharingRuleSource({ engine, logger }), warns };
     }
 
     it('maps `sharedWith.type: field` onto `recipient_type: field` with the field NAME as the recipient', async () => {
-      const { engine, ruleService, logger, warns, defineRule } = seedHarness([{
+      const { source, warns } = sourceHarness([{
         name: 'approved_to_assignees', object: OBJECT,
         condition: "record.status == 'approved'",
         sharedWith: { type: 'field', value: 'assignees' },
         accessLevel: 'edit',
       }]);
 
-      const res = await bootstrapDeclaredSharingRules(ruleService, null, engine, logger);
+      const served = await source.list();
 
-      expect(res).toEqual({ seeded: 1, skipped: 0 });
       expect(warns).toEqual([]);
-      expect(defineRule).toHaveBeenCalledTimes(1);
-      expect(defineRule.mock.calls[0][0]).toMatchObject({
+      expect(served).toHaveLength(1);
+      expect(served[0]).toMatchObject({
         name: 'approved_to_assignees',
         object: OBJECT,
         criteria: { status: 'approved' },
         recipientType: 'field',
         recipientId: 'assignees',
         accessLevel: 'edit',
-        managedBy: 'package',
       });
     });
 
-    it('CONTROL: an unmapped recipient kind is still skipped, never seeded wider', async () => {
-      const { engine, ruleService, logger, warns, defineRule } = seedHarness([{
+    it('CONTROL: an unmapped recipient kind is still not served, never served wider', async () => {
+      const { source, warns } = sourceHarness([{
         name: 'r_manager', object: OBJECT,
         condition: "record.status == 'approved'",
         sharedWith: { type: 'manager', value: 'owner_id' },   // ⛔ no `manager` member — the ruling
       }]);
-      const res = await bootstrapDeclaredSharingRules(ruleService, null, engine, logger);
-      expect(res).toEqual({ seeded: 0, skipped: 1 });
-      expect(defineRule).not.toHaveBeenCalled();
+      expect(await source.list()).toEqual([]);
+      expect(warns.some((w) => w.msg.includes('unmappable recipient'))).toBe(true);
+    });
+
+    it('a `field` value off the field-name grammar is not served — the registry copy is never re-parsed', async () => {
+      const { source, warns } = sourceHarness([{
+        name: 'r_dotted', object: OBJECT,
+        condition: "record.status == 'approved'",
+        sharedWith: { type: 'field', value: 'owner.manager_id' },
+      }]);
+      expect(await source.list()).toEqual([]);
       expect(warns.some((w) => w.msg.includes('unmappable recipient'))).toBe(true);
     });
   });

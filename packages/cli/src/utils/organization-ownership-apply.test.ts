@@ -429,6 +429,7 @@ const apply = (
     lock?: MetadataLockPort;
     securityPlugin?: SchemaMigrationComposition['securityPlugin'];
     defaultOrganization?: DefaultOrganizationPort;
+    declaredSharingRules?: readonly string[];
   } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
@@ -451,6 +452,7 @@ const apply = (
     ...(opts.metadataChoices ? { metadataChoices: opts.metadataChoices } : {}),
     ...(opts.securityPlugin ? { securityPlugin: opts.securityPlugin } : {}),
     ...(opts.defaultOrganization ? { defaultOrganization: opts.defaultOrganization } : {}),
+    ...(opts.declaredSharingRules ? { declaredSharingRules: { names: async () => opts.declaredSharingRules! } } : {}),
     posture: opts.posture ?? 'single',
     database: file,
     catalog: c,
@@ -887,36 +889,37 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 6 }]);
   });
 
-  it('certifies a ceremony whose only remaining NULL rows are the declared sharing-rule mirrors this release still seeds: advisory, named, kept', async () => {
+  it('certifies once the declared sharing-rule mirror is deleted: its grant renamed to the rule\'s name first, the organization\'s rule kept', async () => {
     db.exec(`
       CREATE TABLE sys_sharing_rule (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT, customized INTEGER);
       INSERT INTO sys_sharing_rule VALUES ('rule_declared', NULL, 'share_deals', 'package', 0), ('rule_org', 'org_b', 'mine', 'admin', 0);
+      CREATE TABLE sys_record_share (id TEXT PRIMARY KEY, organization_id TEXT, object_name TEXT, record_id TEXT, source TEXT, source_id TEXT);
+      INSERT INTO sys_record_share VALUES ('share_declared', 'org_b', 'crm_deal', 'deal_1', 'rule', 'rule_declared'),
+        ('share_org', 'org_b', 'crm_deal', 'deal_1', 'rule', 'rule_org');
     `);
     const l = ledger();
-    const report = await apply(catalog(), l);
+    const report = await apply(catalog(), l, { declaredSharingRules: ['share_deals'] });
 
     // Every step ran, and the moved settings rung reads zero. The rule mirror
-    // is D2's to remove, and this release's own boot keeps seeding it, so it
-    // is advisory: named and counted beside the unattributable rows, never a
-    // discrepancy (the restore and the negative legs:
+    // is a copy of a declaration the registry serves (ADR-0131 D2), so the
+    // mirror-deletion step removes it — after renaming its grant — and nothing
+    // of it remains (the blocking and seeding legs:
     // `organization-ownership-apply.declared-rule-mirrors.test.ts`).
     const unattributable = report.tables.reduce((n, t) => n + t.unattributable.length, 0);
     expect(report.complete).toBe(true);
     expect(report.blocking).toBe(0);
-    expect(report.advisory).toBe(unattributable + 1);
-    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: unattributable + 1 });
+    expect(report.advisory).toBe(unattributable);
+    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: unattributable });
     expect(tableOf(report, 'sys_setting').departures).toEqual([]);
     const rule = tableOf(report, 'sys_sharing_rule');
     expect(rule.remaining).toBe(0);
-    expect(rule.departures).toEqual([
-      { id: 'declared-rule-mirrors', label: expect.any(String), as: 'mirror-deletion', rows: 1, advisory: expect.stringMatching(/own boot still writes them/) },
-    ]);
-    // Still NULL, so the column takes no NOT NULL; the operator was told before the first write.
-    expect(rule.notNull).toEqual({ willReceive: false, reason: expect.stringMatching(/^1 row\(s\) stay NULL on this release, reported as advisory: /) });
-    expect(report.warnings.filter((w) => w.startsWith('sys_sharing_rule holds 1 organization-less row(s) of '))).toHaveLength(1);
-    expect(rows(`SELECT id, organization_id FROM sys_sharing_rule ORDER BY id`)).toEqual([
-      { id: 'rule_declared', organization_id: null },
-      { id: 'rule_org', organization_id: 'org_b' },
+    expect(rule.departures).toEqual([]);
+    expect(rule.deleted).toBe(1);
+    expect(report.warnings.filter((w) => w.startsWith('sys_sharing_rule holds'))).toEqual([]);
+    expect(rows(`SELECT id, organization_id FROM sys_sharing_rule ORDER BY id`)).toEqual([{ id: 'rule_org', organization_id: 'org_b' }]);
+    expect(rows(`SELECT id, source_id FROM sys_record_share ORDER BY id`)).toEqual([
+      { id: 'share_declared', source_id: 'share_deals' },
+      { id: 'share_org', source_id: 'rule_org' },
     ]);
   });
 
