@@ -39,7 +39,7 @@
  * #13855, where it is offered for contract review.)
  */
 
-import { recordsOf } from './object-graph.js';
+import { recordsOf, suggestName } from './object-graph.js';
 
 type AnyRec = Record<string, unknown>;
 
@@ -149,13 +149,16 @@ export function checkSectionGroupRefs(
         `section references field group "${ref.key}", which object "${objectName}" does not `
         + 'declare — the section inherits its members from that group, so it resolves to no '
         + 'fields and the whole section silently does not render',
+      // [#22161] One remedy line, for both host rules' ids. The object's
+      // declared groups are no longer echoed — the nearest one is named instead
+      // ("Did you mean") — and how a section inherits its members from a group
+      // is each id's `os explain` entry.
       hint:
-        `Fix the key, or declare it: \`fieldGroups: [{ key: '${ref.key}', label: '…' }]\` on `
-        + `${objectName}, with each member field carrying \`group: '${ref.key}'\`. `
-        + (declared.size > 0
-          ? `Declared groups on ${objectName}: ${[...declared].sort().join(', ')}.`
-          : `${objectName} declares no field groups at all, so no section on it can reference one `
-            + 'yet — enumerate the members with `fields` until it does.'),
+        declared.size > 0
+          ? `Fix the key, or declare '${ref.key}' in ${objectName}'s \`fieldGroups\` and set `
+            + `\`group: '${ref.key}'\` on its member fields.${suggestName(ref.key, declared)}`
+          : `Declare \`fieldGroups: [{ key: '${ref.key}', label: '…' }]\` on ${objectName} and `
+            + `\`group: '${ref.key}'\` on its member fields, or enumerate the section's \`fields\`.`,
     });
   }
   return findings;

@@ -8,8 +8,12 @@ land in the repo (`.gitignore` here tracks only this README). The durable source
 the checklist itself under `../areas/`; a run is a snapshot that goes stale the moment
 the build moves.
 
-**Where results go instead — every completed run files one `qa-run` GitHub issue** as its
-durable, **text-only** report (pass or fail alike):
+**Where results go instead — every completed sweep run** (a release candidate, an area or
+`all` run, a maintainer-named target) **files one `qa-run` GitHub issue** as its durable,
+**text-only** report (pass or fail alike). A verification re-run — one triggered by the same
+PR's ledger edit of that item — files none: its evidence is the PR body and the item's
+`history` row, with a `partial` / `blocked` gap also in `fixtures.knownGaps`
+([../RUNNER.md](../RUNNER.md), Run records, states the exception in full). A sweep's record:
 
 - the issue **body** hosts the per-clause verdict table (pass / partial / fail / blocked)
   and the scope — the selector that chose the items + the `revision` each ran against;

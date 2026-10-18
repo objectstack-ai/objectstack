@@ -222,30 +222,19 @@ export function unprovisionedAnchorVerdict(objectName: string, field: string): s
 }
 
 /**
- * The FIX clause paired with {@link unprovisionedAnchorCause} — the two ways
- * out, in the order an author should consider them: vouch for the remote column
- * by declaring it, or stop referencing an anchor this object does not have.
- */
-export function unprovisionedAnchorHint(objectName: string, field: string): string {
-  return (
-    `If the remote table really carries '${field}', declare it in ${objectName}'s own fields ` +
-    `(mapped through the external binding's columnMap) so the reference resolves to a column ` +
-    `you vouch for; otherwise drop the reference, or opt the object out of the injection ` +
-    `(\`ownership: 'none'\` for the ownership anchors, \`systemFields: { audit: false }\` for ` +
-    `the audit family).`
-  );
-}
-
-/**
- * [#22161] The ONE-LINE form of {@link unprovisionedAnchorHint}, for a rule
- * whose `fix:` line is one remedy: the same three ways out — vouch for the
- * remote column by declaring it, drop the reference, opt the object out of the
- * injection — in one clause each, and the rule's `os explain` entry
+ * [#22161] The FIX clause paired with {@link unprovisionedAnchorCause} and
+ * {@link unprovisionedAnchorVerdict}, as a `fix:` line of one remedy: the three
+ * ways out, in the order an author should consider them — vouch for the remote
+ * column by declaring it, drop the reference, opt the object out of the
+ * injection — in one clause each. The rule's `os explain` entry
  * (`rule-explanations.ts`) carries how (`columnMap`, `ownership: 'none'`,
- * `systemFields: { audit: false }`). The pairing of
- * {@link unprovisionedAnchorVerdict} with the long cause, repeated for the fix:
- * a rule still on the long hint converges here when its `fix:` line is
- * shortened, so the converted rules cannot drift apart.
+ * `systemFields: { audit: false }`). It is the one shared anchor fix, so the
+ * converted rules cannot drift apart: the long form it replaced
+ * (`unprovisionedAnchorHint`) lost its last two callers,
+ * `page-field-unprovisioned` and `flow-template-field-unprovisioned`, when
+ * their `fix:` lines were shortened, and was deleted with them. The two copies
+ * the note on {@link unprovisionedAnchorCause} names (`validate-expressions.ts`,
+ * `validate-semantic-roles.ts`) still word their own fix.
  */
 export function unprovisionedAnchorFix(objectName: string, field: string): string {
   return (
