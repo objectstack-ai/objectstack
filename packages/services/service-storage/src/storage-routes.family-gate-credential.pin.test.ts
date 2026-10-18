@@ -98,9 +98,11 @@ function services(sessionReads: { n: number }) {
   };
   const matches = (row: Record<string, unknown>, where: Record<string, unknown> | undefined) =>
     Object.entries(where ?? {}).every(([k, v]) => {
+      if (k.startsWith('$')) throw new Error(`fixture: unsupported combinator ${k}`);
       if (v !== null && typeof v === 'object') {
         const list = (v as { $in?: unknown[] }).$in;
-        return Array.isArray(list) ? list.includes(row[k]) : false;
+        if (!Array.isArray(list)) throw new Error(`fixture: unsupported operator on ${k}`);
+        return list.includes(row[k]);
       }
       return (v ?? null) === (row[k] ?? null);
     });
