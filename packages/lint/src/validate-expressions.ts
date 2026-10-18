@@ -1754,16 +1754,17 @@ function storedMetadataBodyHopMessage(
   site: 'formula' | 'rule',
   field: string,
   target: string,
-  columns: readonly string[],
+  columns: string,
 ): string {
   const consequence = site === 'formula'
     ? 'so this formula reads null on every row'
     : 'so this rule has no verdict and every write it judges is refused';
-  return `\`record.${field}\` is a reference to '${target}', a stored-metadata table, and this ${site} reads `
-    + `${columns.map((c) => `'${c}'`).join(', ')} through it. A formula or a validation rule never reads through `
+  const read = celMemberPath('record', field);
+  return `${read} is a reference to '${target}', a stored-metadata table, and this ${site} reads `
+    + `${columns} through it. A formula or a validation rule never reads through `
     + `a reference into a stored-metadata table: the hop is not read, ${consequence}. Those rows carry stored `
     + 'metadata bodies, which are served only through the metadata API (`GET /api/v1/meta/:type/:name`), '
-    + `where the body is projected. Remove the read through \`${field}\`; \`record.${field}\` alone is the `
+    + `where the body is projected. Remove the read through \`${field}\`; ${read} alone is the `
     + 'stored id, if the id is what you need.';
 }
 
@@ -1901,15 +1902,20 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
   const attachedOnReadIndex = buildAttachedOnReadIndex(objects);
   const fieldTypeIndex = buildFieldTypeIndex(objects);
   const nullableIndex = buildNullableFieldIndex(objects);
-  // [#24316] object name → its references into a stored-metadata-body table;
-  // only objects that declare one are present.
+  // [#24316] object name → its references into a stored-metadata-body table,
+  // read the first time a site of that object serves a hop — never before the
+  // walk reaches the object, so a carrier the spec cannot read is refused by the
+  // pass that owned that verdict before this one existed.
   const storedMetadataBodyReferenceIndex = new Map<string, Map<string, string>>();
-  for (const obj of objects) {
-    const name = typeof obj.name === 'string' ? obj.name : undefined;
-    if (!name) continue;
-    const refs = storedMetadataBodyReferencesOf(obj);
-    if (refs.size > 0) storedMetadataBodyReferenceIndex.set(name, refs);
-  }
+  const storedMetadataBodyReferencesFor = (objectName: string): Map<string, string> => {
+    let familyRefs = storedMetadataBodyReferenceIndex.get(objectName);
+    if (!familyRefs) {
+      familyRefs = new Map();
+      for (const obj of objects) if (obj.name === objectName) familyRefs = storedMetadataBodyReferencesOf(obj);
+      storedMetadataBodyReferenceIndex.set(objectName, familyRefs);
+    }
+    return familyRefs;
+  };
   /**
    * [#24316] Refuse a one-hop read through a reference into a
    * stored-metadata-body table, at the two sites that serve a hop: a
@@ -1925,16 +1931,17 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     objectName: string,
     site: 'formula' | 'rule',
   ): void => {
-    const refs = storedMetadataBodyReferenceIndex.get(objectName);
-    if (!refs) return;
     const source = celSourceOf(raw);
     if (!source) return;
-    for (const [field, columns] of analyzeRelationshipTraversals(source, 'record')?.traversals ?? []) {
-      const target = refs.get(field);
+    const traversals = analyzeRelationshipTraversals(source, 'record')?.traversals;
+    if (!traversals || traversals.size === 0) return;
+    const familyRefs = storedMetadataBodyReferencesFor(objectName);
+    for (const [field, columns] of traversals) {
+      const target = familyRefs.get(field);
       if (!target) continue;
       issues.push({
         where,
-        message: storedMetadataBodyHopMessage(site, field, target, [...columns].sort()),
+        message: storedMetadataBodyHopMessage(site, field, target, Array.from(columns, (c) => `'${c}'`).sort().join(', ')),
         source,
         severity: 'error',
       });
