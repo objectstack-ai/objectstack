@@ -153,6 +153,39 @@ const headerRow = async (bytes: Buffer, sheet = 0) => {
   return { wb, header: (wb.worksheets[sheet].getRow(1).values as unknown[]).slice(1) as string[] };
 };
 
+/**
+ * The process's first loads, paid during collection rather than inside the
+ * first cases' clocks (AGENTS.md: clocked windows measure behaviour, never
+ * loading). The route `import()`s `exceljs` lazily (`xlsx-module.ts`), and
+ * each path the cases take — the SQL driver, the template writer in both
+ * locales, the workbook reader and writer, both import formats, the three
+ * export formats — runs cold the first time. One throwaway engine walks each
+ * path once and is destroyed before the first case runs. No case sees its
+ * engine, its rows or its spies: every case boots an engine of its own.
+ */
+async function warmUpFirstLoads(): Promise<void> {
+  const { engine, get, importRoute } = await boot();
+  liveEngines.splice(liveEngines.indexOf(engine), 1);
+  try {
+    const bytes = (await get({ template: 'true' })).body();
+    await parseXlsxToRows(bytes);
+    const wb = await loadXlsxWorkbook(bytes);
+    const headers = (wb.worksheets[0].getRow(1).values as unknown[]).slice(1) as string[];
+    const fields = (wb.worksheets[1].getColumn(2).values as unknown[]).slice(5, 5 + headers.length) as string[];
+    const mapping = Object.fromEntries(headers.map((h, i) => [h, fields[i]]));
+    await importRows(importRoute, 'deal', { format: 'xlsx', xlsxBase64: bytes.toString('base64'), mapping });
+    await importRows(importRoute, 'deal', { format: 'json', rows: [{ title: 'warm-up' }] });
+    await wb.xlsx.writeBuffer();
+    await loadXlsxWorkbook((await get({ template: 'true', locale: 'zh-CN' })).body());
+    for (const format of ['xlsx', 'csv', 'json']) await get({ format });
+  } finally {
+    await engine.destroy();
+  }
+}
+
+// At module scope, never in a hook: vitest clocks a hook as it clocks a test.
+await warmUpFirstLoads();
+
 // ---------------------------------------------------------------------------
 
 describe('?template=true — the import template, through the real stack', () => {
