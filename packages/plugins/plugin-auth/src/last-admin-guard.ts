@@ -1003,6 +1003,31 @@ export function registerLastAdminGuard(
   };
 
   /**
+   * [ADR-0131 D5] Which `admin_full_access` grants among `links` the anchor
+   * reads — the resolver's predicate (`grantAnchorsPlatformStanding`,
+   * `resolve-authz-context.ts`): one owned by no organization, or, under
+   * `single`, by the Default Organization ({@link readDefaultOrganizationId},
+   * read only when some grant names an organization). Every other
+   * organization's grant is an organization administrator's. Under a wall only
+   * the organization-less row is asked about, and only as evidence — it
+   * anchors nothing there.
+   */
+  const anchorOwnerTest = async (
+    op: GuardedOp,
+    links: Array<Record<string, unknown>>,
+    pending?: PendingStandingWrite,
+  ): Promise<(link: Record<string, unknown>) => boolean> => {
+    const ownerOf = (link: Record<string, unknown>) => toId(link.organization_id ?? link.organizationId);
+    const defaultOrganizationId = !postureEnforcesWall(resolveTenancyPosture()) && links.some((l) => ownerOf(l))
+      ? await readDefaultOrganizationId(op, pending)
+      : undefined;
+    return (link) => {
+      const owner = ownerOf(link);
+      return owner === undefined || owner === defaultOrganizationId;
+    };
+  };
+
+  /**
    * Every user this environment recognises as an administrator.
    *
    * With `pending` (#5978) the SAME enumeration is replayed over the rows as
@@ -1066,11 +1091,13 @@ export function registerLastAdminGuard(
       const links = await scan(op, USER_PERMISSION_SET, {
         where: { [GRANT_SET_NAME_FIELD]: ADMIN_FULL_ACCESS },
       });
-      // [ADR-0131 D5] Asked only when some grant names an organization: a
-      // deployment whose grants are all organization-less reads nothing more.
-      const defaultOrganizationId = links.some((l) => toId(l.organization_id ?? l.organizationId))
-        ? await readDefaultOrganizationId(op, pending)
-        : undefined;
+      // [ADR-0131 D5] Judged on the rows as this write would leave them, so a
+      // pending write that re-points a grant's owner is read where it lands.
+      const anchors = await anchorOwnerTest(
+        op,
+        links.map((raw) => applyPending(raw, pending, USER_PERMISSION_SET) ?? raw),
+        pending,
+      );
       for (const raw of links) {
         const link = applyPending(raw, pending, USER_PERMISSION_SET);
         // Revoked outright by the pending write.
@@ -1089,8 +1116,7 @@ export function registerLastAdminGuard(
         // pending write that re-points `organization_id` lands here, and so
         // does a pending organization write that stops naming the owner the
         // Default Organization.
-        const owner = toId(link.organization_id ?? link.organizationId);
-        if (owner !== undefined && owner !== defaultOrganizationId) continue;
+        if (!anchors(link)) continue;
         // ADR-0091's ONE validity predicate, consumed exactly as it already was
         // — the guard invents no expiry semantics of its own (#5893 owns that
         // question, and is blocked on #5702). A pending write that moves
@@ -1262,9 +1288,10 @@ export function registerLastAdminGuard(
         where: { [GRANT_SET_NAME_FIELD]: ADMIN_FULL_ACCESS },
       });
       const nowMs = Date.now();
-      const stranded = held.filter(
-        (link) => !(link.organization_id ?? link.organizationId) && isGrantActive(link, nowMs),
-      );
+      // [ADR-0131 D5] The grants the anchor reads — the Default Organization's
+      // under `single`, beside the organization-less row.
+      const anchors = await anchorOwnerTest(op, held);
+      const stranded = held.filter((link) => anchors(link) && isGrantActive(link, nowMs));
       if (stranded.length > 0) {
         const words = OP_WORDS[op];
         logger?.warn(
@@ -1295,6 +1322,7 @@ export function registerLastAdminGuard(
 
     const now = Date.now();
     const dangling: string[] = [];
+    const anchors = await anchorOwnerTest(op, candidates);
     for (const link of candidates) {
       const name = grantSetNameOf(link);
       // `$nin` is NULL-safe on this engine (#5298) and the drivers differ on
@@ -1302,10 +1330,12 @@ export function registerLastAdminGuard(
       // from the `where` — the same discipline the enumeration applies to
       // the grant's name and the set's `name`.
       if (name !== undefined && known.has(name)) continue;
-      // An org-SCOPED grant never conferred the environment's break-glass
-      // standing, and an out-of-window one never conferred it either, so
-      // neither is evidence that this environment once had a platform admin.
-      if (link.organization_id ?? link.organizationId) continue;
+      // Another organization's grant never conferred the environment's
+      // break-glass standing (ADR-0131 D5: the anchor is the Default
+      // Organization's grant, or an organization-less one), and an
+      // out-of-window one never conferred it either, so neither is evidence
+      // that this environment once had a platform admin.
+      if (!anchors(link)) continue;
       if (!isGrantActive(link, now)) continue;
       const uid = toId(link.user_id ?? link.userId);
       const target = name !== undefined ? `'${name}'` : '(no permission-set name yet)';

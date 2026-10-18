@@ -66,7 +66,8 @@
  *      the reconciler's own `member` row on the Default Organization, which is
  *      promoted to `owner` while the bind is undecided (ADR-0131 D3: that
  *      organization now exists before the admin does).
- *   3. Re-use a pre-existing `slug='default'` org if present; otherwise
+ *   3. Re-use the Default Organization if present — the `slug='default'`
+ *      org, else the sole org (the boot invariant's definition); otherwise
  *      create one. Stable slug keeps human-readable URLs predictable across
  *      cold-boots.
  *   4. Insert a `sys_member { role: 'owner' }` linking the admin to the
@@ -86,7 +87,6 @@ import { postureEnforcesWall } from '@objectstack/spec/security';
 import { resolveTenancyPosture } from '@objectstack/types';
 import { GRANT_SET_NAME_FIELD } from './grant-set-name.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
-import { resolveDefaultOrgId } from './tenancy-service.js';
 
 interface BootstrapLogger {
   info: (message: string, meta?: Record<string, any>) => void;
@@ -500,7 +500,7 @@ export async function ensureDefaultOrganization(
     // (`grantAnchorsPlatformStanding`, `resolve-authz-context.ts`). Reading only
     // the organization-less row would answer `no_admin` on every deployment
     // promoted since, and never bind its administrator.
-    const defaultOrgId = await resolveDefaultOrgId(ql);
+    const defaultOrgId = await findDefaultOrganizationId(ql);
     const adminGrants: any[] = [];
     for (const organizationId of defaultOrgId ? [null, defaultOrgId] : [null]) {
       adminGrants.push(...await tryFind(
@@ -543,11 +543,23 @@ export async function ensureDefaultOrganization(
   }
 
   // 4. Re-use or create the `default` org.
+  //
+  //    [ADR-0131 D3/D5] Under `single`, "re-use" is the Default Organization as
+  //    the boot invariant names it — `slug='default'`, else the sole
+  //    organization — so a deployment whose only organization carries another
+  //    slug binds its admin there rather than minting a second,
+  //    `default`-slugged one. A second one would BECOME the Default Organization
+  //    and move the platform-admin anchor off the grant the promotion wrote
+  //    for the first. Under a wall an organization is a tenant's boundary, never
+  //    "the" organization, so only the `default`-slugged one is re-used.
   let defaultOrgId: string | undefined;
   let defaultOrgCreated = false;
-  const existingDefault = await tryFind(ql, 'sys_organization', { slug: 'default' }, 1);
-  if (existingDefault.length > 0 && existingDefault[0].id) {
-    defaultOrgId = String(existingDefault[0].id);
+  const existingDefaultId = legacyGrantAnchorRetired
+    ? (await tryFind(ql, 'sys_organization', { slug: 'default' }, 1))
+      .map((row) => (row?.id ? String(row.id) : undefined))[0]
+    : await findDefaultOrganizationId(ql);
+  if (existingDefaultId) {
+    defaultOrgId = existingDefaultId;
     if (options.bindOnlyOnCreate) {
       // The organization predates this call, so whether its owner was bound
       // was decided earlier — never re-decided here (ADR-0093 D7).

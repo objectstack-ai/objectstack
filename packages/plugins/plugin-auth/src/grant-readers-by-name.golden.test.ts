@@ -207,8 +207,10 @@ async function standingByReader(posture: Posture): Promise<Record<string, unknow
   guard.demoteOrganizationOwners = await verdict(() => engine.update(
     'sys_member', { role: 'member' }, { where: { role: 'owner' }, multi: true, ...sys },
   ));
+  // [ADR-0131 D5] Under `single` the promotion's grant is the Default
+  // Organization's (here the sole organization, `ORG`) — never organization-less.
   const [adminGrant] = (await engine.find('sys_user_permission_set', {
-    where: { user_id: 'usr_admin', organization_id: null }, context: SYS,
+    where: { user_id: 'usr_admin', permission_set: 'admin_full_access', organization_id: walled ? null : ORG }, context: SYS,
   })) as any[];
   guard.revokeSoleAdministratorGrant = adminGrant
     ? await verdict(() => engine.delete('sys_user_permission_set', { where: { id: adminGrant.id }, ...sys }))
@@ -249,8 +251,15 @@ describe('[ADR-0131 D4] grant readers by name (plugin-auth) — platform standin
  * refused; under a wall the declared owner carries no grant row and outlives
  * the set's deactivation, so only banning the account itself is refused.
  */
+// ⚠️ One recorded move ([ADR-0131] D3/D5): under `single` the fixture's sole
+// organization (`ORG`, slug `gra`) IS the Default Organization — the boot
+// invariant's definition, which owns the promotion's grant — so the
+// default-organization bootstrap binds the platform administrator there beside
+// its existing owner, where it used to mint a second, `default`-slugged
+// organization that would have taken the anchor off that grant. Every guard
+// verdict is unchanged.
 const SINGLE: unknown = {
-  defaultOrganization: { memberCreated: true, reason: null, owners: ['usr_admin'] },
+  defaultOrganization: { memberCreated: true, reason: null, owners: ['usr_admin', 'usr_orgadmin'] },
   lastAdminGuard: {
     banMember: 'permitted',
     banEveryAdministrator: 'refused:PERMISSION_DENIED',
