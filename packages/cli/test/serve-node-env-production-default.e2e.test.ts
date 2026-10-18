@@ -374,23 +374,18 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
   // probed Origin. Each is a port this file HOLDS for the whole boot, so the two
   // are distinct from each other and neither can be the port the child binds:
   // the Origin can never be trusted as "the deployment's own" by accident.
+  //
+  // ⚠️ The spawn stays in THIS function, called with a literal `env` from each
+  // `it` below: `check:cli-test-child-env` rule 3 reads the child's `NODE_ENV`
+  // through exactly one same-file hop, and a second function forwarding `env`
+  // would make every leg unreadable to it.
   const deployment = await holdPort();
   const probedOrigin = await holdPort();
-  try {
-    return await bootAndProbe(env, deployment.port, probedOrigin.port);
-  } finally {
+  const releaseHeld = async (): Promise<void> => {
     await deployment.release();
     await probedOrigin.release();
-  }
-}
-
-/** {@link probeOriginCheck}'s boot and probe, given the two ports it holds. */
-async function bootAndProbe(
-  env: Record<string, string | undefined>,
-  deploymentPort: number,
-  probedOriginPort: number,
-): Promise<OriginCheckResult> {
-  writeFileSync(join(dir, 'objectstack.config.ts'), configFor(deploymentPort), 'utf8');
+  };
+  writeFileSync(join(dir, 'objectstack.config.ts'), configFor(deployment.port), 'utf8');
 
   const child = spawn(process.execPath, [CLI, 'serve', '-p', KERNEL_ASSIGNED_PORT], {
     cwd: dir,
@@ -488,6 +483,9 @@ async function bootAndProbe(
       // number to lose (#24295) — so an exit here is the boot's own failure.
       readyReject(new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
     });
+  }).catch(async (error: unknown) => {
+    await releaseHeld();
+    throw error;
   });
 
   // Everything the child said, for a failure message that can be attributed
@@ -510,7 +508,7 @@ async function bootAndProbe(
             'content-type': 'application/json',
             // No cookie header — this is the shape `validateFormCsrf` forces an
             // origin check for when neither Sec-Fetch-* nor a cookie is present.
-            origin: `http://localhost:${probedOriginPort}`,
+            origin: `http://localhost:${probedOrigin.port}`,
           },
           body: JSON.stringify({ email: 'nobody@example.com', password: 'definitely-wrong-password' }),
         });
@@ -525,6 +523,7 @@ async function bootAndProbe(
     );
   } finally {
     await stop(child);
+    await releaseHeld();
   }
 }
 
