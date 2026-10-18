@@ -4,7 +4,7 @@
 
 feat(formula)!: `validateExpression` judges relationship traversal in the `value` role when the caller opts in, with formula wording
 
-Clause-②: no (narrowing)
+Clause-②: yes (narrowing)
 
 <!-- adr-0087: not-required (no-migration-prescription) No spec key, stored shape or authorable spelling is added, removed or renamed. `validateExpression('value', …)` with `traversalHydration: true` now reports the two traversal conflicts it already reported for `predicate`; a caller that does not pass the flag sees no change. Nothing stored changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
 
