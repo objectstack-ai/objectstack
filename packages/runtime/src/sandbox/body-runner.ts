@@ -239,12 +239,20 @@ function buildBodyLogSurface(
  * privilege escalation around it. A related record that channel does not
  * return leaves a title over it `undefined`, as the REST read of the same
  * record shows it no title.
+ *
+ * ## Two faces, one accessor (#24289)
+ *
+ * A hook's code runs in one of two places: a `body`, in the VM, which reaches
+ * this seam through `installCtx`; and an in-process `handler` function, which
+ * reaches it through {@link withInProcessHookTitle}. Both call THIS function, so
+ * the two answer one question one way: there is no second title implementation
+ * for a handler to drift from.
  */
 function buildTitleSurface(
   engineCtx: any,
   ql: any,
   origin: { kind: 'hook' | 'action'; name: string },
-): ScriptContext['title'] {
+): NonNullable<ScriptContext['title']> {
   const label = `ctx.title (${origin.kind} '${origin.name}')`;
 
   return async (field: string | undefined, api: unknown): Promise<string | undefined> => {
@@ -286,6 +294,63 @@ function buildTitleSurface(
     // hop included, under this caller's permissions — so it is read off the
     // row, never re-derived (see `servedRecordTitle`).
     return servedRecordTitle(ql.getObject(target.object), related as Record<string, unknown>);
+  };
+}
+
+/**
+ * [#24289] An in-process hook `handler` function, handed the same
+ * `ctx.title(field?)` a hook `body` is handed.
+ *
+ * ## Why
+ *
+ * A source boot (`@objectstack/verify`'s `bootStack(config)`, `os serve` over an
+ * `objectstack.config.ts`) runs a hook's inline `handler` in the host process;
+ * `objectstack dev` and an artifact boot run the `body` the build lowered it to.
+ * The accessor was installed only on the second path, so one hook answered on a
+ * served runtime and threw `ctx.title is not a function` under the test harness
+ * an app tests it with. The hook-context reference documents the body's `ctx` as
+ * a subset of the in-process one, so the in-process one carries the accessor too.
+ *
+ * ## What the handler sees
+ *
+ * The {@link buildTitleSurface} answer, as the VM delivers it: the same
+ * one-argument call (`undefined` or `null` names this record, any other value is
+ * the reference field, as `installCtx` reads it), and `null` — never the record's
+ * id — when there is no title. The read channel is the hook context's own `api`,
+ * read at call time, so a `runAs` hook reads under the identity it declared, as
+ * its body would.
+ *
+ * Two body-only rules stay body-only. No capability gates the reference form:
+ * `api.read` is the sandbox's token, and an in-process handler already holds
+ * `ctx.api` whole. And a stored-metadata family row is not refused: that boundary
+ * binds a sandboxed body, and an in-process handler reads through `ctx.api`
+ * without it.
+ *
+ * ## How
+ *
+ * The handler is called with a view of the engine's context that answers
+ * `title` and passes every other read, and every write, to the context itself,
+ * so `ctx.input` / `ctx.result` writes land where the engine reads them. The
+ * engine's own context object is never touched: a fire-and-forget `after*` hook
+ * still running while the next hook fires on the same context neither sees nor
+ * removes another handler's accessor, and nothing serialising the context
+ * finds a new key on it.
+ */
+export function withInProcessHookTitle<H extends (ctx: any) => unknown>(
+  handler: H,
+  ql: unknown,
+  hookName: string,
+): (ctx: any) => Promise<Awaited<ReturnType<H>>> {
+  return async function inProcessHookHandler(engineCtx: any) {
+    if (engineCtx === null || typeof engineCtx !== 'object') return (await handler(engineCtx)) as Awaited<ReturnType<H>>;
+    const surface = buildTitleSurface(engineCtx, ql, { kind: 'hook', name: hookName });
+    const title = async (field?: unknown): Promise<string | null> =>
+      (await surface(field === undefined || field === null ? undefined : String(field), undefined)) ?? null;
+    const view = new Proxy(engineCtx, {
+      get: (target, prop) => (prop === 'title' ? title : Reflect.get(target, prop)),
+      has: (target, prop) => prop === 'title' || Reflect.has(target, prop),
+    });
+    return (await handler(view)) as Awaited<ReturnType<H>>;
   };
 }
 
