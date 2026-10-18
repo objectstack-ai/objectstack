@@ -55,7 +55,9 @@ import { isEntrypoint } from '../invoked-as.mjs';
 // The `Blocked-by:` reader the half-state patrol's H19 discovers targets with.
 // IMPORTED, never restated: the refresh and the patrol must never disagree
 // about what a marker is (see "A STALE `pm:blocked`" below).
-import { blockerTargetsFor, h19BlockOutlivedBlocker, labelNames } from '../pm/check-half-states.mjs';
+// `directiveValues` is the same file's shared line reader, used here for the
+// `Unlock-action:` key exactly as the patrol reads it.
+import { blockerTargetsFor, directiveValues, h19BlockOutlivedBlocker, labelNames } from '../pm/check-half-states.mjs';
 
 // The workflows that carry the hourly full run. Spelled as quoted repo-relative
 // literals: the dispatch derivation reads a gate's path literals as the
@@ -424,14 +426,29 @@ export async function fileOrRefreshCard({
 //
 // THE RULE. On a refresh of a card carrying `pm:blocked`, every `Blocked-by:`
 // target the card names -- body AND comments, line-initial, read by the
-// patrol's own reader -- is resolved. When EVERY one is closed and the card has
-// no assignee, the refresh swaps `pm:blocked` for `pm:queue` and says so in
-// the refreshed body. Anything else changes no label:
+// patrol's own reader -- is resolved. When EVERY one is a LOCAL card that has
+// closed, no `Unlock-action:` line names another unlock, and the card has no
+// assignee, the refresh swaps `pm:blocked` for `pm:queue` and says so in the
+// refreshed body. Anything else changes no label:
 //
 //   not pm:blocked        nothing read at all
 //   no target named       H4's row (a block with no line), not this refresh's
 //   any target OPEN       the block still holds: the hourly reds are expected
 //   any target UNREAD     unread is not closed (#4690) -- never released on it
+//   a CROSS-REPO target   closed upstream means merged THERE, not consumable
+//     that is CLOSED      HERE: 「跨仓解锁判据是消费方可安装,⛔ 不是上游已合并」
+//                         (pm-dispatch SKILL.md, the state model), and a fix
+//                         not yet installable goes to `pm:on-hold` with a
+//                         consumer-side `Restart-when:`, 「⛔ 不回 `pm:queue`」.
+//                         objectstack consumes objectui through the
+//                         `.objectui-sha` pin, so the next hourly red is the
+//                         SAME failure until the pin moves -- never released
+//   an `Unlock-action:`   the card names an unlock other than closure
+//     line (any channel)  (`references/state-machine.md`, `pm:blocked`), so
+//                         closure is not its exit -- never released. Any value
+//                         withholds, a spelling the patrol does not recognise
+//                         included: stricter than the patrol's silent fallback,
+//                         in the one direction that cannot release a card
 //   comments unread       an OPEN blocker could be in them -- never released
 //   assigned              the move to `pm:queue` is the holder's release act
 //                         (clear the assignee + `Release:` line, one write);
@@ -446,7 +463,10 @@ export async function fileOrRefreshCard({
 // (a seat that knew one would have named it, and an OPEN target holds the
 // card). That is the condition the triage seat itself wrote on #23885 when it
 // parked the card: "If the next hourly run names a second failing job, that
-// job is new work, and this label comes off."
+// job is new work, and this label comes off." It holds only for a LOCAL
+// target, whose closure means its fix landed on this `main`; a closed
+// cross-repo target says nothing about this tree, which is why it holds the
+// card (the table above).
 //
 // WHY THE UNION OF BOTH CHANNELS. The patrol's H19 FOUNDS an expiry on the
 // body's set whenever the body states one, because a body is the canonical
@@ -463,15 +483,21 @@ export const BLOCKED_LABEL = 'pm:blocked';
 export const QUEUE_LABEL = 'pm:queue';
 
 // The pure verdict over resolved targets. `resolutions` are
-// `blockerTargetsFor`'s targets, each carrying `state`
+// `blockerTargetsFor`'s targets, each carrying `local` and `state`
 // ('open' | 'closed' | 'unresolved') -- the shape H19 judges.
-export function staleBlockVerdict({ issue, resolutions }) {
+// `unlockActions` are the card's `Unlock-action:` values, both channels.
+export function staleBlockVerdict({ issue, resolutions, unlockActions = [] }) {
   if (!labelNames(issue ?? {}).includes(BLOCKED_LABEL)) return { verdict: 'not-blocked' };
   const rows = resolutions ?? [];
   if (rows.length === 0) return { verdict: 'no-target' };
   const open = rows.filter((r) => r.state === 'open');
   const unread = rows.filter((r) => r.state !== 'open' && r.state !== 'closed');
-  if (open.length > 0 || unread.length > 0) return { verdict: 'held', open, unread };
+  // Closed THERE is not consumable HERE: a closed cross-repo target withholds.
+  const upstream = rows.filter((r) => r.state === 'closed' && r.local !== true);
+  const declared = [...(unlockActions ?? [])];
+  if (open.length > 0 || unread.length > 0 || upstream.length > 0 || declared.length > 0) {
+    return { verdict: 'held', open, unread, upstream, unlockActions: declared };
+  }
   const assignees = (issue?.assignees ?? []).map((a) => String(a?.login ?? a));
   if (assignees.length > 0) return { verdict: 'assigned', assignees };
   return { verdict: 'expired' };
@@ -518,15 +544,26 @@ export async function judgeCardBlock({ issue, ownerRepo, listComments, getIssue,
       resolutions.push({ ...target, state: 'unresolved', closedAt: null, detail: String(error?.message ?? error) });
     }
   }
-  return { ...staleBlockVerdict({ issue, resolutions }), resolutions };
+  const unlockActions = [issue?.body, ...comments].flatMap((text) => directiveValues(text, 'Unlock-action'));
+  return { ...staleBlockVerdict({ issue, resolutions, unlockActions }), resolutions };
 }
 
 const targetName = (r) => (r.local ? `#${r.number}` : r.key);
 
+// What each target reads as on the summary row. A closed cross-repo target is
+// NAMED as the reason it holds, never shown as a bare `closed`.
+const targetReading = (r) =>
+  r.state === 'closed' && r.local !== true
+    ? `${targetName(r)} closed upstream (not an unlock criterion for this consumer)`
+    : `${targetName(r)} ${r.state}`;
+
 // One line for the run log: the verdict and what it was read from.
 function summariseBlock(block) {
-  const rows = (block.resolutions ?? []).map((r) => `${targetName(r)} ${r.state}`);
-  return [block.verdict, block.detail, rows.length > 0 ? rows.join(', ') : null].filter(Boolean).join(' -- ');
+  const rows = (block.resolutions ?? []).map(targetReading);
+  const unlocks = (block.unlockActions ?? []).map((v) => `Unlock-action: ${v} (its unlock is not closure)`);
+  return [block.verdict, block.detail, rows.length > 0 ? rows.join(', ') : null, ...unlocks]
+    .filter(Boolean)
+    .join(' -- ');
 }
 
 // What the refreshed body says about the block, or null when it says nothing.
@@ -911,7 +948,7 @@ async function releaseGate(argv) {
 const SELF_TEST_BATTERIES = Object.freeze({
   'scheduled-full-run concurrency isolation': 20,
   'scheduled-full-run card identity and de-dup': 34,
-  'card refresh: a stale pm:blocked (the measured #23885 sequence)': 21,
+  'card refresh: a stale pm:blocked (the measured #23885 sequence)': 22,
   'release gate: the selection rule on the recorded 2026-10-12 listing': 8,
   'release gate: the selection rule on synthetic runs': 17,
   'release gate: release.yml wiring': 6,
@@ -1552,14 +1589,36 @@ async function selfTest() {
     untouched(b, await b.refresh(), 'held');
     if (!b.calls.includes('getIssue objectstack-ai/objectui#12666')) throw new Error('unread: the cross-repo target was not asked of its own repo');
   });
-  // ...while a cross-repo target that IS read closed counts like a local one.
+  // CONTROL: a cross-repo target read CLOSED holds the card too. Closed THERE
+  // is merged upstream, not consumable HERE through the `.objectui-sha` pin, so
+  // the next hourly red is the same failure -- alone, or beside a closed LOCAL
+  // target, and named on the summary row as the reason.
   await check(async () => {
     const b = blockBoard({ comments: ['Blocked-by: objectstack-ai/objectui#12666'],
       states: { 'objectstack-ai/objectui#12666': 'closed' } });
     const outcome = await b.refresh();
-    if (outcome.block !== 'expired' || b.names() !== sorted([...CARD_LABELS, QUEUE_LABEL])) {
-      throw new Error(`cross-repo: a closed objectui blocker did not release (${outcome.block}, ${b.names()})`);
+    untouched(b, outcome, 'held');
+    if (!outcome.blockSummary.includes('objectstack-ai/objectui#12666 closed upstream (not an unlock criterion for this consumer)')) {
+      throw new Error(`cross-repo: the summary does not name the upstream closure as the reason (${outcome.blockSummary})`);
     }
+    if (b.card.body !== NEW_BODY) throw new Error('cross-repo: a held block wrote a note into the body');
+    const mixed = blockBoard({ comments: [TRIAGE_PARK, 'Blocked-by: objectstack-ai/objectui#12666'],
+      states: { 'objectstack-ai/objectstack#23908': 'closed', 'objectstack-ai/objectui#12666': 'closed' } });
+    untouched(mixed, await mixed.refresh(), 'held');
+  });
+  // An `Unlock-action:` line names an unlock other than closure: held, even
+  // with every target closed and local.
+  await check(async () => {
+    const b = blockBoard({ comments: [TRIAGE_PARK, '- `Unlock-action: re-check #23908 when label pm:queue present`'],
+      states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    const outcome = await b.refresh();
+    untouched(b, outcome, 'held');
+    if (!outcome.blockSummary.includes('Unlock-action: re-check #23908 when label pm:queue present')) {
+      throw new Error(`unlock-action: the summary does not name the line it held on (${outcome.blockSummary})`);
+    }
+    const inBody = blockBoard({ cardBody: `${OLD_BODY}\nUnlock-action: re-check PR #24305`, comments: [TRIAGE_PARK],
+      states: { 'objectstack-ai/objectstack#23908': 'closed' } });
+    untouched(inBody, await inBody.refresh(), 'held');
   });
   // A thread that cannot be read could hide an OPEN blocker: unjudged.
   await check(async () => {

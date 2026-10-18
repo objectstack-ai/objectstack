@@ -46,12 +46,15 @@ name: Scheduled Full Run Card
 #              labels (priority, lane, type) are applied on CREATE only:
 #              grading is the seat's and a refresh must not undo it. The one
 #              label a refresh may move is a STATE: a card still `pm:blocked`
-#              whose every `Blocked-by:` target (body or comments) is closed
-#              goes back to `pm:queue` — a new red after the last blocker closed
-#              is new work, and `pm:blocked` hides it from every seat. Any
-#              target open or unreadable, no target, or an assignee: no label
-#              moves. The rule and its reasons: "A STALE `pm:blocked`" in the
-#              module.
+#              whose every `Blocked-by:` target (body or comments) is a LOCAL
+#              card that has closed goes back to `pm:queue` — a new red after
+#              the last blocker's fix landed on this `main` is new work, and
+#              `pm:blocked` hides it from every seat. ⛔ A closed CROSS-REPO
+#              target never releases it: closed there is merged upstream, not
+#              consumable here through the `.objectui-sha` pin. That, any
+#              target open or unreadable, no target and an assignee are among
+#              the cases where no label moves; every case and its reason:
+#              "A STALE `pm:blocked`" in the module.
 #   BODY       the run link, and the commits between the previous GREEN
 #              scheduled run of THIS workflow and this one. That range is the
 #              hour in which `main` broke, and an EMPTY range is a reading of
@@ -222,8 +225,8 @@ jobs:
             // The DECISION is the module's, driven offline by its self-test
             // against a mutable board (one red run files one card; the next
             // refreshes it and files no second; a refresh of a card whose
-            // every blocker closed moves `pm:blocked` to `pm:queue`). What is
-            // left here is thin callbacks over the API.
+            // every blocker is a closed LOCAL card moves `pm:blocked` to
+            // `pm:queue`). What is left here is thin callbacks over the API.
             const outcome = await mod.fileOrRefreshCard({
               identity,
               body,
