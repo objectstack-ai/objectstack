@@ -2515,17 +2515,16 @@ const RECORD_LINE_ITEMS_HISTORY =
  * column takes the child field's label (and with it that label's
  * translation), its cell type and its options; declaring a `type` opts the
  * column out. The renderer half is objectstack-ai/objectui#12854:
- * `LineItemsPanel` reuses `hydrateColumns`, not a second resolver. Until the
- * `.objectui-sha` pin carries it, the panel hands `columns` to the grid
- * through the field-security pass alone, and an identity-only column draws as
- * a text cell headed by its name.
+ * `LineItemsPanel` reuses `hydrateColumns`, not a second resolver, and the
+ * `.objectui-sha` pin carries it.
  *
  * `defineStack`'s resolved-type check (`collectHydratedInlineColumnErrors` in
- * `stack.zod.ts`) walks the three master-detail carriers and not this block,
- * so an identity-only column here that hydrates to a type carrying a
- * type-conditional column rule (today `currency`, which refuses `scale`) is
- * not judged at publish. Closing that gap changes what publishes, so it is a
- * change of its own, not part of this block's describe.
+ * `stack.zod.ts`) walks this block as it walks the three master-detail
+ * carriers (#24190): an identity-only column here that hydrates to a type
+ * carrying a type-conditional column rule (today `currency`, which refuses
+ * `scale`) is refused at publish, judged against the field of the child
+ * object the panel lists — the object `dataSource` binding's `object` when the
+ * node carries one, else `childObject`.
  *
  * The keys this block shares with an `object-master-detail-form` detail entry
  * take that entry's types and alias table, so one concept is spelled one way

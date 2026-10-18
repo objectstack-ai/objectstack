@@ -613,11 +613,11 @@ describe('defineStack judges an identity-only detail column by the type it rende
  * the showcase project page's five `field`-keyed columns published green over
  * a grid of empty cells.
  *
- * One difference from the master-detail block is pinned on purpose: this
- * panel hands `columns` to the grid as authored, with no hydration from the
- * child object's field. So an identity-only column has no resolved type for
- * `defineStack` to judge, and the cross-reference check does not reach this
- * block — the last test below is that control.
+ * The panel hydrates an identity-only column from the child object's field
+ * through the same `hydrateColumns` the master-detail block calls (#24140,
+ * objectstack-ai/objectui#12854), so `defineStack` judges its resolved type as
+ * it does on the other three carriers (#24190): the last section below, whose
+ * first test holds the two page blocks to the same answer for the same column.
  */
 const LINE_ITEMS_PROPS = ComponentPropsMap['record:line_items'];
 
@@ -737,22 +737,149 @@ describe('the line-items block is strict, and its columns are the column contrac
     expect(parseLineItems(viaBinding).success).toBe(true);
   });
 
-  it('CONTROL — defineStack does not judge an identity-only line-items column: the panel draws it unhydrated', () => {
-    const page = {
-      name: 'crm_invoice_record',
-      label: 'Invoice',
-      type: 'record' as const,
-      object: 'crm_invoice',
-      regions: [{
-        name: 'main',
-        components: [{
-          type: 'record:line_items',
-          properties: { childObject: 'crm_invoice_line', relationshipField: 'invoice', columns: [IDENTITY_ONLY_WITH_SCALE] },
-        }],
-      }],
-    };
-    expect(() => build({ manifest, objects: [PARENT, childObject()], pages: [page] })).not.toThrow();
-    // The same column under the master-detail block IS judged — the reach is the carrier's.
-    expect(() => build(stackWithMasterDetailColumns([IDENTITY_ONLY_WITH_SCALE]))).toThrow();
+});
+
+// ---------------------------------------------------------------------------
+// #24190 — `defineStack` judges the fourth carrier's identity-only columns.
+// ---------------------------------------------------------------------------
+
+type LineItemsBlockOptions = {
+  /** The block's `childObject`; `null` leaves the key out. */
+  childObject?: string | null;
+  /** The node-level `dataSource` binding, when the block carries one. */
+  dataSource?: Record<string, unknown>;
+};
+
+const lineItemsBlock = (
+  columns: unknown[],
+  { childObject: child = 'crm_invoice_line', dataSource }: LineItemsBlockOptions = {},
+) => ({
+  type: 'record:line_items',
+  ...(dataSource ? { dataSource } : {}),
+  properties: { ...(child === null ? {} : { childObject: child }), relationshipField: 'invoice', columns },
+});
+
+/** A stack whose one record page carries `block` in the given position. */
+const stackWithLineItemsBlock = (block: Record<string, unknown>, position: PagePosition = 'region') => {
+  const page = {
+    name: 'crm_invoice_record',
+    label: 'Invoice',
+    type: 'record' as const,
+    object: 'crm_invoice',
+    regions: [{
+      name: 'main',
+      components: position === 'region' ? [block]
+        : position === 'nested' ? [{ type: 'page:card', properties: { children: [block] } }]
+          : [],
+    }],
+    ...(position === 'slot' ? { kind: 'slotted', slots: { details: [block] } } : {}),
+  };
+  return { manifest, objects: [PARENT, childObject()], pages: [page] };
+};
+
+const stackWithLineItemColumns = (columns: unknown[], position: PagePosition = 'region') =>
+  stackWithLineItemsBlock(lineItemsBlock(columns), position);
+
+const LINE_ITEMS_AT = "Page 'crm_invoice_record' (regions.0.components.0) record:line_items columns";
+const MASTER_DETAIL_AT = "Page 'crm_invoice_entry' (regions.0.components.0) object-master-detail-form details[0].columns";
+
+/** A finding with its location cut off: what the column and its child field make of it. */
+const findingPast = (refusal: Refusal, location: string): string => {
+  const finding = String(refusal.issues![0]);
+  expect(finding.startsWith(location), finding).toBe(true);
+  return finding.slice(location.length);
+};
+
+describe('defineStack judges an identity-only line-items column by the type it renders as', () => {
+  it('PARITY — the line-items block and the master-detail block give the same answer for the same column', () => {
+    for (const columns of [[IDENTITY_ONLY_WITH_SCALE], [{ name: 'quantity' }, IDENTITY_ONLY_WITH_SCALE]]) {
+      const lineItems = refusalOf(stackWithLineItemColumns(columns));
+      const masterDetail = refusalOf(stackWithMasterDetailColumns(columns));
+      for (const refusal of [lineItems, masterDetail]) {
+        expect(refusal.code).toBe('STACK_CROSS_REFERENCE_INVALID');
+        expect(refusal.status).toBe(422);
+        expect(refusal.issues).toHaveLength(1);
+      }
+      expect(findingPast(lineItems, LINE_ITEMS_AT)).toBe(findingPast(masterDetail, MASTER_DETAIL_AT));
+    }
+    // …and the same column without the refused key builds under both.
+    expect(() => build(stackWithLineItemColumns([{ name: 'amount' }]))).not.toThrow();
+    expect(() => build(stackWithMasterDetailColumns([{ name: 'amount' }]))).not.toThrow();
+  });
+
+  it('refuses the card\'s identity-only column over a currency child field, naming the column and the child field\'s type', () => {
+    expectHydratedCurrencyRefusal(
+      stackWithLineItemColumns([{ name: 'quantity' }, IDENTITY_ONLY_WITH_SCALE]),
+      `${LINE_ITEMS_AT}[1].scale`,
+    );
+  });
+
+  it('refuses it inside a container and under a slot too — wherever the page carries the block', () => {
+    expectHydratedCurrencyRefusal(
+      stackWithLineItemColumns([IDENTITY_ONLY_WITH_SCALE], 'nested'),
+      "Page 'crm_invoice_record' (regions.0.components.0.properties.children.0) record:line_items columns[0].scale",
+    );
+    expectHydratedCurrencyRefusal(
+      stackWithLineItemColumns([IDENTITY_ONLY_WITH_SCALE], 'slot'),
+      "Page 'crm_invoice_record' (slots.details.0) record:line_items columns[0].scale",
+    );
+  });
+
+  it('judges the column against the child object the renderer lists: an object `dataSource` binding wins over `childObject`', () => {
+    const bound = { object: 'crm_invoice_line' };
+    // The binding alone supplies the object.
+    expectHydratedCurrencyRefusal(
+      stackWithLineItemsBlock(lineItemsBlock([IDENTITY_ONLY_WITH_SCALE], { childObject: null, dataSource: bound })),
+      `${LINE_ITEMS_AT}[0].scale`,
+    );
+    // The binding is written over an authored `childObject` this stack does not declare.
+    expectHydratedCurrencyRefusal(
+      stackWithLineItemsBlock(lineItemsBlock([IDENTITY_ONLY_WITH_SCALE], { childObject: 'ext_line', dataSource: bound })),
+      `${LINE_ITEMS_AT}[0].scale`,
+    );
+    // The other direction: the panel lists the bound object, which this stack
+    // does not declare, so the declared `childObject` is not the column's child.
+    expect(() => build(stackWithLineItemsBlock(
+      lineItemsBlock([IDENTITY_ONLY_WITH_SCALE], { dataSource: { object: 'ext_line' } }),
+    ))).not.toThrow();
+  });
+
+  it('judges it against `childObject` under an API binding, which names no object', () => {
+    const api = { provider: 'api', read: { url: '/api/v1/cloud/home' } };
+    expectHydratedCurrencyRefusal(
+      stackWithLineItemsBlock(lineItemsBlock([IDENTITY_ONLY_WITH_SCALE], { dataSource: api })),
+      `${LINE_ITEMS_AT}[0].scale`,
+    );
+  });
+
+  it('leaves a column that is invalid on its own to the props half: no finding the resolved type does not bring', () => {
+    const column = { ...IDENTITY_ONLY_WITH_SCALE, zzz_not_a_key: 1 };
+    expect(parseLineItemColumns([column]).success).toBe(false);
+    expect(() => build(stackWithLineItemColumns([column]))).not.toThrow();
+  });
+
+  it('CONTROLS — valid columns build, and so do the typed and bogus-key columns, which only the props half reads', () => {
+    const columns = [
+      { name: 'quantity', scale: 1 },
+      { name: 'amount' },
+      { name: 'amount', prefix: 'US$' },
+      { name: 'amount', type: 'number', scale: 2 },
+      { name: 'not_a_child_field', scale: 2 },
+    ];
+    expect(() => build(stackWithLineItemColumns(columns))).not.toThrow();
+    expect(() => build(stackWithLineItemColumns([TYPED_CURRENCY_WITH_SCALE, BOGUS_KEY_ONLY]))).not.toThrow();
+  });
+
+  it('CONTROL — an unresolved child object is not judged: one this stack does not declare, or none at all', () => {
+    expect(() => build(stackWithLineItemsBlock(
+      lineItemsBlock([IDENTITY_ONLY_WITH_SCALE], { childObject: 'ext_line' }),
+    ))).not.toThrow();
+    expect(() => build(stackWithLineItemsBlock(
+      lineItemsBlock([IDENTITY_ONLY_WITH_SCALE], { childObject: null }),
+    ))).not.toThrow();
+  });
+
+  it('following the remedy builds: the refused column with `scale` deleted and nothing added', () => {
+    expect(() => build(stackWithLineItemColumns([{ name: 'amount' }]))).not.toThrow();
   });
 });

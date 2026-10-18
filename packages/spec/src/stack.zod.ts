@@ -2387,7 +2387,8 @@ const isComponentNode = (value: unknown): value is Record<string, unknown> =>
 /**
  * Visit every component a page carries, with its locatable path, parent before
  * children — the one traversal of a page's component tree the cross-reference
- * checks share (inline actions, #6889; master-detail detail columns, #20928).
+ * checks share (inline actions, #6889; master-detail detail columns, #20928;
+ * line-items columns, #24190).
  * `visit` receives the node and its `properties` record; a node without one is
  * not visited, since every check here reads under `properties`.
  *
@@ -3551,13 +3552,13 @@ const hasOwnKey = (record: object, key: string): boolean => Object.prototype.has
  * raises is reported, with the schema's own message. A column is judged only
  * once it is a valid column WITHOUT the type, so an issue here is one the
  * resolved type brings. On the two carriers the stack's parse reaches, it
- * already passed that parse; on the page carrier, whose `properties` the
+ * already passed that parse; on the two page carriers, whose `properties` the
  * stack's parse never reaches, the column is parsed alone first and a column
  * that fails is left to the component-props gate (`@objectstack/lint`'s
  * `validateComponentProps`), which reports its own defects against
  * `ComponentPropsMap`.
  *
- * All three carriers of the column are walked:
+ * All four carriers of the column are walked:
  *
  * - a relationship field's `inlineColumns` — the field sits on the CHILD
  *   object, so a column names a field of the object that owns the field;
@@ -3566,7 +3567,11 @@ const hasOwnKey = (record: object, key: string): boolean => Object.prototype.has
  *   `childObject`;
  * - [#20928] an `object-master-detail-form` page block's `details[].columns`,
  *   wherever the block sits on a page ({@link forEachPageComponent}) — a column
- *   names a field of the detail entry's `childObject`.
+ *   names a field of the detail entry's `childObject`;
+ * - [#24190] a `record:line_items` page block's `columns`, wherever the block
+ *   sits on a page — a column names a field of the child object the panel
+ *   lists, resolved the way the renderer resolves it
+ *   ({@link lineItemsChildObject}).
  *
  * Resolution is against the stack's own `objects`: a `childObject` this stack
  * does not declare, or a column naming no field of it, is not judged here — an
@@ -3630,24 +3635,60 @@ function collectHydratedInlineColumnErrors(config: ObjectStackDefinition): strin
     }
   }
 
-  // [#20928] The page carrier: `properties` is an open record the stack's parse
-  // never reaches, so `details` is read raw, entry by entry.
+  // [#20928] The page carriers: `properties` is an open record the stack's
+  // parse never reaches, so `details` and `columns` are read raw.
   for (const page of config.pages ?? []) {
     if (!isRecord(page)) continue;
     const pageName = typeof page.name === 'string' ? page.name : '(unnamed)';
     forEachPageComponent(page, (node, props, path) => {
-      if (node.type !== 'object-master-detail-form' || !Array.isArray(props.details)) return;
-      props.details.forEach((detail: unknown, j: number) => {
-        if (!isRecord(detail) || typeof detail.childObject !== 'string') return;
-        judge(
-          detail.columns,
-          detail.childObject,
-          `Page '${pageName}' (${path}) object-master-detail-form details[${j}].columns`,
-        );
-      });
+      if (node.type === 'object-master-detail-form' && Array.isArray(props.details)) {
+        props.details.forEach((detail: unknown, j: number) => {
+          if (!isRecord(detail) || typeof detail.childObject !== 'string') return;
+          judge(
+            detail.columns,
+            detail.childObject,
+            `Page '${pageName}' (${path}) object-master-detail-form details[${j}].columns`,
+          );
+        });
+        return;
+      }
+      // [#24190] The fourth carrier: one grid per block, over the child object
+      // the panel lists.
+      if (node.type === 'record:line_items') {
+        const childObject = lineItemsChildObject(node, props);
+        if (childObject === undefined) return;
+        judge(props.columns, childObject, `Page '${pageName}' (${path}) record:line_items columns`);
+      }
     });
   }
   return errors;
+}
+
+/**
+ * [#24190] The child object a `record:line_items` block lists, resolved the
+ * way objectui resolves it before `LineItemsPanel` hydrates its columns from
+ * that object's schema — so the column is judged against the field it will
+ * render.
+ *
+ * The block's `childObject` is optional because the node's object
+ * `dataSource` binding can supply the object instead (`RecordLineItemsProps`),
+ * and the block's binding mapping writes the binding's `object` onto
+ * `childObject`: a binding that names an object wins over an authored
+ * `childObject`. An API binding (`provider: 'api'`) names no object, and the
+ * panel then reads `childObject` as authored. The `isRecord` / `typeof`
+ * guards are this rule's own type guards, as in the rest of this page walk:
+ * the stack's parse has already judged the node's `dataSource`, and it never
+ * reaches `properties`.
+ */
+function lineItemsChildObject(
+  node: Record<string, unknown>,
+  props: Record<string, unknown>,
+): string | undefined {
+  const binding = node.dataSource;
+  if (isRecord(binding) && typeof binding.object === 'string' && binding.object.length > 0) {
+    return binding.object;
+  }
+  return typeof props.childObject === 'string' ? props.childObject : undefined;
 }
 
 /**
@@ -3784,8 +3825,8 @@ function validateCrossReferences(
   }
 
   // Validate identity-only inline grid columns against the child field's type
-  // (#20901) — every carrier (#20928 added the page block's), the column
-  // schema's own verdict.
+  // (#20901) — every carrier (#20928 added the master-detail page block's,
+  // #24190 the line-items block's), the column schema's own verdict.
   errors.push(...collectHydratedInlineColumnErrors(config));
 
   // Validate seed data → object references. ARTIFACT-SCOPED (#18202).
