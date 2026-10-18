@@ -430,7 +430,7 @@ export function rlsProbeSecurity(config: any): SecurityPlugin {
 async function personaOrganization(
   ql: any,
   userId: string,
-  sysCtx: { context: { isSystem: true } },
+  sysCtx: { context: { isSystem: boolean } },
 ): Promise<{ organization_id?: string }> {
   const memberships = rowsOf(await ql.find('sys_member', { where: { user_id: userId }, limit: 2 }, sysCtx));
   const organizationId = memberships.length === 1 ? memberships[0]?.organization_id : undefined;

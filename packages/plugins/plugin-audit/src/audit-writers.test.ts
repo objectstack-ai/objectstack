@@ -2564,3 +2564,61 @@ describe('[#21207] stored metadata copies carry no content hash', () => {
     expect(JSON.parse(audit!.row.new_value).checksum).toBe(HASH);
   });
 });
+
+/**
+ * [ADR-0131 D9] An activity row about a record with no organization of its own
+ * (a `sys_user`, a platform setting), written with no session organization (a
+ * sign-up), takes the one the host derives — the `tenancy` service's Default
+ * Organization under `single`, `null` under a wall. The ledger row's
+ * `tenant_id` is an attribution of what the row is ABOUT (D7) and is not
+ * touched; a known organization is never overridden.
+ */
+describe('audit writers — the activity row of an org-less record names the derivable organization (ADR-0131 D9)', () => {
+  const ORG_LESS = { ...MULTI_TENANT, sys_user: ['id', 'name', 'email'] };
+  const signUp = {
+    object: 'sys_user',
+    input: { id: 'usr-1' },
+    result: { id: 'usr-1', name: 'Ada', email: 'ada@example.com' },
+    session: {},
+  };
+
+  it('stamps the Default Organization under single, and leaves the ledger attribution alone', async () => {
+    const { engine, fire, created } = makeEngine(ORG_LESS);
+    installAuditWriters(engine as any, 'test.audit', { getDefaultOrganizationId: async () => 'org-default' });
+    await fire('afterInsert', signUp);
+
+    expect(created.find((c) => c.object === 'sys_activity')?.row.organization_id).toBe('org-default');
+    expect(created.find((c) => c.object === 'sys_audit_log')?.row.tenant_id).toBeNull();
+  });
+
+  it('names none under a wall, and none when the host derives nothing or cannot answer', async () => {
+    for (const getDefaultOrganizationId of [async () => null, undefined, async () => { throw new Error('no tenancy'); }]) {
+      const { engine, fire, created } = makeEngine(ORG_LESS);
+      installAuditWriters(engine as any, 'test.audit', getDefaultOrganizationId ? { getDefaultOrganizationId } : {});
+      await fire('afterInsert', signUp);
+      expect(created.find((c) => c.object === 'sys_activity')?.row.organization_id).toBeNull();
+    }
+  });
+
+  it('never overrides a known organization — the record\'s, then the session\'s — nor asks for one', async () => {
+    let asked = 0;
+    const getDefaultOrganizationId = async () => { asked += 1; return 'org-default'; };
+    const { engine, fire, created } = makeEngine({ ...MULTI_TENANT, crm_lead: ['id', 'name', 'organization_id'] });
+    installAuditWriters(engine as any, 'test.audit', { getDefaultOrganizationId });
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
+    });
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-2' },
+      result: { id: 'lead-2', name: 'Beta', organization_id: null },
+      session: { organizationId: 'org-B', userId: 'user-1' },
+    });
+    const activities = created.filter((c) => c.object === 'sys_activity').map((c) => c.row.organization_id);
+    expect(activities).toEqual(['org-A', 'org-B']);
+    expect(asked).toBe(0);
+  });
+});
