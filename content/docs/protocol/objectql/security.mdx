@@ -329,7 +329,11 @@ That asymmetry is deliberate, not an oversight: `treatAsHistorical` arrives on a
 (non-system) REST import request, so honouring it on create would let any caller seed the
 approval/status columns the create-side strip exists to protect — in a single POST. **To
 replay archival read-only facts on create, write from a system context** (`isSystem`), the
-same trust marker rule 1 already names.
+same trust marker rule 1 already names. The REST import doors now hold that line at the door
+as well: they refuse `treatAsHistorical: true` from every caller but the system principal,
+`403 PERMISSION_DENIED` before a row is read, so over HTTP the flag no longer reaches the
+strip at all; the UPDATE-only rule still binds an in-process, non-system caller of the import
+runner.
 
 A non-system create that *requests* `preserveAudit` and loses fields to the strip is not
 silently ignored: the server logs a `WARN` naming the object, the stripped fields, and this
