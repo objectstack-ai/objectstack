@@ -402,11 +402,13 @@ export { hookRecordState } from './hook-wrappers.js';
 // exactly these; they are exported so it does not have to re-derive any of it.
 export {
   resolveRecordTitle,
+  resolveServedRecordTitle,
+  servedRecordTitle,
   resolveRelatedTitleTarget,
   titleFieldOf,
   RecordTitleFieldError,
 } from './record-title.js';
-export type { RelatedTitleTarget } from './record-title.js';
+export type { RelatedTitleTarget, FormulaServingChannel } from './record-title.js';
 export { evaluateFormulaField } from './engine.js';
 
 // Export Validation
