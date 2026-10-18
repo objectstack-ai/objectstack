@@ -30,10 +30,40 @@
  * import, and a list would drift as the boot changes. Running the boot, a
  * sign-in and a sign-up pays all of it through this package's own harness.
  *
- * ⛔ It shares nothing a case asserts on. It boots an app of its own (no
- * objects), on its own in-memory database, and stops it before the file's
- * first hook runs. What stays warm is process-level: the module registry,
- * sql.js's compiled WASM and the JIT.
+ * What it shares. It boots an app of its own (no objects), under a
+ * configuration object of its own, on its own in-memory database, and stops
+ * it before the file's first hook runs, so no kernel, row, service instance or
+ * configuration claim outlives it. What outlives it is the PROCESS's state —
+ * under vitest's per-file isolation, the file's — which the file's own boots
+ * then inherit instead of creating:
+ *
+ *  - the harness's data key: `harnessCryptoProvider()` in `harness.ts` builds
+ *    the process's crypto provider on the process's FIRST boot and keeps it, so
+ *    every later boot seals and opens under the provider the warm-up built;
+ *  - `NODE_ENV`: `bootStack` sets it to `development` and never restores it,
+ *    so the module code after the warm-up, and every case before the file's
+ *    own first boot, runs under `development` instead of vitest's `test`;
+ *  - what the loaded modules keep for the life of the process: the module
+ *    registry, sql.js's compiled WASM, the JIT, better-auth's process-global
+ *    context holder, and each module's own memos and once-per-process notices.
+ *
+ * That is safe for a case that asserts on none of it and changes none of its
+ * inputs after the warm-up: the provider is built by the same code from the
+ * same input whichever boot builds it (a random key, no environment read, no
+ * key file); every `bootStack` sets `NODE_ENV` before it builds its kernel;
+ * and a module's memo answers the file's boots as it would have answered the
+ * file's first. Only WHEN that state is created moves, and so under which
+ * environment.
+ *
+ * ⛔ So a file whose case asserts on that state takes no warm-up: on how or
+ * under which environment the data key is built, on `NODE_ENV` before its
+ * first boot, on a notice a module says once per process, or on a memo whose
+ * input the case changes after the warm-up (an environment variable a module
+ * reads once).
+ * `harness.key-custody.test.ts` is the measured case: it sets its keyless
+ * posture in a hook, a warm-up would build the provider at module scope before
+ * that posture exists, and a provider that minted a key file would then mint it
+ * outside the posture the file inspects, so the pin would stay green over it.
  *
  * ⛔ Call it at module scope, on a line of its own, never in a hook: vitest
  * clocks a hook with `hookTimeout` exactly as it clocks a test with

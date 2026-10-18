@@ -20,6 +20,7 @@ import { buildApiError } from '../error-envelope.js';
 import type { IAIService } from '@objectstack/spec/contracts';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 
 export function createAiDomain(deps: DomainHandlerDeps): DomainRoute {
     return {
@@ -63,6 +64,11 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         handled: true,
         response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
     });
+    // [#24151] The body is read once this decision has admitted the caller,
+    // never ahead of it (`../deferred-request-body.ts`): here for a caller it
+    // admits, and in the route loop below for an anonymous caller a route's
+    // `auth: false` admits.
+    if (!denyAnonymous) body = readDispatchedBody(body);
 
     let aiService: IAIService | undefined;
     try {
@@ -180,6 +186,10 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
         // itself is the same one — `denyAnonymous`, computed once above —
         // so the two exits cannot answer differently.
         if (route.auth !== false && denyAnonymous) return anonymousRefusal();
+        // [#24151] An anonymous caller this route's `auth: false` admitted has
+        // its body read here; an admitted caller's was read at the decision
+        // above, and reading a body that is no longer deferred returns it as is.
+        const admittedBody = readDispatchedBody(body);
 
         // Resolve `req.user` from the already-resolved ExecutionContext so
         // AI route handlers can attribute the call to the authenticated
@@ -247,7 +257,7 @@ export async function handleAIRequest(deps: DomainHandlerDeps, subPath: string, 
             : undefined;
 
         const result = await route.handler({
-            body,
+            body: admittedBody,
             params,
             query,
             headers: context.request?.headers,

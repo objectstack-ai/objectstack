@@ -15,7 +15,11 @@
  *    snapshot;
  *  - the item read of a non-object type falls back to the metadata service
  *    when the protocol serves no item: a disabled package's item there is
- *    absent, byte for byte the answer for a name with nothing behind it.
+ *    absent, byte for byte the answer for a name with nothing behind it;
+ *  - `/meta/:type/:name/published` of a non-object item reads the stored
+ *    overlay row or the snapshot, neither of which knows a disable: a disabled
+ *    package's item is absent there too, byte for byte the missing name's
+ *    answer (the owner is the plain read's kept envelope `packageId`).
  */
 
 import { describe, it, expect, vi } from 'vitest';
@@ -39,6 +43,20 @@ const refusal = (object: string) => Object.assign(
     { code: 'OBJECT_PACKAGE_DISABLED', status: 404, object },
 );
 
+/**
+ * [#24210] The owner each page's plain read names in its kept protection
+ * envelope (`packageId`), withheld item or not: `*_page` is published as a
+ * stored overlay row, `*_snap` only in the code/package snapshot.
+ */
+const OWNERS: Record<string, string> = {
+    demo_page: DISABLED_PKG, demo_snap: DISABLED_PKG,
+    healthy_page: HEALTHY_PKG, healthy_snap: HEALTHY_PKG,
+};
+const PUBLISHED_ROWS: Record<string, any> = {
+    demo_page: { name: 'demo_page', label: 'Demo (published row)' },
+    healthy_page: { name: 'healthy_page', label: 'Healthy (published row)' },
+};
+
 /** The metadata service's copies: it keeps both packages' pages. */
 const SERVICE_ITEMS: Record<string, any> = {
     demo_page: { name: 'demo_page', label: 'Demo', _packageId: DISABLED_PKG },
@@ -46,16 +64,21 @@ const SERVICE_ITEMS: Record<string, any> = {
 };
 
 function boot(opts: { getMetaTypes?: boolean } = {}) {
+    const disabled = { on: true };
     const getMetaItem = vi.fn(async ({ type, name }: any) => {
         if (type === 'object' && name === DISABLED) throw refusal(name);
         if (type === 'object' && name === HEALTHY) return { type, name, item: schema(name) };
         // The protocol answers the disabled package's page as absent (#24210),
         // and holds no copy of the healthy one: the service fallback serves it.
-        return { type, name, item: undefined, lock: 'none', editable: true };
+        return {
+            type, name, item: undefined, lock: 'none', editable: true,
+            ...(OWNERS[name] ? { packageId: OWNERS[name] } : {}),
+        };
     });
     const getMetaItemLayered = vi.fn(async ({ type, name }: any) => {
         if (type === 'object' && name === DISABLED) throw refusal(name);
-        return { type, name, code: null, overlay: null, effective: null };
+        const row = PUBLISHED_ROWS[name] ?? null;
+        return { type, name, code: null, overlay: row, effective: row };
     });
     const protocol: Record<string, unknown> = {
         getMetaItem,
@@ -71,11 +94,14 @@ function boot(opts: { getMetaTypes?: boolean } = {}) {
         getObject: vi.fn((name: string) => (name === DISABLED || name === HEALTHY ? schema(name) : undefined)),
         listItems: vi.fn(() => []),
         isObjectPackageDisabled: (name: string) => name === DISABLED,
-        isPackageDisabled: (id: unknown) => id === DISABLED_PKG,
+        isPackageDisabled: (id: unknown) => disabled.on && id === DISABLED_PKG,
     };
     const metadata = {
         getItem: vi.fn(async (_type: string, name: string) => SERVICE_ITEMS[name]),
-        getPublished: vi.fn(async (_type: string, name: string) => (name === DISABLED ? schema(name) : undefined)),
+        getPublished: vi.fn(async (_type: string, name: string) => {
+            if (name === DISABLED) return schema(name);
+            return name.endsWith('_snap') ? { name, label: `${name} (snapshot)` } : undefined;
+        }),
         list: vi.fn(async () => []),
     };
     const auth = { api: { getSession: async () => ({ user: { id: 'u_session' } }) } };
@@ -91,6 +117,8 @@ function boot(opts: { getMetaTypes?: boolean } = {}) {
         dispatcher: new HttpDispatcher(kernel, undefined, { enforceProjectMembership: false }),
         registry,
         metadata,
+        disabled,
+        getMetaItemLayered,
     };
 }
 
@@ -164,5 +192,42 @@ describe('#24210 — the item read\'s metadata-service fallback and a disabled p
         const res = await stack.dispatcher.dispatch('GET', '/meta/page/healthy_page', {}, {}, SESSION());
         expect(res.response?.status).toBe(200);
         expect(res.response?.body?.data?.item?.name).toBe('healthy_page');
+    });
+});
+
+describe('#24210 — /published of a disabled package\'s non-object item', () => {
+    const published = (stack: ReturnType<typeof boot>, name: string) =>
+        stack.dispatcher.dispatch('GET', `/meta/page/${name}/published`, {}, {}, SESSION());
+
+    it('served while enabled, then the missing name\'s answer on both exits, then served again', async () => {
+        const stack = boot();
+        stack.disabled.on = false;
+        expect((await published(stack, 'demo_page')).response?.body?.data).toEqual(PUBLISHED_ROWS.demo_page);
+        expect((await published(stack, 'demo_snap')).response?.body?.data).toEqual({ name: 'demo_snap', label: 'demo_snap (snapshot)' });
+
+        stack.disabled.on = true;
+        const missing = await published(stack, 'no_such_page');
+        expect(missing.response?.status).toBe(404);
+        expect(missing.response?.body?.error?.code).toBe('RESOURCE_NOT_FOUND');
+        stack.metadata.getPublished.mockClear();
+        stack.getMetaItemLayered.mockClear();
+        for (const name of ['demo_page', 'demo_snap']) {
+            const hidden = await published(stack, name);
+            expect(hidden.response?.status, name).toBe(missing.response?.status);
+            expect(JSON.stringify(hidden.response?.body), name).toBe(JSON.stringify(missing.response?.body));
+        }
+        // Neither store was asked for a withheld item.
+        expect(stack.metadata.getPublished).not.toHaveBeenCalled();
+        expect(stack.getMetaItemLayered).not.toHaveBeenCalled();
+
+        stack.disabled.on = false;
+        expect((await published(stack, 'demo_page')).response?.body?.data).toEqual(PUBLISHED_ROWS.demo_page);
+        expect((await published(stack, 'demo_snap')).response?.body?.data).toEqual({ name: 'demo_snap', label: 'demo_snap (snapshot)' });
+    });
+
+    it('the control: another package\'s item is served on both exits while the package is disabled', async () => {
+        const stack = boot();
+        expect((await published(stack, 'healthy_page')).response?.body?.data).toEqual(PUBLISHED_ROWS.healthy_page);
+        expect((await published(stack, 'healthy_snap')).response?.body?.data).toEqual({ name: 'healthy_snap', label: 'healthy_snap (snapshot)' });
     });
 });

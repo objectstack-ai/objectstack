@@ -147,8 +147,9 @@ import type {
     PublishMetaItemRequest,
     AuditMetaItemRequest,
     HistoryMetaItemRequest,
-    SaveMetaItemRequest,
-    DeleteMetaItemRequest,
+    // `SaveMetaItemRequest` and `DeleteMetaItemRequest`, the item save's and the reset's
+    // declared requests, moved with those doors to `meta-item-write-routes.ts` (#23050
+    // slice 13c).
 } from '@objectstack/spec/api';
 // `GetUiViewRequest`, the UI view door's declared request, moved with that door to
 // `ui-routes.ts` (#23050 slice 10).
@@ -210,14 +211,14 @@ export { filterAppForUser } from './meta-item-read-gate.js';
 import {
     // `META_ITEM_LAYERS_PARAMS` is read only by the `/layers` door, which moved to
     // `meta-item-read-routes.ts` (#23050 slice 13b); the re-export below still names it.
+    // `META_ITEM_SAVE_PARAMS` is read only by the item save, which moved to
+    // `meta-item-write-routes.ts` (#23050 slice 13c); the re-export below still names it.
     META_ITEM_MEMBER_PARAM,
     META_ITEM_PUBLISHED_PARAMS,
-    META_ITEM_SAVE_PARAMS,
     metaMemberSelector,
 } from './meta-item-read-gate.js';
-// [#22141] The `PUT /meta/:type/:name` door's precondition and lifecycle, read
-// through the ONE mapping the runtime dispatcher's `/meta` domain asks too.
-import { metaSaveRequestOptions } from './meta-save-request.js';
+// [#22141] `metaSaveRequestOptions`, the `PUT /meta/:type/:name` door's precondition and
+// lifecycle mapping, moved with that door to `meta-item-write-routes.ts` (#23050 slice 13c).
 import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
@@ -325,6 +326,9 @@ import {
 // [#23050 slice 13b] The `/meta` per-item reads (`/references`, `/layers`, the book tree
 // and the item read) moved to their own module — see its header.
 import { registerMetaItemReadRoutes, type MetaItemReadRouteHost } from './meta-item-read-routes.js';
+// [#23050 slice 13c] The `/meta` per-item writes (the item save and the reset) moved to
+// their own module — see its header.
+import { registerMetaItemWriteRoutes, type MetaItemWriteRouteHost } from './meta-item-write-routes.js';
 import { loadExcelJs, type Worksheet } from './xlsx-module.js';
 // [#18386] `?template=true` on the export door: the import template's column
 // rule, request reading and workbook. See the module header.
@@ -366,8 +370,9 @@ import {
     sendDeclaredFault,
     sendFieldVisibilityFault,
     handleRouteError,
-    // `thrownAnswerIsBareNotFound`, read only by the item read's catch, moved with that body
-    // to `meta-item-read-routes.ts` (#23050 slice 13b).
+    // `thrownAnswerIsBareNotFound`: the item read's catch moved to `meta-item-read-routes.ts`
+    // (#23050 slice 13b); the event and diff doors here still read it (#24210).
+    thrownAnswerIsBareNotFound,
     // `logUnexpectedRouteError` and `applyDroppedFieldsHeader`, read only by the CRUD doors' catches
     // and their two write answers, moved with `registerCrudEndpoints`' body to `crud-routes.ts`
     // (#23050 slice 12).
@@ -3522,6 +3527,12 @@ export class RestServer {
      * Only the types {@link metaItemReadGate} judges per caller are fetched at
      * all, so every other type's door is untouched: no extra read, no new
      * failure mode. Answers the refusal to send, or `undefined` to go on.
+     *
+     * [#7557, #24210] A withheld item's absence (a disabled package's item,
+     * which {@link fetchCurrentMetaDocument} throws) is answered in the plain
+     * read's own body, {@link sendMetaItemAbsent}, recognised as the plain
+     * read's catch recognises it ({@link thrownAnswerIsBareNotFound}), not in
+     * the classification door's flat one.
      */
     private async eventDoorRefusal(
         environmentId: string | undefined,
@@ -3531,7 +3542,13 @@ export class RestServer {
         const metaType = RestServer.metaTypeSingular(req.params.type);
         const policy: MetaReadGatePolicy = { arms: 'per-caller', app: 'gate' };
         if (!RestServer.gatesPerCaller(metaType)) return undefined;
-        const current = await this.fetchCurrentMetaDocument(req, p);
+        let current: any;
+        try {
+            current = await this.fetchCurrentMetaDocument(req, p);
+        } catch (error: any) {
+            if (thrownAnswerIsBareNotFound(error)) return sendMetaItemAbsent;
+            throw error;
+        }
         if (current == null) return undefined;
         const verdict = await this.metaItemReadGate(
             environmentId, req, p, metaType, req.params.name, [current], policy,
@@ -5180,410 +5197,23 @@ export class RestServer {
         };
         registerMetaItemReadRoutes.call(itemReadHost, scope);
 
-        // PUT /meta/:type/:name - Save metadata item
-        // We always register this route, but return 501 if protocol doesn't support it
-        // This makes it discoverable even if not implemented
-        registerPerItemRoute({
-            method: 'PUT',
-            path: `${metaPath}/:type/:name`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#6603] Authoring capability gate — the SAME mechanism
-                    // `POST /meta/_migrate-stored` uses next door, deliberately
-                    // not a second way of demanding the same capability.
-                    //
-                    // Two independent reasons, either sufficient:
-                    //
-                    //  1. **The ADR-0106 round-trip.** D1 removes an unreadable
-                    //     field WHOLE from a served object schema, and this
-                    //     route persists the body it is handed. So a non-exempt
-                    //     caller's ordinary GET → edit a label → PUT used to
-                    //     store the schema back MINUS the fields masked out of
-                    //     their own read — silent deletion of fields they were
-                    //     never allowed to see, with nothing in the exchange
-                    //     saying so. Refusing the write is the write-side answer
-                    //     the masking needs: it makes "whoever may write a
-                    //     schema is whoever sees all of it" an enforced
-                    //     invariant instead of a coincidence, rather than
-                    //     teaching `saveMetaItem` that absent means keep (which
-                    //     would make field DELETION inexpressible for everyone).
-                    //  2. It closes a hole that predates masking entirely: any
-                    //     authenticated session could clobber any metadata item.
-                    //
-                    // Gate FIRST — before the protocol is resolved — so an
-                    // unauthorized caller cannot use the 501-vs-200 answer to
-                    // probe which kernels implement saving, and so nothing is
-                    // written before the refusal. `manage_metadata` is
-                    // ADR-0066 D1's authoring capability and saving a metadata
-                    // item is authoring; `isSystem` bypasses, matching every
-                    // other capability gate on the platform.
-                    //
-                    // [#12702 · ADR-0131 D6] The gate is the shared
-                    // `metaWriteCapabilityVerdict` (`@objectstack/metadata-core`):
-                    // `manage_metadata` or `isSystem`. The org-scoped
-                    // `manage_org_presentation` arm retired with the
-                    // per-organization overlay axis — this door threads no
-                    // organization, so that arm would have admitted its holders
-                    // to environment-wide authoring.
-                    //
-                    // [#20156] Asked through {@link metaSaveVerdict}, the ONE
-                    // spelling the stored-version read doors' author exemption
-                    // asks too (ruling 5856774816): whoever this door admits
-                    // reads the stored version whole there, whatever the plain
-                    // read withholds from them — so what they save back is
-                    // everything that was stored.
-                    const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                    {
-                        const verdict = RestServer.metaSaveVerdict(ctx);
-                        if (!verdict.allowed) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: verdict.message,
-                                },
-                            });
-                            return;
-                        }
-                    }
-                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
-                    // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` every organization shares the
-                    // environment's metadata, so only the platform operator rung
-                    // (or the engine itself) writes it, whatever the type. Inert
-                    // under `single`. See {@link walledCatalogRefusal}.
-                    {
-                        const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
-                        if (!walled.allowed) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: walled.message,
-                                },
-                            });
-                            return;
-                        }
-                    }
-                    const p = await this.resolveProtocol(environmentId, req);
-                    if (!p.saveMetaItem) {
-                        // [#7035] ADR-0112 envelope: the semantic code lives at
-                        // `error.code`, NOT as a sibling of `error`. This site
-                        // used to answer `{ error: '<msg>', code: 'NOT_IMPLEMENTED' }`
-                        // while `POST /meta/_migrate-stored` a few hundred lines
-                        // up answered the nested shape for the same condition,
-                        // so a client reading `err.error.code` got `undefined`
-                        // here — and `undefined` takes the "no code" branch, not
-                        // an error branch. `NOT_IMPLEMENTED` is unchanged: it is
-                        // already the standard-catalog code ADR-0112 maps 501 to
-                        // (`spec/src/api/errors.zod.ts` — the catalog member and
-                        // `standardErrorCodeForHttpStatus(501)`).
-                        res.status(501).json({
-                            error: {
-                                code: 'NOT_IMPLEMENTED',
-                                message: 'Save operation not supported by protocol implementation',
-                            },
-                        });
-                        return;
-                    }
-
-                    // Accept both `{ ...itemFields }` (bare) and `{ metadata: {...} }`
-                    // / `{ item: {...} }` envelope shapes. Studio and direct API
-                    // callers historically use either; ADR-0005 settles on
-                    // unwrapping to a single payload before persistence.
-                    const body = req.body ?? {};
-                    const item = (body && typeof body === 'object' && 'metadata' in body)
-                        ? (body as any).metadata
-                        : (body && typeof body === 'object' && 'item' in body)
-                            ? (body as any).item
-                            : body;
-
-                    // Opt-in OCC under ADR-0008 PR-10d.3: callers (Studio,
-                    // CLI) may set `If-Match` to the version token a receipt
-                    // served, to enforce that the overlay row has not advanced
-                    // since they last read it. A `null`/empty body or no header
-                    // preserves the legacy last-write-wins behaviour. [#21207]
-                    // The token is the crypto provider's keyed digest of the
-                    // stored content hash, never the hash itself; the protocol
-                    // compares it in that form, so it passes through here as sent.
-                    // [#22114] The item read serves the same token as `version`,
-                    // and `If-None-Match: *` pins a save that expects no row.
-                    // [#22141] The pin and `?mode=draft` are read through
-                    // {@link metaSaveRequestOptions} — the ONE mapping the
-                    // runtime dispatcher's `/meta` door asks too, so the
-                    // `@objectstack/hono` catch-all cannot answer this request
-                    // differently. Its `request` members are spread into the
-                    // save below, each present only when the caller asked.
-                    //
-                    // The multiplicity guard runs FIRST: it refuses a repeated
-                    // `force`, `package` or `mode` (see the `force` read below
-                    // for why that one is sharp) and UNWRAPS one occurrence
-                    // encoded as an array, so `?mode=` reaches the mapping as
-                    // the string it reads.
-                    //
-                    // [#23072] …and RECOGNITION before it, over the measured
-                    // closed set: a name this door does not read — `member`
-                    // first among them, the save being body-addressed — is a
-                    // located 400 here, before anything is written, never
-                    // dropped while the body's own member is saved.
-                    if (refuseUnknownQueryParams(req, res, META_ITEM_SAVE_PARAMS)) return;
-                    if (refuseRepeatedQueryParams(req, res, ['force', 'package', 'mode'])) return;
-                    const saveOptions = metaSaveRequestOptions({ headers: req.headers, query: req.query });
-                    if (!saveOptions.ok) {
-                        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: saveOptions.message } });
-                        return;
-                    }
-                    // [#7749 producer, #7941 precedence] The request's authenticated
-                    // identity — one producer, shared by every `/meta` write (see
-                    // resolveMetaWriteActor). `X-Actor` is not consulted.
-                    const actor = await this.resolveMetaWriteActor(environmentId, req);
-                    // Phase 3a-destructive: `?force=true` opts past the
-                    // destructive-change safety check. Accept any truthy
-                    // string ('true', '1', 'yes') for resilience.
-                    //
-                    // [#6877] THE sharp one on this surface. The `typeof` ternary
-                    // below falls to `!!forceRaw` for anything that is not a
-                    // string, and a non-empty array is truthy — so
-                    // `?force=false&force=false`, a caller repeating an explicit
-                    // OPT-OUT, turned the destructive-change guard ON. An
-                    // inversion, on a destructive verb, reported as 200. The
-                    // multiplicity guard above refuses it before this read.
-                    const forceRaw = req.query?.force;
-                    const force = typeof forceRaw === 'string'
-                        ? ['true', '1', 'yes', 'on'].includes(forceRaw.toLowerCase())
-                        : !!forceRaw;
-
-                    // Software-package binding (Studio package authoring).
-                    // `?package=<id>` binds the saved row to that package
-                    // (sys_metadata.package_id). 'all'/empty = env-local overlay
-                    // ({@link metaItemPackageBinding}, the item read's too).
-                    const packageId = metaItemPackageBinding(req.query?.package);
-
-                    // [ADR-0131 D6] THE WRITE NAMES NO ORGANIZATION. The
-                    // per-organization overlay axis is retired: every write this
-                    // door admits lands environment-wide (`organization_id`
-                    // NULL), its audit row included, whatever the caller's
-                    // active organization. Until this stage the door threaded
-                    // the active organization for the five types whose registry
-                    // flag opened an overlay (then spelled `allowOrgOverride`,
-                    // `allowEnvironmentOverlay` since 18, which decides no
-                    // organization); a single-posture Studio save
-                    // of those types therefore sits under the Default
-                    // Organization, and is not served again until ADR-0131 C7
-                    // promotes it to the environment layer.
-                    // [#12004] The `as any` cast this call carried came off
-                    // when `SaveMetaItemRequestSchema` caught up with the
-                    // members this door sends. `saveMetaItem` is a REQUIRED
-                    // protocol member, so unlike the publish door's old cast
-                    // (member existence, TS2339) this one was load-bearing on
-                    // REQUEST SHAPE alone: the schema declared only
-                    // `{ type, name, item }`, and removing the cast surfaced
-                    // TS2353 on every other key. The literal is now compiled
-                    // against the spec contract through the commit 2a29caa53
-                    // `TransportScopedMetaRequest` wrapper — `environmentId`
-                    // is the transport-level routing key that wrapper layers
-                    // on, ⛔ never a protocol key; every other key here is
-                    // checked against the declared request, so an undeclared
-                    // member is a compile error instead of a payload member no
-                    // contract has ever seen.
-                    const saveRequest: TransportScopedMetaRequest<SaveMetaItemRequest> = {
-                        type: req.params.type,
-                        name: req.params.name,
-                        item,
-                        // [commit d806081dd] This door answers with an ADR-0112 error
-                        // envelope that carries the refusal's `issues[]`
-                        // structurally beside the message (`sendError` threads a
-                        // top-level `issues`), so `saveMetaItem`'s 422 renders
-                        // its findings as a headline here instead of restating
-                        // the per-key prose a console would then show twice.
-                        // Server-stated: this object is built field by field
-                        // from named `req` values and never spreads the body, so
-                        // a client cannot smuggle a face in.
-                        writeFace: 'meta-envelope',
-                        ...(environmentId ? { environmentId } : {}),
-                        // `parentVersion` and `mode`, each only when asked —
-                        // a closed two-key object read off the headers and the
-                        // query, never the body.
-                        ...saveOptions.request,
-                        ...(actor ? { actor } : {}),
-                        ...(force ? { force: true } : {}),
-                        ...(packageId ? { packageId } : {}),
-                    };
-                    const result = await p.saveMetaItem(saveRequest);
-                    res.json(result);
-                } catch (error: any) {
-                    handleRouteError(res, error);
-                }
-            },
-            metadata: {
-                summary: 'Save specific metadata item',
-                tags: ['metadata'],
-            },
-        });
-
-        // DELETE /meta/:type/:name - Reset metadata item to artifact default
-        // Removes a customization overlay row from sys_metadata (ADR-0005).
-        // Returns 200 even when no overlay existed (idempotent reset).
-        registerPerItemRoute({
-            method: 'DELETE',
-            path: `${metaPath}/:type/:name`,
-            handler: async (req: any, res: any) => {
-                try {
-                    const environmentId = isScoped ? req.params?.environmentId : undefined;
-                    // [#7019] Same gate, same mechanism as the `PUT` twins —
-                    // but the argument for it is NOT the ADR-0106 round trip,
-                    // and saying so matters. Nothing is masked here and nothing
-                    // is round-tripped: this route discards a customization
-                    // overlay outright, so before this gate an authenticated
-                    // session holding no authoring capability at all could
-                    // reset any customized metadata item in the deployment to
-                    // its artifact default — and with `?dropStorage=true`, drop
-                    // the object's physical table with it.
-                    //
-                    // It belongs with the two PUTs because deleting a
-                    // customization is authoring it (ADR-0066 D1), and because
-                    // the fix is the same four lines — not because it is the
-                    // same argument.
-                    //
-                    // Gate FIRST — before the protocol is resolved — so the
-                    // 501-vs-200 answer leaks no kernel capability, and, the
-                    // point here, so the refusal happens with the overlay row
-                    // still intact. A gate that answers 403 after
-                    // `deleteMetaItem` has run would still be the bug.
-                    // `isSystem` bypasses, as everywhere else.
-                    //
-                    // [#12702 · ADR-0131 D6] Same shared verdict as the PUT
-                    // door. The reset names no organization either, so it
-                    // discards the environment-wide row.
-                    const ctx = await this.resolveExecCtx(environmentId, req).catch(rethrowAuthzStoreUnavailable);
-                    {
-                        const verdict = metaWriteCapabilityVerdict({
-                            isSystem: ctx?.isSystem === true,
-                            systemPermissions: ctx?.systemPermissions,
-                            operation: 'reset',
-                        });
-                        if (!verdict.allowed) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: verdict.message,
-                                },
-                            });
-                            return;
-                        }
-                    }
-                    // [ADR-0131 D3 · D12 items 7–8] The walled refusal, after the
-                    // capability gate and before the protocol is resolved: under
-                    // `isolated` / `group` every organization shares the
-                    // environment's metadata, so only the platform operator rung
-                    // (or the engine itself) writes it, whatever the type. Inert
-                    // under `single`. See {@link walledCatalogRefusal}.
-                    {
-                        const walled = await this.walledCatalogRefusal(req.params.type, ctx, environmentId, req);
-                        if (!walled.allowed) {
-                            res.status(403).json({
-                                error: {
-                                    code: 'FORBIDDEN',
-                                    message: walled.message,
-                                },
-                            });
-                            return;
-                        }
-                    }
-                    const p = await this.resolveProtocol(environmentId, req);
-                    if (!p.deleteMetaItem) {
-                        // [#7035] ADR-0112 envelope. This site was the worst of
-                        // the three shapes: a BARE STRING `error`, with no code
-                        // at all — so neither `err.error.code` nor `err.code`
-                        // resolved, and `err.error.message` read `undefined`
-                        // too. `NOT_IMPLEMENTED` is the standard-catalog code
-                        // for 501 (ADR-0112; `standardErrorCodeForHttpStatus`).
-                        res.status(501).json({
-                            error: {
-                                code: 'NOT_IMPLEMENTED',
-                                message: 'Reset operation not supported by protocol implementation',
-                            },
-                        });
-                        return;
-                    }
-                    // Mirror saveMetaItem's OCC + actor plumbing (ADR-0008
-                    // PR-10d wiring): `If-Match` pins the expected current
-                    // version so concurrent edits get a 409 instead of a
-                    // silent reset; the request's authenticated identity flows
-                    // into the history tombstone row (#7749 producer; #7941
-                    // dropped the `X-Actor` limb that used to outrank it).
-                    const ifMatchHeader = req.headers?.['if-match'] ?? req.headers?.['If-Match'];
-                    const parentVersion = typeof ifMatchHeader === 'string'
-                        ? ifMatchHeader.replace(/^"|"$/g, '')
-                        : undefined;
-                    // [#7749 producer, #7941 precedence] The request's authenticated
-                    // identity — one producer, shared by every `/meta` write (see
-                    // resolveMetaWriteActor). `X-Actor` is not consulted.
-                    const actor = await this.resolveMetaWriteActor(environmentId, req);
-
-                    // [#6877] `?state=` and the destructive `?dropStorage=`
-                    // both fail SAFE on an array today (the comparisons stop
-                    // matching), but "the wrong answer happens to be the
-                    // conservative one" is not a rule a caller can rely on and
-                    // is not what the request asked for.
-                    // [#22877] Recognition first, over the measured closed set.
-                    if (refuseUnknownQueryParams(req, res, META_ITEM_RESET_PARAMS)) return;
-                    if (refuseRepeatedQueryParams(req, res, ['state', 'dropStorage', 'package', META_ITEM_MEMBER_PARAM])) return;
-                    const stateParam = typeof req.query?.state === 'string'
-                        && req.query.state.toLowerCase() === 'draft'
-                        ? 'draft' as const
-                        : undefined;
-
-                    // `?dropStorage=true` also tears down the object's physical
-                    // table (object + active only). Used by the "discard a
-                    // previewed object" flow so a publish-to-preview leaves no
-                    // orphan table. Destructive — opt-in, defaults off.
-                    const dropStorage = req.query?.dropStorage === 'true' || req.query?.dropStorage === '1';
-                    const deletePackageId = metaItemPackageBinding(req.query?.package);
-
-                    // [ADR-0131 D6] No organization, as on the `PUT` twin: the
-                    // reset reaches the environment-wide row.
-                    // [#11679] The `(p as any)` cast this call carried came off
-                    // when `DeleteMetaItemRequestSchema` caught up with the
-                    // eight members this door sends. Unlike the publish door's
-                    // cast (member existence, TS2339), this one was load-bearing
-                    // on REQUEST SHAPE: the member was declared all along, but
-                    // the schema declared only `{ type, name }`, so removing the
-                    // cast surfaced TS2353 on six keys. The literal is now
-                    // compiled against the spec contract through the commit 2a29caa53
-                    // `TransportScopedMetaRequest` wrapper — `environmentId` is
-                    // the transport-level routing key that wrapper layers on,
-                    // ⛔ never a protocol key; every other key here is checked
-                    // against the declared request, so an undeclared member is a
-                    // compile error instead of a payload member no contract has
-                    // ever seen. The 501 guard above stays: the member is
-                    // declared OPTIONAL, and the guard is what narrows it to
-                    // callable here.
-                    const deleteRequest: TransportScopedMetaRequest<DeleteMetaItemRequest> = {
-                        type: req.params.type,
-                        name: req.params.name,
-                        ...(environmentId ? { environmentId } : {}),
-                        ...(parentVersion !== undefined ? { parentVersion } : {}),
-                        ...(actor ? { actor } : {}),
-                        ...(stateParam ? { state: stateParam } : {}),
-                        ...(dropStorage ? { dropStorage: true } : {}),
-                        // [#22877] Resets ONE member of a bundled type.
-                        ...metaMemberSelector(req.query),
-                        // [#23165, ADR-0048] The package whose row the delete
-                        // removes; `all` and an empty value name none, as on
-                        // the save door, and the protocol then resolves it.
-                        ...(deletePackageId ? { packageId: deletePackageId } : {}),
-                    };
-                    const result = await p.deleteMetaItem(deleteRequest);
-                    res.json(result);
-                } catch (error: any) {
-                    handleRouteError(res, error);
-                }
-            },
-            metadata: {
-                summary: 'Reset metadata item to artifact default (deletes customization overlay)',
-                tags: ['metadata'],
-            },
-        });
+        // [#23050 slice 13c] The per-item writes (`PUT` and `DELETE {metaPath}/:type/:name`,
+        // the item save and the reset) moved to `meta-item-write-routes.ts`, and are
+        // registered HERE so they keep their place in the order: after the per-item reads,
+        // above the history family below. They still register through the per-item
+        // registrar this head declares, which reaches that module in `scope` as the one
+        // closure it is and reads the route manager when it is called, during this call.
+        // This literal hands that body every other member it reads (see
+        // `MetaItemWriteRouteHost`); it carries no route manager, because that body
+        // registers nothing on one itself. Read that module's header before moving it.
+        const itemWriteHost: MetaItemWriteRouteHost = {
+            resolveExecCtx: (...a) => this.resolveExecCtx(...a),
+            metaSaveVerdict: (...a) => RestServer.metaSaveVerdict(...a),
+            walledCatalogRefusal: (...a) => this.walledCatalogRefusal(...a),
+            resolveProtocol: (...a) => this.resolveProtocol(...a),
+            resolveMetaWriteActor: (...a) => this.resolveMetaWriteActor(...a),
+        };
+        registerMetaItemWriteRoutes.call(itemWriteHost, scope);
 
         // GET /meta/:type/:name/history — durable change-log for one item.
         // Returns the sys_metadata_history events that the Studio "History"
@@ -6293,9 +5923,21 @@ export class RestServer {
                         throw maskError;
                     }
                     const diffGated = RestServer.gatesPerCaller(diffMetaType);
-                    const diffCurrent = diffGated
-                        ? await this.fetchCurrentMetaDocument(req, p)
-                        : undefined;
+                    let diffCurrent: any;
+                    try {
+                        diffCurrent = diffGated
+                            ? await this.fetchCurrentMetaDocument(req, p)
+                            : undefined;
+                    } catch (currentError: any) {
+                        // [#7557, #24210] A withheld item (a disabled package's)
+                        // is answered in the plain read's body, as
+                        // {@link eventDoorRefusal} answers it.
+                        if (thrownAnswerIsBareNotFound(currentError)) {
+                            sendMetaItemAbsent(res);
+                            return;
+                        }
+                        throw currentError;
+                    }
                     // [#22639] A list view's and a dashboard's per-caller gate
                     // is the item's OWN `requiredPermissions`. With no
                     // published row there is no current document to judge, so
@@ -6476,7 +6118,23 @@ export class RestServer {
                         Boolean(this.objectQLProvider),
                         () => this.objectQLProvider!(environmentId),
                     );
-                    const schema = (ql as any)?.registry?.getObject?.(name);
+                    // [#7557, #24210] The registry is a resolution reader and
+                    // keeps serving a disabled package's object, so this API
+                    // door asks first and answers what `GET /meta/object/:name`
+                    // answers: the protocol's own refusal, `404
+                    // OBJECT_PACKAGE_DISABLED` (the dispatcher twin's
+                    // `disabledObjectAnswer`); any other throw of that read is
+                    // answered as itself, never as an absence. A protocol that
+                    // does not refuse it gets this door's own answer for no
+                    // object, below. The schema is never read for such a name.
+                    const registry = (ql as any)?.registry;
+                    const disabledObject = typeof registry?.isObjectPackageDisabled === 'function'
+                        && registry.isObjectPackageDisabled(name) === true;
+                    if (disabledObject) {
+                        const p = await this.resolveProtocol(environmentId, req);
+                        await p.getMetaItem({ type: 'object', name });
+                    }
+                    const schema = disabledObject ? undefined : registry?.getObject?.(name);
                     if (!schema) {
                         // `{ error: { code, message } }`, the envelope
                         // `BaseResponseSchema` declares — not the bare
@@ -6677,8 +6335,31 @@ export class RestServer {
                         // READ, and a gate fault raised while serving must reach
                         // `handleRouteError` as itself — never fall through to
                         // the snapshot as though no overlay existed.
+                        // [#7557, #24210] A disabled package's item is answered
+                        // as a name with nothing behind it, as the plain read
+                        // and the list answer it. Neither store below knows a
+                        // disable (the layered read keeps serving its resolution
+                        // reader, and the snapshot carries no owner), so the
+                        // owner is the one the plain read's kept protection
+                        // envelope names, `packageId`, asked of the registry's
+                        // `isPackageDisabled`: the predicate the protocol asks of
+                        // that same field. An object is the layered read's own
+                        // refusal below; `package` is never hidden.
+                        let withheld = false;
+                        if (publishedMetaType !== 'object' && publishedMetaType !== 'package'
+                            && typeof publishedProtocol?.getMetaItem === 'function') {
+                            const ql = await wiredEngineOrLoud(
+                                Boolean(this.objectQLProvider),
+                                () => this.objectQLProvider!(environmentId),
+                            );
+                            const registry = (ql as any)?.registry;
+                            if (typeof registry?.isPackageDisabled === 'function') {
+                                const envelope = await publishedProtocol.getMetaItem({ type, name });
+                                withheld = registry.isPackageDisabled(envelope?.packageId) === true;
+                            }
+                        }
                         let publishedOverlay: unknown;
-                        if (typeof publishedProtocol?.getMetaItemLayered === 'function') {
+                        if (!withheld && typeof publishedProtocol?.getMetaItemLayered === 'function') {
                             try {
                                 const layered = await publishedProtocol.getMetaItemLayered({
                                     type,
@@ -6766,7 +6447,9 @@ export class RestServer {
                         // CANONICAL types; handed the raw segment it answered
                         // 404 for a recognised plural and 200 for the singular
                         // twin of the same code-published item.
-                        const data = await (svc as any).getPublished(canonicalMetaUrlType(type), name);
+                        const data = withheld
+                            ? undefined
+                            : await (svc as any).getPublished(canonicalMetaUrlType(type), name);
                         // The 404 this route could never produce before. An
                         // item that exists but was never published still
                         // answers 200 with its current definition — that is

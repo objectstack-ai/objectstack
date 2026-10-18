@@ -1261,6 +1261,30 @@ export async function handleMetadataRequest(deps: DomainHandlerDeps, path: strin
             return successWithHeaders(deps, served, { 'Cache-Control': cacheControl });
         };
 
+        // [#7557, #24210] A disabled package's item is answered as a name with
+        // nothing behind it (every exit below ends in this same `404`), as
+        // `RestServer`'s `/published` answers it: the owner the plain read's
+        // kept protection envelope names, `packageId`, asked of the engine
+        // registry ({@link isServiceItemOfDisabledPackage}). Neither store below
+        // knows a disable. A throw of that read is the item read's answer for
+        // it. An object is the layered read's own refusal below; `package` is
+        // never hidden.
+        if (publishedType !== 'object' && publishedType !== 'package'
+            && protocol && typeof protocol.getMetaItem === 'function') {
+            const registry = (await deps.getObjectQL(_context))?.registry;
+            if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled === 'function') {
+                let owner: unknown;
+                try {
+                    owner = (await protocol.getMetaItem({ type, name }))?.packageId;
+                } catch (e) {
+                    return { handled: true, response: deps.errorFromThrown(e, 404) };
+                }
+                if (isServiceItemOfDisabledPackage(registry, { _packageId: owner })) {
+                    return { handled: true, response: deps.error('Not found', 404) };
+                }
+            }
+        }
+
         let publishedOverlay: unknown;
         if (protocol && typeof protocol.getMetaItemLayered === 'function') {
             try {

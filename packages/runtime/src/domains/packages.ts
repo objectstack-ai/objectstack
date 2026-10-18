@@ -123,6 +123,7 @@ import { parseBooleanParam } from '../query-param.js';
 import { setPackageDisabled } from '../package-state-store.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 // [#19328] The install door's DECLARED body contract, asked whole at
 // `POST /api/v1/packages` — the union of the wrapped request and a bare
 // manifest — plus each branch by name, which the refusal re-reads to locate a
@@ -1070,6 +1071,9 @@ export async function handlePackagesRequest(deps: DomainHandlerDeps, path: strin
             };
         }
     }
+    // [#24151] The body is read once the floor above has admitted the caller,
+    // never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     const parts = path.replace(/^\/+/, '').split('/').filter(Boolean);
 
