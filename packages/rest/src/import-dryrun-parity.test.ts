@@ -217,7 +217,11 @@ describe('import dry run == real write (#4633)', () => {
 
     it('required + no value: same verdict from both halves (was `firstMissingRequiredField`)', async () => {
       const rows = [{ id: 'r1', billing_address: null }]; // `name` is required
-      const { dry, real } = await bothWays(rows, { runAutomations: false });
+      // [#24348] No `runAutomations: false` here any more: this fixture binds
+      // no automation, so the opt-out the retired mirror needed changed
+      // nothing, and the import door now refuses it to every caller but the
+      // system principal (`import-control-opt-out-gate.test.ts`).
+      const { dry, real } = await bothWays(rows);
       expect(dry).toMatchObject({ ok: 0, errors: 1, created: 0 });
       expect(real).toMatchObject({ ok: 0, errors: 1, created: 0 });
       expect(verdictOf(dry)).toMatchObject({ field: 'name', code: 'required', error: 'Name is required' });
@@ -230,7 +234,7 @@ describe('import dry run == real write (#4633)', () => {
       // validating, so the preview must too; reporting `required` here would be
       // a false alarm on a row the write happily creates.
       const rows = [{ id: 'r2', name: 'Stark' }];
-      const { dry, real } = await bothWays(rows, { runAutomations: false });
+      const { dry, real } = await bothWays(rows);
       expect(dry).toMatchObject({ ok: 1, errors: 0, created: 1 });
       expect(real).toMatchObject({ ok: 1, errors: 0, created: 1 });
       expect((await engine.findOne('crm_account', { where: { id: 'r2' } }))?.tier).toBe('standard');
