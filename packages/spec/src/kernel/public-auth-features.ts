@@ -134,6 +134,9 @@ export const PUBLIC_AUTH_FEATURES = {
     gatedInputs: [
       'sys_organization.actions.create_organization',
       'sys_organization.actions.update_organization',
+      // The name/logo-only rename door, at the record header and the row:
+      // `update_organization`'s endpoint and gate, without its `slug` param.
+      'sys_organization.actions.rename_organization',
       'sys_organization.actions.delete_organization',
       'sys_organization.actions.set_active_organization',
       'sys_organization.actions.leave_organization',

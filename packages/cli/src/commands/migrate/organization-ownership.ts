@@ -249,7 +249,10 @@ class ReportFileReservation {
  * asks about the backup — the operator's act and the precondition (D10 item
  * 2): `--backup-taken`, or a yes at the prompt; a non-interactive run without
  * the flag is refused before the boot. It then
- * performs the fates in order — attribution, the authored catalog conversion,
+ * performs the fates in order — attribution (under `single`, on a database
+ * that holds no organization at all, after creating the Default Organization
+ * through plugin-auth's boot invariant, as the plan's warnings say; ADR-0131
+ * D3), the authored catalog conversion,
  * the promotion of organization customizations and public-form withdrawals,
  * the template promotion, the settings global-rung move, the verified id→name
  * rewrite, mirror deletion, column drops — through `../../utils/organization-ownership-apply.ts`,
@@ -571,7 +574,9 @@ export default class MigrateOrganizationOwnership extends Command {
       return;
     }
     printInfo(`Database: ${chalk.white(plan.database)} · posture ${chalk.white(plan.posture)} · ` +
-      `Default Organization ${plan.defaultOrganization ? chalk.white(plan.defaultOrganization.id) : chalk.yellow('none')}`);
+      `Default Organization ${plan.defaultOrganization
+        ? chalk.white(plan.defaultOrganization.id)
+        : chalk.yellow(plan.defaultOrganizationCreatedByApply ? 'none — --apply creates it' : 'none')}`);
     for (const sibling of plan.siblings ?? []) printInfo(describeTelemetryDatabase(sibling.database));
     console.log('');
     for (const table of plan.tables) {
@@ -889,6 +894,30 @@ export default class MigrateOrganizationOwnership extends Command {
           },
         },
         ledger,
+        defaultOrganization: {
+          // [ADR-0131 D3] The boot invariant's own producer, so the ceremony
+          // creates exactly the row a single-posture boot creates. Asked only
+          // when the reviewed plan said --apply creates it (no organization at all).
+          create: async () => {
+            const organizations = engine as unknown as { getObject?: (name: string) => unknown };
+            if (typeof organizations.getObject === 'function' && !organizations.getObject('sys_organization')) {
+              throw new Error(
+                'this run booted without the auth family that declares sys_organization (no auth secret, or the auth ' +
+                  'tier off); run the ceremony the way the deployment is served — with its OS_AUTH_SECRET, or with --dev ' +
+                  'for a development database',
+              );
+            }
+            const { ensureDefaultOrganizationExists } = await import('@objectstack/plugin-auth');
+            const result = await ensureDefaultOrganizationExists(engine);
+            if (!result.organizationId) {
+              throw new Error(
+                `the database holds ${result.ambiguous?.organizationCount ?? 'several'} organizations and none has ` +
+                  "slug 'default', so none is the Default Organization",
+              );
+            }
+            return { id: result.organizationId };
+          },
+        },
         reviewedPlan,
         ...(inventory ? { inventory } : {}),
         ...(json ? {} : { onProgress: (message: string) => printStep(message), onWarning: (message: string) => printWarning(message) }),

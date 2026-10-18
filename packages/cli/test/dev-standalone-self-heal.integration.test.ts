@@ -56,9 +56,8 @@ import Database from 'better-sqlite3';
 import {
   childEnv,
   E2E_SECRET_KEY,
-  portContentionError,
-  portDriftError,
-  randomPort,
+  KERNEL_ASSIGNED_PORT,
+  readKernelAssignedPort,
   requireBuiltCli,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
@@ -120,8 +119,14 @@ function stageBareIndex(): void {
   }
 }
 
-/** Boot `os <argv>` until its ready banner, then stop the whole group and return what it printed. */
-function bootUntilReady(argv: string[], port: string, env: Record<string, string | undefined>): Promise<string> {
+/**
+ * Boot `os <argv>` until its ready banner, then stop the whole group and return what it printed.
+ *
+ * Every call passes `-p KERNEL_ASSIGNED_PORT` (#24295): the production leg's child refuses to
+ * auto-shift, so a port drawn and released beforehand is a red whenever another process takes
+ * it in the gap. Nothing here talks to the port; the read-back only checks the banner names one.
+ */
+function bootUntilReady(argv: string[], env: Record<string, string | undefined>): Promise<string> {
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn(process.execPath, [CLI, ...argv], {
       cwd: dir,
@@ -163,13 +168,14 @@ function bootUntilReady(argv: string[], port: string, env: Record<string, string
     );
     const onData = (d: unknown) => {
       out += String(d);
-      if (READY.test(out)) finish(portDriftError(out, `os ${argv[0]}`, port));
+      if (!READY.test(out)) return;
+      const bound = readKernelAssignedPort(out, `os ${argv[0]}`);
+      finish(bound instanceof Error ? bound : null);
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('exit', (code) =>
-      finish(portContentionError(out, `os ${argv[0]}`, port)
-        ?? new Error(`os ${argv[0]} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
+      finish(new Error(`os ${argv[0]} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
     );
   });
 }
@@ -216,18 +222,15 @@ beforeAll(async () => {
   db = join(dir, 'A.db');
 
   // Boot 1: fresh, with the telemetry opt-out.
-  let port = randomPort();
-  await recordBoot('fresh', bootUntilReady(['dev', '--no-watch', '-d', 'file:A.db', '-p', port], port, { OS_TELEMETRY_DB: '0' }));
+  await recordBoot('fresh', bootUntilReady(['dev', '--no-watch', '-d', 'file:A.db', '-p', KERNEL_ASSIGNED_PORT], { OS_TELEMETRY_DB: '0' }));
 
   // Boot 2: the card's restart, on the restaged bare index, telemetry default-on.
   if (existsSync(db)) stageBareIndex();
-  port = randomPort();
-  await recordBoot('restart', bootUntilReady(['dev', '--no-watch', '-d', 'file:A.db', '-p', port], port, {}));
+  await recordBoot('restart', bootUntilReady(['dev', '--no-watch', '-d', 'file:A.db', '-p', KERNEL_ASSIGNED_PORT], {}));
 
   // Boot 3: production (`os serve`, NODE_ENV unset) on the restaged bare index.
   if (existsSync(db)) stageBareIndex();
-  port = randomPort();
-  await recordBoot('production', bootUntilReady(['serve', 'objectstack.config.ts', '-p', port], port, {
+  await recordBoot('production', bootUntilReady(['serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT], {
     OS_DATABASE_URL: 'file:A.db',
     OS_AUTH_SECRET: 'e2e-21733-production-leg-secret-not-for-real-use',
     OS_LOG_LEVEL: 'warn',

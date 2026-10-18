@@ -1950,8 +1950,11 @@ export const HistoryMetaItemResponseSchema = lazySchema(() => z.object({
     message: z.string().optional().describe('Optional commit message recorded with the write.'),
     ts: z.string().describe('When the write happened (ISO-8601 string).'),
     source: z.string().describe(
-      'Origin label of the write: "fs", "studio", "rest", "ai", '
-      + '"git-import", …',
+      'Which code path wrote the event: an open label the server stamps, not '
+      + 'an enum an author or client picks from (e.g. `protocol.saveMetaItem`, '
+      + '`protocol.publishMetaItem`, `migrate-stored`). The history row\'s '
+      + 'stored value is passed through; `sys-metadata-repo` is the '
+      + 'repository\'s own default and the answer for a row that stored none.',
     ),
   })).describe(
     'The durable change-log for the item, oldest first. See the '

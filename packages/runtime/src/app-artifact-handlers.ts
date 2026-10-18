@@ -145,7 +145,13 @@ import {
 } from '@objectstack/types';
 import { SEMCONV } from '@objectstack/observability';
 import { QuickJSScriptRunner } from './sandbox/quickjs-runner.js';
-import { hookBodyRunnerFactory, actionBodyRunnerFactory, jobBodyRunnerFactory, judgeJobBody } from './sandbox/body-runner.js';
+import {
+    hookBodyRunnerFactory,
+    actionBodyRunnerFactory,
+    jobBodyRunnerFactory,
+    judgeJobBody,
+    withInProcessHookTitle,
+} from './sandbox/body-runner.js';
 import { GLOBAL_ACTION_OBJECT_KEY } from './action-execution.js';
 import {
     collectBundleActions,
@@ -249,6 +255,9 @@ export function bindAppArtifactHandlers(
                 );
             }
         }
+        // [#24289] An inline `handler` function runs in-process; it is handed the
+        // `ctx.title(field?)` a `body` gets in the sandbox (see `hookWithInProcessTitle`).
+        hooks = hooks.map((hook) => hookWithInProcessTitle(hook, ql));
         // Entries, not bare handlers: each function's declared `effect`
         // (#4396) rides along to the registry, where a `script` node reads
         // it to report what its run actually did.
@@ -328,6 +337,25 @@ export function bindAppArtifactHandlers(
     }
 
     return out;
+}
+
+/**
+ * [#24289] `hook` with its inline `handler` function handed `ctx.title(field?)`
+ * ({@link withInProcessHookTitle}, the one accessor a `body` is handed too), or
+ * `hook` itself when its `handler` is not a function.
+ *
+ * A copy, so the app's own declaration is never rewritten. Which of `body` and
+ * `handler` runs stays the binder's call: a hook carrying both binds its `body`,
+ * and the wrapped function is never consulted.
+ *
+ * A `handler` that NAMES a function (the deprecated string form, and what the
+ * build leaves for a callable it could not lower) also runs in-process, but the
+ * function is found by name inside the engine's binder, past this point, so
+ * it is not handed the accessor here.
+ */
+function hookWithInProcessTitle(hook: any, ql: IObjectQLEngine): any {
+    if (!hook || typeof hook.handler !== 'function') return hook;
+    return { ...hook, handler: withInProcessHookTitle(hook.handler, ql, String(hook.name)) };
 }
 
 // ─── The job half (#21489) ─────────────────────────────────────────────

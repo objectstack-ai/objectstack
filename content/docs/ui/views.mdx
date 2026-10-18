@@ -154,7 +154,7 @@ all.
 | What you write on the view | `os validate` | Toolbar search at runtime |
 | :--- | :--- | :--- |
 | a subset of the allowed set | clean | scans exactly those columns |
-| key omitted, or `searchableFields: []` | clean | scans the object's full allowed set |
+| key omitted, or `searchableFields: []` | clean | scans the object's full allowed set — `400 INVALID_FIELD` when that set is empty |
 | a renamed / mistyped column, or a dotted path | `searchable-field-unknown` | `400 INVALID_FIELD` |
 | a real column outside the allowed set | `searchable-field-unsearchable` | `400 INVALID_FIELD` |
 | a virtual `formula` column — no stored column to scan (#6674) | `searchable-field-unsearchable` | `400 INVALID_FIELD` |

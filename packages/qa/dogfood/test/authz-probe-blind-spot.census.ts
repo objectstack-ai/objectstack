@@ -541,17 +541,17 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       '`data-action-routes.ts`, `batch-routes.ts`, `approvals-routes.ts`, `sharing-routes.ts`, ' +
       '`analytics-routes.ts`, `security-routes.ts`, `discovery-routes.ts`, `email-routes.ts`, ' +
       '`search-routes.ts`, `ui-routes.ts`, `form-routes.ts`, `crud-routes.ts`, `meta-collection-routes.ts`, ' +
-      '`meta-item-read-routes.ts`, `meta-item-write-routes.ts` and `meta-item-history-routes.ts`, ' +
-      'the modules the bodies of ' +
+      '`meta-item-read-routes.ts`, `meta-item-write-routes.ts`, `meta-item-history-routes.ts` and ' +
+      '`meta-object-state-routes.ts`, the modules the bodies of ' +
       '`registerDataActionEndpoints`, `registerBatchEndpoints`, `registerApprovalsEndpoints`, ' +
       '`registerSharingEndpoints`, `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, ' +
       '`registerSecurityExplainEndpoints`, `registerSecurityEndpoints`, `registerDiscoveryEndpoints`, ' +
       '`registerOpenApiEndpoints`, `registerEmailEndpoints`, `registerSearchEndpoints`, ' +
-      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints`, and the first six `/meta` ' +
+      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints`, and all eight `/meta` ' +
       'groups of `registerMetadataEndpointsInner`, moved to; ' +
       'reachable = those inside registerMetadataEndpoints, PLUS every site in the registrar list\'s named `/meta` ' +
       'subset (`REST_SERVER_META_ROUTE_FILES`: `meta-collection-routes.ts`, `meta-item-read-routes.ts`, ' +
-      '`meta-item-write-routes.ts` and `meta-item-history-routes.ts`), whose ' +
+      '`meta-item-write-routes.ts`, `meta-item-history-routes.ts` and `meta-object-state-routes.ts`), whose ' +
       'registrations the inner method ' +
       'runs inside the umbrella\'s swap',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
@@ -910,10 +910,31 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // `const registerPerItemRoute =` stays 1, `forwarder slice:` stays 1 and
     // `enforceAuth` stays 112: the moved group spells none of them, and neither
     // does the seam.
+    // [#23050 slice 13e] 70 / 19 / 51 UNCHANGED, `reachable` held by 13a's rule
+    // with no rule change, and ONE control re-keyed. The seventh `/meta` group,
+    // the object state-machine read (one DIRECT registration site, in no
+    // per-family switch), moved to `meta-object-state-routes.ts`, which joins the
+    // list (length 17 -> 18) and the named `/meta` subset (4 -> 5) with its own
+    // control on `this.routeManager.register(` (1). The eighth and last, the
+    // published read (one helper-routed site), joined `meta-item-history-routes.ts`,
+    // whose own control goes 5 -> 6, and the whole-population
+    // `registerPerItemRoute(` control stays 8 over this file plus every module on
+    // the list (0 here + 2 + 6). Measured at the move commit, before the list
+    // learned the new module: population 69, the state read's site out of reach.
+    // RE-KEYED, not relaxed: the inner method now calls the history module TWICE
+    // (the history family, and the published read at its own position after the
+    // state read), so `.call(` inside the inner method reads 6 against a subset of
+    // 5 files, and is recorded as the subset's length PLUS that one second call;
+    // a `/meta` module called without joining the subset, or a subset entry no
+    // longer called, still moves it. `this.routeManager.register(` stays 63 over
+    // the eighteen files (one site moved from here to the new module),
+    // `private register*Endpoints(` stays 16, `const registerPerItemRoute =`
+    // stays 1, `forwarder slice:` stays 1 and `enforceAuth` stays 112: the moved
+    // groups spell none of the last four, and neither does the seam.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
-      'registrar list length': 17,
+      'registrar list length': 18,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
       'approvals-routes.ts: this.routeManager.register(': 7,
@@ -932,11 +953,16 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       // has no direct site (see above).
       'meta-item-write-routes.ts: registerPerItemRoute(': 2,
       // [#23050 slice 13d] The same: the history family's module has no direct site.
-      'meta-item-history-routes.ts: registerPerItemRoute(': 5,
+      // [#23050 slice 13e] 5 -> 6: the published read joined it, helper-routed too.
+      'meta-item-history-routes.ts: registerPerItemRoute(': 6,
+      // [#23050 slice 13e] The object state-machine read registers directly.
+      'meta-object-state-routes.ts: this.routeManager.register(': 1,
       // [#23050 slice 13a] Recorded AS the subset's length, not as a literal: the
       // measured side is the module calls inside the inner method, so the two
       // can only move together.
-      '/meta subset ↔ .call( inside registerMetadataEndpointsInner': REST_SERVER_META_ROUTE_FILES.length,
+      // [#23050 slice 13e] …PLUS ONE: `meta-item-history-routes.ts` is the one
+      // module the inner method calls at two positions (see above).
+      '/meta subset ↔ .call( inside registerMetadataEndpointsInner': REST_SERVER_META_ROUTE_FILES.length + 1,
       // Both halves of the new rule carry their own control, so neither can go
       // silently to zero: a helper deleted and its routes inlined back would
       // still read population 80, and only these two controls would notice the
@@ -1478,6 +1504,7 @@ export function deriveProbeFileCensus(): {
         'forwarder slice: this.routeManager.register(': occurrences(forwarderSlice(src), mountRe),
         // [#23050 slice 13a] The module calls inside the inner method — one per
         // moved `/meta` group's module — recorded against the subset's length.
+        // [#23050 slice 13e] Two for `meta-item-history-routes.ts`, recorded as such.
         '/meta subset ↔ .call( inside registerMetadataEndpointsInner': occurrences(inner, /\.call\(/g),
         enforceAuth: occurrences(all, /enforceAuth/g),
       },

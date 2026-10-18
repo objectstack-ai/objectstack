@@ -22,25 +22,55 @@ import {
  *
  * ## What is refused
  *
- * At `kernel:ready` — the reader shape of {@link MigrationRecoveryPlugin},
- * refusing where that plugin warns — the guard asks one question: does a
- * table whose object declares NO organization column (`systemFields.tenant:
- * false` and no declared `organization_id`) still carry a PHYSICAL
- * `organization_id`? Schema sync only adds, so on a database a v17 runtime
- * created the answer is yes until the ceremony's column-drops step has run. If
- * it is, the guard reads the ceremony's `sys_migration` marker
- * ({@link ORGANIZATION_OWNERSHIP_MIGRATION_ID}); unless that marker is
- * verified, it throws {@link OrganizationOwnershipBootRefusal}, which stops
- * the boot before `kernel:listening` opens the socket.
+ * Two questions, in order:
+ *
+ * 1. Does a table whose object declares NO organization column
+ *    (`systemFields.tenant: false` and no declared `organization_id`) still
+ *    carry a PHYSICAL `organization_id`? Schema sync only adds, so on a
+ *    database a v17 runtime created the answer is yes until the ceremony's
+ *    column-drops step has run. If it is, the guard reads the ceremony's
+ *    `sys_migration` marker ({@link ORGANIZATION_OWNERSHIP_MIGRATION_ID});
+ *    unless that marker is verified, it throws
+ *    {@link OrganizationOwnershipBootRefusal}.
+ * 2. With no such table left: does the marker exist and say the ceremony has
+ *    not finished? A ceremony whose every step ran (the columns are gone) but
+ *    whose post-check found discrepancies records `applied_at` and leaves
+ *    `verified_at` NULL — rows of an organization-owned object still without
+ *    their organization. D10 item 5 refuses a database the ceremony has not
+ *    COMPLETED, and `verified_at` is the ceremony's completion marker, so this
+ *    database is refused too, naming the re-run. Without a marker there is
+ *    nothing to judge: a fresh database is never refused.
  *
  * - A FRESH database is never refused: no table it creates carries a retired
- *   column, so the question answers no without a marker.
+ *   column, and no ceremony wrote a marker on it.
  * - A database whose ceremony verified boots, whatever its columns.
  * - A read that fails is refused, never passed: "I could not check" is not
  *   "there is nothing to find" (the `readDataMigrationFlag` asymmetry).
  * - ⛔ No escape hatch: no `OS_ALLOW_*` / `OS_SKIP_*` variable and no flag
  *   skips the check (D10 verbatim). A 17.x runtime is the way to keep 17.x
  *   semantics on an unmigrated database.
+ *
+ * ## When it judges: in `start()`, before any plugin writes a row
+ *
+ * The boot the ceremony prescribes — "boot this release once against the
+ * database (its schema sync adds the column)" — must write nothing before it
+ * is refused. A refusal at `kernel:ready` came after every plugin's `start()`:
+ * by then the auth plugin had created the Default Organization, the inline
+ * seed had started stamping rows with it (the refusal's rollback cut it
+ * mid-object), and the platform migrations had recorded their run — a
+ * half-stamped database the ceremony's next apply then read as discrepancies.
+ * So the guard judges in its own `start()`, ordered after the engine (whose
+ * `start()` connects the drivers and runs the additive schema sync the
+ * ceremony waits for) and the platform objects (`sys_migration`), and ahead of
+ * every plugin that writes at start: the plugins that do declare it in their
+ * `optionalDependencies` ({@link ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME}
+ * — `AppPlugin`, whose `start()` loads the inline seed; plugin-auth's
+ * `AuthPlugin` and identity-objects plugin, whose `start()` creates the
+ * Default Organization), and `os serve` composes it ahead of the rest. A
+ * `start()` that throws stops the kernel before the next plugin starts; the
+ * kernel hands the refusal on as the `cause` of its own start-failure error
+ * ("Plugin … failed to start"), so a host that inspects the boot error asks
+ * {@link isOrganizationOwnershipBootRefusal} of each `cause` down the chain.
  *
  * ## Where it runs, and where it must not
  *
@@ -56,6 +86,16 @@ import {
 
 /** The machine code a host discriminates this refusal by, across module instances. */
 export const ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE = 'ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED' as const;
+
+/**
+ * The guard's kernel plugin name: a plugin that writes rows in its `start()`
+ * names it in `optionalDependencies`, so on a kernel that composes the guard it
+ * starts only once the guard has judged the database (ADR-0116 ordering).
+ * Not a package entry export: each writer spells the name as a string literal
+ * (`check:init-service-contract` reads `optionalDependencies` as literals only),
+ * and the guard's tests pin each declaration against this constant.
+ */
+export const ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME = 'com.objectstack.organization-ownership-boot-guard' as const;
 
 const ORG = 'organization_id';
 
@@ -92,6 +132,7 @@ export class OrganizationOwnershipBootRefusal extends Error {
 export function isOrganizationOwnershipBootRefusal(error: unknown): error is OrganizationOwnershipBootRefusal {
   return !!error && typeof error === 'object' && (error as { code?: unknown }).code === ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE;
 }
+
 
 type Dialect = 'sqlite' | 'postgres' | 'mysql';
 
@@ -176,13 +217,30 @@ export async function findV17ShapeTables(engine: GuardEngine): Promise<string[]>
   return found.sort();
 }
 
-/** The refusal text: what was found, that the server refuses to start, the command, and the 17.x way out. */
+/**
+ * The refusal text: what was found, that the server refuses to start, the
+ * command, and the 17.x way out. With no table left in the v17 shape (`tables`
+ * empty), the ceremony ran every step and its marker is not verified: the
+ * text says so and names the re-run instead.
+ */
 export function organizationOwnershipRefusalMessage(
   tables: readonly string[],
   marker: 'absent' | 'unverified' | 'unreadable',
   opts: OrganizationOwnershipBootGuardOptions = {},
 ): string {
   const ceremony = ceremonyCommand(opts.dev);
+  if (tables.length === 0) {
+    const state = marker === 'unreadable'
+      ? `its marker (sys_migration '${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') could not be read`
+      : `its marker (sys_migration '${ORGANIZATION_OWNERSHIP_MIGRATION_ID}') is not verified: the post-check ` +
+        'still found rows the ceremony has not carried';
+    return (
+      `The organization-ownership ceremony has not finished on this database: ${state}. The server refuses to start ` +
+      'rather than serve rows of an organization-owned object with no organization. Resolve what the apply report ' +
+      `names, then run '${ceremony} --out PLAN' again, review it, run '${ceremony} --apply --plan-file PLAN ` +
+      "--backup-taken', and start again."
+    );
+  }
   const state = marker === 'absent'
     ? 'the ceremony has not run on it'
     : marker === 'unverified'
@@ -198,28 +256,64 @@ export function organizationOwnershipRefusalMessage(
 }
 
 export class OrganizationOwnershipBootGuardPlugin implements Plugin {
-  readonly name = 'com.objectstack.organization-ownership-boot-guard';
+  readonly name = ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME;
   readonly type = 'standard';
   readonly version = '1.0.0';
   readonly dependencies: string[] = [];
-  /** Needs the engine to read columns and the marker; still loads (inert) without it. */
-  readonly optionalDependencies: string[] = ['com.objectstack.engine.objectql'];
+  /**
+   * Started after the engine — its `start()` connects the drivers and runs the
+   * additive schema sync the ceremony's rewrite step waits for — and after the
+   * platform objects, which register `sys_migration`. Order-if-present: the
+   * guard still loads (inert) on a kernel with no engine.
+   */
+  readonly optionalDependencies: string[] = ['com.objectstack.engine.objectql', 'com.objectstack.platform-objects'];
 
   constructor(private readonly options: OrganizationOwnershipBootGuardOptions = {}) {}
 
   async init(_ctx: PluginContext): Promise<void> {}
 
+  /**
+   * [ADR-0131 D10 item 5] Judges here, not at `kernel:ready`: the plugins that
+   * write rows in their own `start()` are ordered after this one, so a refused
+   * boot has written none (see the module doc).
+   */
   async start(ctx: PluginContext): Promise<void> {
-    (ctx as any)?.hook?.('kernel:ready', async () => {
-      let engine: GuardEngine | undefined;
-      try {
-        engine = (ctx as any).getService?.('objectql');
-      } catch {
-        return; // no engine — no database to judge
-      }
-      if (!engine || typeof engine.getDriverForObject !== 'function') return;
-      await assertOrganizationOwnershipMigrated(engine, (ctx as any)?.logger, this.options);
-    });
+    let engine: GuardEngine | undefined;
+    try {
+      engine = (ctx as any).getService?.('objectql');
+    } catch {
+      return; // no engine — no database to judge
+    }
+    if (!engine || typeof engine.getDriverForObject !== 'function') return;
+    await assertOrganizationOwnershipMigrated(engine, (ctx as any)?.logger, this.options);
+  }
+}
+
+/**
+ * The ceremony's marker: `absent` (no ledger on this composition, no store
+ * serving it, or no row), `verified`, `unverified`, or `unreadable` (a store
+ * serves the ledger and its read threw).
+ */
+async function readMarker(engine: GuardEngine): Promise<'absent' | 'verified' | 'unverified' | 'unreadable'> {
+  if (typeof engine.findOne !== 'function') return 'absent';
+  // A composition that registers no ledger object has no marker to hold.
+  if (typeof engine.getObject === 'function' && !engine.getObject(DATA_MIGRATION_FLAG_OBJECT)) return 'absent';
+  // A boot with no storage (no driver serves the ledger — `os serve` with no
+  // OS_DATABASE_URL and no driver plugin) has no database to judge, exactly as
+  // the column probe skips an object no driver serves: nothing was ever
+  // migrated there. Only a store that serves the ledger and fails its read is
+  // `unreadable`.
+  if (typeof engine.getDriverForObject === 'function' && !engine.getDriverForObject(DATA_MIGRATION_FLAG_OBJECT)) return 'absent';
+  try {
+    const row = (await engine.findOne(DATA_MIGRATION_FLAG_OBJECT, {
+      where: { id: ORGANIZATION_OWNERSHIP_MIGRATION_ID },
+      context: { isSystem: true },
+    })) as DataMigrationFlag | null;
+    if (!row) return 'absent';
+    const flag = { ...row, blocking: Number((row as { blocking?: unknown }).blocking) } as DataMigrationFlag;
+    return isDataMigrationFlagVerified(flag) ? 'verified' : 'unverified';
+  } catch {
+    return 'unreadable';
   }
 }
 
@@ -246,28 +340,19 @@ export async function assertOrganizationOwnershipMigrated(
       [],
     );
   }
-  if (tables.length === 0) return;
-  let marker: 'absent' | 'unverified' | 'unreadable' = 'absent';
-  try {
-    const row = typeof engine.findOne === 'function'
-      ? ((await engine.findOne(DATA_MIGRATION_FLAG_OBJECT, {
-        where: { id: ORGANIZATION_OWNERSHIP_MIGRATION_ID },
-        context: { isSystem: true },
-      })) as DataMigrationFlag | null)
-      : null;
-    if (row) {
-      const flag = { ...row, blocking: Number((row as { blocking?: unknown }).blocking) } as DataMigrationFlag;
-      if (isDataMigrationFlagVerified(flag)) {
-        logger?.info?.(
-          `[organization-ownership] ${tables.join(', ')} still carry a physical organization_id column, and the ` +
-            `ceremony's marker is verified: the server starts.`,
-        );
-        return;
-      }
-      marker = 'unverified';
+  const marker = await readMarker(engine);
+  if (marker === 'verified') {
+    if (tables.length > 0) {
+      logger?.info?.(
+        `[organization-ownership] ${tables.join(', ')} still carry a physical organization_id column, and the ` +
+          `ceremony's marker is verified: the server starts.`,
+      );
     }
-  } catch {
-    marker = 'unreadable';
+    return;
   }
+  // No table left in the v17 shape: only a marker the ceremony wrote and did
+  // not verify refuses (its post-check found rows it has not carried). No
+  // marker is a database no ceremony ran on — a fresh one — and it boots.
+  if (tables.length === 0 && marker === 'absent') return;
   throw new OrganizationOwnershipBootRefusal(organizationOwnershipRefusalMessage(tables, marker, opts), tables);
 }
