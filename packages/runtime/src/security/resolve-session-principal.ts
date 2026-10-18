@@ -17,8 +17,11 @@
  * with.
  */
 
-import type { IAuthService } from '@objectstack/spec/contracts';
+import type { AuthSessionApi, IAuthService } from '@objectstack/spec/contracts';
 import { inProcessSessionReadInput } from '@objectstack/types';
+
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 /** Headers as adapters deliver them, or an already-built `Headers`. */
 export type HeaderBag = Record<string, unknown> | Headers;
@@ -37,16 +40,20 @@ function toHeaders(headers: HeaderBag): Headers {
 /**
  * The better-auth session payload for a request, or `undefined` when there is
  * no auth service, no session API, or no session.
+ *
+ * [#24222] Typed as `AuthSessionApi` declares the answer, read off the
+ * contract's own `api` / `getApi()` members, no longer through `any`: both
+ * callers' reads (`user.id`, `session.userId`) are declared there.
  */
 export async function resolveSessionData(
     authService: IAuthService | undefined,
     headers: HeaderBag,
-): Promise<any | undefined> {
+): Promise<SessionRead | null> {
     try {
         if (!authService) return undefined;
-        let api: any = (authService as any).api;
-        if (!api && typeof (authService as any).getApi === 'function') {
-            api = await (authService as any).getApi();
+        let api = authService.api;
+        if (!api && typeof authService.getApi === 'function') {
+            api = await authService.getApi();
         }
         if (!api?.getSession) return undefined;
         // [#22258] The in-process session-read rule: a request carrying a

@@ -33,6 +33,7 @@ import type {
   IStorageService,
   IFileAccessDelegate,
   ApiKeyLifecyclePolicy,
+  AuthSessionApi,
 } from '@objectstack/spec/contracts';
 import {
   OBSERVABILITY_METRICS_SERVICE,
@@ -938,8 +939,16 @@ function toWebHeaders(req: { headers?: unknown }): any | null {
   return null;
 }
 
-/** A `getSession(headers)` bound to the kernel's `auth` service, or null. */
-function buildGetSession(registry: StorageGateRegistry): ((headers: any) => Promise<any>) | null {
+/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
+type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
+
+/**
+ * A `getSession(headers)` bound to the kernel's `auth` service, or null.
+ *
+ * [#24222] It answers as `AuthSessionApi` declares the read, not `any`, so each
+ * of its three readers reads only fields the contract declares.
+ */
+function buildGetSession(registry: StorageGateRegistry): ((headers: any) => Promise<SessionRead | null>) | null {
   let authService: any;
   try {
     authService = registry.getService<any>('auth');
@@ -1151,9 +1160,10 @@ export function composeStorageRoutes(
  * upload routes thread into `createFile` so the new `sys_file` row is stamped.
  * The read is the platform's existing spelling for that fact —
  * `session.session.activeOrganizationId`, the same one `HttpDispatcher`,
- * `dispatcher-plugin` and `ExecutionContext.tenantId` resolve from — with the
- * flattened shape as a fallback for hosts that hand back the session record
- * directly.
+ * `dispatcher-plugin` and `ExecutionContext.tenantId` resolve from. [#24222]
+ * The flattened shape (a top-level `activeOrganizationId`) is no longer read:
+ * `AuthSessionApi` declares no such field and no in-process producer answers
+ * one (better-auth's read is `{ user, session }`).
  *
  * ⛔ No membership fallback. A session with no active organization is a
  * declared state (ADR-0123 D1), never a gap to fill from the user's `sys_member`
@@ -1173,11 +1183,12 @@ function buildAuthSessionResolver(
     try {
       const headers = toWebHeaders(req);
       if (!headers) return null;
-      const session: any = await getSession(headers);
+      const session = await getSession(headers);
       const userId = session?.user?.id;
       if (!userId) return null;
-      const activeOrganizationId =
-        session?.session?.activeOrganizationId ?? session?.activeOrganizationId;
+      // [#24222] Where the contract declares it. No top-level
+      // `activeOrganizationId` operand: no in-process producer answers one.
+      const activeOrganizationId = session?.session?.activeOrganizationId;
       const organizationId =
         typeof activeOrganizationId === 'string' && activeOrganizationId.length > 0
           ? activeOrganizationId
@@ -1274,7 +1285,7 @@ function buildAuthGateSessionReader(
       if (admission.outcome === 'held') return { authGate: admission.gate };
       if (admission.outcome !== 'none') return undefined;
     }
-    let session: any;
+    let session: SessionRead | null;
     try {
       session = await getSession(headers);
     } catch (err) {

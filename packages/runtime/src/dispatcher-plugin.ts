@@ -210,8 +210,9 @@ async function readGatedSessionUser(
         }
         // [#22258] The in-process session-read rule: a cookie request reads
         // without renewal, because this door's response never carries a
-        // renewed cookie.
-        const session: any = await api.getSession(inProcessSessionReadInput(webHeaders));
+        // renewed cookie. [#24222] Typed as `AuthSessionApi` declares the
+        // answer (`api` is the contract's handle), no longer through `any`.
+        const session = await api.getSession(inProcessSessionReadInput(webHeaders));
         return session?.user;
     } catch (err) {
         throw new AuthzStoreUnavailableError('auth_gate', err);
