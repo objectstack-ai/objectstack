@@ -1,7 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import {
-    IHttpServer, resolveAuthzContext, resolveLocalizationContext, isAuthGateAllowlisted,
+    IHttpServer, isAuthGateAllowlisted,
     // [commit 6a180e42d] Re-raise a permission-store OUTAGE through the fail-closed nets
     // below instead of degrading it into an anonymous/denied answer.
     rethrowAuthzStoreUnavailable,
@@ -9,19 +9,21 @@ import {
     // be RESOLVED leaves the caller's permissions equally undetermined, so it
     // takes the same loud answer rather than the quiet 403 it used to wear.
     AuthzStoreUnavailableError,
-    // [#13906 / #16013] The ONE classification the tenancy seam applies on
-    // BOTH of its wirings: the REGISTRY's own "never registered" brand absorbs
-    // the supported no-tenancy composition (never message text, #13905) while
-    // every other rejection stays loud. ⛔ The two wirings themselves are NOT
-    // the helper's — see `computeExecCtx`.
-    classifyAdmissionTenancyPosture,
+    // [ruling record 6227928430, letter A] The ONE request-to-ExecutionContext
+    // composition `computeExecCtx` calls, and the shape of the tenancy wiring
+    // it hands over: [#13906 / #16013] the composition classifies the
+    // `tenancy` read on BOTH wirings (the REGISTRY's own "never registered"
+    // brand absorbs the supported no-tenancy composition, never message text,
+    // #13905; every other rejection stays loud). ⛔ The two wirings themselves
+    // are NOT the composition's — see `computeExecCtx`.
+    resolveRequestExecutionContext,
+    type TenancyServiceResolver,
     effectiveTenancyPosture,
     // The registry's "never registered" brand, asked directly by the public
     // form doors' tenancy read (see `registerFormEndpoints`).
     isServiceNotRegisteredError,
-    assembleExecutionContext, normalizeAuthGate, userAuthGateSourceOf, type AuthGate,
-    // [#23367] The API-key lifecycle policy source, and its branded refusal.
-    apiKeyLifecyclePolicySourceOf, isApiKeyLifecycleRefusalError, type ApiKeyLifecycleRefusalError,
+    // [#23367] The API-key lifecycle's branded refusal.
+    isApiKeyLifecycleRefusalError, type ApiKeyLifecycleRefusalError,
     shouldDenyAnonymous, ANONYMOUS_DENY_BODY, ANONYMOUS_DENY_STATUS,
     // `isAudienceBindingSuggestionStatus` and `unknownAudienceBindingSuggestionStatusMessage`,
     // the suggested-binding `?status=` vocabulary (#7678), moved with `registerSecurityEndpoints`'
@@ -40,8 +42,6 @@ import {
     // [#20061] The thrown `VALIDATION_FAILED` + `fields[]` shape every catch in
     // this file already maps to `400` — see `readDeclaredQueryNumber` below.
     validationFailure,
-    // [#22258] The in-process session-read rule — see `computeExecCtx`.
-    inProcessSessionReadInput,
 } from '@objectstack/types';
 import {
     allowPerfDisclosure,
@@ -218,7 +218,7 @@ import {
 // [#22141] The `PUT /meta/:type/:name` door's precondition and lifecycle, read
 // through the ONE mapping the runtime dispatcher's `/meta` domain asks too.
 import { metaSaveRequestOptions } from './meta-save-request.js';
-import type { AuthSessionApi, ISecurityService } from '@objectstack/spec/contracts';
+import type { ISecurityService } from '@objectstack/spec/contracts';
 import {
     resolveEffectiveApiMethods,
     effectiveOperationsArray,
@@ -245,9 +245,6 @@ import {
 // and this file is audited `dialectOnly` for the two non-conforming dialects it
 // still emits — which this deliberately is not.
 import { sendError as sendEnvelopeError } from '@objectstack/types';
-
-/** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
-type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 
 /**
  * The protocol slice the REST layer actually consumes (ADR-0076 D9 / #2462
@@ -3046,14 +3043,16 @@ export class RestServer {
                 if (authService) authEnvironmentId = environmentId;
             }
             if (!authService) return undefined;
-            // The auth service may be the AuthManager wrapper (which exposes
-            // `getApi()`) or the raw better-auth instance (which exposes
-            // `.api` directly). Normalize to the raw API object.
-            let api: any = authService.api;
-            if (!api && typeof authService.getApi === 'function') {
-                api = await authService.getApi();
-            }
-            if (!api?.getSession) return undefined;
+            // [ruling record 6227928430, letter A] From here to the context is
+            // the ONE request-to-ExecutionContext composition
+            // (`resolveRequestExecutionContext`, @objectstack/core), called once
+            // below with this door's differences as its named parameters. What
+            // stays in this method is this door's own: the environment and the
+            // auth service above, the headers, the engine and the tenancy wiring
+            // below, and what the context carries out of here.
+            //
+            // The auth service may be the AuthManager wrapper (`getApi()`) or the
+            // raw better-auth instance (`.api`); the composition reads either.
 
             // better-auth's `getSession` requires a Web `Headers` instance
             // (it calls `headers.get('cookie')`). Adapter req.headers may
@@ -3072,7 +3071,7 @@ export class RestServer {
                 return undefined;
             }
 
-            // Resolve the data engine for this scope (shared by the resolver below).
+            // Resolve the data engine for this scope (handed to the composition below).
             //
             // [#13476] The PROVIDER branch reaches the seam through
             // `wiredEngineOrLoud`, so "no engine is wired" and "the engine could
@@ -3093,24 +3092,6 @@ export class RestServer {
                     () => this.objectQLProvider!(environmentId),
                 );
 
-            // Delegate ALL identity + role/permission/RLS aggregation to the SINGLE
-            // shared resolver (`resolveAuthzContext`, @objectstack/core) — the same one
-            // the runtime dispatcher uses, so the REST and dispatcher entry points can
-            // never drift on authorization. (This path previously kept its own copy that
-            // silently omitted sys_user_position / sys_position_permission_set / platform_admin /
-            // ai_seat — see the resolver's module doc.)
-            //
-            // [#22258] Read through the in-process session rule: this request
-            // answers with its OWN response, so a renewal here would move
-            // `sys_session.expires_at` while the renewed cookie is discarded —
-            // the browser's cookie then dies before its session. A request
-            // carrying a session cookie therefore reads without renewal (only
-            // `/get-session`, which re-issues the cookie, renews it); a
-            // bearer-only request renews as before.
-            // [#24222] Answers as `AuthSessionApi` declares the read, not `any`.
-            const getSession = async (h: any): Promise<SessionRead | null> => {
-                try { return await api.getSession(inProcessSessionReadInput(h)); } catch { return undefined; }
-            };
             // [#8287] The EFFECTIVE tenancy posture, from the kernel's `tenancy`
             // service — the same source plugin-security reconciles for the Layer 0
             // wall, so API-key admission and the wall agree.
@@ -3190,8 +3171,9 @@ export class RestServer {
             // absence is the only fault it could report anyway. It keeps the
             // previous quiet answer, unchanged.
             //
-            // [#16013] The CLASSIFICATION below is one shared function, not two
-            // hand-written copies: `classifyAdmissionTenancyPosture` answers
+            // [#16013] The CLASSIFICATION is one shared function, not two
+            // hand-written copies: the composition hands the `tenancy` thunk
+            // built below to `classifyAdmissionTenancyPosture`, which answers
             // quiet `undefined` for the branded "never registered" (the
             // supported no-tenancy composition, no posture-conditional refusal)
             // and raises `AuthzStoreUnavailableError('tenancy', err)` for every
@@ -3200,12 +3182,11 @@ export class RestServer {
             // the posture is an authorization INPUT and admission was never
             // decided. ⛔ The WIRING branch is NOT shared and must not become
             // so: which of the two wirings may be asked is this file's fact
-            // alone, for the reason spelled out in the `else if` below.
-            let tenancyPosture;
+            // alone, for the reason spelled out in the `else if` below. No
+            // wiring here, no thunk: the composition then reads no posture.
+            let tenancy: TenancyServiceResolver | undefined;
             if (kernel && typeof kernel.getServiceAsync === 'function') {
-                tenancyPosture = await classifyAdmissionTenancyPosture(
-                    () => kernel.getServiceAsync('tenancy') as any,
-                );
+                tenancy = () => kernel.getServiceAsync('tenancy') as any;
             } else if (this.tenancyServiceProvider) {
                 // [#15256 / 1A] The SINGLE-KERNEL branch — the wiring every
                 // deployment the open core builds actually runs, and the one
@@ -3223,158 +3204,75 @@ export class RestServer {
                 // rejection is the outage it is. The provider re-raises
                 // unbranded rejections for precisely that reason — see
                 // `rest-api-plugin.ts`.
-                tenancyPosture = await classifyAdmissionTenancyPosture(
-                    () => this.tenancyServiceProvider!(environmentId) as any,
-                );
+                tenancy = () => this.tenancyServiceProvider!(environmentId) as any;
             }
-            // [#23287, ruling C′ item 3] The auth service's per-user posture
-            // computation rides into the shared resolver, where the API-key
-            // admission seam asks it for a key's owner: ONE judgment for every
-            // face, this one included.
-            const authz = await resolveAuthzContext({
-                ql,
+            // [#23287, ruling C′ item 3 · #23367] The auth service's per-user
+            // posture computation and its API-key lifecycle policy reach the
+            // shared resolver from `authService` itself, inside the composition:
+            // ONE judgment for every face, this one included. Identity, the
+            // role/permission/RLS aggregation, the localization and the envelope
+            // are the composition's; each parameter below is this door's answer
+            // from before the composition existed (its docblock tables them).
+            const base = await resolveRequestExecutionContext({
                 headers,
-                getSession,
-                tenancyPosture,
-                userAuthGates: userAuthGateSourceOf(authService),
-                // [#23367] The API-key lifecycle policy, from the same service.
-                apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService),
-            });
-            // [commit f586f1a89] The anonymous contract IS the shared assembler's default
-            // entry: no resolved principal → no context → 401. Taken early here
-            // only so an anonymous request does not pay for the localization and
-            // auth-gate reads it would never use; `assembleExecutionContext`
-            // below re-affirms the same rule.
-            if (!authz.userId) return undefined;
-
-            const settings = this.settingsServiceProvider
-                ? await seamOrUndefined(() => this.settingsServiceProvider!(environmentId))
-                : undefined;
-            const localization = await resolveLocalizationContext({
                 ql,
-                settings,
-                tenantId: authz.tenantId,
-                userId: authz.userId,
-            });
-
-            // ADR-0069 — authentication-policy gate posture. Only when a gate
-            // feature is active (cheap sync check) do we re-read the session for
-            // its `user.authGate` (computed in customSession). enforceAuth() then
-            // blocks protected resources for a gated user. Zero cost when off.
-            //
-            // [#7280] Normalized through the shared `normalizeAuthGate` instead
-            // of copied verbatim: the session user crosses an external boundary
-            // as `any`, and `ExecutionContext.authGate` now DECLARES the shape
-            // (`{ code, message }`), so this is where the declaration is met —
-            // a gate with a blank message no longer rides into a 403 body as
-            // `undefined`.
-            //
-            // [#13906 — maintainer ruling 2026-09-02, decision 2 option B] The
-            // gate is best-effort NO LONGER in one precisely measured window:
-            // `isAuthGateActive()` answered `true` AND the gate's session
-            // re-read then FAILED. Measured before the repair, same fixture,
-            // the wiring differing only in how the gate faulted:
-            //
-            // | gate wiring                        | before | after |
-            // |:--|:--|:--|
-            // | INACTIVE (the common, correct case)| admitted | admitted — unchanged |
-            // | ACTIVE, healthy re-read, gated user| 403 code+message | 403 — unchanged |
-            // | `isAuthGateActive()` THROWS        | admitted | admitted — unchanged |
-            // | ACTIVE, re-read FAILS              | **admitted** | **503** |
-            //
-            // ⇒ an enforcement the deployment DECLARED active used to vanish
-            // with no wire trace, deep-equal to gate-off. A declared promise
-            // that disappears silently is the fail-OPEN this card measured.
-            //
-            // ⛔ The probe-throws row stays absorbed DELIBERATELY, and it is the
-            // narrowness the ruling asked for: a host whose probe faults never
-            // answered `true`, so it never declared a gate, and refusing on it
-            // would block deployments that never asked for one.
-            //
-            // [#23287 — ruling C′ item 3] The cookie re-read below is the
-            // SESSION's gate, and it runs only for a principal a session
-            // admitted. A principal an API KEY admitted is judged by the key's
-            // own answer, decided once at the shared key-admission seam
-            // (`authz.authGate`: the key owner's account-scope posture). It
-            // used to re-read the cookie here whatever had admitted the
-            // caller, so a key sent beside a held cookie was refused with the
-            // COOKIE's posture — another credential's, possibly another user's
-            // — while the same key sent alone was admitted with no question
-            // asked of its owner at all.
-            let authGate: AuthGate | undefined;
-            let gateActive = false;
-            if (authz.credential === 'api_key') {
-                authGate = authz.authGate;
-            } else {
-                try {
-                    gateActive = typeof authService.isAuthGateActive === 'function'
-                        && authService.isAuthGateActive() === true;
-                } catch {
-                    gateActive = false;
-                }
-            }
-            if (gateActive) {
-                // [#24222] Typed as `AuthSessionApi` declares the answer, not `any`.
-                let gatedSession: SessionRead | null;
-                try {
-                    // ⛔ NOT the `getSession` closure above, and not its
-                    // `.catch(() => undefined)`: both convert a THROW into the
-                    // same `undefined` a gate-less user produces, which is
-                    // precisely the collapse being repaired. A session that
-                    // RESOLVES carrying no gate is not a failure — that user is
-                    // simply not gated, and still admits.
-                    // [#22258] Same in-process read rule as the closure above.
-                    gatedSession = await api.getSession(inProcessSessionReadInput(headers));
-                } catch (err) {
-                    throw new AuthzStoreUnavailableError('auth_gate', err);
-                }
-                authGate = normalizeAuthGate(gatedSession?.user) ?? undefined;
-            }
-
-            // [commit f586f1a89 — maintainer ruling 2026-08-08, Option A] The assembly of
-            // the ExecutionContext itself is now the SINGLE shared one
-            // (`assembleExecutionContext`, @objectstack/core), the same module
-            // the runtime / MCP dispatcher assembles through. Before this, the
-            // step AFTER `resolveAuthzContext` was two hand-written copies and
-            // the copies drifted: #6071 (this face never set `principalKind`,
-            // so every enforcement judgment reading it was silently never-true
-            // here) and commit 8e13ca876 / #6551 (a dropped `accessible_org_ids` produced
-            // real 403s on the share-link faces). The field set is closed by
-            // type there, so a new `ExecutionContext` field cannot land on one
-            // face and miss another.
-            //
-            // This face takes the FAIL-CLOSED DEFAULT entry — no resolved
-            // principal → no context → `enforceAuth` answers 401. The runtime
-            // face takes the explicit guest entry instead. Both behaviours are
-            // unchanged; the divergence is now named API rather than drift.
-            const base = assembleExecutionContext({
-                authz,
+                authService,
+                tenancy,
+                // [commit f586f1a89] The FAIL-CLOSED default entry: no resolved
+                // principal → no context → `enforceAuth` answers 401. The runtime
+                // face takes the guest entry; the divergence is named API, not
+                // drift. An anonymous request reads no localization and no gate.
+                anonymous: 'fail-closed',
+                // ADR-0069 — this face CARRIES the gate, and its consumer is
+                // `enforceAuth` (403 `{ code, message }`). [#23287] A key is judged
+                // by its owner's posture, decided at the shared key-admission
+                // seam, whatever cookie rides beside it; the request's own session
+                // is read again only while a gate feature is active (a cheap sync
+                // probe, zero cost when off). [#13906 — maintainer ruling
+                // 2026-09-02, decision 2 option B] fails closed in exactly one
+                // window:
+                //
+                // | gate wiring                         | answer |
+                // |:--|:--|
+                // | INACTIVE (the common, correct case) | admitted |
+                // | ACTIVE, healthy re-read, gated user | 403 code + message |
+                // | `isAuthGateActive()` THROWS         | admitted: a probe that faults never declared a gate |
+                // | ACTIVE, re-read FAILS               | 503: a declared enforcement never vanishes silently |
+                authGate: 'reread-when-active',
+                credentials: 'api-key-and-session',
+                // Without a session read this door authenticates nobody, the
+                // API-key door included.
+                sessionApi: 'required',
+                // [#22258] The request's own session, under the in-process read
+                // rule: this request answers with its OWN response, so a request
+                // carrying a session cookie reads without renewal (only
+                // `/get-session`, which re-issues the cookie, renews it).
+                session: 'request',
+                // The reference localization from this door's settings provider;
+                // a provider that throws or rejects reads as no service.
+                localization: {
+                    settings: () => (this.settingsServiceProvider
+                        ? seamOrUndefined(() => this.settingsServiceProvider!(environmentId))
+                        : undefined),
+                },
+                // [#3957] The request's OWN locale wins over the workspace
+                // default; the precedence lives in the shared assembler.
+                requestLocale: this.extractLocale(req),
+                // A NAMED divergence (commit f586f1a89): this transport has never
+                // carried the better-auth session bearer, and
+                // `ExecutionContext.accessToken` is a PUBLISHED hook surface
+                // (`session.accessToken`, hook.zod.ts). Widening it to a second
+                // transport is a product decision, not a refactor.
+                accessToken: 'withhold',
                 // OAuth access tokens are honoured on the `/mcp` door alone
                 // (`acceptOAuthAccessToken`), precisely so coarse tool-family
                 // scopes cannot ride onto REST — so `principalKind: 'agent'`,
                 // `onBehalfOf` and `oauthScopes` are not representable here.
                 oauth: undefined,
-                localization,
-                // [#3957] The request's OWN locale wins over the workspace
-                // default; the precedence itself lives in the shared assembler.
-                requestLocale: this.extractLocale(req),
-                // A NAMED divergence, deliberately preserved (commit f586f1a89): this
-                // transport has never carried the better-auth session bearer on
-                // the envelope, and `ExecutionContext.accessToken` is a
-                // PUBLISHED hook surface (`session.accessToken`, hook.zod.ts).
-                // Widening it to a second transport is a product decision, not
-                // a refactor — so REST withholds it on the record.
-                accessToken: undefined,
-                // [ADR-0069 / #7280] This face DOES carry the gate: its consumer
-                // is ten lines up (`enforceAuth` → 403 `{ code, message }`). It
-                // used to be spread on AFTER assembly behind an `as any`, which
-                // is precisely how it stayed outside the closed field set; it is
-                // a declared `ExecutionContext` field and an assembler input now.
-                authGate,
+                // The dispatcher's admission channel. This door enforces the gate
+                // off the envelope, at `enforceAuth`.
+                onAdmission: undefined,
             });
-            // Unreachable: the anonymous early-return above already took this
-            // branch. Kept because the shared entry — not this method — is the
-            // authority on what an anonymous request yields.
             if (!base) return undefined;
 
             const execCtx = {
