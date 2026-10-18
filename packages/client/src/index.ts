@@ -2895,8 +2895,17 @@ export class ObjectStackClient {
      * `unhiddenApps` / `unhideError` / `rebindError`) each report their own
      * outcome: a 200 does not mean the data plane or the visibility flip
      * caught up. `probes` is deliberately opaque in the contract (#9406).
+     *
+     * `opts.backfill` (#24253) names fields this publish adds whose literal
+     * `defaultValue` is written into the object's existing rows, as the
+     * signed-in caller; `backfillApplied` reports the rows written per field.
+     * A field that is not new, or declares no literal default, refuses the
+     * whole request with a 400 before anything is published.
      */
-    publishDrafts: async (id: string, opts?: { actor?: string }): Promise<PublishPackageDraftsResponse> => {
+    publishDrafts: async (
+        id: string,
+        opts?: { actor?: string; backfill?: Array<{ object: string; field: string }> },
+    ): Promise<PublishPackageDraftsResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/publish-drafts`, {
             method: 'POST',
