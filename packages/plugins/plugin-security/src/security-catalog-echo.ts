@@ -150,9 +150,15 @@ export const isProjectionEcho = (v: any): boolean =>
 
 /**
  * The package the stored row a by-name read SERVES for `name` is bound to:
- * the `_packageId` the protocol's single-item read states from that row's
- * `package_id` column. `undefined` when the row is bound to no package, or the
- * protocol has no single-item read. A read that fails is not caught here.
+ * the protection envelope's `packageId`, which the protocol's single-item read
+ * states from the served document's `_packageId` (that row's `package_id`
+ * column). `undefined` when the row is bound to no package, or the protocol
+ * has no single-item read. A read that fails is not caught here.
+ *
+ * [#7557, #24210] The envelope, not `item._packageId`: this is a resolution
+ * read, and the by-name read withholds the item of a disabled package while
+ * keeping its envelope. Read off the item, a disabled package's set echoed
+ * unowned, and stayed unowned after the package was re-enabled.
  */
 export async function readServedPackageBinding(
   protocol: any,
@@ -161,7 +167,7 @@ export async function readServedPackageBinding(
 ): Promise<string | undefined> {
   if (typeof protocol?.getMetaItem !== 'function') return undefined;
   const served = await protocol.getMetaItem({ type, name });
-  const packageId = served?.item?._packageId;
+  const packageId = served?.packageId;
   return typeof packageId === 'string' && packageId !== '' ? packageId : undefined;
 }
 

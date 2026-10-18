@@ -27,7 +27,7 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import type { IAuthService, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
 // [#22258] The in-process session-read rule — see the session getter below.
@@ -63,6 +63,14 @@ interface KernelServiceLookup {
   <K extends keyof ServiceSlotContracts>(name: K): Promise<ServiceSlotContract<K> | undefined>;
   (name: string): Promise<any> | any;
 }
+
+/**
+ * A verified MCP OAuth access token, exactly as `IAuthService` declares the
+ * verifier's result — derived from the contract rather than copied, so a
+ * member the contract gains (`organizationId`, the organization the consent
+ * bound) cannot be dropped here by a hand-written shape.
+ */
+type VerifiedMcpAccessToken = NonNullable<Awaited<ReturnType<NonNullable<IAuthService['verifyMcpAccessToken']>>>>;
 
 interface ResolveOptions {
   /** Function returning a service from the active kernel (or undefined). */
@@ -143,18 +151,16 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   // JWKS); the *authorization* resolution below still flows through the
   // single shared resolver — OAuth is a second provenance for the
   // principal, never a second authz model.
-  let oauthPrincipal: { userId: string; scopes: string[]; clientId?: string } | undefined;
+  let oauthPrincipal: VerifiedMcpAccessToken | undefined;
   let oauthBearerPresented = false;
   if (opts.acceptOAuthAccessToken) {
     const jwtBearer = extractJwtBearer(headers);
     if (jwtBearer) {
       oauthBearerPresented = true;
       try {
-        // [#4127 FINDING, batch 5]
-        // `verifyMcpAccessToken` is implemented (auth-manager.ts) and undeclared.
-        // This file's own `opts.getService: (name: string) => Promise<any> | any`
-        // is a second, smaller instance of the same problem — a lookup facade
-        // that returns `any` — and typing it is part of that batch too.
+        // `verifyMcpAccessToken` is declared by `IAuthService` and reached
+        // through the slot-typed lookup, so the verified result is read as the
+        // contract states it — `organizationId` included.
         const authService = await opts.getService('auth');
         const verified = await authService?.verifyMcpAccessToken?.(jwtBearer);
         if (verified?.userId && Array.isArray(verified.scopes)) {
@@ -192,8 +198,26 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
   //  - JWT bearer presented but NOT verified → hard anonymous (no cookie
   //    fallback — a dead token must yield 401, not ambient session access);
   //  - otherwise → the regular better-auth session path.
+  //
+  // [ADR-0090 D10 · ruling record 6232069920, letter A] The synthetic session
+  // is built IN the one organization the user's consent bound — the verified
+  // result's `organizationId`, carried where a session carries its active
+  // organization. So `resolveAuthzContext`'s session arm vets it on every
+  // request by the rule it applies to a browser session
+  // (`vetOrganizationClaim`): kept while a current membership backs it under a
+  // walled posture; dropped — no organization, only global grants, so tenant
+  // reads come back empty and tenant writes are refused — once none does. The
+  // D10 delegator is then resolved in that organization, so the user's
+  // organization-scoped grants count for their agent as they do for them.
+  // ⛔ Never the union of the user's organizations, never the organization
+  // their browser session has selected now, never a widened global grant. A
+  // token minted before consents bound one carries none: `undefined` here,
+  // the principal resolves with no organization, exactly as before.
   const getSessionForProvenance = oauthPrincipal
-    ? async () => ({ user: { id: oauthPrincipal!.userId } })
+    ? async () => ({
+      user: { id: oauthPrincipal!.userId },
+      session: { userId: oauthPrincipal!.userId, activeOrganizationId: oauthPrincipal!.organizationId },
+    })
     : oauthBearerPresented
       ? async () => undefined
       : getSession;

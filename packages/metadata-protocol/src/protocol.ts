@@ -534,6 +534,35 @@ function isObjectOfDisabledPackage(registry: any, name: string): boolean {
 }
 
 /**
+ * [#7557, #24210] Whether `item` belongs to a disabled package: its
+ * `_packageId`, asked of `registry.isPackageDisabled`. The ONE predicate for a
+ * non-object item, asked by the list read ({@link
+ * ObjectStackProtocolImplementation.getMetaItems}, which omits the item) and
+ * the by-name read ({@link ObjectStackProtocolImplementation.getMetaItem},
+ * which answers as for a name with nothing behind it), so the two cannot
+ * disagree about which items a disable hides. Optional-called, as {@link
+ * isObjectOfDisabledPackage} is: a host whose registry cannot answer has no
+ * item hidden.
+ */
+function isItemOfDisabledPackage(registry: any, item: unknown): boolean {
+    return typeof registry?.isPackageDisabled === 'function'
+        && registry.isPackageDisabled((item as { _packageId?: unknown } | null | undefined)?._packageId) === true;
+}
+
+/**
+ * The strict draft read's `404 NO_DRAFT`: no pending draft at this address
+ * (ADR-0005 §draft-lifecycle). [#24210] One constructor for the read that
+ * finds no draft row and the read of a disabled package's draft, so the two
+ * answers are byte-identical.
+ */
+function noPendingDraftError(type: string, name: string): Error & { code: 'NO_DRAFT'; status: 404 } {
+    const err = new Error(`No pending draft exists for ${type}/${name}.`) as Error & { code: 'NO_DRAFT'; status: 404 };
+    err.code = 'NO_DRAFT';
+    err.status = 404;
+    return err;
+}
+
+/**
  * [#17501] Does a converted JSON Schema carry any authorable surface at all?
  *
  * `z.toJSONSchema()` answers a `ZodPipe` in its default `'output'` mode with a
@@ -10375,10 +10404,11 @@ export class ObjectStackProtocolImplementation implements
         // `assertObjectRegistered` (`OBJECT_PACKAGE_DISABLED`) — absence here
         // and refusal there are the two halves of one answer, pinned together
         // by `protocol.package-disable-enforcement.test.ts`.
+        //
+        // [#24210] The predicate is {@link isItemOfDisabledPackage}, the one the
+        // by-name read asks, so the list and the by-name read hide the same items.
         if (request.type !== 'package') {
-            items = (items as any[]).filter(
-                (it) => !this.engine.registry.isPackageDisabled((it as any)?._packageId),
-            );
+            items = (items as any[]).filter((it) => !isItemOfDisabledPackage(this.engine.registry, it));
         }
 
         // Canonical-shape exposure (ADR-0017, "Object has-many View"): a
@@ -11046,6 +11076,19 @@ export class ObjectStackProtocolImplementation implements
      * that must still see the object (the save's destructive-change check)
      * read {@link readMetaItem}, the shared body, instead: the reader-class
      * split `package-disable-enforcement.test.ts` pins.
+     *
+     * [#7557, #24210] Every other type but `package` has no data plane, so a
+     * disabled package's item is answered as ABSENT, the answer a name with
+     * nothing behind it gets: the list read omits that item, by the same
+     * predicate ({@link isItemOfDisabledPackage}) asked of the item this read
+     * resolved, in every state. The strict draft read throws the missing
+     * draft's `404 NO_DRAFT`. The other reads serve no `item`, which both
+     * transports answer `404 RESOURCE_NOT_FOUND`, byte for byte the missing
+     * name's answer, and drop `registration`, the engine's verdict on a served
+     * flow. The protection envelope stays: it reports the write doors'
+     * verdicts about this address (#21670), and a disable does not change how
+     * the lock gate judges a save there. `package` is never hidden, so a
+     * disabled package can still be read and re-enabled.
      */
     async getMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
@@ -11057,7 +11100,14 @@ export class ObjectStackProtocolImplementation implements
         if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
             throw objectPackageDisabledError(request.name);
         }
-        return this.readMetaItem(request);
+        const answer = await this.readMetaItem(request);
+        if (request.type === 'object' || request.type === 'package'
+            || !isItemOfDisabledPackage(this.engine?.registry, answer?.item)) {
+            return answer;
+        }
+        if (request.state === 'draft') throw noPendingDraftError(request.type, request.name);
+        const { item: _withheld, registration: _servedOnly, ...envelope } = answer as typeof answer & { registration?: unknown };
+        return { ...envelope, item: undefined };
     }
 
     /**
@@ -11292,14 +11342,7 @@ export class ObjectStackProtocolImplementation implements
         // status code to decide "no pending edit" without sniffing
         // envelope shape. See ADR-0005 §draft-lifecycle.
         if (readState === 'draft') {
-            if (item === undefined) {
-                const err: any = new Error(
-                    `No pending draft exists for ${request.type}/${request.name}.`,
-                );
-                err.code = 'NO_DRAFT';
-                err.status = 404;
-                throw err;
-            }
+            if (item === undefined) throw noPendingDraftError(request.type, request.name);
             return {
                 type: request.type,
                 name: request.name,

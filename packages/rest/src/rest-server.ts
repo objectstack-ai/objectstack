@@ -3577,6 +3577,15 @@ export class RestServer {
      * which is not the item these doors read. Such a key is answered as no
      * current document, exactly as it was before the arm existed: no app name
      * is in the package-id grammar, so nothing is stored under it.
+     *
+     * [#7557, #24210] …and THROWS the plain read's absence (`404
+     * RESOURCE_NOT_FOUND`) when the plain read withholds an item that is
+     * there: a disabled package's item, which the by-name read answers as
+     * absent while its layers still resolve. Answered as no current document,
+     * it took these doors past their per-caller gate (events served ungated, a
+     * view's or dashboard's diff served ungated). The layered read, which keeps
+     * serving every layer, tells it apart from a deleted item, whose layers are
+     * all null: that one keeps its answer, `undefined`.
      */
     private async fetchCurrentMetaDocument(
         req: any,
@@ -3588,7 +3597,16 @@ export class RestServer {
             name: req.params.name,
         };
         const envelope = await p.getMetaItem(currentRequest) as Record<string, any>;
-        return envelope?.item ?? undefined;
+        const current = envelope?.item ?? undefined;
+        if (current !== undefined || typeof (p as any).getMetaItemLayered !== 'function') return current;
+        const layered = await (p as any).getMetaItemLayered(currentRequest);
+        if (layered?.effective != null) {
+            throw Object.assign(new Error('Metadata item not found or access denied.'), {
+                code: 'RESOURCE_NOT_FOUND',
+                status: 404,
+            });
+        }
+        return undefined;
     }
 
     /**
