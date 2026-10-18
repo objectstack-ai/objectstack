@@ -1232,7 +1232,8 @@ export const PublishMetaItemResponseSchema = lazySchema(() => z.object({
  *   object. Its three return sites always set `success` / `outcome` /
  *   `publishedCount` / `failedCount` / `published` / `failed` (so those six
  *   are REQUIRED), and
- *   attach `seedApplied` / `materializeApplied` / `probes` / `commitId` only
+ *   attach `seedApplied` / `materializeApplied` / `probes` / `commitId` /
+ *   `backfillApplied` (#24253, only when the request named a `backfill`) only
  *   on the happy path when the corresponding fact exists (so each is
  *   optional — absence means "did not apply", never "failed").
  * - The REST door (`packages/runtime/src/domains/packages.ts`) then mutates
@@ -1451,6 +1452,42 @@ export const PublishPackageDraftsResponseSchema = lazySchema(() => z.object({
   commitId: z.string().optional().describe(
     'ADR-0067 — id of the commit this publish recorded. Absent when '
     + 'nothing published.',
+  ),
+  backfillApplied: z.object({
+    success: z.boolean().describe(
+      'False when any field stopped short (its entry carries `error`). The '
+      + 'publish itself still succeeded and is not undone.',
+    ),
+    fields: z.array(z.object({
+      object: z.string().describe('Object the backfilled field belongs to.'),
+      field: z.string().describe('The field this publish added and the request named.'),
+      updated: z.number().int().describe(
+        'Existing rows this publish wrote the field\'s default into, as the '
+        + 'caller. A row that already held a value is not counted (on the SQL '
+        + 'driver the new column\'s DEFAULT fills existing rows itself, so 0 is '
+        + 'a complete answer there); nor is a row the caller cannot read. On a '
+        + 'failure, the rows written before it.',
+      ),
+      error: z.string().optional().describe(
+        'Present when this field\'s backfill stopped: the record it stopped at '
+        + 'and why. Rows counted in `updated` stay written. Client-facing text '
+        + 'only, same ADR-0112 withhold as `unhideError`.',
+      ),
+      code: z.string().optional().describe(
+        'Machine code of the refusal that stopped this field, when it declared '
+        + 'one (SCREAMING_SNAKE, ADR-0112 vocabulary).',
+      ),
+    })).describe('One element per requested field, in request order.'),
+  }).optional().describe(
+    'The opt-in `backfill` request key\'s receipt: the literal '
+    + '`defaultValue` of each named field this publish added, written into '
+    + 'the object\'s existing rows whose value is absent, page by page, as '
+    + 'the caller (permissions, RLS/FLS and record hooks apply as on their '
+    + 'own edit). Present ONLY when the request named at least one field and '
+    + 'the batch published; absent means nothing was asked. A request that '
+    + 'names a field this publish does not add, or one without a literal '
+    + 'default, is refused with a 400 before anything is published, so this '
+    + 'key never reports a refusal.',
   ),
   unhiddenApps: z.array(z.string()).optional().describe(
     'ADR-0045 §3 — names of the apps whose `_unpublished` gate this publish '
