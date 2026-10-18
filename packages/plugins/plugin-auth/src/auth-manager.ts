@@ -73,6 +73,7 @@ import {
 } from '@objectstack/spec';
 import { postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 import { MCP_OAUTH_SCOPES } from '@objectstack/spec/ai';
+import type { StandardErrorCode } from '@objectstack/spec/api';
 import { createObjectQLAdapterFactory, withSystemContext, withSystemReadContext } from './objectql-adapter.js';
 import { permissionSetInEffect } from './catalog-set-in-effect.js';
 import { recoverInternalFieldsForSystemRead } from './internal-field-readback.js';
@@ -1359,6 +1360,34 @@ async function slugGuardReadFaultApiError(object: string, cause: unknown): Promi
       `The organization slug guard could not read \`${object}\`, so whether an active environment ` +
       `still references this organization was never determined, and the slug was not changed. ` +
       `This is a server-side outage, not a refusal of the new slug: retry once the data store is reachable.`,
+  });
+  (err as { cause?: unknown }).cause = cause;
+  return err;
+}
+
+/** [#23945] The standard ADR-0112 code a store outage answers with — the status's own name. */
+const INVITATION_ROLE_CAP_READ_FAULT_CODE: StandardErrorCode = 'SERVICE_UNAVAILABLE';
+
+/**
+ * [#23945] The invitation role cap's answer when its one read — the issuer's
+ * `sys_member` rows — cannot answer: `503 SERVICE_UNAVAILABLE`, as the slug
+ * guard's read fault answers ({@link slugGuardReadFaultApiError}).
+ *
+ * Not the cap's `403 INVITE_ISSUER_UNVERIFIED`: that code is a verdict — the
+ * store answered and established no role — while a read that threw reached no
+ * verdict, so it must not wear the refusal's code. Still fail-closed: the
+ * throw ends the endpoint, so no invitation row is written. Unlike the slug
+ * guard's body, this one carries the code too, so every answer from the
+ * invitation endpoint has one. The driver's own failure rides `cause`.
+ */
+async function invitationRoleCapReadFaultApiError(cause: unknown): Promise<Error> {
+  const { APIError } = await import('better-auth/api');
+  const err = new APIError('SERVICE_UNAVAILABLE', {
+    message:
+      'The invitation role cap could not read `sys_member`, so the role the issuer holds was never ' +
+      'determined, and no invitation was created. This is a server-side outage, not a refusal of the ' +
+      'invitation: retry once the data store is reachable.',
+    code: INVITATION_ROLE_CAP_READ_FAULT_CODE,
   });
   (err as { cause?: unknown }).cause = cause;
   return err;
@@ -3487,13 +3516,18 @@ export class AuthManager {
             // placement intent at all. Skipped for a plain `member` invitation,
             // which can never trip the cap — so the ordinary path pays nothing.
             if (!isPlainMemberInvitation(invitation?.role)) {
-              const capFailure = invitationRoleCapFailure(
+              // [#23945] Each refusal carries its ADR-0112 code beside its
+              // message, the way better-auth's own `owner` refusal on this
+              // endpoint does. A membership read that THROWS never reaches
+              // this verdict: `resolveMembershipRole` answers it as an outage
+              // (503 `SERVICE_UNAVAILABLE`), not as a refusal.
+              const refusal = invitationRoleCapFailure(
                 invitation?.role,
                 await this.resolveMembershipRole(inviterUserId, organizationId),
               );
-              if (capFailure) {
+              if (refusal) {
                 const { APIError } = await import('better-auth/api');
-                throw new APIError('FORBIDDEN', { message: capFailure });
+                throw new APIError('FORBIDDEN', { message: refusal.message, code: refusal.code });
               }
             }
 
@@ -7813,10 +7847,18 @@ export class AuthManager {
    * org-scoped RLS read performed as a non-privileged delegate could return
    * nothing and silently grade them as unresolved.
    *
-   * Returns `null` when the role cannot be established — missing keys, no
-   * engine, no membership row, or a lookup error. That grades BELOW a plain
-   * member, so the cap refuses anything above a `member` invitation: this
-   * backs a security gate, and an unverifiable issuer must confer nothing.
+   * Returns `null` when the role is not established — missing keys, no
+   * engine, or a read that answered with no usable membership row. That
+   * grades BELOW a plain member, so the cap refuses anything above a `member`
+   * invitation with `INVITE_ISSUER_UNVERIFIED`: this backs a security gate,
+   * and an issuer it cannot check confers nothing — "no engine to read" is
+   * "cannot check", never "the cap does not apply".
+   *
+   * [#23945] A read that THROWS is not one of those answers: it throws
+   * `503 SERVICE_UNAVAILABLE` ({@link invitationRoleCapReadFaultApiError}), so
+   * an outage is never reported as a verdict about the issuer. Still no
+   * invitation is created.
+   *
    * Multiple membership rows (legacy duplicates) are joined so the highest
    * grade among them wins — the cap must judge the authority they actually
    * hold, not whichever row came back first.
@@ -7830,18 +7872,19 @@ export class AuthManager {
     if (!uid || !oid) return null;
     const engine = this.getDataEngine();
     if (!engine) return null;
+    let members: unknown;
     try {
-      const members = await withSystemReadContext(engine).find('sys_member', {
+      members = await withSystemReadContext(engine).find('sys_member', {
         where: { user_id: uid, organization_id: oid },
         limit: 10,
       });
-      const roles = (Array.isArray(members) ? members : [])
-        .map((m: any) => (typeof m?.role === 'string' ? m.role : ''))
-        .filter((r: string) => r.length > 0);
-      return roles.length > 0 ? roles.join(',') : null;
-    } catch {
-      return null;
+    } catch (err) {
+      throw await invitationRoleCapReadFaultApiError(err);
     }
+    const roles = (Array.isArray(members) ? members : [])
+      .map((m: any) => (typeof m?.role === 'string' ? m.role : ''))
+      .filter((r: string) => r.length > 0);
+    return roles.length > 0 ? roles.join(',') : null;
   }
 
   /**

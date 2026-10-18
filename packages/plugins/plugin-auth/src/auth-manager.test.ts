@@ -1198,6 +1198,28 @@ describe('AuthManager', () => {
       expect(roles.sales_rep).toBeUndefined();
     });
 
+    /**
+     * [#23945] A cap refusal asserted on its envelope (ADR-0112): the status
+     * and the `code` better-auth serialises into the body — never the bare
+     * throw, which a codeless `FORBIDDEN` passes just as well.
+     */
+    const capAnswer = async (attempt: Promise<unknown>) => {
+      const err = (await attempt.then(
+        () => undefined,
+        (e: unknown) => e,
+      )) as
+        | { status?: unknown; statusCode?: unknown; body?: { code?: unknown; message?: unknown }; cause?: unknown }
+        | undefined;
+      expect(err, 'the invitation was admitted').toBeTruthy();
+      return err;
+    };
+    const inviteAs = (orgPlugin: any, role: string, inviterId = 'u_delegate') =>
+      orgPlugin._opts.organizationHooks.beforeCreateInvitation({
+        invitation: { organizationId: 'org-42', email: 'e@x.test', role },
+        inviter: { id: inviterId },
+        organization: { id: 'org-42' },
+      });
+
     it('role cap: a delegate inviting an `admin` is REFUSED (the escalation chain)', async () => {
       // delegate invites admin → sys_member(role='admin') → auto-org-admin-grant
       // → organization_admin → wildcard modifyAllRecords → isTenantAdmin().
@@ -1205,13 +1227,20 @@ describe('AuthManager', () => {
         dataEngine: engineWithMemberRole('delegated_admin') as never,
       });
 
-      await expect(
-        orgPlugin._opts.organizationHooks.beforeCreateInvitation({
-          invitation: { organizationId: 'org-42', email: 'e@x.test', role: 'admin' },
-          inviter: { id: 'u_delegate' },
-          organization: { id: 'org-42' },
-        }),
-      ).rejects.toThrow(/never confer a role above the issuer/);
+      const err = await capAnswer(inviteAs(orgPlugin, 'admin'));
+      expect(err?.statusCode).toBe(403);
+      expect(err?.status).toBe('FORBIDDEN');
+      expect(err?.body?.code).toBe('INVITE_ROLE_ABOVE_ISSUER');
+    });
+
+    it('role cap: a delegate minting another delegate is REFUSED as member-only, not as outranked', async () => {
+      const orgPlugin = await bootOrgPlugin({
+        dataEngine: engineWithMemberRole('delegated_admin') as never,
+      });
+
+      const err = await capAnswer(inviteAs(orgPlugin, 'delegated_admin'));
+      expect(err?.statusCode).toBe(403);
+      expect(err?.body?.code).toBe('INVITE_ISSUER_MEMBER_ONLY');
     });
 
     it('role cap: a delegate inviting a plain `member` passes — and costs no lookup', async () => {
@@ -1244,17 +1273,50 @@ describe('AuthManager', () => {
     });
 
     it('role cap: an unresolvable issuer membership fails CLOSED', async () => {
+      // Pinned HERE, not on the wire: through `POST /organization/invite-member`
+      // this input is not reachable. better-auth reads the inviter's membership
+      // before the hook runs and refuses a non-member (`MEMBER_NOT_FOUND`, 400)
+      // or a role without `invitation:create` (403) first, and the cap re-reads
+      // the same `sys_member` rows in system context — so a read that answers
+      // "no usable row" needs the row to vanish between the two reads.
       const orgPlugin = await bootOrgPlugin({
         dataEngine: engineWithMemberRole(null) as never,
       });
 
-      await expect(
-        orgPlugin._opts.organizationHooks.beforeCreateInvitation({
-          invitation: { organizationId: 'org-42', email: 'e@x.test', role: 'admin' },
-          inviter: { id: 'u_ghost' },
-          organization: { id: 'org-42' },
-        }),
-      ).rejects.toThrow(/could not be verified/);
+      const err = await capAnswer(inviteAs(orgPlugin, 'admin', 'u_ghost'));
+      expect(err?.statusCode).toBe(403);
+      expect(err?.body?.code).toBe('INVITE_ISSUER_UNVERIFIED');
+    });
+
+    it('role cap: NO data engine to read fails CLOSED too — "cannot check" is never "does not apply"', async () => {
+      // Not reachable through `AuthPlugin`, which hard-depends on ObjectQL and
+      // always passes its `data` service; only a bare `AuthManager` built
+      // without `dataEngine` (better-auth then runs on its in-memory adapter)
+      // reaches the hook with nothing to read.
+      const orgPlugin = await bootOrgPlugin();
+
+      const err = await capAnswer(inviteAs(orgPlugin, 'admin', 'u_any'));
+      expect(err?.statusCode).toBe(403);
+      expect(err?.body?.code).toBe('INVITE_ISSUER_UNVERIFIED');
+    });
+
+    it('role cap: a membership read that THROWS is an outage (503 SERVICE_UNAVAILABLE), not a refusal', async () => {
+      // An owner's invitation, so the only thing between it and admission is
+      // the read: the verdict the store would have given is "admitted".
+      const engine = engineWithMemberRole('owner');
+      engine.find.mockImplementation(async () => {
+        throw new Error('store unavailable');
+      });
+      const orgPlugin = await bootOrgPlugin({ dataEngine: engine as never });
+
+      const err = await capAnswer(inviteAs(orgPlugin, 'admin', 'u_owner'));
+      expect(err?.statusCode).toBe(503);
+      expect(err?.status).toBe('SERVICE_UNAVAILABLE');
+      expect(err?.body?.code).toBe('SERVICE_UNAVAILABLE');
+      expect(err?.body?.code).not.toBe('INVITE_ISSUER_UNVERIFIED');
+      // The driver's own failure is kept for the operator.
+      expect((err?.cause as Error | undefined)?.message).toBe('store unavailable');
+      expect(engine.find).toHaveBeenCalledTimes(1);
     });
 
     it('role cap: it runs BEFORE the placement gate and applies without placement intent', async () => {
@@ -1278,7 +1340,7 @@ describe('AuthManager', () => {
           inviter: { id: 'u_delegate' },
           organization: { id: 'org-42' },
         }),
-      ).rejects.toThrow(/never confer a role above the issuer/);
+      ).rejects.toMatchObject({ statusCode: 403, body: { code: 'INVITE_ROLE_ABOVE_ISSUER' } });
       // Refused before the placement gate was ever consulted.
       expect(assertIssuable).not.toHaveBeenCalled();
     });
