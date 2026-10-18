@@ -3412,6 +3412,14 @@ export class RestServer {
      * `withItemWriteVerdict` — [#20156] the door's policy honours the author
      * exemption, so the caller carries its `mayWriteItem` (see
      * {@link metaReadAudienceSources}).
+     *
+     * [#7557, #24210] `isItemOfDisabledPackage`, the layered chain's owner
+     * step: the plain read serves no `item` and its kept envelope `packageId`
+     * is one the engine registry's `isPackageDisabled` answers for, the owner
+     * `/published` asks about. The engine is
+     * reached through {@link wiredEngineOrLoud}: none wired withholds nothing,
+     * as before; one that cannot be resolved is the loud outage, never "not
+     * withheld".
      */
     private metaItemReadGateSources(
         environmentId: string | undefined,
@@ -3424,6 +3432,23 @@ export class RestServer {
             ...this.metaListSource(p, environmentId),
             serviceProbe: (caller) => this.serviceProbeFor((caller as any)?.__kernel),
             navPruneLogged: this.navPruneLogged,
+            isItemOfDisabledPackage: async ({ type, name, packageId }) => {
+                if (typeof p.getMetaItem !== 'function') return false;
+                const ql = await wiredEngineOrLoud(
+                    Boolean(this.objectQLProvider),
+                    () => this.objectQLProvider!(environmentId),
+                );
+                const registry = (ql as any)?.registry;
+                if (typeof registry?.isPackageDisabled !== 'function') return false;
+                const itemRequest: TransportScopedMetaRequest<GetMetaItemRequest> = {
+                    type,
+                    name,
+                    ...(packageId ? { packageId } : {}),
+                    ...(environmentId ? { environmentId } : {}),
+                };
+                const envelope = await p.getMetaItem(itemRequest) as { item?: unknown; packageId?: unknown } | undefined;
+                return envelope?.item == null && registry.isPackageDisabled(envelope?.packageId) === true;
+            },
         };
     }
 
@@ -4072,7 +4097,12 @@ export class RestServer {
         // admission (`metaItemReadGateSources(…, true)`).
         const answer = await metaReadGate.createMetaLayeredAnswer(
             this.metaItemReadGateSources(environmentId, req, p, true),
-            { metaType: RestServer.metaTypeSingular(req.params.type), name: req.params.name, maskPosture },
+            {
+                metaType: RestServer.metaTypeSingular(req.params.type),
+                name: req.params.name,
+                ...(layeredPackageId ? { packageId: layeredPackageId } : {}),
+                maskPosture,
+            },
         )(layered);
         switch (answer.kind) {
             case 'refuse':

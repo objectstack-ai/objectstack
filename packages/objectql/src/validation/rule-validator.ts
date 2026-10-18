@@ -230,8 +230,8 @@
  * evaluator once per matched row — one payload, N priors (#3106).
  */
 
-import { ExpressionEngine, collectCelRootIdentifiers, analyzeRelationshipTraversals, findTraversalConflicts } from '@objectstack/formula';
-import type { EvalContext, EvalPermissions, RelationshipTraversalAnalysis } from '@objectstack/formula';
+import { ExpressionEngine, collectCelRootIdentifiers, analyzeRelationshipTraversals, findTraversalConflicts, DEFAULT_TRAVERSAL_ROOT } from '@objectstack/formula';
+import type { EvalContext, EvalPermissions, RelationshipTraversalAnalysis, TraversalConflict, TraversalSubject } from '@objectstack/formula';
 import type { Expression } from '@objectstack/spec';
 import { AUDIT_PROVENANCE_FIELDS, RUNTIME_OWNED_FIELD_TYPES, referenceTargetOf, resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import type { ValidationAdvisoryEvent } from '@objectstack/spec/data';
@@ -553,28 +553,7 @@ export function collectPredicateRelationships(
   const fields = objectSchema?.fields;
   if (!fields) return out;
 
-  const addFrom = (cond: unknown): void => {
-    // The DIALECT is checked, not assumed: a `template` or `js` source that
-    // happens to parse as CEL would otherwise be analysed and hydrated, and the
-    // hop list would describe an expression no CEL engine ever evaluates.
-    // A bare string is CEL by the envelope's own default.
-    if (cond && typeof cond === 'object' && (cond as Expression).dialect !== undefined
-        && (cond as Expression).dialect !== 'cel') return;
-    const source = typeof cond === 'string'
-      ? cond
-      : (cond && typeof cond === 'object' ? (cond as Expression).source : undefined);
-    if (typeof source !== 'string' || !source) return;
-    const analysis = analysisFor(source);
-    if (!analysis) return;
-    for (const [field, related] of analysis.traversals) {
-      // `referenceTargetOf` answers undefined for a non-reference field AND for
-      // a reference field naming no target — both mean "nothing to preload".
-      if (!referenceTargetOf(fields[field])) continue;
-      let set = out.get(field);
-      if (!set) out.set(field, (set = new Set()));
-      for (const name of related) set.add(name);
-    }
-  };
+  const addFrom = (cond: unknown): void => { addReferenceTraversals(out, cond, fields); };
 
   const visit = (rule: unknown, depth: number): void => {
     if (!rule || typeof rule !== 'object' || depth > 8) return;
@@ -589,6 +568,90 @@ export function collectPredicateRelationships(
   };
   for (const rule of rules) visit(rule, 0);
   return out;
+}
+
+/**
+ * [#18682 / #24197] The CEL source of an authored expression slot, or
+ * `undefined` when it is not CEL. The DIALECT is checked, not assumed: a
+ * `template` or `js` source that happens to parse as CEL would otherwise be
+ * analysed and hydrated, and the hop list would describe an expression no CEL
+ * engine ever evaluates. A bare string is CEL by the envelope's own default.
+ */
+function celSourceOfSlot(cond: unknown): string | undefined {
+  if (cond && typeof cond === 'object' && (cond as Expression).dialect !== undefined
+      && (cond as Expression).dialect !== 'cel') return undefined;
+  const source = typeof cond === 'string'
+    ? cond
+    : (cond && typeof cond === 'object' ? (cond as Expression).source : undefined);
+  return typeof source === 'string' && source ? source : undefined;
+}
+
+/**
+ * [#18682] Fold the one-hop reads `cond` takes through REFERENCE fields into
+ * `out` (reference field → the related fields named on it). The one judgement
+ * behind both seams that preload a hop: {@link collectPredicateRelationships}
+ * for validation rules and {@link collectReferenceTraversals} for formula
+ * fields (#24197), so "which hops does this expression take" cannot answer
+ * differently for the two.
+ */
+function addReferenceTraversals(
+  out: Map<string, Set<string>>,
+  cond: unknown,
+  fields: Record<string, ConditionalFieldDef>,
+): void {
+  const source = celSourceOfSlot(cond);
+  if (!source) return;
+  const analysis = analysisFor(source);
+  if (!analysis) return;
+  for (const [field, related] of analysis.traversals) {
+    // `referenceTargetOf` answers undefined for a non-reference field AND for
+    // a reference field naming no target — both mean "nothing to preload".
+    if (!referenceTargetOf(fields[field])) continue;
+    let set = out.get(field);
+    if (!set) out.set(field, (set = new Set()));
+    for (const name of related) set.add(name);
+  }
+}
+
+/**
+ * [#24197] The reference fields `expressions` read ONE hop through, and the
+ * related fields each names — {@link collectPredicateRelationships}' judgement
+ * for an arbitrary set of expressions, which the engine's formula read path
+ * asks of one formula field at a time (see `planFormulaProjection`).
+ *
+ * Empty for an expression that traverses nothing, which is the common case and
+ * what lets a formula read skip the related read entirely.
+ */
+export function collectReferenceTraversals(
+  expressions: Iterable<unknown>,
+  fields: Record<string, ConditionalFieldDef> | undefined | null,
+): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  if (!fields) return out;
+  for (const expression of expressions) addReferenceTraversals(out, expression, fields);
+  return out;
+}
+
+/**
+ * [#24197] The traversal conflicts in one authored expression — the shapes a
+ * one-hop preload cannot serve (a second hop; a reference read both through
+ * and as a value) — judged against `fields` by the same `referenceTargetOf`
+ * arbiter {@link resolveTraversalScope} asks, and worded for `subject`.
+ *
+ * The engine's formula read path asks it at planning time, so a formula the
+ * lint would refuse also reads `null` WITH a reason at run time — metadata
+ * that never met the lint (Studio, `sys_metadata`, an agent) included.
+ */
+export function referenceTraversalConflicts(
+  expression: unknown,
+  fields: Record<string, ConditionalFieldDef> | undefined | null,
+  subject: TraversalSubject,
+): TraversalConflict[] {
+  const source = celSourceOfSlot(expression);
+  if (!source) return [];
+  const analysis = analysisFor(source);
+  if (!analysis || (analysis.traversals.size === 0 && analysis.multiHopFields.size === 0)) return [];
+  return findTraversalConflicts(analysis, (field) => !!referenceTargetOf(fields?.[field]), DEFAULT_TRAVERSAL_ROOT, subject);
 }
 
 /**

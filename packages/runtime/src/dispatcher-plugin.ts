@@ -2288,7 +2288,15 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                     path,
                                     query: req.query ?? {},
                                     headers: req.headers ?? {},
-                                    body: req.body,
+                                    // [#24252] Deferred, ⛔ never `req.body`: this
+                                    // object is built before the step matches an
+                                    // endpoint or runs its policies, and reading a
+                                    // body the transport could not parse here would
+                                    // answer its `400` ahead of the miss's `404`
+                                    // and `authRequired`'s `401`. The step reads it
+                                    // with `readDispatchedBody` once the policy
+                                    // chain admitted the caller.
+                                    body: deferRequestBody(req),
                                     ...(req.remoteAddress ? { remoteAddress: req.remoteAddress } : {}),
                                 },
                                 deps: {

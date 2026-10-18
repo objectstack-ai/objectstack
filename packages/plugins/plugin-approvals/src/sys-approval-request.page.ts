@@ -30,10 +30,22 @@ import type { Page } from '@objectstack/spec/ui';
  *    `record_id` / `object_name` is a declared `referenceVia` pointer pair that
  *    the console draws as a card of the target record IN THE DETAILS GRID — a
  *    strip carrying `record_id` would take the card off the page. The object's
- *    own `highlightFields` is left as it is: other surfaces read it, and only
+ *    own `highlightFields` keeps `record_id`: other surfaces read it, and only
  *    this page has a grid the pair must stay in.
- *  - `tabs` is authored: Details (`record:details`, the request's own fields
- *    by the object's field groups) and Timeline — `sys_approval_action` as a
+ *  - The strip and the object's list change together, never the strip alone.
+ *    The Details tab's `record:details` node authors neither `sections` nor
+ *    `fields`, so it draws the object's `highlightFields` (the spec's declared
+ *    fallback) minus the strip: a field the object lists and the strip drops
+ *    moves into that tab.
+ *  - The flow chip is `process_label` (the flow's label), not `process_name`
+ *    (the machine source, `flow:NAME`). The console reads a request through
+ *    the approvals get, which serves `process_label` by the one display-label
+ *    chain (`display-labels.ts`): the stored label, else the node-config
+ *    snapshot's, else the humanized machine name. Where the chain yields
+ *    nothing, the field has no value, the strip draws no Flow chip, and the
+ *    record title still names `process_name`.
+ *  - `tabs` is authored: Details (`record:details`, a bare node: see the
+ *    strip above) and Timeline — `sys_approval_action` as a
  *    related list keyed on `request_id`, newest first. The `tabs` slot is
  *    authored rather than `details` because the console builds the tab strip
  *    from `tabs` when both are present; the details body therefore lives in
@@ -68,7 +80,7 @@ export const SysApprovalRequestDetailPage: Page = {
     highlights: {
       type: 'record:highlights',
       properties: {
-        fields: ['process_name', 'object_name', 'status', 'current_step', 'submitter_id', 'updated_at'],
+        fields: ['process_label', 'object_name', 'status', 'current_step', 'submitter_id', 'updated_at'],
       },
     },
 

@@ -1994,7 +1994,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     /**
      * [#18682] Opt this ONE site in to the relationship-traversal conflict
      * checks. True only where the traversal is actually SERVED — object
-     * validation rules, which ObjectQL's `checkPredicate` hydrates. Everywhere
+     * validation rules, which ObjectQL's `checkPredicate` hydrates (a formula
+     * `expression`, the other served site, is judged by `judgeFieldFormula`,
+     * which does not go through this helper). Everywhere
      * else the checks' prescription ("write `record.<fk>.id`") is false,
      * because nothing hydrates there and the repaired expression would fault;
      * on the fail-open seams that means the rule stops enforcing entirely.
@@ -2614,8 +2616,9 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
       // bare refs are flagged (#1928).
       // [#18682] The sites where a relationship traversal is SERVED: these are
       // the `script` / `cross_field` conditions ObjectQL's `checkPredicate`
-      // hydrates. `traversalHydration` is passed here and on a nested
-      // `condition` below (#22042), and NOWHERE else.
+      // hydrates. `traversalHydration` is passed here, on a nested
+      // `condition` below (#22042), and on a formula field's `expression`
+      // (`judgeFieldFormula`, #24197), and NOWHERE else.
       check(where, rule.condition, objectName, 'record', undefined, true);
       // `conditional` rules carry a nested `when` predicate (record-scoped).
       // ⚠️ `when` is evaluated by `checkConditional` WITHOUT hydration today, so
@@ -2729,6 +2732,14 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         // The object's columns alone, never its read attachments: a formula is
         // computed on the stored row, which carries no block (see
         // {@link SERVED_ROW_SITES}).
+        //
+        // [#24197] `traversalHydration`: a formula `expression` is a site where
+        // a relationship traversal is SERVED — ObjectQL's formula read path
+        // preloads ONE hop through a reference field (`record.book.title`)
+        // before computing the field, page-batched, under the reader's own
+        // read. So one hop passes here, and the two shapes that path cannot
+        // serve — a second hop, and a reference read both through and as a
+        // value — are refused with the formula-worded prescription.
         const res = validateExpression('value', f.expression as string | { dialect?: string; source?: string },
           objectName
             ? {
@@ -2736,6 +2747,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
                 fields: fieldIndex.get(objectName),
                 fieldTypes: fieldTypeIndex.get(objectName),
                 scope: 'record',
+                traversalHydration: true,
               }
             : { scope: 'record' });
         // Names the KEY the author edits, not the field type. Saying "formula"
