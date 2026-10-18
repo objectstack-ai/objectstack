@@ -243,6 +243,24 @@ describe('ErrorCode (standard ∪ registered)', () => {
     }
   });
 
+  it('accepts the organization and placement hook refusal codes, registered ahead of their plugin-auth producer', () => {
+    // #24254 is the spec half of #24243's split: four of plugin-auth's eight
+    // code-less hook refusals get a new row; the other four answer a standard
+    // member and need none. #24243 stamps them and asserts these exact strings
+    // by value — pinned here too.
+    for (const code of [
+      'INVITE_PLACEMENT_OUTSIDE_ISSUER_SCOPE',
+      'INVITE_PLACEMENT_UNSUPPORTED',
+      'ORGANIZATION_CREATION_DISABLED',
+      'ORGANIZATION_SLUG_REFERENCED_BY_ENVIRONMENTS',
+    ]) {
+      expect(ErrorCode.parse(code)).toBe(code);
+      expect(ERROR_CODE_LEDGER['@objectstack/plugin-auth'], `${code} registered under plugin-auth`).toContain(code);
+      // INVITE and ORGANIZATION are tokens no standard member carries — no waiver needed.
+      expect(standardSynonymOf(code), `${code} needs no waiver`).toBeUndefined();
+    }
+  });
+
   it('accepts the nine-code batch — every code that ships in dist, door or no door (ruled: the ledger is the published face)', () => {
     // The #16404 ruling (director seat, decision batch #62, 2026-09-07, option
     // D): the published face is this ledger, so a code that ships in `dist` is
