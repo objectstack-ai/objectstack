@@ -75,47 +75,26 @@ const CLI_SPAWNERS: ReadonlySet<string> = new Set(['CLI', 'runServe']);
 const HARNESS_MODULE = /(?:^|\/)serve-process(?:\.[cm]?[jt]s)?$/;
 
 /**
- * Slice 2 of #24342 converts the rest of the development column: the bespoke
- * tsx spawners (the seven `package-install-local-*` `os start` files and the
- * other files that spawn `CLI` themselves) and the four `bin/run.js --dev` /
- * `os dev` files. Until it lands, a lost race there is a drift that each file's
- * own read-back reports as a red on a correct tree.
- */
-const SLICE_2 = 'slice 2 of #24342';
-
-/**
  * Files that spawn the CLI and still draw, each with the EXACT number of draw
- * calls it may make and why. Every entry today is a file slice 1 of #24342 did
- * not convert; a site that genuinely needs a number BEFORE the spawn and has no
- * closed alternative (`KERNEL_ASSIGNED_PORT` read back afterwards, or a port
- * held for the whole boot) would earn an entry with that reason instead.
+ * calls it may make and why. #24342 converted every other spawner; what is left
+ * is a draw whose non-zero number is the SUBJECT of an arm, or an instrument
+ * beside the spawn, where `KERNEL_ASSIGNED_PORT` read back afterwards would
+ * change what the file proves. A new entry needs a reason of that kind, with no
+ * closed alternative (a port read back afterwards, or one held for the whole boot).
  */
 const RELEASED_DRAW_LEDGER: Readonly<Record<string, { draws: number; why: string }>> = {
-  'artifact-flag-precedence.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'dev-boot-output-order.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'package-install-local-boot-steps.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'package-install-local-handlers.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'package-install-local-hooks.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'package-install-local-jobs-pull.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'package-install-local-jobs-shared-name.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'package-install-local-jobs.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'package-install-local-uninstall-cleanups.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'package-restart-acceptance.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-app-anchored-optional-import.e2e.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-config-boot-flat-docs.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-config-boot-residual.integration.test.ts': { draws: 2, why: SLICE_2 },
-  'serve-host-config-metadata-door.integration.test.ts': { draws: 2, why: SLICE_2 },
-  'serve-mcp-capability-collision.e2e.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-mcp-stdio-answers.e2e.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-migrate-exit-schema-parity.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-organization-record-page.e2e.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-port-drift-notice.e2e.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-process-child-env.e2e.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-publishes-bound-port.e2e.test.ts': { draws: 2, why: SLICE_2 },
-  'serve-runtime-assets-branding-warning.e2e.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-stdio-stdout-purity.e2e.test.ts': { draws: 1, why: SLICE_2 },
-  'serve-view-container-read.integration.test.ts': { draws: 1, why: SLICE_2 },
-  'start-signal-forwarding.e2e.test.ts': { draws: 1, why: SLICE_2 },
+  'serve-port-drift-notice.e2e.test.ts': {
+    draws: 1,
+    why: 'the NEGATIVE arm is a boot that binds exactly the non-zero port it asked for and says '
+      + 'nothing about ports; `--port 0` asks for no port, and that boot prints plugin-hono-server\'s '
+      + '"Port 0 is in use, using port N instead" (#24387)',
+  },
+  'serve-publishes-bound-port.e2e.test.ts': {
+    draws: 2,
+    why: 'reservePort() is the connect instrument\'s NEGATIVE arm, a port probed free and left unbound '
+      + '(nothing is spawned on it); randomPort() is the non-zero request the ordinary-boot arm is about, '
+      + 'and that arm reads a lost race out of the child\'s own drift notice instead of failing on it',
+  },
 };
 
 interface Census {

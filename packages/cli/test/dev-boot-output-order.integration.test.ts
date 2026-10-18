@@ -58,7 +58,7 @@ import { fileURLToPath } from 'node:url';
 import {
   childEnv,
   E2E_SECRET_KEY,
-  randomPort,
+  KERNEL_ASSIGNED_PORT,
   requireBuiltCli,
   RUN_JS_RESOLVES_FROM_DIST,
 } from './helpers/serve-process.js';
@@ -115,10 +115,9 @@ function screenLines(raw: string): string[] {
 
 /** Boot `os dev` under a pty until the banner and the block have both printed, then Ctrl+C it. */
 function bootUnderPty(boot: number): Promise<string> {
-  const port = randomPort();
   const command = [
     `exec '${process.execPath}' '${CLI}' dev --no-watch`,
-    `-d 'file:boot${boot}.db' -p ${port}`,
+    `-d 'file:boot${boot}.db' -p ${KERNEL_ASSIGNED_PORT}`,
   ].join(' ');
   return new Promise((resolveBoot, rejectBoot) => {
     const child = spawn('script', ['-qfec', command, '/dev/null'], {

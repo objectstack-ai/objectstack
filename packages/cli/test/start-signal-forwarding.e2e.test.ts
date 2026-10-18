@@ -45,9 +45,9 @@
  * The subject is the supervisor's wiring in `src/commands/start.ts`, which the
  * built entry runs byte for byte from `dist/`, so the source entry measures the
  * same code without a build prerequisite. The `development` posture it pins
- * re-opens `serve`'s port auto-shift; that is harmless here because the port is
- * read back out of the child's own banner (`boundPortFromBanner`) rather than
- * assumed from what this file asked for. The built entry was measured too, by
+ * re-opens `serve`'s port auto-shift; that is harmless here because each boot
+ * asks for a kernel-assigned port and reads the one it bound back out of the
+ * child's own banner (`readKernelAssignedPort`). The built entry was measured too, by
  * hand, before and after the repair (the PR that landed this records both).
  *
  * Each child gets its own process group (`detached: true`) so `afterEach` can
@@ -64,9 +64,9 @@ import { fileURLToPath } from 'node:url';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
 import {
   childEnv,
-  boundPortFromBanner,
+  KERNEL_ASSIGNED_PORT,
   portIsFree,
-  reservePort,
+  readKernelAssignedPort,
 } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -100,13 +100,13 @@ const ARTIFACT = JSON.stringify({
 
 type Command = 'start' | 'dev';
 
-/** The argv that boots `command` on `artifact` at `port`, with no Console. */
-function argvFor(command: Command, artifact: string, port: number): string[] {
+/** The argv that boots `command` on `artifact` at a kernel-assigned port, with no Console. */
+function argvFor(command: Command, artifact: string): string[] {
   // `start` declares `--ui` with `allowNo` (default on); `dev` declares it
   // default-off and rejects `--no-ui`. Both therefore boot without a Console.
   return command === 'start'
-    ? ['start', '--artifact', artifact, '--port', String(port), '--no-ui']
-    : ['dev', '--artifact', artifact, '--port', String(port)];
+    ? ['start', '--artifact', artifact, '--port', KERNEL_ASSIGNED_PORT, '--no-ui']
+    : ['dev', '--artifact', artifact, '--port', KERNEL_ASSIGNED_PORT];
 }
 
 /**
@@ -176,12 +176,11 @@ function boot(command: Command): Promise<Booted> {
   workdir = dir;
   const artifact = join(dir, 'objectstack.json');
   writeFileSync(artifact, ARTIFACT);
-  const port = reservePort();
 
   return new Promise((resolveBoot, rejectBoot) => {
     const parent = spawn(
       process.execPath,
-      ['--import', TSX_LOADER, RUN_DEV_JS, ...argvFor(command, artifact, port)],
+      ['--import', TSX_LOADER, RUN_DEV_JS, ...argvFor(command, artifact)],
       {
         cwd: dir,
         env: childEnv({
@@ -211,12 +210,12 @@ function boot(command: Command): Promise<Booted> {
       if (!ready && BANNER_TAIL.test(output)) {
         ready = true;
         clearTimeout(timer);
-        const readback = boundPortFromBanner(output);
-        if (readback.state !== 'bound') {
-          rejectBoot(new Error(`os ${command}: banner unreadable (${readback.state}).\n--- output ---\n${output}`));
+        const port = readKernelAssignedPort(output, `os ${command}`);
+        if (port instanceof Error) {
+          rejectBoot(port);
           return;
         }
-        resolveBoot({ parent, port: readback.port, output: () => output, exited });
+        resolveBoot({ parent, port, output: () => output, exited });
       }
     };
     parent.stdout?.on('data', onData);

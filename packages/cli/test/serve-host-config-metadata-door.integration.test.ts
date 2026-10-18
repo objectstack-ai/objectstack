@@ -57,10 +57,9 @@ import {
   CLI,
   childEnv,
   E2E_SECRET_KEY,
-  portContentionError,
-  portDriftError,
+  KERNEL_ASSIGNED_PORT,
   probeThroughChild,
-  randomPort,
+  readKernelAssignedPort,
   TSX,
 } from './helpers/serve-process.js';
 import { defineStackSourceFromLiteral, linkSpec } from './helpers/define-stack-fixture.js';
@@ -117,9 +116,9 @@ const groups: ChildProcess[] = [];
 let dir: string;
 const readings: Partial<Record<'source' | 'artifact', Reading>> = {};
 
-function boot(argv: string[], port: string, env: Record<string, string | undefined>): Promise<Live> {
+function boot(argv: string[], env: Record<string, string | undefined>): Promise<Live> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, ...argv, '-p', port], {
+    const child = spawn(TSX, [CLI, ...argv, '-p', KERNEL_ASSIGNED_PORT], {
       cwd: dir,
       // `childEnv`, never a bare `...process.env` — see its header. Neither
       // artifact variable leaks in from the runner: each leg states its own.
@@ -140,12 +139,12 @@ function boot(argv: string[], port: string, env: Record<string, string | undefin
     groups.push(child);
     let out = '';
     let settled = false;
-    const settle = (err: Error | null) => {
+    const settle = (verdict: Error | number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (err) rejectBoot(err);
-      else resolveBoot({ child, base: `http://localhost:${port}`, output: () => out });
+      if (verdict instanceof Error) rejectBoot(verdict);
+      else resolveBoot({ child, base: `http://localhost:${verdict}`, output: () => out });
     };
     const timer = setTimeout(
       () => settle(new Error(`os ${argv[0]} never printed ${READY}\n--- output ---\n${out.slice(-4000)}`)),
@@ -153,13 +152,13 @@ function boot(argv: string[], port: string, env: Record<string, string | undefin
     );
     const onData = (d: unknown) => {
       out += String(d);
-      if (READY.test(out)) settle(portDriftError(out, `os ${argv[0]}`, port));
+      // The child is the authority on the port it bound: a kernel-assigned one (#24342).
+      if (READY.test(out)) settle(readKernelAssignedPort(out, `os ${argv[0]}`));
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
     child.on('exit', (code) =>
-      settle(portContentionError(out, `os ${argv[0]}`, port)
-        ?? new Error(`os ${argv[0]} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
+      settle(new Error(`os ${argv[0]} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
     );
   });
 }
@@ -256,14 +255,12 @@ beforeAll(async () => {
   writeFileSync(join(dir, 'objectstack.config.ts'), defineStackSourceFromLiteral(literal));
   linkSpec(dir);
 
-  let port = randomPort();
-  await measure('source', boot(['serve', 'objectstack.config.ts'], port, { OS_DATABASE_URL: 'file:source.db' }));
+  await measure('source', boot(['serve', 'objectstack.config.ts'], { OS_DATABASE_URL: 'file:source.db' }));
 
   // The compiled twin, for the artifact door's control leg.
   mkdirSync(join(dir, 'dist'), { recursive: true });
   writeFileSync(join(dir, 'dist', 'objectstack.json'), JSON.stringify(STACK, null, 2), 'utf8');
-  port = randomPort();
-  await measure('artifact', boot(['serve', 'objectstack.config.ts'], port, { OS_DATABASE_URL: 'file:artifact.db' }));
+  await measure('artifact', boot(['serve', 'objectstack.config.ts'], { OS_DATABASE_URL: 'file:artifact.db' }));
 }, ALL_BOOTS_TIMEOUT_MS);
 
 afterAll(async () => {
