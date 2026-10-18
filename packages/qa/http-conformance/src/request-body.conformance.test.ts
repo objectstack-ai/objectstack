@@ -32,6 +32,14 @@
  *     its own.
  *  5. `rawBody()` still reads the bytes of a refused body.
  *  6. CONTROLS: an empty body is `{}`, and a valid JSON body is the document.
+ *  7. THE FALLBACK (`setFallbackHandler`), the door every declared `apis:`
+ *     endpoint enters through: a fallback that reads a refused body is
+ *     answered with the refusal whether it then throws, catches and answers,
+ *     or catches and writes nothing, because the standard transport runs its
+ *     fallback through the same `runHandler` as its routes. CONTROLS: a
+ *     fallback that never reads the body and writes nothing leaves the 404,
+ *     and the 405 + `Allow` (guarantee 4); one that reads a valid body gets
+ *     the document (guarantee 2).
  *
  * Then PARITY: every row above, sent to both adapters, answers the same status
  * and the same bytes (the refusal messages included, so the reference's
@@ -51,6 +59,8 @@ import { NodeHttpServer } from './adapter.js';
 /** The `IHttpServer` members this suite drives. */
 interface BodyReadingServer {
     post(path: string, handler: RouteHandler): void;
+    put(path: string, handler: RouteHandler): void;
+    setFallbackHandler(handler: RouteHandler): void;
     listen(port: number): Promise<void>;
     close?(): Promise<void>;
     getPort(): number;
@@ -109,9 +119,50 @@ const MULTIPART_FIELDS = {
     upload: { file: 'notes.txt', type: 'text/plain', size: 5 },
 };
 
-type Answer = { status: number; text: string };
+type Answer = { status: number; text: string; allow: string | null };
 
-/** Boot one adapter with the three routes this suite reads through. */
+/**
+ * The fallback, by the path's second segment: what it does once it has read
+ * `req.body` (or not). Any other path, `/only-put` included, is `no-read`.
+ */
+const FALLBACK: RouteHandler = (req, res) => {
+    const mode = req.path.split('/')[2];
+    if (mode === 'throw') {
+        const body = describeBody(req.body);
+        res.status(200);
+        res.json({ body });
+        return;
+    }
+    if (mode === 'caught-answers') {
+        try {
+            void req.body;
+        } catch {
+            res.status(500);
+            res.json({ caught: true });
+            return;
+        }
+        res.status(200);
+        res.json({ caught: false });
+        return;
+    }
+    if (mode === 'caught-silent') {
+        try {
+            void req.body;
+        } catch {
+            return;
+        }
+        return;
+    }
+    if (mode === 'echo') {
+        const body = describeBody(req.body);
+        res.status(200);
+        res.json({ body });
+    }
+    // `no-read`: never reads the body and writes nothing, the documented way
+    // to say "not mine".
+};
+
+/** Boot one adapter with the routes and the fallback this suite reads through. */
 async function boot(make: () => BodyReadingServer, opened: BodyReadingServer[]) {
     const server = make();
     // Reads `req.body` and answers what it read.
@@ -139,12 +190,18 @@ async function boot(make: () => BodyReadingServer, opened: BodyReadingServer[]) 
         res.status(200);
         res.json({ raw: bytes.toString('utf8') });
     });
+    // A path that exists under another verb, for the fallback's 405 control.
+    server.put('/only-put', (_req, res) => {
+        res.status(200);
+        res.json({ route: 'put' });
+    });
+    server.setFallbackHandler(FALLBACK);
     await server.listen(0);
     opened.push(server);
     const base = `http://127.0.0.1:${server.getPort()}`;
     return async (path: string, body: BodyName): Promise<Answer> => {
         const res = await fetch(`${base}${path}`, { method: 'POST', ...BODIES[body]() });
-        return { status: res.status, text: await res.text() };
+        return { status: res.status, text: await res.text(), allow: res.headers.get('allow') };
     };
 }
 
@@ -187,8 +244,41 @@ describe.each(ADAPTERS)('IHttpRequest.body conformance on the $label adapter', (
 
     it('rawBody() still reads the bytes of a body that req.body refuses', async () => {
         const send = await boot(make, opened);
-        expect(await send('/raw', 'malformedJson')).toEqual({ status: 200, text: JSON.stringify({ raw: '{ not json' }) });
-        expect(await send('/raw', 'textPlain')).toEqual({ status: 200, text: JSON.stringify({ raw: 'plain words' }) });
+        expect(await send('/raw', 'malformedJson')).toEqual({ status: 200, text: JSON.stringify({ raw: '{ not json' }), allow: null });
+        expect(await send('/raw', 'textPlain')).toEqual({ status: 200, text: JSON.stringify({ raw: 'plain words' }), allow: null });
+    });
+
+    it('a fallback that reads a refused body and throws is answered with the refusal', async () => {
+        const send = await boot(make, opened);
+        expectRefused(await send('/fallback/throw', 'malformedJson'), '{ not json');
+    });
+
+    it('a fallback that catches the refusal and answers its own is still answered with the refusal', async () => {
+        const send = await boot(make, opened);
+        expectRefused(await send('/fallback/caught-answers', 'textPlain'), 'plain words');
+    });
+
+    it('a fallback that catches the refusal and writes nothing is answered with the refusal, not the 404', async () => {
+        const send = await boot(make, opened);
+        expectRefused(await send('/fallback/caught-silent', 'malformedJson'), '{ not json');
+    });
+
+    it('CONTROL — a fallback that never reads the body and writes nothing leaves the 404, and the 405 + Allow', async () => {
+        const send = await boot(make, opened);
+        const missing = await send('/fallback/no-read', 'malformedJson');
+        expect(missing.status, missing.text).toBe(404);
+        expect(JSON.parse(missing.text)).toEqual({ success: false, error: { code: 'ENDPOINT_NOT_FOUND', message: 'Not found' } });
+        const otherVerb = await send('/only-put', 'malformedJson');
+        expect(otherVerb.status, otherVerb.text).toBe(405);
+        expect(otherVerb.allow).toBe('PUT');
+        expect(JSON.parse(otherVerb.text)).toMatchObject({ success: false, error: { code: 'METHOD_NOT_ALLOWED' } });
+    });
+
+    it('CONTROL — a fallback that reads a valid JSON body gets the document', async () => {
+        const send = await boot(make, opened);
+        const answer = await send('/fallback/echo', 'validJson');
+        expect(answer.status, answer.text).toBe(200);
+        expect(JSON.parse(answer.text)).toEqual({ body: { title: 'adapter parity', tags: ['a', 'b'], n: 3 } });
     });
 
     it('CONTROL — an empty body is {}: none at all, an empty JSON body, an empty text/plain body', async () => {
@@ -224,6 +314,12 @@ describe('IHttpRequest.body parity: both adapters answer each body with the same
         ['/caught', 'textPlain'],
         ['/raw', 'malformedJson'],
         ['/raw', 'textPlain'],
+        ['/fallback/throw', 'malformedJson'],
+        ['/fallback/caught-answers', 'textPlain'],
+        ['/fallback/caught-silent', 'malformedJson'],
+        ['/fallback/no-read', 'malformedJson'],
+        ['/only-put', 'malformedJson'],
+        ['/fallback/echo', 'validJson'],
     ];
 
     it.each(ROWS)('%s · %s', async (path, body) => {
