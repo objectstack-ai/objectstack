@@ -171,7 +171,7 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
 
   it('reads both names over a page, one related read per reference field — never one per row', async () => {
     d.calls.length = 0;
-    const rows = await engine.find('lib_loan', { limit: 4, context: READER } as any);
+    const rows = await engine.find('lib_loan', { limit: 4, context: READER });
     expect(rows.map((r) => r.title)).toEqual(['Dune · Ann', 'Emma · Ann', 'Ulysses · Bo', 'Dune · Bo']);
     // 4 rows, 3 distinct books and 2 distinct readers: ONE read each.
     expect(relatedReads('lib_book')).toBe(1);
@@ -187,24 +187,24 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
 
   it('pages the hop: the next page reads only its own related ids', async () => {
     d.calls.length = 0;
-    const rows = await engine.find('lib_loan', { limit: 2, offset: 3, context: READER } as any);
+    const rows = await engine.find('lib_loan', { limit: 2, offset: 3, context: READER });
     expect(rows.map((r) => r.title)).toEqual(['Dune · Bo', 'Emma · Bo']);
     const bookRead = d.calls.find((c) => c.object === 'lib_book')!;
     expect([...bookRead.ast.where.id.$in].sort()).toEqual(['b1', 'b2']);
   });
 
   it('reads the hop for a projection naming only the formula, and cuts the widening back off', async () => {
-    const rows = await engine.find('lib_loan', { fields: ['title'], limit: 1, context: READER } as any);
+    const rows = await engine.find('lib_loan', { fields: ['title'], limit: 1, context: READER });
     expect(rows).toEqual([{ title: 'Dune · Ann' }]);
   });
 
   it('serves findOne', async () => {
-    const row = await engine.findOne('lib_loan', { where: { id: 'l3' }, context: READER } as any);
+    const row = await engine.findOne('lib_loan', { where: { id: 'l3' }, context: READER });
     expect(row?.title).toBe('Ulysses · Bo');
   });
 
   it("serves a write's response", async () => {
-    const created = await engine.insert('lib_loan', { book: 'b3', reader: 'r1' }, { context: READER } as any);
+    const created = await engine.insert('lib_loan', { book: 'b3', reader: 'r1' }, { context: READER });
     expect((created as Rec).title).toBe('Ulysses · Ann');
     expect((created as Rec).book).toBe('b3');
   });
@@ -225,9 +225,9 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
 
     it('a related row the caller may not read is not read through, and the formula says so', async () => {
       // The caller's own read of that reader returns nothing…
-      expect(await engine.find('lib_reader', { where: { id: 'r_hidden' }, context: READER } as any)).toEqual([]);
+      expect(await engine.find('lib_reader', { where: { id: 'r_hidden' }, context: READER })).toEqual([]);
       // …so the formula over it has no value, and no part of the hidden row leaks.
-      const row = await engine.findOne('lib_loan', { where: { id: 'l_hidden' }, context: READER } as any);
+      const row = await engine.findOne('lib_loan', { where: { id: 'l_hidden' }, context: READER });
       expect(row?.title).toBeNull();
       expect(JSON.stringify(row)).not.toContain('Hidden Person');
       const fault = faultsOn('lib_loan', 'title');
@@ -237,7 +237,7 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
     });
 
     it('SYSTEM reads it, as SYSTEM reads the reader directly', async () => {
-      const row = await engine.findOne('lib_loan', { where: { id: 'l_hidden' }, context: { isSystem: true } } as any);
+      const row = await engine.findOne('lib_loan', { where: { id: 'l_hidden' }, context: { isSystem: true } });
       expect(row?.title).toBe('Dune · Hidden Person');
     });
 
@@ -249,7 +249,7 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
           ctx.result = ctx.result.map((r: Rec) => { const { name: _masked, ...rest } = r; return rest; });
         }
       });
-      const rows = await engine.find('lib_loan', { limit: 1, context: READER } as any);
+      const rows = await engine.find('lib_loan', { limit: 1, context: READER });
       expect(rows[0].title).toBeNull();
       expect(JSON.stringify(rows)).not.toContain('Ann');
     });
@@ -259,7 +259,7 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
     it('a dangling reference reads null WITH a reason — no value is computed in its place', async () => {
       registerLoan("record.book.title + ' · ' + record.reader.?name.orValue('—')");
       d.storeFor('lib_loan').set('l_gone', { id: 'l_gone', book: 'b_gone', reader: 'r1' });
-      const row = await engine.findOne('lib_loan', { where: { id: 'l_gone' }, context: READER } as any);
+      const row = await engine.findOne('lib_loan', { where: { id: 'l_gone' }, context: READER });
       expect(row?.title).toBeNull();
       expect(faultsOn('lib_loan', 'title')[0].message).toContain("`book` (object 'lib_book')");
     });
@@ -267,14 +267,14 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
     it('an EMPTY reference is the author\'s to give a value to', async () => {
       registerLoan("record.book.title + ' · ' + record.reader.?name.orValue('—')");
       d.storeFor('lib_loan').set('l_open', { id: 'l_open', book: 'b2', reader: null });
-      const row = await engine.findOne('lib_loan', { where: { id: 'l_open' }, context: READER } as any);
+      const row = await engine.findOne('lib_loan', { where: { id: 'l_open' }, context: READER });
       expect(row?.title).toBe('Emma · —');
       expect(faultsOn('lib_loan', 'title')).toEqual([]);
     });
 
     it('a plain read through an EMPTY reference faults and names the optional read', async () => {
       d.storeFor('lib_loan').set('l_open', { id: 'l_open', book: 'b2', reader: null });
-      const row = await engine.findOne('lib_loan', { where: { id: 'l_open' }, context: READER } as any);
+      const row = await engine.findOne('lib_loan', { where: { id: 'l_open' }, context: READER });
       expect(row?.title).toBeNull();
       const fault = faultsOn('lib_loan', 'title');
       expect(fault).toHaveLength(1);
@@ -284,7 +284,7 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
 
     it('a related field the related object does not declare is named, on the right object', async () => {
       registerLoan('record.book.isbn');
-      const row = await engine.findOne('lib_loan', { where: { id: 'l1' }, context: READER } as any);
+      const row = await engine.findOne('lib_loan', { where: { id: 'l1' }, context: READER });
       expect(row?.title).toBeNull();
       expect(faultsOn('lib_loan', 'title')[0].message).toContain("'lib_book' declares no such field");
     });
@@ -294,7 +294,7 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
     it('a second hop written out is not evaluated, reads null, and says so in the lint\'s words — with no related read', async () => {
       registerLoan('record.book.shelf.code');
       d.calls.length = 0;
-      const row = await engine.findOne('lib_loan', { where: { id: 'l1' }, context: READER } as any);
+      const row = await engine.findOne('lib_loan', { where: { id: 'l1' }, context: READER });
       expect(row?.title).toBeNull();
       expect(relatedReads('lib_book')).toBe(0);
       expect(faultsOn('lib_loan', 'title')[0].message).toContain('A formula resolves ONE hop');
@@ -302,17 +302,17 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
 
     it("the related object's own-column formulas are computed on the hop read", async () => {
       registerLoan('record.book.shout');
-      const row = await engine.findOne('lib_loan', { where: { id: 'l1' }, context: READER } as any);
+      const row = await engine.findOne('lib_loan', { where: { id: 'l1' }, context: READER });
       expect(row?.title).toBe('DUNE');
     });
 
     it('a formula read through a hop serves no hop of its own (a second hop, reached through a formula)', async () => {
       // One hop from the book: served.
-      const book = await engine.findOne('lib_book', { where: { id: 'b1' }, context: READER } as any);
+      const book = await engine.findOne('lib_book', { where: { id: 'b1' }, context: READER });
       expect(book?.shelf_code).toBe('A-1');
       // Two hops from the loan: not served — the book's formula reads null on the hop read and says why.
       registerLoan('record.book.shelf_code');
-      const row = await engine.findOne('lib_loan', { where: { id: 'l1' }, context: READER } as any);
+      const row = await engine.findOne('lib_loan', { where: { id: 'l1' }, context: READER });
       expect(row?.title).toBeNull();
       expect(faultsOn('lib_book', 'shelf_code')[0].message).toContain('a formula resolves ONE hop');
     });
@@ -328,7 +328,7 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
       } as any, 'test-package');
       d.storeFor('lib_ping').set('p1', { id: 'p1', pong: 'q1' });
       d.storeFor('lib_pong').set('q1', { id: 'q1', ping: 'p1' });
-      const rows = await engine.find('lib_ping', { context: READER } as any);
+      const rows = await engine.find('lib_ping', { context: READER });
       expect(rows).toHaveLength(1);
       expect(rows[0].label).toBeNull();
     });
@@ -336,7 +336,7 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
 
   it('a formula title over lookups stays unsortable: refused by name, never silently dropped', async () => {
     await expect(
-      engine.find('lib_loan', { orderBy: [{ field: 'title', order: 'asc' }], context: READER } as any),
+      engine.find('lib_loan', { orderBy: [{ field: 'title', order: 'asc' }], context: READER }),
     ).rejects.toMatchObject({ code: 'INVALID_SORT', status: 400, field: 'title' });
   });
 });
