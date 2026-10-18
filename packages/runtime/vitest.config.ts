@@ -196,6 +196,15 @@ export default defineConfig({
       // the #4567 regression (croner rejecting the expression envelope) is
       // reproduced by the actual scheduler rather than by a double.
       { find: '@objectstack/service-job', replacement: path.resolve(__dirname, '../services/service-job/src/index.ts') },
+      // Dev-only: src/security/request-execution-context.conformance.test.ts
+      // drives the REAL settings door (`SettingsServicePlugin`'s context
+      // resolver) as one row of ruling record 6227928430's conformance test, so
+      // the row reads the door in the checkout, never a built copy of it.
+      // Anchored: the package publishes only its root entry.
+      {
+        find: /^@objectstack\/service-settings$/,
+        replacement: path.resolve(__dirname, '../services/service-settings/src/index.ts'),
+      },
       // Dev-only: app-plugin.disabled-seed.test.ts drives the REAL
       // `sys_packages` → registry rehydration (#5047), so the empty-env seed
       // regression is proven against the actual hydration code rather than a

@@ -2430,6 +2430,9 @@ importers:
       '@objectstack/service-package':
         specifier: workspace:*
         version: link:../services/service-package
+      '@objectstack/service-settings':
+        specifier: workspace:*
+        version: link:../services/service-settings
       typescript:
         specifier: ^6.0.3
         version: 6.0.3

@@ -69,6 +69,7 @@
     "@objectstack/service-job": "workspace:*",
     "@objectstack/service-messaging": "workspace:*",
     "@objectstack/service-package": "workspace:*",
+    "@objectstack/service-settings": "workspace:*",
     "typescript": "^6.0.3",
     "vitest": "^4.1.11"
   },

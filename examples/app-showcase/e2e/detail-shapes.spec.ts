@@ -111,8 +111,16 @@ test('grouped: fieldGroup sections render and Money starts collapsed', async ({ 
 
   // objectui#2577: fieldGroups[].icon renders as a real (Lucide svg) icon in
   // the section header — not as literal icon-name text.
+  // A collapsible section's header is a disclosure button named by its title
+  // (objectui#12625); the icon sits beside the title span inside it, and the
+  // chevron in a SIBLING element. So the svg is looked up under whatever
+  // element directly holds the title span: a bare `button svg` would also
+  // match the chevron and stay green with no icon at all.
   await expect(
-    page.locator('div:has(> span:text-is("Money")) svg').first(),
+    page
+      .getByRole('button', { name: 'Money' })
+      .locator('*:has(> span:text-is("Money")) svg')
+      .first(),
     'Money header icon svg',
   ).toBeVisible();
   await expect(page.getByText('banknote', { exact: true })).toHaveCount(0);
