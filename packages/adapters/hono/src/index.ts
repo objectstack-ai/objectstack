@@ -538,6 +538,40 @@ function readDispatchQuery(c: Context): Record<string, string | string[]> {
 }
 
 /**
+ * [#24245] The verb the catch-all hands `dispatch()`, and the one the auth
+ * arm's `/auth/config` branch compares: the request's own, except that a
+ * `HEAD` goes as `GET`.
+ *
+ * Hono answers a `HEAD` from the `GET` route: it routes the request as `GET`
+ * and returns that answer's status and headers with no body. `c.req.method`
+ * still reads `HEAD`, though, and the dispatcher decides a verb by comparing it
+ * with `'GET'` (a domain's `methods`, its branches, the discovery root). So the
+ * catch-all handed `dispatch()` a verb nothing serves, and a `HEAD` was not
+ * answered as its `GET`. Measured through `app.request`, `GET` vs `HEAD`:
+ * `/mcp/skill` `200` vs `405` with `Allow: GET`; `/health`, `/ready` and the
+ * scoped root `/environments/:id` `200` vs `404 ROUTE_NOT_FOUND`; signed in,
+ * `/analytics/meta` `200` vs `404`, `/ai/agents` `200` vs `501`; anonymous,
+ * `/share-links/:token/resolve` (public) `501` vs `401`; with an auth service,
+ * `/auth/config` `200` vs `404`.
+ *
+ * The standalone server hands `dispatch()` `GET` for the same request: both
+ * `IHttpServer` transports route a `HEAD` to the `GET` handler (the
+ * conformance suite pins "answers HEAD from GET routes without a body"), and
+ * the dispatcher plugin's `GET` mounts pass a literal `'GET'`. This door now
+ * does the same, so every domain answers `HEAD` exactly as it answers `GET`: a
+ * path that serves no `GET` answers its `405` and `Allow`, an anonymous caller
+ * gets the anonymous `GET` answer.
+ *
+ * Only the verb moves. `{ request: c.req.raw }` stays the client's `HEAD`
+ * request, as the standalone mounts hand theirs, so a domain that forwards
+ * the request (the `/mcp` transport, the `/approvals/act` member) sees the
+ * method that was sent. The body is dropped by Hono's `HEAD` handling.
+ */
+function dispatchedMethod(method: string): string {
+  return method === 'HEAD' ? 'GET' : method;
+}
+
+/**
  * Creates a full-featured Hono app with all ObjectStack route dispatchers.
  *
  * Only routes that need framework-specific handling (auth service,
@@ -916,7 +950,10 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       }
 
       // Handle /auth/config endpoint specifically (not handled by better-auth)
-      if (path === 'config' && method === 'GET' && authService) {
+      // [#24245] A `HEAD` is answered as this `GET` too (`dispatchedMethod`), as
+      // `plugin-auth`'s `GET` mount answers it on the standalone server; it was
+      // forwarded to better-auth instead and answered `404`.
+      if (path === 'config' && dispatchedMethod(method) === 'GET' && authService) {
         try {
           const config = (authService as any).getPublicConfig?.();
           if (config) {
@@ -1060,7 +1097,8 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
       // [#23214] A repeated name stays an array (`readDispatchQuery`).
       const queryParams = readDispatchQuery(c);
 
-      const result = await dispatcher.dispatch(method, subPath, read?.value, queryParams, { request: c.req.raw }, prefix);
+      // [#24245] A `HEAD` is dispatched as the `GET` it is answered from (`dispatchedMethod`).
+      const result = await dispatcher.dispatch(dispatchedMethod(method), subPath, read?.value, queryParams, { request: c.req.raw }, prefix);
       // [#23914] A body this adapter could not parse, READ by the domain: the
       // refusal is the answer, whatever the domain answered (see `readDispatchBody`).
       const refusal = read?.refusalRead();

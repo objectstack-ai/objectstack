@@ -498,6 +498,13 @@ const NAV_PRUNE_LOGGED = new Set<string>();
  * author exemption (the `?state=draft` read): this transport's own save-door
  * answer (`saveVerdict` in {@link handleMetadataRequest}), carried on a COPY of
  * the context — the same object serves every other consumer of this request.
+ *
+ * [#7557, #24210] `isItemOfDisabledPackage`, the layered chain's owner step:
+ * the plain read serves no `item` and its kept envelope `packageId` is one the
+ * engine registry disables ({@link isServiceItemOfDisabledPackage}), the owner
+ * `/published` asks about. A host
+ * with no registry that can answer withholds nothing, as before; a read that
+ * rejects is that fault, never "not withheld".
  */
 function metaItemReadGateSources(
     deps: DomainHandlerDeps,
@@ -520,6 +527,13 @@ function metaItemReadGateSources(
             }
         },
         navPruneLogged: NAV_PRUNE_LOGGED,
+        isItemOfDisabledPackage: async ({ type, name, packageId }) => {
+            if (typeof protocol?.getMetaItem !== 'function') return false;
+            const registry = (await deps.getObjectQL(context))?.registry;
+            if (typeof (registry as { isPackageDisabled?: unknown } | undefined)?.isPackageDisabled !== 'function') return false;
+            const envelope = await protocol.getMetaItem({ type, name, ...(packageId ? { packageId } : {}) });
+            return envelope?.item == null && isServiceItemOfDisabledPackage(registry, { _packageId: envelope?.packageId });
+        },
     };
 }
 
@@ -869,7 +883,7 @@ async function answerMetaLayered(
         });
         answer = await createMetaLayeredAnswer(
             metaItemReadGateSources(deps, context, protocol, mayWriteItem),
-            { metaType: pluralToSingular(type), name, maskPosture },
+            { metaType: pluralToSingular(type), name, ...(packageId ? { packageId } : {}), maskPosture },
         )(layered);
     } catch (e: any) {
         return withHeaders(deps.errorFromThrown(e, 500), headers);
