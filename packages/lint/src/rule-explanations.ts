@@ -3614,8 +3614,8 @@ const FORM_SECTION_GROUP_UNKNOWN_EXPLANATION: RuleExplanation = {
   paragraphs: [
     ...SECTION_GROUP_REFERENCE,
     'On a form view the reference is a section\'s `group`, in `sections` and in the legacy `groups` ' +
-      'alias alike, resolved against the object the form binds (its own `data.object`, else its ' +
-      'container\'s, else the container\'s list binding).',
+      'alias alike, resolved against the object the form binds (its own `objectName`, `object` or ' +
+      '`data.object`, else its container\'s, else the container\'s list binding).',
   ],
 };
 
