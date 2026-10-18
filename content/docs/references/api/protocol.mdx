@@ -2039,7 +2039,7 @@ The published metadata item body, opaque by ruling (1C). Shape is the item's own
 | **actor** | `string \| null` | ✅ | Who wrote this. `null` = system-initiated (boot sync, migration, scheduled job) — never a sentinel string: consumers that resolve this against `sys_user` must be able to tell "nobody" from "a user id". |
 | **message** | `string` | optional | Optional commit message recorded with the write. |
 | **ts** | `string` | ✅ | When the write happened (ISO-8601 string). |
-| **source** | `string` | ✅ | Origin label of the write: "fs", "studio", "rest", "ai", "git-import", … |
+| **source** | `string` | ✅ | Which code path wrote the event: an open label the server stamps, not an enum an author or client picks from (e.g. `protocol.saveMetaItem`, `protocol.publishMetaItem`, `migrate-stored`). The history row's stored value is passed through; `sys-metadata-repo` is the repository's own default and the answer for a row that stored none. |
 
 
 ---
