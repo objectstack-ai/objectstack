@@ -46,7 +46,10 @@ export const ORGANIZATION_OWNERSHIP_REQUIRED_MESSAGE = 'objectstack:organization
 
 export interface OrganizationOwnershipRequiredMessage {
   type: typeof ORGANIZATION_OWNERSHIP_REQUIRED_MESSAGE;
-  /** The tables the guard found still carrying a physical organization column. */
+  /**
+   * The tables the guard found still carrying a physical organization column;
+   * empty when none is left and the ceremony's marker is not verified.
+   */
   tables: string[];
 }
 

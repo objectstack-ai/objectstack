@@ -820,21 +820,40 @@ export function createHonoApp(options: ObjectStackHonoOptions): Hono {
           return c.redirect(res.url);
         }
         if (res.type === 'stream' && res.events) {
-          // SSE / Vercel Data Stream streaming response
-          const headers: Record<string, string> = {
+          /**
+           * [#24287] SSE / Vercel Data Stream / raw single-chunk response.
+           *
+           * A string event is written as given, in every mode; an object
+           * event is one SSE frame (or one JSON line in a Vercel data
+           * stream). A producer's own header replaces the default it names,
+           * matched case-insensitively. That is what the standalone server's
+           * writer does (`runtime/src/dispatcher-plugin.ts`,
+           * `sendResultBase`), and what `/mcp/skill`'s domain relies on: it
+           * serves the markdown as one string event under its own lowercase
+           * `content-type` and `cache-control`. This arm used to SSE-frame
+           * every event outside a Vercel data stream and spread those headers
+           * into a record beside its capitalised defaults, so the caller got
+           * `data: "# skill"` under a doubled `Content-Type` and
+           * `no-cache, no-store`. The `/ai` domain's two shapes reach this arm
+           * too — pre-encoded string frames with `vercelDataStream`, object
+           * parts without it — and both answer as before.
+           */
+          const headers = new Headers({
             'Content-Type': res.contentType || 'text/event-stream',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
-            ...(res.headers || {}),
-          };
+          });
+          for (const [k, v] of Object.entries(res.headers || {})) headers.set(k, String(v));
           const stream = new ReadableStream({
             async start(controller) {
               try {
                 const encoder = new TextEncoder();
                 for await (const event of res.events) {
-                  const chunk = res.vercelDataStream
-                    ? (typeof event === 'string' ? event : JSON.stringify(event) + '\n')
-                    : `data: ${JSON.stringify(event)}\n\n`;
+                  const chunk = typeof event === 'string'
+                    ? event
+                    : res.vercelDataStream
+                      ? JSON.stringify(event) + '\n'
+                      : `data: ${JSON.stringify(event)}\n\n`;
                   controller.enqueue(encoder.encode(chunk));
                 }
               } catch (err) {

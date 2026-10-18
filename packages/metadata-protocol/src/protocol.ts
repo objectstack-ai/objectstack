@@ -15847,8 +15847,21 @@ export class ObjectStackProtocolImplementation implements
             // `search` instead of a pre-built `where` routes through it anyway —
             // and leaves ONE producer of search clauses rather than two callers
             // of one helper, which is the stronger form of the same fix.
+            //
+            // [#24284] …and the cliff in (1) is now a REFUSAL one call down:
+            // the engine answers a non-blank term over an empty resolved set
+            // with `400 INVALID_FIELD` rather than every row. The skip stays,
+            // and it is what keeps the palette `200` — the sweep passes over an
+            // object with nothing to scan instead of failing on it, since this
+            // method chose the object, not the caller. So the set judged here
+            // must be the set the engine resolves: the `internal: true` columns
+            // it never scans are left out of it too, through the same flag
+            // reader the #22646 ingress gate uses. Without that, an object
+            // whose only text column is internal would pass this skip, reach
+            // `find`, and fail the whole sweep.
+            const internalFields = new Set(collectInternalWriteResponseFields(obj));
             const fieldMetaByName: Record<string, any> = {};
-            for (const f of fields) if (f?.name) fieldMetaByName[f.name] = f;
+            for (const f of fields) if (f?.name && !internalFields.has(f.name)) fieldMetaByName[f.name] = f;
             const { allowed: declaredSearchFields } = resolveSearchFieldResolution({
                 fields: fieldMetaByName,
                 searchableFields: obj.searchableFields,

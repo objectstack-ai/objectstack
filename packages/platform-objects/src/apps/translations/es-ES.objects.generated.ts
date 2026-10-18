@@ -601,6 +601,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Establecer como activa",
         successMessage: "Organización activa cambiada"
       },
+      rename_organization: {
+        label: "Renombrar organización",
+        successMessage: "Organización renombrada"
+      },
       change_slug: {
         label: "Cambiar slug",
         description: "Renombrar el slug reescribe todos los subdominios de la plataforma para esta organización y reserva el slug anterior durante 90 días. ¿Continuar?",

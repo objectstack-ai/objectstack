@@ -199,9 +199,16 @@ function companionWithinSearchFields(searchFields: readonly string[], opts: Expa
 
 /**
  * Expand a `$search` term into a `{ $or: [...] }` (single term) or
- * `{ $and: [{ $or: [...] }, ...] }` (multi-term) filter. Returns `null` when
- * there's nothing to search (empty query or no resolvable fields) so the caller
- * leaves the existing filter untouched.
+ * `{ $and: [{ $or: [...] }, ...] }` (multi-term) filter. Returns `null` in
+ * two cases, and they are NOT the same answer one layer up:
+ *
+ * - an empty or whitespace query — not a search at all, so the caller leaves
+ *   the existing filter untouched;
+ * - [#24284] a real term over an EMPTY resolved field set — a search that
+ *   cannot be honoured. The engine's one caller (`expandSearchOnAst`) refuses
+ *   that with `400 INVALID_FIELD` rather than leaving `where` untouched, which
+ *   would answer the search with every row. This function stays pure and
+ *   non-throwing; the judgement lives at the call site every verb reaches.
  */
 export function expandSearchToFilter(raw: unknown, opts: ExpandSearchOptions): any | null {
   const { query, fields: requested } = normalizeSearch(raw);

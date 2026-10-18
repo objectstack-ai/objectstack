@@ -15,6 +15,11 @@ export * from './auth-plugin.js';
 export * from './identity-objects-plugin.js';
 export * from './auth-manager.js';
 export * from './ensure-default-organization.js';
+// [ADR-0131 D3 / D10 fate 3] The Default Organization's boot invariant, for the
+// v18 organization-ownership ceremony (`os migrate organization-ownership
+// --apply`), whose attribution needs the owner before its first write; see the
+// module header for why no host composing a kernel calls it.
+export { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
 // ADR-0093 D7 — the default-org bootstrap with its owner bind decided once;
 // the walled `@objectstack/organizations` wiring calls the same gate.
 export * from './default-org-bootstrap-once.js';
