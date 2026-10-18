@@ -152,16 +152,34 @@ describe('[#13906 / 1A] HttpDispatcher.resolveRequestScope — the tenancy postu
         expect(absentCtx.executionContext.userId).toBe('u_exmember');
     });
 
-    it('every OTHER fault of the identity step still degrades to anonymous — only the branded outage is re-raised', async () => {
-        // The net around the identity step keeps its fail-closed shape for
-        // everything except the one class the ruling requires to stay loud:
-        // an engine whose `find` throws a plain Error is not an authz-store
-        // outage (the API-key lookup fails closed to "no key"), so the request
-        // resolves as a guest exactly as before.
+    it('[#24299] a plain engine fault on the `sys_api_key` read is the branded outage too — a key whose read failed is no "no key"', async () => {
+        // SUPERSEDED PIN, quoted — what origin/main answered on this wiring,
+        // when the key read sat in a bare `catch` answering "no key":
+        //     await dispatcherOn(kernel).resolveRequestScope(context, '/data/task');   // resolved
+        //     expect(context.executionContext.userId).toBeUndefined();                // a guest
+        // The same "no key" let a cookie beside the key answer for it.
         const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as any);
         kernel.registerService('objectql', { find: async () => { throw new Error('plain engine fault'); } });
         kernel.registerService('tenancy', { posture: 'isolated' });
         const context = requestWith({ 'x-api-key': RAW_EXMEMBER });
+        const err: any = await rejectionOf(dispatcherOn(kernel).resolveRequestScope(context, '/data/task'));
+        expect(isAuthzStoreUnavailableError(err)).toBe(true);
+        expect(err.status).toBe(503);
+        expect(err.object).toBe('sys_api_key');
+        expect(context.executionContext).toBeUndefined();
+    });
+
+    it('every OTHER fault of the identity step still degrades to anonymous — only the branded outage is re-raised', async () => {
+        // The net around the identity step keeps its fail-closed shape for
+        // everything except the one class the ruling requires to stay loud:
+        // a session read that throws is no authz-store outage (the session
+        // arm answers "no session"), so the request resolves as a guest
+        // exactly as before.
+        const kernel = new ObjectKernel({ skipSystemValidation: true, gracefulShutdown: false } as any);
+        kernel.registerService('objectql', qlWith());
+        kernel.registerService('tenancy', { posture: 'isolated' });
+        kernel.registerService('auth', { api: { getSession: async () => { throw new Error('plain session fault'); } } });
+        const context = requestWith({ cookie: 'session=1' });
         await dispatcherOn(kernel).resolveRequestScope(context, '/data/task');
         expect(context.executionContext).toBeDefined();
         expect(context.executionContext.userId).toBeUndefined();
