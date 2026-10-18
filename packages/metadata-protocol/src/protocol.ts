@@ -25995,6 +25995,13 @@ export class ObjectStackProtocolImplementation implements
                                 + `(${dropped.reason}): this caller cannot set the field; the backfill stopped there.`,
                             ), { status: 403 });
                         }
+                        const kept = (r as { data?: Record<string, unknown> }).data;
+                        if (kept && Object.prototype.hasOwnProperty.call(kept, e.field) && kept[e.field] == null) {
+                            throw Object.assign(new Error(
+                                `Record '${String(r.id)}' of '${e.object}' was written with '${e.field}' left empty, so a `
+                                + 'hook or rule on the object cleared it; the backfill stopped there.',
+                            ), { status: 422 });
+                        }
                         written.add(String(r.id));
                         updated++;
                     }
