@@ -653,20 +653,26 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
       'The identity that write was recorded under: the save\'s `actor`, the value its history event '
       + 'carries. `null` when the write recorded none, never a sentinel string.',
     ),
-    at: z.string().datetime().describe('When that write happened (ISO-8601 instant).'),
+    at: z.string().datetime().describe(
+      'When that write happened: an ISO-8601 instant in UTC, written with `Z` (the form '
+      + '`toISOString()` produces). An offset or a local time is refused.',
+    ),
   }).describe('One changed key path of the pending draft, and the last write that changed it.'))
     .optional().describe(
       'Per-key provenance of the pending draft: which authoring surface last changed each key path of '
-      + '`item`, under which actor, and when. A write is compared with the body it replaced (the '
-      + 'previous draft, or the published body for the draft\'s first save). Kept from the first '
-      + 'recorded save until the draft is published or discarded, which remove the draft row and these '
-      + 'entries with it. No two entries share a path, and a write replaces every entry at or under a '
-      + 'path it changes, so the last write to change a key is the entry whose `path` is the longest '
-      + 'prefix of that key\'s path; entries under a key\'s path are changes inside it. It records which '
-      + 'writes changed what; it is not a list of every difference from the published body (compare the '
-      + 'two bodies for that). Present only on a `?state=draft` read that answers a stored draft row. '
-      + 'ABSENT on the active read, the cached branch and a `?preview=draft` read, and for a draft row '
-      + 'whose saves recorded none: absence means "not recorded", never "no changes".',
+      + '`item`, under which actor, and when. No server writes the key yet: until the engine\'s draft '
+      + 'save records it, every draft read is one whose saves recorded none, and the key is absent. '
+      + 'The contract a writer must meet: it compares each draft save with the body that save replaced '
+      + '(the previous draft, or the published body for the draft\'s first save); it keeps the entries '
+      + 'from the first recorded save until the draft is published or discarded, which remove the draft '
+      + 'row and the entries with it; and it keeps no two entries on one path, replacing every entry at '
+      + 'or under a path a save changes, so the last write to change a key is the entry whose `path` is '
+      + 'the longest prefix of that key\'s path, and entries under a key\'s path are changes inside it. '
+      + 'The entries name which writes changed what; they are not a list of every difference from the '
+      + 'published body (compare the two bodies for that). Served only on a `?state=draft` read that '
+      + 'answers a stored draft row. ABSENT on the active read, the cached branch and a '
+      + '`?preview=draft` read, and for a draft row whose saves recorded none: absence means "not '
+      + 'recorded", never "no changes".',
     ),
 }));
 
