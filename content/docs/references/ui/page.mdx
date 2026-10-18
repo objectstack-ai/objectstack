@@ -250,7 +250,7 @@ View filter rule
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Region name — a slot the page's `template` places: header, sidebar, main, aside or footer on 'default' and 'three-column'; header, sidebar or main on 'header-sidebar-main'; any name on 'dashboard' (header and footer span it, every other region is a grid cell). One region per slot. A name the template does not place, and a second region filling a slot already filled, are refused. |
-| **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional |  |
+| **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional | Region width. A region named `main` takes only 'full', which is page-wide: the page drops its max-width cap and fills the screen. 'small', 'medium' and 'large' are refused on `main`, because a `main` region is drawn at the width its template leaves it: beside `sidebar` and `aside` it takes the space they leave, and on 'dashboard' it is one grid cell. |
 | **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
 
 ### Nested Shape: `Page.interfaceConfig`
@@ -468,7 +468,7 @@ Sort field and direction pair
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | **name** | `string` | ✅ | Region name — a slot the page's `template` places: header, sidebar, main, aside or footer on 'default' and 'three-column'; header, sidebar or main on 'header-sidebar-main'; any name on 'dashboard' (header and footer span it, every other region is a grid cell). One region per slot. A name the template does not place, and a second region filling a slot already filled, are refused. |
-| **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional |  |
+| **width** | `Enum<'small' \| 'medium' \| 'large' \| 'full'>` | optional | Region width. A region named `main` takes only 'full', which is page-wide: the page drops its max-width cap and fills the screen. 'small', 'medium' and 'large' are refused on `main`, because a `main` region is drawn at the width its template leaves it: beside `sidebar` and `aside` it takes the space they leave, and on 'dashboard' it is one grid cell. |
 | **components** | `{ type: Enum<'page:header' \| 'page:footer' \| 'page:sidebar' \| 'page:tabs' \| 'page:accordion' \| …> \| string; id?: string; label?: string \| Record<string, string>; properties?: Record<string, any>; … }[]` | ✅ | Components in this region |
 
 ### Nested Shape: `PageRegion.components[number]`
