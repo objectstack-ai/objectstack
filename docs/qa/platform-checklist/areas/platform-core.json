@@ -1263,7 +1263,7 @@
         "ADR-0090 (audience vocabulary)",
         "ADR-0049 (fail closed — unresolvable holdings deny)",
         "packages/spec/src/system/book.zod.ts#audienceAllows — audienceAllows / resolveDocAudiences / docAudienceAllows / resolveBookClaimedDocs / deriveImplicitPackageBook / resolveBookTree (UNCATEGORIZED_KEY exclusion)",
-        "packages/rest/src/rest-server.ts#metaPath — GET <metaPath>/book/:name/tree (audience gate, per-entry filter, resolveDocLocale, refuseRepeatedQueryParams)",
+        "packages/rest/src/meta-item-read-routes.ts#registerMetaItemReadRoutes — GET <metaPath>/book/:name/tree (audience gate, per-entry filter, resolveDocLocale, refuseRepeatedQueryParams)",
         "#2774 (feat(security)!: enforce book audience at the REST read layer)",
         "packages/spec/liveness/book.json + doc.json (the ledgers whose coverage.json waivers this item retires)"
       ],

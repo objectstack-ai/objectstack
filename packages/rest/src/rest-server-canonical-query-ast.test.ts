@@ -178,6 +178,10 @@ interface CensusEntry {
  * no `query:` slot. The per-type list's one `query` key sits mid-line in the
  * list chain's options literal, which `querySlots` (a line-initial `query:`)
  * does not read, as before the move, so the moved module's floor is 0.
+ *
+ * [#23050 slice 13b] 4 = 0 + 3 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0 + 0,
+ * unchanged: the per-item reads (`meta-item-read-routes.ts`) build no `query:`
+ * slot either, so the moved module's floor is 0.
  */
 const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, number>> = {
     'rest-server.ts': 0,
@@ -194,6 +198,7 @@ const REGISTRAR_QUERY_SLOT_FLOORS: Readonly<Record<RestServerRegistrarFile, numb
     'form-routes.ts': 0,
     'crud-routes.ts': 1,
     'meta-collection-routes.ts': 0,
+    'meta-item-read-routes.ts': 0,
 };
 
 const CENSUS: CensusEntry[] = [
@@ -393,7 +398,9 @@ describe('[#16638] §1 CONTROLS on the census instrument itself', () => {
         // from `rest-server.ts` to `crud-routes.ts`).
         // [#23050 slice 13a] Length 13 → 14, the sum unchanged (the moved `/meta`
         // groups carry no slot).
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(14);
+        // [#23050 slice 13b] Length 14 → 15, the sum unchanged (the per-item reads
+        // carry no slot).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(15);
         expect(Object.keys(REGISTRAR_QUERY_SLOT_FLOORS).sort()).toEqual([...REST_SERVER_REGISTRAR_FILES].sort());
         expect(CENSUS.filter(({ file }) => REGISTRAR_SOURCES.has(file)).map(({ file }) => file))
             .toEqual([...REST_SERVER_REGISTRAR_FILES]);

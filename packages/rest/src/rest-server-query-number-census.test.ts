@@ -343,7 +343,11 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // (`meta-collection-routes.ts`): the type list, the whole-store family and
         // the per-type list coerce no number of the query:
         // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 13 → 14.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(14);
+        // [#23050 slice 13b] Nor do the per-item reads (`meta-item-read-routes.ts`):
+        // the reference sweep, the layered read, the book tree and the item read
+        // coerce no number of the query:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 14 → 15.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(15);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });
