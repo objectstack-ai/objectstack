@@ -1128,8 +1128,8 @@ the tolerant intersection, but not a search with nothing to scan: when no
 `searchableFields` entry names a stored field and the auto-default finds none
 (`internal: true` fields never count), the engine itself refuses a non-blank `search`
 with `400 INVALID_FIELD` (`param: 'search'`) on `find`, `findOne`, `count` and
-`aggregate` alike, rather than answering every row. Multiple whitespace-separated
-terms are AND-ed and fields are OR-ed. Case sensitivity comes from the operator the expansion emits, not
+`aggregate` alike, rather than answering every row. Multiple whitespace-separated terms are AND-ed and
+fields are OR-ed. Case sensitivity comes from the operator the expansion emits, not
 from the expansion: it emits `$icontains`, which ignores **ASCII case** by the
 rule in [Case Sensitivity](#case-sensitivity) above. So a user typing `acme` does
 find `ACME Corp` — search is case-insensitive by ruling
