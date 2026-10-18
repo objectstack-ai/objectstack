@@ -150,11 +150,11 @@ async function liveObjectWithRows(rig: Awaited<ReturnType<typeof makeRig>>, n: n
     await draftObject(rig.protocol, TITLE);
     const first = await rig.protocol.publishPackageDrafts({ packageId: PKG });
     expect(first.outcome).toBe('published');
-    for (let i = 1; i <= n; i++) await rig.engine.insert(OBJ, { title: `r${i}` }, { context: { isSystem: true } } as any);
+    for (let i = 1; i <= n; i++) await rig.engine.insert(OBJ, { title: `r${i}` }, { context: { isSystem: true } });
 }
 
 async function rows(rig: Awaited<ReturnType<typeof makeRig>>) {
-    return (await rig.engine.find(OBJ, { context: { isSystem: true } } as any)) as Array<Record<string, unknown>>;
+    return (await rig.engine.find(OBJ, { context: { isSystem: true } })) as Array<Record<string, unknown>>;
 }
 
 /** The ADR-0112 envelope a refusal carries — its `code`, `status` and per-entry `issues[]`. */
