@@ -1087,6 +1087,70 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     expect(localeCalls()).toBe(1);
   });
 
+  // [#24235] The held locale is retired by a write to either settings store;
+  // the real-engine pin is `audit-write-locale-settings-seam.integration.test.ts`.
+  // These two hold what it cannot reach: the global rung's own store, and a
+  // write landing while a lookup is still in flight.
+  const settingsWrite = (object: string) => ({
+    object,
+    input: {},
+    result: { id: 's-1', namespace: 'localization', key: 'locale' },
+    previous: { id: 's-1', namespace: 'localization', key: 'locale' },
+    session: {},
+  });
+  const summaryOf = (created: CapturedRow[], name: string) =>
+    created.find((c) => c.object === 'sys_activity' && c.row.record_label === name)?.row.summary;
+
+  it('[#24235] a write to either settings store retires the held locale; without one it is held', async () => {
+    for (const store of [undefined, 'sys_setting', 'sys_platform_setting']) {
+      const { engine, fire, created } = makeEngine(WITH_QUALIFICATION);
+      let locale: string | undefined;
+      installAuditWriters(engine as any, 'test.audit', { getI18n: () => makeI18n() as any, getLocale: async () => locale });
+      await fire('afterInsert', insertCtx());
+      locale = 'zh-CN';
+      if (store) await fire('afterUpdate', settingsWrite(store));
+      await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
+      expect(summaryOf(created, 'OC-00001'), String(store)).toBe('Created person_qualification "OC-00001"');
+      // The control (`undefined`: no settings write) still answers from the held locale.
+      expect(summaryOf(created, 'OC-00002'), String(store)).toBe(
+        store ? '创建了 人员资质 "OC-00002"' : 'Created person_qualification "OC-00002"',
+      );
+    }
+  });
+
+  it('[#24235] a settings write landing while the lookup is in flight leaves the pre-write answer unheld', async () => {
+    const { engine, fire, created } = makeEngine(WITH_QUALIFICATION);
+    let entered!: () => void;
+    const lookupStarted = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release!: () => void;
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    installAuditWriters(engine as any, 'test.audit', {
+      getI18n: () => makeI18n() as any,
+      getLocale: async () => {
+        calls += 1;
+        if (calls === 1) {
+          entered();
+          await inFlight; // read before the write below, answered after it
+          return undefined;
+        }
+        return 'zh-CN';
+      },
+    });
+    const first = fire('afterInsert', insertCtx());
+    await lookupStarted;
+    await fire('afterUpdate', settingsWrite('sys_setting'));
+    release();
+    await first;
+    await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
+    expect(summaryOf(created, 'OC-00001')).toBe('Created person_qualification "OC-00001"');
+    expect(summaryOf(created, 'OC-00002')).toBe('创建了 人员资质 "OC-00002"');
+  });
+
   // Collaboration notification titles (assignment / @mention) are localized to
   // the RECIPIENT's locale with the same key shapes, and fall back to the
   // authored object label (not the API name) in English.
