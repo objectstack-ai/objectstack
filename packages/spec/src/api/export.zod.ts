@@ -250,7 +250,7 @@ export type ImportMappingParsed = z.infer<typeof ImportMappingSchema>;
  * {
  *   format: 'csv', csv: 'Name,Owner,Stage\nAcme,jane@x.com,Won',
  *   mapping: { Name: 'name', Owner: 'owner', Stage: 'stage' },
- *   writeMode: 'upsert', matchFields: ['name'], runAutomations: false,
+ *   writeMode: 'upsert', matchFields: ['name'],
  * }
  */
 export const ImportRequestSchema = lazySchema(() => z.object({
@@ -288,13 +288,16 @@ export const ImportRequestSchema = lazySchema(() => z.object({
     .describe(
       'Fire triggers/hooks for each imported row. ON by default, and opting out must be ' +
       'explicit: automations always ran on import historically (the engine ignored this flag ' +
-      'until this flag was honoured), so a caller that wants a silent bulk load sends `runAutomations: false` — ' +
-      'omitting the key runs them. This matches platform convention (Salesforce fires triggers ' +
-      'on import by default). One boundary: a `dryRun` preview runs NO automations whatever ' +
-      'this flag says.',
+      'until this flag was honoured), so omitting the key runs them. This matches platform ' +
+      'convention (Salesforce fires triggers on import by default). Only the system principal (an ' +
+      'in-process caller such as a seed or migration job) may send `runAutomations: false`, because ' +
+      'it takes the object\'s triggers and metadata-bound hooks, its approvals and record freezes ' +
+      'among them, off every row: the import doors refuse it from every other caller, every ' +
+      'signed-in user and administrator included, with `403 PERMISSION_DENIED` before any row is ' +
+      'read. One boundary: a `dryRun` preview runs NO automations whatever this flag says.',
     ),
   treatAsHistorical: z.boolean().default(false)
-    .describe('Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates; and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them. Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped.'),
+    .describe('Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates; and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them. Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped. Only the system principal (an in-process caller such as a seed or migration job) may send `treatAsHistorical: true`: the import doors refuse it from every other caller, every signed-in user and administrator included, with `403 PERMISSION_DENIED` before any row is read.'),
   trimWhitespace: z.boolean().default(true)
     .describe('Trim leading/trailing whitespace from string cells'),
   nullValues: z.array(z.string()).optional()
