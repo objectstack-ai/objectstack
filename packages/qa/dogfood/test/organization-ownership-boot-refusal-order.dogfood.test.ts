@@ -41,7 +41,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
 import {
   OrganizationOwnershipBootGuardPlugin,
-  organizationOwnershipBootRefusalIn,
+  isOrganizationOwnershipBootRefusal,
 } from '@objectstack/runtime';
 import { bootShowcase } from './showcase-boot.js';
 
@@ -56,6 +56,14 @@ const columnsOf = (file: string, table: string): string[] => {
     db.close();
   }
 };
+
+/** The guard's refusal down a failed boot's `cause` chain (the kernel reports a failed `start()` as its own error). */
+function refusalIn(error: unknown): unknown {
+  for (let e = error, depth = 0; !!e && typeof e === 'object' && depth < 8; e = (e as { cause?: unknown }).cause, depth++) {
+    if (isOrganizationOwnershipBootRefusal(e)) return e;
+  }
+  return undefined;
+}
 
 /** A v18 boot of the showcase over `file`, the guard composed as `os serve` composes it; the refusal, or null. */
 async function boot(file: string): Promise<unknown> {
@@ -100,7 +108,7 @@ describe('[ADR-0131 D10 item 5] a 17.x database upgrades through the boot refusa
     seed.close();
     expect(columnsOf(file, 'sys_user_permission_set')).not.toContain('permission_set');
 
-    refusal = organizationOwnershipBootRefusalIn(await boot(file));
+    refusal = refusalIn(await boot(file));
     expect(refusal, 'the boot was refused for the v17 shape').toBeDefined();
     expect(String((refusal as Error).message)).toContain('os migrate organization-ownership');
     expect((refusal as { tables?: string[] }).tables).toEqual(expect.arrayContaining(['sys_metadata', 'sys_migration_journal']));

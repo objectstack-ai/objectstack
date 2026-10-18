@@ -18,7 +18,6 @@ import {
   assertOrganizationOwnershipMigrated,
   isOrganizationOwnershipBootRefusal,
   OrganizationOwnershipBootGuardPlugin,
-  organizationOwnershipBootRefusalIn,
   ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME,
   ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE,
 } from './organization-ownership-boot-guard.js';
@@ -224,16 +223,6 @@ describe('the v18 boot refusal (ADR-0131 D10 item 5)', () => {
     expect(new AppPlugin({}).optionalDependencies).toContain(ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME);
   });
 
-  it('a host that asks the failed boot finds the refusal down the cause chain the kernel wraps it in', async () => {
-    v17Shape();
-    const refusal = await refusalOf(() => assertOrganizationOwnershipMigrated(engine()));
-    const wrapped = Object.assign(new Error(`Plugin ${ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME} failed to start - rollback complete: ${refusal.message}`), { cause: refusal });
-    expect(isOrganizationOwnershipBootRefusal(wrapped)).toBe(false);
-    expect(organizationOwnershipBootRefusalIn(wrapped)).toBe(refusal);
-    expect(organizationOwnershipBootRefusalIn(refusal)).toBe(refusal);
-    expect(organizationOwnershipBootRefusalIn(new Error('some other boot failure', { cause: new Error('deeper') }))).toBeUndefined();
-    expect(organizationOwnershipBootRefusalIn(undefined)).toBeUndefined();
-  });
 
   it('no escape hatch: no environment variable stands the refusal down', async () => {
     v17Shape();

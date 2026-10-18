@@ -69,7 +69,8 @@ import {
  * Default Organization), and `os serve` composes it ahead of the rest. A
  * `start()` that throws stops the kernel before the next plugin starts; the
  * kernel hands the refusal on as the `cause` of its own start-failure error
- * ({@link organizationOwnershipBootRefusalIn} finds it there).
+ * ("Plugin … failed to start"), so a host that inspects the boot error asks
+ * {@link isOrganizationOwnershipBootRefusal} of each `cause` down the chain.
  *
  * ## Where it runs, and where it must not
  *
@@ -90,6 +91,8 @@ export const ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE = 'ORGANIZATION_OWNERSHIP_
  * The guard's kernel plugin name: a plugin that writes rows in its `start()`
  * names it in `optionalDependencies`, so on a kernel that composes the guard it
  * starts only once the guard has judged the database (ADR-0116 ordering).
+ * Package-internal (`AppPlugin` reads it); a plugin in another package spells
+ * the name.
  */
 export const ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME = 'com.objectstack.organization-ownership-boot-guard' as const;
 
@@ -129,21 +132,6 @@ export function isOrganizationOwnershipBootRefusal(error: unknown): error is Org
   return !!error && typeof error === 'object' && (error as { code?: unknown }).code === ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE;
 }
 
-/**
- * The refusal a failed boot carries, wherever it sits: the error itself, or a
- * `cause` down its chain. The guard refuses from its `start()`, and the kernel
- * reports a failed `start()` as its own error ("Plugin … failed to start")
- * with the plugin's error as the `cause`, so a host that asks only the top
- * error misses it. `undefined` when the boot failed for any other reason.
- */
-export function organizationOwnershipBootRefusalIn(error: unknown): OrganizationOwnershipBootRefusal | undefined {
-  let current: unknown = error;
-  for (let depth = 0; depth < 8 && current && typeof current === 'object'; depth++) {
-    if (isOrganizationOwnershipBootRefusal(current)) return current;
-    current = (current as { cause?: unknown }).cause;
-  }
-  return undefined;
-}
 
 type Dialect = 'sqlite' | 'postgres' | 'mysql';
 

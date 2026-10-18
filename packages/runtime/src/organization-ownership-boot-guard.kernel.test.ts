@@ -38,13 +38,26 @@ import { createIdentityObjectsPlugin } from '@objectstack/plugin-auth';
 import { AppPlugin } from './app-plugin.js';
 import { DriverPlugin } from './driver-plugin.js';
 import {
+  isOrganizationOwnershipBootRefusal,
   ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE,
-  organizationOwnershipBootRefusalIn,
   OrganizationOwnershipBootGuardPlugin,
+  type OrganizationOwnershipBootRefusal,
 } from './organization-ownership-boot-guard.js';
 
 const dirs: string[] = [];
 const kernels: ObjectKernel[] = [];
+
+/**
+ * The refusal a failed boot carries. The guard refuses from its `start()`, and
+ * the kernel reports a failed `start()` as its own error with the plugin's as
+ * the `cause` — the shape a host that composes the guard reads.
+ */
+function refusalIn(error: unknown): OrganizationOwnershipBootRefusal | undefined {
+  for (let e = error, depth = 0; !!e && typeof e === 'object' && depth < 8; e = (e as { cause?: unknown }).cause, depth++) {
+    if (isOrganizationOwnershipBootRefusal(e)) return e;
+  }
+  return undefined;
+}
 const MARKER = 'adr-0131-organization-ownership';
 
 function databaseFile(): string {
@@ -131,9 +144,12 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     const file = databaseFile();
     seedV17Shape(file);
     const { kernel, error } = await boot(file);
-    const refusal = organizationOwnershipBootRefusalIn(error);
+    const refusal = refusalIn(error);
     expect(refusal?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
     expect(refusal?.tables).toEqual(['sys_migration_journal']);
+    // Refused in `start()`: the kernel's start-failure error carries it as its cause.
+    expect((error as Error).message).toMatch(/^Plugin com\.objectstack\.organization-ownership-boot-guard failed to start/);
+    expect((error as Error).cause).toBe(refusal);
     expect(kernel.getState()).not.toBe('running');
   });
 
@@ -149,7 +165,7 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     const file = databaseFile();
     seedV17Shape(file, { verifiedAt: null });
     const { error } = await boot(file);
-    expect(organizationOwnershipBootRefusalIn(error)?.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
+    expect(refusalIn(error)?.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
   });
 
   it('⭐ a fresh database boots', async () => {
@@ -164,7 +180,7 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     writeMarker(db, null, 602);
     db.close();
     const { kernel, error } = await boot(file);
-    const refusal = organizationOwnershipBootRefusalIn(error);
+    const refusal = refusalIn(error);
     expect(refusal?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
     expect(refusal?.tables).toEqual([]);
     expect(refusal?.message).toMatch(/^The organization-ownership ceremony has not finished on this database: its marker/);
@@ -186,7 +202,7 @@ describe('a refused boot writes nothing (ADR-0131 D10 item 5: the guard judges b
     const file = databaseFile();
     seedV17Shape(file);
     const { kernel, error } = await boot(file, { writers: true });
-    expect(organizationOwnershipBootRefusalIn(error)?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
+    expect(refusalIn(error)?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
     expect(kernel.getState()).not.toBe('running');
     // The engine's additive schema sync ran before the refusal (the ceremony's
     // rewrite step waits for it); the rows did not.

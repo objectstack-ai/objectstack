@@ -5793,8 +5793,12 @@ export default class Serve extends Command {
       // so the kernel hands it on as the `cause` of its own start-failure
       // error: the refusal is looked for down the chain, and its own text is
       // what this boot prints.
-      const { organizationOwnershipBootRefusalIn } = await import('@objectstack/runtime');
-      const ownershipRefusal = organizationOwnershipBootRefusalIn(error);
+      const { isOrganizationOwnershipBootRefusal } = await import('@objectstack/runtime');
+      let ownershipRefusal: { tables: readonly string[]; message: string } | undefined;
+      for (let cause: unknown = error, depth = 0; !ownershipRefusal && cause && typeof cause === 'object' && depth < 8; depth++) {
+        if (isOrganizationOwnershipBootRefusal(cause)) ownershipRefusal = cause;
+        cause = (cause as { cause?: unknown }).cause;
+      }
       if (ownershipRefusal && isDev && typeof process.send === 'function') {
         const sent = await announceOrganizationOwnershipRequired([...ownershipRefusal.tables]);
         if (sent) this.exit(1);

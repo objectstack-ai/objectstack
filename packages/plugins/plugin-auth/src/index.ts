@@ -20,7 +20,6 @@ export * from './ensure-default-organization.js';
 // --apply`), whose attribution needs the owner before its first write; see the
 // module header for why no host composing a kernel calls it.
 export { ensureDefaultOrganizationExists } from './default-organization-invariant.js';
-export type { DefaultOrganizationInvariantResult } from './default-organization-invariant.js';
 // ADR-0093 D7 — the default-org bootstrap with its owner bind decided once;
 // the walled `@objectstack/organizations` wiring calls the same gate.
 export * from './default-org-bootstrap-once.js';

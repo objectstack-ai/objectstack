@@ -52,7 +52,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ORGANIZATION_OWNERSHIP_MIGRATION_ID } from '@objectstack/spec/system';
 import { bootStack } from '@objectstack/verify';
-import { OrganizationOwnershipBootGuardPlugin, organizationOwnershipBootRefusalIn } from '@objectstack/runtime';
+import { isOrganizationOwnershipBootRefusal, OrganizationOwnershipBootGuardPlugin } from '@objectstack/runtime';
 import { isExitSignal } from '../../utils/format.js';
 
 // Pay the first transform of the dist-resolved workspace deps the boots reach
@@ -137,7 +137,7 @@ async function run(args: string[]): Promise<{ payload: any; exitCode: number }> 
   }
 }
 
-/** A served boot over the file with the v18 guard composed (`os serve`'s refusal); the refusal, or null once it started and stopped. */
+/** A served boot over the file with the v18 guard composed (`os serve`'s refusal); the error it failed with, or null once it started and stopped. */
 async function guardedBoot(): Promise<unknown> {
   try {
     const stack = await bootStack(stackConfig(), { databaseFile: file, extraPlugins: [new OrganizationOwnershipBootGuardPlugin({ dev: true })] });
@@ -146,6 +146,14 @@ async function guardedBoot(): Promise<unknown> {
   } catch (error) {
     return error;
   }
+}
+
+/** The guard's refusal down a failed boot's `cause` chain (the kernel reports a failed `start()` as its own error). */
+function refusalIn(error: unknown): { code: string; tables: readonly string[] } | undefined {
+  for (let e = error, depth = 0; !!e && typeof e === 'object' && depth < 8; e = (e as { cause?: unknown }).cause, depth++) {
+    if (isOrganizationOwnershipBootRefusal(e)) return e;
+  }
+  return undefined;
 }
 
 describe('os migrate organization-ownership on a single-posture database that holds no organization', () => {
@@ -214,7 +222,7 @@ describe('os migrate organization-ownership on a single-posture database that ho
 
     // ⭐ The boot it prescribes: refused, having written no row.
     const before = rowCounts();
-    const refusal = organizationOwnershipBootRefusalIn(await guardedBoot());
+    const refusal = refusalIn(await guardedBoot());
     expect(refusal?.code).toBe('ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED');
     expect(refusal?.tables).toContain('sys_job');
     expect(sql('SELECT name FROM pragma_table_info(?)', 'sys_user_permission_set').map((c) => c.name)).toContain('permission_set');
