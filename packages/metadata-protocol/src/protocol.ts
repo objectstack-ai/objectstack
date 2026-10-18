@@ -171,6 +171,7 @@ import {
     type QueryAliasConflict,
     type DroppedFieldsEvent, type QueryAST, type EngineQueryOptionsParsed,
     type ValidationAdvisoryEvent,
+    discriminateDefaultValueShape,
 } from '@objectstack/spec/data';
 import { PLURAL_TO_SINGULAR, SINGULAR_TO_PLURAL, canonicalMetaUrlType, metaUrlSpellingRefusal, unrecognisedMetaTypeRefusal, METADATA_ITEM_NAME_PATTERN } from '@objectstack/spec/shared';
 // [#13331] The cluster fan-out transport type only — the protocol never
@@ -1319,6 +1320,115 @@ interface MetadataIssueEntry {
     path: string;
     message: string;
     code: string | undefined;
+}
+
+/**
+ * [#24253] One field a `publishPackageDrafts` backfill will write: the entry as
+ * the request named it, plus the literal its draft declares. Built only by
+ * `planPublishBackfill`, so every value here was judged before the publish.
+ */
+interface PublishBackfillEntry {
+    object: string;
+    field: string;
+    value: unknown;
+}
+
+/**
+ * [#24253] The `backfillApplied` receipt of `publishPackageDrafts`, declared as
+ * `PublishPackageDraftsResponseSchema.backfillApplied` in `@objectstack/spec/api`.
+ * `updated` counts the rows this publish wrote, so a row that already held a
+ * value (a database column DEFAULT fills one on the SQL driver) is not counted.
+ */
+type PublishBackfillReceipt = {
+    success: boolean;
+    fields: Array<{ object: string; field: string; updated: number; error?: string; code?: string }>;
+};
+
+/** [#24253] Rows read and written per round of one field's backfill. */
+const PUBLISH_BACKFILL_PAGE_SIZE = 200;
+
+/**
+ * [#24253] The 400 a `publishPackageDrafts` backfill request is refused with:
+ * every entry that cannot be honoured, by path, in one answer, before anything
+ * is promoted or written. The headline names the first; `issues[]` names all.
+ */
+function publishBackfillRefusal(
+    packageId: string,
+    issues: MetadataIssueEntry[],
+): Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] } {
+    const first = issues[0]!;
+    const err = new Error(
+        `Nothing was published: the backfill of package '${packageId}' cannot be honoured `
+        + `(${issues.length} ${issues.length === 1 ? 'problem' : 'problems'}; first at ${first.path}: ${first.message}) `
+        + 'Fix or drop the named entries and publish again.',
+    ) as Error & { code: 'VALIDATION_ERROR'; status: 400; issues: MetadataIssueEntry[] };
+    err.code = 'VALIDATION_ERROR';
+    err.status = 400;
+    err.issues = issues;
+    return err;
+}
+
+/**
+ * [#24253] The shape half of the backfill judgement: an array of
+ * `{ object, field }` pairs, each named once, and the caller's context to write
+ * as. Read before any server state, so a malformed request is refused the same
+ * way whatever the package holds. Absent is nothing asked; so is `[]`.
+ */
+function readPublishBackfillRequest(
+    packageId: string,
+    backfill: unknown,
+    context: unknown,
+): Array<{ object: string; field: string }> {
+    if (backfill === undefined) return [];
+    const issues: MetadataIssueEntry[] = [];
+    if (!Array.isArray(backfill)) {
+        throw publishBackfillRefusal(packageId, [{
+            path: 'backfill',
+            message: 'Must be an array of { object, field } pairs naming the fields this publish adds.',
+            code: 'invalid_type',
+        }]);
+    }
+    const entries: Array<{ object: string; field: string }> = [];
+    const seen = new Set<string>();
+    backfill.forEach((entry: unknown, i: number) => {
+        const path = `backfill.${i}`;
+        if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+            issues.push({ path, message: 'Must be an object { object, field }.', code: 'invalid_type' });
+            return;
+        }
+        const extra = Object.keys(entry).filter((k) => k !== 'object' && k !== 'field');
+        if (extra.length > 0) {
+            issues.push({
+                path,
+                message: `Unrecognized ${extra.length === 1 ? 'key' : 'keys'} ${extra.map((k) => `'${k}'`).join(', ')}: `
+                    + 'an entry names an object and a field, and the value written is the field\'s own defaultValue.',
+                code: 'unrecognized_keys',
+            });
+            return;
+        }
+        const { object, field } = entry as { object?: unknown; field?: unknown };
+        if (typeof object !== 'string' || object.length === 0 || typeof field !== 'string' || field.length === 0) {
+            issues.push({ path, message: 'Both `object` and `field` must be non-empty strings.', code: 'invalid_type' });
+            return;
+        }
+        const key = `${object}.${field}`;
+        if (seen.has(key)) {
+            issues.push({ path, message: `'${key}' is named more than once.`, code: 'custom' });
+            return;
+        }
+        seen.add(key);
+        entries.push({ object, field });
+    });
+    if (entries.length > 0 && (!context || typeof context !== 'object')) {
+        issues.push({
+            path: 'backfill',
+            message: 'A backfill writes as the caller, and no caller context reached this publish: '
+                + 'pass the caller\'s execution context as `context`. It is never written as the system.',
+            code: 'custom',
+        });
+    }
+    if (issues.length > 0) throw publishBackfillRefusal(packageId, issues);
+    return entries;
 }
 
 /**
@@ -25739,6 +25849,188 @@ export class ObjectStackProtocolImplementation implements
     private closureReadWarned = false;
 
     /**
+     * [#24253] The judgement half of a `publishPackageDrafts` backfill, run
+     * before anything is promoted. An entry is honoured only when this batch
+     * holds an `object` draft of that name, the draft declares the field, the
+     * object the engine serves today does NOT (only a field this publish adds
+     * may be filled, so no value a user wrote is ever overwritten), and the
+     * field declares a literal `defaultValue`. A runtime token (`NOW()`,
+     * `current_user`) or an expression envelope is resolved per insert against
+     * that insert's context, so there is no one value to stamp into rows
+     * written by other people at other times: refused, named.
+     *
+     * Every failing entry is collected, so one answer names them all.
+     */
+    private async planPublishBackfill(
+        packageId: string,
+        entries: ReadonlyArray<{ object: string; field: string }>,
+        drafts: ReadonlyArray<{ type: string; name: string; member?: string }>,
+    ): Promise<PublishBackfillEntry[]> {
+        const repo = this.getOverlayRepo();
+        const issues: MetadataIssueEntry[] = [];
+        const plan: PublishBackfillEntry[] = [];
+        const draftFields = new Map<string, Record<string, any> | undefined>();
+        for (const [i, e] of entries.entries()) {
+            const path = `backfill.${i}`;
+            const draft = drafts.find((d) => canonicalMetaType(d.type) === 'object' && d.name === e.object);
+            if (!draft) {
+                issues.push({
+                    path,
+                    message: `Package '${packageId}' has no pending draft of object '${e.object}': a backfill fills `
+                        + 'fields this publish adds, so it names an object drafted in this package.',
+                    code: 'custom',
+                });
+                continue;
+            }
+            if (!draftFields.has(e.object)) {
+                const ref = { type: draft.type, name: draft.name, org: 'env' } as unknown as Parameters<typeof repo.get>[0];
+                const body = typeof repo.get === 'function'
+                    ? (await repo.get(ref, { state: 'draft' }))?.body as { fields?: unknown } | undefined
+                    : undefined;
+                const fields = body?.fields;
+                draftFields.set(
+                    e.object,
+                    fields && typeof fields === 'object' && !Array.isArray(fields) ? fields as Record<string, any> : undefined,
+                );
+            }
+            const def = draftFields.get(e.object)?.[e.field];
+            if (!def || typeof def !== 'object') {
+                issues.push({
+                    path,
+                    message: `The draft of object '${e.object}' declares no field '${e.field}'.`,
+                    code: 'custom',
+                });
+                continue;
+            }
+            const live = this.engine?.registry?.getObject?.(e.object) as { fields?: Record<string, unknown> } | undefined;
+            if (live?.fields && Object.prototype.hasOwnProperty.call(live.fields, e.field)) {
+                issues.push({
+                    path,
+                    message: `Field '${e.object}.${e.field}' already exists on the published object, so this publish does `
+                        + 'not add it: a backfill fills only fields a publish adds. Change existing rows through the data API.',
+                    code: 'custom',
+                });
+                continue;
+            }
+            const dv = (def as { defaultValue?: unknown }).defaultValue;
+            if (dv === undefined || dv === null) {
+                issues.push({
+                    path,
+                    message: `Field '${e.object}.${e.field}' declares no defaultValue, so there is no value to write: `
+                        + 'declare one on the field, or drop it from the backfill.',
+                    code: 'custom',
+                });
+                continue;
+            }
+            const shape = discriminateDefaultValueShape(dv);
+            if (shape !== 'literal') {
+                issues.push({
+                    path,
+                    message: `Field '${e.object}.${e.field}' declares a ${shape === 'token' ? 'runtime token' : 'expression'} `
+                        + 'defaultValue, resolved for each new record as it is created; a backfill writes a literal value only.',
+                    code: 'custom',
+                });
+                continue;
+            }
+            plan.push({ object: e.object, field: e.field, value: dv });
+        }
+        if (issues.length > 0) throw publishBackfillRefusal(packageId, issues);
+        return plan;
+    }
+
+    /**
+     * [#24253] The write half: for each planned field, the rows whose value is
+     * absent get the field's literal default, a page at a time, AS THE CALLER.
+     * Each page goes through {@link updateManyData} with the caller's context,
+     * the bulk face of the by-id PATCH, so permissions, RLS/FLS, validation and
+     * record hooks run per row as on that caller's own edit, and a row the
+     * caller cannot see is not read.
+     *
+     * The publish has committed by now and is not undone by a failed write. A
+     * field stops at its first failing row and reports the rows written so far
+     * with the error, by name; the other fields still run. A row is counted
+     * only when the engine kept the value: a row whose field a rule stripped
+     * (`droppedFields`), or that reads back empty after it was written, stops
+     * the field instead of looping on it.
+     */
+    private async applyPublishBackfill(
+        packageId: string,
+        plan: ReadonlyArray<PublishBackfillEntry>,
+        context: unknown,
+    ): Promise<PublishBackfillReceipt> {
+        const fields: PublishBackfillReceipt['fields'] = [];
+        for (const e of plan) {
+            let updated = 0;
+            const written = new Set<string>();
+            try {
+                for (;;) {
+                    const rows = (await this.engine.find(e.object, {
+                        where: { [e.field]: { $null: true } },
+                        limit: PUBLISH_BACKFILL_PAGE_SIZE,
+                        context,
+                    } as never)) as Array<{ id?: unknown }> | null | undefined;
+                    const ids = (rows ?? []).map((r) => r?.id).filter((id): id is string | number =>
+                        typeof id === 'string' || typeof id === 'number').map(String);
+                    if (ids.length === 0) break;
+                    const stuck = ids.find((id) => written.has(id));
+                    if (stuck !== undefined) {
+                        throw Object.assign(new Error(
+                            `Record '${stuck}' of '${e.object}' still has no '${e.field}' after it was written, so a hook `
+                            + 'or rule on the object cleared it; the backfill stopped there.',
+                        ), { status: 422 });
+                    }
+                    const res = await this.updateManyData({
+                        object: e.object,
+                        records: ids.map((id) => ({ id, data: { [e.field]: e.value } })),
+                        options: { continueOnError: false } as UpdateManyDataRequest['options'],
+                        context,
+                    });
+                    for (const r of res.results ?? []) {
+                        if (!r.success) continue;
+                        const dropped = (r as { droppedFields?: DroppedFieldsEvent[] }).droppedFields
+                            ?.find((ev) => ev.fields.includes(e.field));
+                        if (dropped) {
+                            throw Object.assign(new Error(
+                                `The write of '${e.field}' to record '${String(r.id)}' of '${e.object}' was dropped `
+                                + `(${dropped.reason}): this caller cannot set the field; the backfill stopped there.`,
+                            ), { status: 403 });
+                        }
+                        written.add(String(r.id));
+                        updated++;
+                    }
+                    if (!res.success) {
+                        const failedRow = (res.results ?? []).find((r) => !r.success);
+                        const rowError = (failedRow as { errors?: Array<{ code?: string; message?: string }> } | undefined)?.errors?.[0];
+                        const failure = {
+                            error: `Record '${String(failedRow?.id)}' of '${e.object}' was not written: `
+                                + `${rowError?.message ?? 'the write failed'}; the backfill stopped there.`,
+                            ...(rowError?.code ? { code: rowError.code } : {}),
+                        };
+                        fields.push({ object: e.object, field: e.field, updated, ...failure });
+                        console.warn(`[Protocol] publishPackageDrafts backfill of '${e.object}.${e.field}' (package '${packageId}'): ${failure.error}`);
+                        break;
+                    }
+                }
+                if (!fields.some((f) => f.object === e.object && f.field === e.field)) {
+                    fields.push({ object: e.object, field: e.field, updated });
+                }
+            } catch (err: unknown) {
+                const code = clientFacingFailureCode(err);
+                console.warn(
+                    `[Protocol] publishPackageDrafts backfill of '${e.object}.${e.field}' (package '${packageId}') `
+                    + `stopped after ${updated} row(s): ${(err as Error)?.message ?? String(err)}`,
+                );
+                fields.push({
+                    object: e.object, field: e.field, updated,
+                    error: clientFacingFailureText(err, 'the backfill failed; the reason is in the server log'),
+                    ...(code ? { code } : {}),
+                });
+            }
+        }
+        return { success: fields.every((f) => f.error === undefined), fields };
+    }
+
+    /**
      * Publish every pending DRAFT bound to a package in one shot (ADR-0033) —
      * the "publish whole app" action. Promotes each draft→active by reusing the
      * per-item {@link publishMetaItem} primitive (which runs the overridable /
@@ -25766,6 +26058,21 @@ export class ObjectStackProtocolImplementation implements
         message?: string;
         /** ADR-0067 — AI model that authored the turn (absent for human/CLI). */
         aiModel?: string;
+        /**
+         * [#24253] Opt-in: fields THIS publish adds whose literal
+         * `defaultValue` is written into the object's existing rows once the
+         * drafts are live. Absent or empty, no row is touched. Every entry is
+         * judged before anything is promoted ({@link planPublishBackfill}), and
+         * one that cannot be honoured refuses the whole request.
+         */
+        backfill?: ReadonlyArray<{ object: string; field: string }>;
+        /**
+         * [#24253] The caller's execution context: the principal the
+         * `backfill` writes run as, so object permissions, RLS/FLS and record
+         * hooks apply exactly as they do to that caller's own edit. Required
+         * when `backfill` names anything; nothing else here reads it.
+         */
+        context?: unknown;
     }): Promise<{
         success: boolean;
         /**
@@ -25832,12 +26139,21 @@ export class ObjectStackProtocolImplementation implements
         probes?: import('./build-probes.js').BuildProbeReport;
         /** ADR-0067 — id of the commit this publish recorded (absent if nothing published). */
         commitId?: string;
+        /**
+         * [#24253] What the requested `backfill` wrote, per field — present
+         * only when the request named at least one field and the batch
+         * published. See {@link applyPublishBackfill}.
+         */
+        backfillApplied?: PublishBackfillReceipt;
     }> {
         // [ADR-0131 D6] FIRST: an organization-scoped package publish is
         // refused. See {@link organizationScopedWriteRefusal}.
         ObjectStackProtocolImplementation.refuseOrganizationScopedWrite(
             `Package '${request.packageId}'`, request,
         );
+        // [#24253] The request's own shape is judged before any server state
+        // is read; what it names is judged against the drafts below.
+        const backfillRequest = readPublishBackfillRequest(request.packageId, request.backfill, request.context);
         await this.ensureOverlayIndex();
         // Environment-wide drafts only: the environment repository lists the
         // environment's rows (a legacy organization's is left out off the
@@ -25846,6 +26162,12 @@ export class ObjectStackProtocolImplementation implements
         // ADR-0131 C7).
         const repo = this.getOverlayRepo();
         const drafts = await repo.listDrafts({ packageId: request.packageId });
+        // [#24253] Before anything is promoted: a backfill entry that cannot be
+        // honoured refuses the request whole, so a publish never lands with
+        // half of what its caller asked for.
+        const backfillPlan = backfillRequest.length > 0
+            ? await this.planPublishBackfill(request.packageId, backfillRequest, drafts)
+            : [];
 
         // Runtime enforcement of the package namespace-prefix rule (ADR-0028
         // current-state contract). `defineStack` enforces this at compile time,
@@ -26601,6 +26923,16 @@ export class ObjectStackProtocolImplementation implements
 
         const seedApplied = seedBodies.length > 0 ? await this.applySeedBodies(seedBodies) : undefined;
 
+        // [#24253] AFTER every promoted item's side effects, never before: the
+        // registry write-through is what makes the engine serve the new field
+        // (a write naming a field the registry lacks is stripped), and
+        // `ensureObjectStorage` is what adds its column. A sync that was
+        // refused there leaves no column, so the write below fails and is
+        // reported per field, never skipped.
+        const backfillApplied = backfillPlan.length > 0 && published.length > 0
+            ? await this.applyPublishBackfill(request.packageId, backfillPlan, request.context)
+            : undefined;
+
         // ADR-0038 L3: exercise what was just published — one real read per
         // artifact — so "Published!" can never again mean "and silently
         // broken". Best-effort by design: a probe crash is swallowed (the
@@ -26670,6 +27002,7 @@ export class ObjectStackProtocolImplementation implements
                 : {}),
             ...(probes ? { probes } : {}),
             ...(commit ? { commitId: commit.commitId } : {}),
+            ...(backfillApplied ? { backfillApplied } : {}),
         };
     }
 
