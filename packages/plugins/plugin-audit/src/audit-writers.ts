@@ -1300,16 +1300,19 @@ export function installAuditWriters(
   // the full settings read on every audited write (measured on a real engine:
   // two settings reads per audited write, against none for a held answer).
   const LOCALE_TTL_MS = 30_000;
-  /** Advanced by every settings-store write; an entry held at an older value is dead. */
+  /**
+   * Advanced by every settings-store write. ONE rule retires a held answer:
+   * an entry stamped with an older generation is dead.
+   */
   let localeGeneration = 0;
   const localeCache = new Map<string, { value: string | undefined; expires: number; generation: number }>();
   const resolveWriteLocale = async (tenantId?: string, userId?: string): Promise<string | undefined> => {
     if (!opts.getLocale) return undefined;
     const cacheKey = `${tenantId ?? ''}|${userId ?? ''}`;
-    // Read BEFORE the lookup and stored with its answer: a settings write that
-    // lands while the lookup is in flight moves the generation past it, so a
-    // pre-write answer is never held (the clear-then-repopulate-from-a-stale-
-    // read shape the core resolver guards against the same way).
+    // Read BEFORE the lookup and stamped on its answer, as the core resolver
+    // stamps its epoch: a settings write that lands while the lookup is in
+    // flight moves the generation past the stamp, so the pre-write answer is
+    // dead on arrival instead of held for the TTL.
     const generation = localeGeneration;
     const now = Date.now();
     const hit = localeCache.get(cacheKey);
@@ -1320,9 +1323,7 @@ export function installAuditWriters(
     } catch {
       value = undefined;
     }
-    if (generation === localeGeneration) {
-      localeCache.set(cacheKey, { value, expires: now + LOCALE_TTL_MS, generation });
-    }
+    localeCache.set(cacheKey, { value, expires: now + LOCALE_TTL_MS, generation });
     return value;
   };
   /**
@@ -1339,7 +1340,6 @@ export function installAuditWriters(
     // scope would otherwise retire on every write — a memo that never hits.
     if (!LOCALE_SOURCE_OBJECTS.has(ctx.object)) return;
     localeGeneration += 1;
-    localeCache.clear();
   };
 
   // Translate function bound to a locale. Returns undefined on any miss
