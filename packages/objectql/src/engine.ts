@@ -143,6 +143,9 @@ import {
   // keys, before file-field hydration forwards it to the download door's
   // field-owned verdict — see `readParentDerivedFiles`.
   withoutOperationPrivateKeys,
+  // [ADR-0131 D8] The ONE tenant read predicate, shared with plugin-security's
+  // Layer 0 — see {@link buildDriverOptions}.
+  computeTenantLayer0Verdict,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
 import { bridgeAuthzInvalidation } from './authz-invalidation-bridge.js';
@@ -4099,6 +4102,16 @@ function eventOrganizationValue(value: unknown): string | undefined {
 }
 
 /**
+ * [ADR-0105 D2] The context's organization access set
+ * (`ExecutionContext.accessible_org_ids`), stringified — `undefined` when
+ * absent or empty, which the verdict reads as "no membership" under `group`.
+ */
+function accessibleOrganizationsOf(execCtx: ExecutionContext | undefined): string[] | undefined {
+  const set = (execCtx as { accessible_org_ids?: unknown } | undefined)?.accessible_org_ids;
+  return Array.isArray(set) && set.length > 0 ? set.map(String) : undefined;
+}
+
+/**
  * `BulkDataEvent.organizationId` — the ONE organization the tenant wall named
  * for a predicate write, or `undefined` when the producer cannot assert one
  * (#15225, the bulk half of the cross-tenant fan-out leak whose single-record
@@ -6762,14 +6775,48 @@ export class ObjectQL implements IObjectQLEngine {
   /**
    * Build the DriverOptions blob passed to every IDataDriver call.
    *
-   * Carries `tenantId` from the active ExecutionContext so the driver can
-   * enforce per-tenant isolation (SQL driver auto-scopes reads and
-   * auto-injects the tenant column on writes) — EXCEPT for the two object
-   * postures below. The SQL driver has its own opt-out (sticky tenant-field
-   * cache), but withholding tenantId here protects every driver at the
-   * source. Existing user-supplied shapes (transactions, AST extras) are
-   * preserved by spreading them first — an explicitly-passed `base.tenantId`
-   * is deliberate caller intent and still wins, under both exemptions.
+   * # The tenant read scope is the wall's verdict (ADR-0131 D8)
+   *
+   * The driver's native tenant scope — `tenantId` (equality) and `tenantIds`
+   * (the `group` union), which `applyTenantScope` compiles — is the Layer 0
+   * verdict projected onto `DriverOptions`, never a second derivation beside
+   * it. One function decides ({@link computeTenantLayer0Verdict},
+   * `@objectstack/core`), and the engine reads it from one of two places:
+   *
+   * - **the verdict the wall RECORDED on this operation**
+   *   ({@link OperationContext.tenantLayer0Verdict}, passed in as
+   *   `scope.recordedVerdict`) — present where the security layer composed its
+   *   wall onto the predicate: a read, or a predicate write. It already carries
+   *   what only that layer can know (the exempt `PLATFORM_ADMIN` on a
+   *   posture-permitting object, the verified platform owner's read, the
+   *   delegator's intersection), so the driver reaches exactly the rows Layer 0
+   *   admits;
+   * - **otherwise, the same function over the engine's own facts** — the
+   *   posture in force ({@link resolveEnginePosture}), the context's active
+   *   organization and access set, the object's tenancy — with no admin
+   *   exemption, since the engine holds no permission sets. That covers a
+   *   system context, a by-id write, and a composition with no security layer
+   *   mounted.
+   *
+   * Projected: `none` (the `single` posture; a non-tenant, tenancy-disabled or
+   * federated object; an exempt platform admin) → no scope; `organization` →
+   * `tenantId`; `organizations` → `tenantIds`, with the active organization as
+   * `tenantId` (the driver keys its scope on `tenantId` being present); `deny`
+   * → the active organization if there is one — the narrowest scope a driver
+   * can express, and where the wall ran its deny sentinel is already in the
+   * predicate. Under `single` the driver therefore no longer narrows a read to
+   * the active organization: the posture is one tenant, and isolation inside it
+   * was never the driver's to add (ADR-0131 D11).
+   *
+   * # The write target is not a read scope
+   *
+   * An insert (`scope.writeTarget`) keeps the active organization as
+   * `tenantId` in EVERY posture — `injectTenantOnInsert` stamps the row with
+   * it, the counter scopes by it, and an upsert's identity probe refuses a
+   * merge into another organization's row by it — and the `group` membership
+   * set beside it, unchanged.
+   *
+   * # Withheld for two object postures
    *
    * 1. **`tenancy.enabled: false`** (ADR-0066 platform-global posture, e.g.
    *    `sys_license`): stamping the caller's active-org tenantId there would
@@ -6800,11 +6847,18 @@ export class ObjectQL implements IObjectQLEngine {
    *    the remote and to the layers above (RBAC/RLS, the datasource binding),
    *    not to a predicate the platform guesses onto someone else's table.
    *
-   * System / isSystem callers may still cross tenants by clearing
-   * `tenantId` themselves on the resulting object; this helper does not
-   * mask the system path.
+   * Existing user-supplied shapes (transactions, AST extras) are preserved by
+   * spreading them first — an explicitly-passed `base.tenantId` is deliberate
+   * caller intent and still wins, under every verdict. System / isSystem
+   * callers may still cross tenants by clearing `tenantId` themselves on the
+   * resulting object; this helper does not mask the system path.
    */
-  private buildDriverOptions(object: string, execCtx?: ExecutionContext, base?: any): any {
+  private buildDriverOptions(
+    object: string,
+    execCtx?: ExecutionContext,
+    base?: any,
+    scope: { writeTarget?: boolean; recordedVerdict?: unknown } = {},
+  ): any {
     // The open transaction may arrive explicitly via the context, or ambiently
     // via txStore when an internal query runs during a transactional write
     // (ADR-0034). Explicit wins; ambient is the safety net. [#22855] A handle
@@ -6830,10 +6884,13 @@ export class ObjectQL implements IObjectQLEngine {
     // federated object by — one spelling of "this schema is the remote's",
     // not a second reading of it.
     const isFederated = isFederatedObject(objectSchema);
-    const hasTenant =
-      execCtx?.tenantId !== undefined &&
-      !isTenancyDisabled(objectSchema) &&
-      !isFederated;
+    const tenantObject = !isTenancyDisabled(objectSchema) && !isFederated;
+    const tenantScope = tenantObject
+      ? scope.writeTarget
+        ? this.driverWriteTarget(execCtx)
+        : this.driverReadScope(objectSchema, execCtx, scope.recordedVerdict)
+      : undefined;
+    const hasTenant = tenantScope !== undefined;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
     // [#13491] The object's tenancy classification — the ONE reading both the
@@ -6851,21 +6908,10 @@ export class ObjectQL implements IObjectQLEngine {
       opts.transaction = tx;
     }
     if (hasTenant && opts.tenantId === undefined) {
-      opts.tenantId = execCtx!.tenantId;
+      opts.tenantId = tenantScope.tenantId;
     }
-    // [ADR-0105 D2 / #3623] Under the `group` posture the caller's read reach
-    // is their whole membership set, not the active org — thread it so the
-    // driver's native scope widens to the SAME union Layer 0 enforces, instead
-    // of ANDing an active-org equality under it (which collapsed group reads
-    // to isolated semantics). Inserts still stamp from `tenantId` (the active
-    // org is the write target, D5). No provider / other postures / absent set
-    // → no `tenantIds`, and drivers fall back to equality: fail toward
-    // isolation, never toward exposure.
-    if (hasTenant && opts.tenantIds === undefined && this.tenancyPostureProvider?.() === 'group') {
-      const set = (execCtx as any)?.accessible_org_ids;
-      if (Array.isArray(set) && set.length > 0) {
-        opts.tenantIds = set.map(String);
-      }
+    if (hasTenant && opts.tenantIds === undefined && tenantScope.tenantIds !== undefined) {
+      opts.tenantIds = tenantScope.tenantIds;
     }
     if (hasTz && opts.timezone === undefined) {
       // Thread the business timezone so date-dependent driver generation
@@ -6902,6 +6948,67 @@ export class ObjectQL implements IObjectQLEngine {
       opts.preserveAudit = true;
     }
     return opts;
+  }
+
+  /**
+   * [ADR-0131 D8] The driver's native read scope for one operation — the Layer
+   * 0 verdict projected onto `DriverOptions` (see {@link buildDriverOptions}).
+   * `undefined` is "no scope"; the caller has already excluded a
+   * tenancy-disabled or federated object.
+   *
+   * A recorded verdict that does not parse as `TenantLayer0VerdictSchema`
+   * reads as absent — never as an organization — and the engine then decides
+   * over its own facts, which carry no admin exemption: fail toward the wall.
+   */
+  private driverReadScope(
+    objectSchema: any,
+    execCtx: ExecutionContext | undefined,
+    recordedVerdict: unknown,
+  ): { tenantId: string; tenantIds?: string[] } | undefined {
+    const activeOrganization =
+      execCtx?.tenantId !== undefined && execCtx.tenantId !== null && String(execCtx.tenantId) !== ''
+        ? String(execCtx.tenantId)
+        : undefined;
+    const recorded = recordedVerdict === undefined ? undefined : TenantLayer0VerdictSchema.safeParse(recordedVerdict);
+    const verdict = recorded?.success
+      ? recorded.data
+      : computeTenantLayer0Verdict({
+          tenancyPosture: this.resolveEnginePosture(),
+          organizationId: activeOrganization,
+          accessibleOrgIds: accessibleOrganizationsOf(execCtx),
+          // `undefined` (an object this registry has not resolved) assumes a
+          // tenant object, as Layer 0 does: the driver resolves the column.
+          objectHasOrgIdField: objectSchema ? resolveTenantFieldName(objectSchema) !== null : undefined,
+          tenancyDisabled: false,
+          // The engine holds no permission sets: no exemption is ITS to grant.
+          posturePermitsCrossTenant: false,
+          isPlatformAdmin: false,
+        });
+    switch (verdict.kind) {
+      case 'none':
+        return undefined;
+      case 'organization':
+        return { tenantId: verdict.organizationId };
+      case 'organizations':
+        return { tenantId: activeOrganization ?? verdict.organizationIds[0], tenantIds: [...verdict.organizationIds] };
+      case 'deny':
+        return activeOrganization !== undefined ? { tenantId: activeOrganization } : undefined;
+    }
+  }
+
+  /**
+   * The write target of an insert or upsert: the active organization, in every
+   * posture, with the `group` membership set beside it — the scope the
+   * driver's insert readback and upsert identity probe narrow by (ADR-0105 D5:
+   * the active organization is where a write lands).
+   */
+  private driverWriteTarget(
+    execCtx: ExecutionContext | undefined,
+  ): { tenantId: string; tenantIds?: string[] } | undefined {
+    if (execCtx?.tenantId === undefined) return undefined;
+    const tenantIds =
+      this.resolveEnginePosture() === 'group' ? accessibleOrganizationsOf(execCtx) : undefined;
+    return { tenantId: execCtx.tenantId as string, ...(tenantIds ? { tenantIds: [...tenantIds] } : {}) };
   }
 
   /**
@@ -14038,7 +14145,7 @@ export class ObjectQL implements IObjectQLEngine {
           ql: this
       };
       await this.triggerHooks('beforeFind', hookContext);
-      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
       // [ADR-0139 D2] The executor boundary: the AST is final here — after the
       // doors, the middleware chain and `beforeFind` — so every `ReadableIds`
       // leaf is composed (or refused) on it, immediately before the driver.
@@ -14340,7 +14447,7 @@ export class ObjectQL implements IObjectQLEngine {
           ql: this
       };
       await this.triggerHooks('beforeFind', hookContext);
-      hookContext.input.options = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any);
+      hookContext.input.options = this.buildDriverOptions(objectName, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
       // [ADR-0139 D2] The executor boundary, as in `find`.
       const driverAst = await this.composeReadableIdsAtBoundary(objectName, 'findOne', hookContext.input.ast as QueryAST, opCtx.context);
 
@@ -15818,6 +15925,9 @@ export class ObjectQL implements IObjectQLEngine {
         derivedOrganizationId !== undefined
           ? { ...(optionsBase && typeof optionsBase === 'object' ? optionsBase : {}), tenantId: derivedOrganizationId }
           : optionsBase,
+        // The active organization is where the row LANDS, in every posture —
+        // not a read scope (ADR-0131 D8 leaves the write target alone).
+        { writeTarget: true },
       );
       for (const rowCtx of rowHookContexts) {
         rowCtx.input.options = driverOptions;
@@ -17006,7 +17116,7 @@ export class ObjectQL implements IObjectQLEngine {
                await dispatchHooksExplainingWithheldReadonly(readonlyHiddenFromHooks, 'beforeUpdate',
                  () => this.dispatchUnscopedMultiWriteHooks('beforeUpdate', object, hookContext));
            }
-           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+           const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
            readPriorRows = async () => {
                if (!priorRowsRead) {
                    priorRowsRead = true;
@@ -17181,7 +17291,7 @@ export class ObjectQL implements IObjectQLEngine {
        // refuses before any driver call.
        reportDroppedFields(preComputedPayload, computedStripUpdate.rows[0] as Record<string, unknown> | null | undefined, 'computed');
 
-       hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+       hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
 
        try {
            let result;
@@ -19529,7 +19639,7 @@ export class ObjectQL implements IObjectQLEngine {
       const declaredDeleteColumns = declaredColumnSet(deleteSchema);
       const readPreImage = async (targetId: unknown): Promise<Record<string, unknown> | null> => {
         const preAst: QueryAST = { object, where: { id: targetId }, limit: 1 };
-        const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+        const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
         return withDeclaredColumnsOnly(
           (await driver.findOne(object, preAst, preOpts)) as Record<string, unknown> | null,
           declaredDeleteColumns,
@@ -19672,7 +19782,7 @@ export class ObjectQL implements IObjectQLEngine {
         const perRowBeforeHooks = this.hasHooksFor('beforeDelete', object);
         const perRowAfterHooks = this.hasHooksFor('afterDelete', object);
         if (perRowBeforeHooks || perRowAfterHooks) {
-          const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+          const preOpts = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
           // [#21613] Each doomed row is its per-row `previous`: declared set.
           const doomed = rowsWithDeclaredColumnsOnly(
             (await driver.find(object, ast, preOpts) as Record<string, unknown>[]) ?? [],
@@ -19691,7 +19801,7 @@ export class ObjectQL implements IObjectQLEngine {
         }
       }
 
-      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any);
+      hookContext.input.options = this.buildDriverOptions(object, opCtx.context, hookContext.input.options as any, { recordedVerdict: opCtx.tenantLayer0Verdict });
 
       try {
           let result;
@@ -19909,7 +20019,7 @@ export class ObjectQL implements IObjectQLEngine {
      const callerWhere = (opCtx.ast as QueryAST).where;
 
      await this.executeWithMiddleware(opCtx, async () => {
-       const countOpts = this.buildDriverOptions(object, opCtx.context);
+       const countOpts = this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict });
        if (driver.count) {
            // [ADR-0139 D2] The executor boundary, as in `find` (`count` has no
            // before-hook): the AST is final once the chain has run. The
@@ -20430,7 +20540,7 @@ export class ObjectQL implements IObjectQLEngine {
             // natively today; one that grows native support must advertise a
             // capability flag, at which point this post-filter becomes the
             // fallback tier — the dateGranularity two-tier pattern.
-            const aggregated = await drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context));
+            const aggregated = await drv.aggregate(object, ast, this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict }));
             return applyHaving(aggregated, ast.having, havingColumnClasses);
         }
         // In-memory fallback path: ask the driver for raw rows, then bucket +
@@ -20474,7 +20584,7 @@ export class ObjectQL implements IObjectQLEngine {
         delete rowsAst.groupBy;
         delete rowsAst.aggregations;
         delete rowsAst.having;
-        const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context));
+        const raw = await driver.find(object, rowsAst, this.buildDriverOptions(object, opCtx.context, undefined, { recordedVerdict: opCtx.tenantLayer0Verdict }));
         return applyHaving(applyInMemoryAggregation(raw, ast, tz, declaredFields), ast.having, havingColumnClasses);
       });
 
