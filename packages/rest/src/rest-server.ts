@@ -369,8 +369,9 @@ import {
     sendDeclaredFault,
     sendFieldVisibilityFault,
     handleRouteError,
-    // `thrownAnswerIsBareNotFound`, read only by the item read's catch, moved with that body
-    // to `meta-item-read-routes.ts` (#23050 slice 13b).
+    // `thrownAnswerIsBareNotFound`: the item read's catch moved to `meta-item-read-routes.ts`
+    // (#23050 slice 13b); the event and diff doors here still read it (#24210).
+    thrownAnswerIsBareNotFound,
     // `logUnexpectedRouteError` and `applyDroppedFieldsHeader`, read only by the CRUD doors' catches
     // and their two write answers, moved with `registerCrudEndpoints`' body to `crud-routes.ts`
     // (#23050 slice 12).
