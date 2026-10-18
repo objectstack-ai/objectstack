@@ -193,7 +193,9 @@ const byRecord = (rows: ShareRow[]) => Object.fromEntries(rows.map((r) => [r.rec
 
 describe("[#14484] a rule-materialised grant carries the RULE's organization", () => {
   it("an ORG-STAMPED rule's grants all carry ORG_A — the organization-less record included", async () => {
-    const { rules, shares } = await boot();
+    // [ADR-0131 D8] `isolated`: the sweep's organization scope is the wall's,
+    // and under `single` there is none to keep ORG_B's won deals out.
+    const { rules, shares } = await boot('isolated');
     const rule = await rules.defineRule(
       { name: 'os14484_org_a_won', label: 'ORG_A won', object: OBJECT, criteria: WON, recipientType: 'user', recipientId: 'u_a', accessLevel: 'read' } as never,
       ORG_A_ADMIN,
@@ -434,6 +436,10 @@ describe("[#14484] a record read that FAILS never stamps the acting session's or
 });
 
 describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFFERENT organization — measured: a loud RECORD_NOT_FOUND, not a silent no-op (2026-09-02 review, §5 note 3)', () => {
+  // [ADR-0131 D8] Under a wall: the update half's scope is the wall's verdict,
+  // so these cases boot `isolated`; under `single` there is no scope (the
+  // re-home case below).
+  //
   // `SqlDriver.applyTenantScope` scopes the update half to
   // `organization_id = ? OR organization_id IS NULL`: a legacy NULL row is
   // reachable (pinned above), a row carrying ANOTHER organization is not —
@@ -457,7 +463,7 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
   );
 
   it("grant: throws RECORD_NOT_FOUND (404); the stored row keeps the other organization's stamp, level and source", async () => {
-    const { driver, sharing } = await boot();
+    const { driver, sharing } = await boot('isolated');
     await driver.create('sys_record_share', {
       id: 'shr_org_a', object_name: OBJECT, record_id: 'deal_p1', recipient_type: 'user', recipient_id: 'u_x',
       access_level: 'read', source: 'rule', source_id: 'rule_org_a', organization_id: ORG_A, created_at: '2026-01-01T00:00:00Z',
@@ -476,7 +482,7 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
   });
 
   it("reconcile: two organizations' rules on one organization-less record — the second's pass aborts at that record; grants before it stay, its stale revocation never runs", async () => {
-    const { driver, rules, shares } = await boot();
+    const { driver, rules, shares } = await boot('isolated');
     const ruleA = await rules.defineRule(
       { name: 'os14484_note3_a', label: 'ORG_A won', object: OBJECT, criteria: WON, recipientType: 'user', recipientId: 'u_x', accessLevel: 'read' } as never,
       ORG_A_ADMIN,
@@ -514,7 +520,14 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
     });
   });
 
-  it("reconcile: a record re-homed after a platform-global rule granted it — the rule's next pass aborts at it, and nothing in that pass lands", async () => {
+  it("reconcile under `single`: a record re-homed after a platform-global rule granted it — no wall, so the next pass reaches its row and completes", async () => {
+    // [ADR-0131 D8] This case used to abort here with RECORD_NOT_FOUND: the
+    // engine scoped the update half to the re-homed record's ORG_B even on a
+    // `single` install, where no organization wall exists. The driver's scope
+    // is now the wall's verdict — `none` under `single` — so the pass reaches
+    // the ORG_A-stamped row like every other. (The platform-global rule cannot
+    // be defined under a walled posture at all: its organization-less system
+    // insert is refused, ADR-0131 D9 — so the walled abort has no twin here.)
     const { driver, rules } = await boot();
     const define = (accessLevel: 'read' | 'edit') => rules.defineRule(
       { name: 'os14484_note3_rehome', label: 'Platform won', object: OBJECT, criteria: WON, recipientType: 'user', recipientId: 'u_x', accessLevel } as never,
@@ -522,8 +535,7 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
     );
     const rule = await define('read');
     await rules.evaluateRule(rule.id, SYSTEM);
-    const before = brief(await allShares(driver));
-    expect(before).toEqual({
+    expect(brief(await allShares(driver))).toEqual({
       deal_a1: { organization_id: ORG_A, access_level: 'read', source_id: rule.id },
       deal_b1: { organization_id: ORG_B, access_level: 'read', source_id: rule.id },
       deal_b2: { organization_id: ORG_B, access_level: 'read', source_id: rule.id },
@@ -533,12 +545,15 @@ describe('[#14484] the scoped UPDATE half cannot reach a row stamped with a DIFF
     // The record moves to ORG_B; its grant row still says ORG_A (the
     // organization the record was in when the platform-global rule stamped it).
     await driver.update(OBJECT, 'deal_a1', { organization_id: ORG_B });
-    // The rule's level changes, so the next pass takes the update half for
-    // every matched record. deal_a1 comes first: `grant` resolves ORG_B from
-    // the re-homed record, the ORG_B-scoped update cannot see the ORG_A row,
-    // and the pass dies before any other record is touched.
     await define('edit');
-    await expect(rules.evaluateRule(rule.id, SYSTEM)).rejects.toMatchObject({ code: 'RECORD_NOT_FOUND', status: 404 });
-    expect(brief(await allShares(driver))).toEqual(before);
+    await expect(rules.evaluateRule(rule.id, SYSTEM)).resolves.toMatchObject({ grantsUpdated: 4, grantsCreated: 0 });
+    expect(brief(await allShares(driver))).toEqual({
+      // The direct-grant rule (the RECORD's organization) carries the row
+      // along with its re-homed record.
+      deal_a1: { organization_id: ORG_B, access_level: 'edit', source_id: rule.id },
+      deal_b1: { organization_id: ORG_B, access_level: 'edit', source_id: rule.id },
+      deal_b2: { organization_id: ORG_B, access_level: 'edit', source_id: rule.id },
+      deal_p1: { organization_id: null, access_level: 'edit', source_id: rule.id },
+    });
   });
 });
