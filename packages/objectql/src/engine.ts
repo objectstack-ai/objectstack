@@ -2851,6 +2851,8 @@ async function hydrateWriteFormulas(
  * above. [#24197] For the same reason it preloads no relationship hop, so a
  * formula reading `record.<reference>.<field>` yields `null` here too. The read and write paths resolve the map first
  * ({@link ObjectQL.resolveFormulaPermissions}); a helper with no resolver cannot.
+ * A caller that holds a read channel and wants the read's answer calls
+ * {@link ObjectQL.serveFormulaField} (through `ScopedContext.serveFormulaField`).
  *
  * Returns `undefined` when `field` is not a declared formula field, which is
  * how a caller tells "read the stored column instead" from "the formula
@@ -6213,6 +6215,57 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const lookup = await this.resolveOneHopRelated(schema, wanted, rows, context, 'caller');
     return (row) => lookup(row);
+  }
+
+  /**
+   * [#24197] Materialize ONE declared `formula` field against a record already
+   * in hand, SERVED the way a read serves it: the one hop the formula reads
+   * through a reference field ({@link resolveFormulaRelated}), the `can()`
+   * permission map ({@link resolveFormulaPermissions}) and the fault report
+   * ({@link formulaFaultSink}), all under `context`.
+   *
+   * The asynchronous twin of the module's {@link evaluateFormulaField}, which
+   * is synchronous and so serves none of the three. It exists for a record the
+   * engine never read back — a hook's in-flight state (stored ⊕ payload), whose
+   * foreign keys may name records the stored row does not — so the title a hook
+   * body asks for (`ctx.title()`) is the title a read of that state would show.
+   *
+   * ## Under which authority, on which connection
+   *
+   * `context` is the reader's own: every hop is the reader's own `find`, through
+   * every enforcement layer a read applies, exactly as the read path's hop is
+   * (`authority: 'caller'`). A related record that read does not return leaves
+   * the formula `null` with the read path's reason — never a fallback. A context
+   * carrying a `transaction` reads on that transaction's connection, so a body
+   * that opened one never asks the pool for a second (a deadlock on SQLite's
+   * `pool max=1`). Call it through {@link ScopedContext.serveFormulaField},
+   * which hands in the context the body's own `ctx.api` reads with.
+   *
+   * ## What it costs
+   *
+   * One batched read per reference field the formula reads through — the read
+   * path's own cost for one row — and nothing for a formula over the record's
+   * own columns. A read that is itself a formula's hop serves no hop of its own,
+   * so a second hop reads `null` with its reason here as it does on a read.
+   *
+   * Returns `undefined` when `field` is not a declared formula field on
+   * `objectName`, as {@link evaluateFormulaField} does. Evaluates against a
+   * shallow COPY of `record`.
+   */
+  async serveFormulaField(
+    objectName: string,
+    record: Record<string, unknown>,
+    field: string,
+    context?: ExecutionContext,
+  ): Promise<unknown> {
+    const schema = this._registry.getObject(objectName);
+    const { plan } = planFormulaProjection(schema, [field]);
+    if (plan.length === 0) return undefined;
+    const scratch: Record<string, unknown> = { ...record };
+    applyFormulaPlan(plan, [scratch], context, await this.resolveFormulaPermissions(
+      objectName, plan, [scratch], context, this.permissionResolution(context),
+    ), this.formulaFaultSink(objectName), await this.resolveFormulaRelated(schema, plan, [scratch], context));
+    return scratch[field];
   }
 
   /**
@@ -21714,4 +21767,17 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
 
   /** Internal: expose the transaction handle for driver-level access */
   get transactionHandle() { return this.executionContext.transaction; }
+
+  /**
+   * [#24197] One declared `formula` field of `objectName`, evaluated over
+   * `record` as a read under THIS context serves it — {@link
+   * ObjectQL.serveFormulaField} with this context's own execution context, so
+   * the one hop the formula reads through a reference is read with this
+   * context's identity and permissions and, inside a transaction this context
+   * carries, on that transaction's connection. `undefined` when `field` is not
+   * a declared formula field.
+   */
+  async serveFormulaField(objectName: string, record: Record<string, unknown>, field: string): Promise<unknown> {
+    return (this.engine as unknown as ObjectQL).serveFormulaField(objectName, record, field, this.executionContext);
+  }
 }

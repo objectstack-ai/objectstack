@@ -2228,7 +2228,7 @@
           "name": "items",
           "type": "array",
           "of": "object",
-          "description": "Term/description pairs [{ term, description }], in order: `term` is the row label, `description` is shown as-is (an object as JSON, an omitted one as an em dash). Omitted or empty renders the \"No details\" state"
+          "description": "Term/description pairs [{ term, description }], in order: `term` is the row label, `description` is shown as-is (an object as JSON, an omitted one as an em dash). Omitted or empty renders the empty state: the active language’s \"No data\" (`common.noData`)"
         },
         {
           "name": "columns",

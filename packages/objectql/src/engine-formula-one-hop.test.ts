@@ -27,6 +27,7 @@
  */
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ObjectQL } from './engine.js';
+import { resolveRecordTitle, resolveServedRecordTitle, servedRecordTitle } from './record-title.js';
 
 type Rec = Record<string, unknown>;
 
@@ -66,13 +67,13 @@ function makeDriver() {
     for (const f of fields) if (r[f] !== undefined) out[f] = r[f];
     return out;
   };
-  const calls: Array<{ object: string; ast: any }> = [];
+  const calls: Array<{ object: string; ast: any; options?: any }> = [];
   let n = 0;
   const driver: any = {
     name: 'memory', version: '0.0.0', supports: {},
     async connect() {}, async disconnect() {}, async checkHealth() { return true; }, async execute() { return null; },
-    async find(object: string, ast: any) {
-      calls.push({ object, ast });
+    async find(object: string, ast: any, options?: any) {
+      calls.push({ object, ast, options });
       const rows = Array.from(storeFor(object).values()).filter((r) => matches(r, ast?.where));
       // Hold the caller's page: `offset` then `limit`, as a real driver does.
       const offset = typeof ast?.offset === 'number' ? ast.offset : 0;
@@ -338,5 +339,85 @@ describe('#24197 — a formula field reads one hop through a reference', () => {
     await expect(
       engine.find('lib_loan', { orderBy: [{ field: 'title', order: 'asc' }], context: READER }),
     ).rejects.toMatchObject({ code: 'INVALID_SORT', status: 400, field: 'title' });
+  });
+
+  // [#24197] The record a hook fires on was never read back, so nothing served
+  // its title: `serveFormulaField` is the read path's evaluation over a record
+  // in hand, reached through a channel (`ScopedContext`) that carries the
+  // reader's own context. The hook body's `ctx.title()` is built on it.
+  describe('serveFormulaField — a record in hand, served as a read serves it', () => {
+    const LOAN_SCHEMA = { name: 'lib_loan', nameField: 'title' };
+
+    it('reads the hop through the IN-HAND foreign keys, one batched read per reference field', async () => {
+      d.calls.length = 0;
+      // Stored l1 names b1; the in-flight state names b2.
+      const value = await engine.createContext(READER).serveFormulaField('lib_loan', { id: 'l1', book: 'b2', reader: 'r1' }, 'title');
+      expect(value).toBe('Emma · Ann');
+      expect(relatedReads('lib_book')).toBe(1);
+      expect(relatedReads('lib_reader')).toBe(1);
+      expect(relatedReads('lib_loan')).toBe(0);
+      expect(d.calls.find((c) => c.object === 'lib_book')!.ast.where).toEqual({ id: { $in: ['b2'] } });
+    });
+
+    it('answers the title a read of the same record answers, where the synchronous evaluator answers none', async () => {
+      const read = await engine.findOne('lib_loan', { where: { id: 'l3' }, context: READER });
+      const inHand = { id: 'l3', book: 'b3', reader: 'r2' };
+      expect(await resolveServedRecordTitle(LOAN_SCHEMA, inHand, engine.createContext(READER))).toBe(read?.title);
+      expect(read?.title).toBe('Ulysses · Bo');
+      // The before-state of this seam: no hop, no title.
+      expect(resolveRecordTitle({ ...LOAN_SCHEMA, fields: engine.getObject('lib_loan')!.fields }, inHand)).toBeUndefined();
+    });
+
+    it('a formula over the record\'s own columns reads nothing', async () => {
+      d.calls.length = 0;
+      expect(await engine.createContext(READER).serveFormulaField('lib_book', { id: 'b1', title: 'dune' }, 'shout')).toBe('DUNE');
+      expect(d.calls).toEqual([]);
+    });
+
+    it('a field that is not a formula answers undefined, so the stored column is read instead', async () => {
+      expect(await engine.createContext(READER).serveFormulaField('lib_loan', { id: 'l1', book: 'b1' }, 'book')).toBeUndefined();
+    });
+
+    it('reads the hop on the transaction the channel carries', async () => {
+      const trx = { __trx: 'body' };
+      d.calls.length = 0;
+      await engine.createContext({ ...READER, transaction: trx }).serveFormulaField('lib_loan', { id: 'l1', book: 'b1', reader: 'r1' }, 'title');
+      const hops = d.calls.filter((c) => c.object === 'lib_book' || c.object === 'lib_reader');
+      expect(hops).toHaveLength(2);
+      for (const c of hops) expect(c.options?.transaction).toBe(trx);
+    });
+
+    it('a related record the channel may not read leaves it null with the read\'s reason, and leaks nothing', async () => {
+      engine.registerMiddleware(async (ctx: any, next: () => Promise<void>) => {
+        if (ctx.object === 'lib_reader' && ['find', 'findOne'].includes(ctx.operation) && !ctx.context?.isSystem) {
+          const scoped = { visible: true };
+          ctx.ast = { ...(ctx.ast ?? {}), where: ctx.ast?.where ? { $and: [ctx.ast.where, scoped] } : scoped };
+        }
+        await next();
+      });
+      const inHand = { id: 'lx', book: 'b1', reader: 'r_hidden' };
+      expect(await engine.createContext(READER).serveFormulaField('lib_loan', inHand, 'title')).toBeNull();
+      expect(await resolveServedRecordTitle(LOAN_SCHEMA, inHand, engine.createContext(READER))).toBeUndefined();
+      expect(faultsOn('lib_loan', 'title')[0].message).toContain('was not found by this read');
+      // CONTROL — the SYSTEM channel reads the reader.
+      expect(await engine.createContext({ isSystem: true }).serveFormulaField('lib_loan', inHand, 'title')).toBe('Dune · Hidden Person');
+    });
+
+    it('a second hop reached through the related object\'s formula is not served', async () => {
+      registerLoan('record.book.shelf_code');
+      d.calls.length = 0;
+      expect(await engine.createContext(READER).serveFormulaField('lib_loan', { id: 'l1', book: 'b1' }, 'title')).toBeNull();
+      expect(relatedReads('lib_shelf')).toBe(0);
+    });
+
+    it('servedRecordTitle reads the title a read served off the row, never re-derived', async () => {
+      const book = { name: 'lib_book', nameField: 'shelf_code', fields: engine.getObject('lib_book')!.fields };
+      // A row a read returned with its one-hop title served…
+      expect(servedRecordTitle(book, { id: 'b1', title: 'Dune', shelf: 's1', shelf_code: 'A-1' })).toBe('A-1');
+      // …which the synchronous re-derivation throws away.
+      expect(resolveRecordTitle(book, { id: 'b1', title: 'Dune', shelf: 's1', shelf_code: 'A-1' })).toBeUndefined();
+      // A row the read served no title on has none.
+      expect(servedRecordTitle(book, { id: 'b1', title: 'Dune', shelf: 's1', shelf_code: null })).toBeUndefined();
+    });
   });
 });
