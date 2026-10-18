@@ -911,8 +911,8 @@ export default class MigrateOrganizationOwnership extends Command {
             const result = await ensureDefaultOrganizationExists(engine);
             if (!result.organizationId) {
               throw new Error(
-                `the database holds ${result.ambiguous?.organizationCount ?? 'several'} organizations and none is the ` +
-                  "Default Organization (slug 'default')",
+                `the database holds ${result.ambiguous?.organizationCount ?? 'several'} organizations and none has ` +
+                  "slug 'default', so none is the Default Organization",
               );
             }
             return { id: result.organizationId };

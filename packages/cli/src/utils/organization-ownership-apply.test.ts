@@ -2417,19 +2417,34 @@ describe('ADR-0131 D10 --apply — a single-posture database that holds no organ
     });
   });
 
-  it('control — organizations exist and none is the Default Organization: nothing is created, the rows are reported with the reason', async () => {
-    await withDatabase(`${NO_ORGANIZATION} INSERT INTO sys_organization VALUES ('org_acme', 'acme', 'Acme');`, async () => {
+  it('control — several organizations and none of them default: nothing is created, the rows are reported with the reason', async () => {
+    await withDatabase(`${NO_ORGANIZATION} INSERT INTO sys_organization VALUES ('org_acme', 'acme', 'Acme'), ('org_beta', 'beta', 'Beta');`, async () => {
       const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
-      expect(plan).toMatchObject({ organizations: 1, defaultOrganizationCreatedByApply: false });
+      expect(plan).toMatchObject({ organizations: 2, defaultOrganization: null, defaultOrganizationCreatedByApply: false });
       const port = defaultOrganizationPort();
       const report = await apply(catalog(), ledger(), { defaultOrganization: port });
 
       expect(port.calls).toBe(0);
       expect(tableOf(report, 'crm_event').unattributable).toEqual([
-        expect.objectContaining({ id: 'ev_1', reason: expect.stringContaining("no Default Organization (slug 'default') exists to fall back to") }),
+        expect.objectContaining({ id: 'ev_1', reason: expect.stringContaining('no Default Organization exists to fall back to') }),
         expect.objectContaining({ id: 'ev_2' }),
         expect.objectContaining({ id: 'ev_3' }),
       ]);
+    });
+  });
+
+  it('⭐ the sole organization, whatever its slug, is the Default Organization: it takes every row no anchor names, nothing is created, and the marker verifies', async () => {
+    await withDatabase(`${NO_ORGANIZATION} INSERT INTO sys_organization VALUES ('org_acme', 'acme', 'Acme');`, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ organizations: 1, defaultOrganization: { id: 'org_acme', slug: 'acme' }, defaultOrganizationCreatedByApply: false });
+      const port = defaultOrganizationPort();
+      const l = ledger();
+      const report = await apply(catalog(), l, { defaultOrganization: port });
+
+      expect(port.calls).toBe(0);
+      expect(rows('SELECT DISTINCT organization_id FROM crm_event')).toEqual([{ organization_id: 'org_acme' }]);
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
     });
   });
 
@@ -2460,6 +2475,66 @@ describe('ADR-0131 D10 --apply — a single-posture database that holds no organ
       expect(rows('SELECT DISTINCT organization_id FROM crm_event')).toEqual([{ organization_id: 'org_boot' }]);
       expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
       expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+    });
+  });
+});
+
+describe('one definition of the Default Organization: the plan names the organization the boot invariant names (ADR-0131 D3, ADR-0093 D3)', () => {
+  /** The same fixture for both readers: `sys_organization` as the invariant writes it, and rows no anchor names. */
+  const fixture = (organizations: string): string => `
+    CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT, name TEXT, logo TEXT, metadata TEXT);
+    ${organizations}
+    CREATE TABLE crm_event (id TEXT PRIMARY KEY, organization_id TEXT, subject TEXT);
+    INSERT INTO crm_event VALUES ('ev_1', NULL, 'one');
+  `;
+
+  /** plugin-auth's boot invariant over the same database: the engine double answers `find` and `insert` from SQLite. */
+  const invariantEngine = () => ({
+    async find(object: string, query: { where?: Record<string, unknown>; limit?: number }) {
+      const where = query.where ?? {};
+      const keys = Object.keys(where);
+      return rows(
+        `SELECT * FROM "${object}"${keys.length ? ` WHERE ${keys.map((k) => `"${k}" = '${String(where[k])}'`).join(' AND ')}` : ''} ` +
+          `ORDER BY id LIMIT ${query.limit ?? 100}`,
+      );
+    },
+    async insert(object: string, data: Record<string, unknown>) {
+      const columns = Object.keys(data);
+      db.prepare(`INSERT INTO "${object}" (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`)
+        .run(...columns.map((c) => data[c] as string | null));
+      return data;
+    },
+  });
+
+  const cases: Array<[string, string, { plan: { id: string; slug: string } | null; invariant: { organizationId?: string; created: boolean; ambiguous?: { organizationCount: number } } }]> = [
+    ["the organization with slug 'default', beside another", `INSERT INTO sys_organization (id, slug, name) VALUES ('org_acme', 'acme', 'Acme'), ('org_def', 'default', 'Default');`,
+      { plan: { id: 'org_def', slug: 'default' }, invariant: { organizationId: 'org_def', created: false } }],
+    ['the sole organization, whatever its slug', `INSERT INTO sys_organization (id, slug, name) VALUES ('org_acme', 'acme', 'Acme');`,
+      { plan: { id: 'org_acme', slug: 'acme' }, invariant: { organizationId: 'org_acme', created: false } }],
+    ["none: two organizations, neither 'default'", `INSERT INTO sys_organization (id, slug, name) VALUES ('org_acme', 'acme', 'Acme'), ('org_beta', 'beta', 'Beta');`,
+      { plan: null, invariant: { created: false, ambiguous: { organizationCount: 2 } } }],
+  ];
+
+  it.each(cases)('⭐ %s: the plan and the invariant name the same organization', async (_label, organizations, expected) => {
+    await withDatabase(fixture(organizations), async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan.defaultOrganization).toEqual(expected.plan);
+      expect(plan.defaultOrganizationCreatedByApply).toBe(false);
+      const { ensureDefaultOrganizationExists } = await import('@objectstack/plugin-auth');
+      expect(await ensureDefaultOrganizationExists(invariantEngine())).toEqual(expected.invariant);
+      expect(plan.defaultOrganization?.id).toBe(expected.invariant.organizationId);
+    });
+  });
+
+  it('⭐ none at all: the plan names none and says --apply creates it; the invariant creates it, and the plan then names the one it created', async () => {
+    await withDatabase(fixture(''), async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ defaultOrganization: null, defaultOrganizationCreatedByApply: true });
+      const { ensureDefaultOrganizationExists } = await import('@objectstack/plugin-auth');
+      const created = await ensureDefaultOrganizationExists(invariantEngine());
+      expect(created).toMatchObject({ created: true, organizationId: expect.any(String) });
+      const again = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(again.defaultOrganization).toEqual({ id: created.organizationId, slug: 'default' });
     });
   });
 });

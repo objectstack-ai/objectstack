@@ -166,10 +166,19 @@ describe('the v18 boot refusal on a real kernel (ADR-0131 D10 item 5)', () => {
     expect(refusalIn(error)?.code).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
   });
 
-  it('⭐ a fresh database boots', async () => {
+  it('⭐ a fresh database boots: the guard reads the ledger, finds no marker (absent, never unreadable), and starts', async () => {
     const { kernel, error } = await boot(databaseFile());
     expect(error).toBeNull();
     expect(kernel.getState()).toBe('running');
+    // The read the guard made is a real one: the ledger object is registered and
+    // its table answers, so the guard took the read, not the "no ledger" branch,
+    // and a throwing read would have refused the boot as 'unreadable'.
+    const engine = kernel.getService('objectql') as {
+      getObject(name: string): unknown;
+      findOne(object: string, query: Record<string, unknown>): Promise<unknown>;
+    };
+    expect(engine.getObject('sys_migration')).toBeTruthy();
+    await expect(engine.findOne('sys_migration', { where: { id: MARKER }, context: { isSystem: true } })).resolves.toBeNull();
   });
 
   it('⭐ a ceremony that ran every step and did not verify (no v17 column left, marker unverified) is refused, naming the re-run', async () => {
