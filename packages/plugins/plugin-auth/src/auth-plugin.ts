@@ -411,8 +411,16 @@ export class AuthPlugin implements Plugin {
    * deployment's env / options config stands. ADR-0049 — declared is enforced:
    * `auth-settings-ordering.pin.test.ts` resolves a hostile registry that uses
    * auth BEFORE settings and proves the DECLARATION is what moves the order.
+   *
+   * `com.objectstack.organization-ownership-boot-guard` — the v18 boot guard
+   * (`@objectstack/runtime`'s `ORGANIZATION_OWNERSHIP_BOOT_GUARD_PLUGIN_NAME`,
+   * spelled here because this package does not depend on the runtime;
+   * ADR-0131 D10 item 5), order-if-present: `start()` creates the Default
+   * Organization, and on a kernel that composes the guard (`os serve`) a
+   * database the guard refuses must be left as the guard found it, so the
+   * organization is created only once the guard has judged.
    */
-  optionalDependencies = ['com.objectstack.service.settings'];
+  optionalDependencies = ['com.objectstack.service.settings', 'com.objectstack.organization-ownership-boot-guard'];
 
 
   private options: AuthPluginOptions;
