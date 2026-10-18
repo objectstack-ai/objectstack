@@ -106,7 +106,7 @@ import {
   SYSTEM_FIELDS,
   unprovisionedInjectedColumnsFor,
   unprovisionedAnchorCause,
-  unprovisionedAnchorHint,
+  unprovisionedAnchorFix,
 } from './system-fields.js';
 import { walkFlowNodes, type WalkedFlowNode } from './flow-walk.js';
 import { recordsOf } from './object-graph.js';
@@ -629,7 +629,9 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                 message:
                   `template references '${hole}', and ${unprovisionedAnchorCause(objectName, head)} — ` +
                   `the hole renders an empty string on every run (silently).`,
-                hint: unprovisionedAnchorHint(objectName, head),
+                // [#22161] The shared one-line anchor fix; how to vouch for or
+                // opt out of the anchor is `os explain flow-template-field-unprovisioned`.
+                hint: unprovisionedAnchorFix(objectName, head),
               });
             }
           }
@@ -670,14 +672,16 @@ export function validateFlowTemplatePaths(stack: AnyRec): FlowTemplatePathFindin
                   `'${head}' — the ${root.isTrigger ? 'flow record' : `'${rootName}' record`} carries ` +
                   `'${head}' as a scalar id, not an expanded object, so ` +
                   `this resolves to an empty string at runtime (silently).`,
+                // [#22161] One remedy line per root. What `config.expand` does
+                // (a single-hop re-read as the run's identity), and that it is
+                // the START node's opt-in covering the trigger record alone, is
+                // `os explain flow-template-lookup-traversal`: a variable root's
+                // line never prescribes it.
                 hint: root.isTrigger
-                  ? `Opt in to resolve it: add '${head}' to the start node's config.expand and the ` +
-                    `engine re-reads it as the run's identity. Otherwise reference the foreign-key id directly ` +
-                    `('{{ record.${head} }}'), or project the value via a formula field on '${objectName}'.`
-                  : `A record read into a flow variable is not expanded either — config.expand is the ` +
-                    `START node's opt-in and covers the trigger record alone. Reference the foreign-key id ` +
-                    `directly ('{{ ${rootName}.${head} }}'), project the value via a formula field on ` +
-                    `'${objectName}', or add a get_record node that reads the related record.`,
+                  ? `Add '${head}' to the start node's config.expand, or write '{{ record.${head} }}' ` +
+                    `(the id) or a formula field on '${objectName}' instead.`
+                  : `Write '{{ ${rootName}.${head} }}' (the id) or a formula field on '${objectName}', or ` +
+                    `read the related record with a get_record node.`,
               });
             }
             // STRUCTURED_TYPES + any other scalar `.sub` access is left alone:

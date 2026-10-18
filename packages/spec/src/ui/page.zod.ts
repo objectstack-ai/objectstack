@@ -683,6 +683,22 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * gate, so naming only `current_user` here under-stated a ruling this
    * package already makes elsewhere.
    *
+   * ## `record` is the page's row
+   *
+   * On a `record` page it is the record the page opens. On an app page it is
+   * the row the page's `record` binding reads ({@link PageRecordBindingSchema}),
+   * and a page with no binding has no row, so `record` is unbound there. A
+   * block's own element `dataSource` does NOT bind `record` for its siblings,
+   * nor for its own `visibleWhen`: the block reads that row for its body.
+   *
+   * A count or a plan is a FIELD on the page's row, never a root of its own:
+   * a count is a `summary` (roll-up) field, so "a second environment exists"
+   * is `record.environment_count > 1`; a tier is the field the bound object
+   * carries, `record.plan != 'free'`. ⛔ Not `features.*`: that root is the
+   * DEPLOYMENT's public auth-capability flags (`/api/v1/auth/config`,
+   * `PUBLIC_AUTH_FEATURES`), the same for every organisation and every viewer,
+   * so an organisation's plan is not one of them.
+   *
    * ## Ambient roots — renderer behaviour, NOT contract-guaranteed
    *
    * The shipping renderer additionally mounts `features` and `os.user`
@@ -698,7 +714,8 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * row `regions`): `buildExpressionScope` builds the ambient scope —
    * `current_user`, `user`, `ctx.user`, `os.user`, `features`, and nothing
    * else; `configEvaluationScope` composes this surface's evaluator from it,
-   * adding `record` (only when the page has a row) and `page`.
+   * adding `record` (only when the page has a row — on an app page, once the
+   * renderer mounts the page's `record` binding) and `page`.
    *
    * ## No `data` root on this surface
    *
@@ -726,7 +743,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
    * this surface does not have. See that key's own describe in
    * `component.zod.ts` rather than assuming either environment carries over.
    */
-  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record`. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
+  visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — component rendered only when TRUE. Contract-bound roots: `record`, `current_user` (ADR-0068 aliases `user` / `ctx.user` — one object, three spellings), and page state as `page.<var>`. The shipping renderer additionally mounts `features` and `os.user` — renderer behaviour, NOT contract-guaranteed (ADR-0068 rules the user object only). It mounts NO `data` root here: a `data.*` read faults and a faulting predicate renders the component, so such a gate never gates; the page's row is `record` — the record a record page opens, or the row an app page's `record` binding reads (none without one; a block's own `dataSource` binds no `record` for its siblings). A count or a plan is a field on that row (a `summary` roll-up: `record.environment_count > 1`; `record.plan != 'free'`), never `features.*`, which are the deployment's public auth flags, the same for every organisation. `data` is declared only for an element whose `dataSource` is the PLANNED API binding (`provider: 'api'`), which reads its bound value as `data` once that binding's renderer ships. ⚠️ A `page:tabs` item `visibleWhen` is a different evaluator: it binds `data` to the record ROW. e.g. \"page.selectedProjectId != ''\""),
   // `visibility` REMOVED at 18 (#23543 F4, ADR-0089 D2): through 17 it was the
   // page component's deprecated spelling of `visibleWhen`, folded onto it at
   // parse by a `.transform` that went with the key. The tombstone carries the
@@ -786,6 +803,54 @@ export const PageComponentSchema = lazySchema(() => strictObject({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
+}));
+
+/**
+ * The ONE row an app page is about — {@link PageSchema}'s `record` key.
+ *
+ * A record page's row is the record it opens. An app page opens no record,
+ * so `record` — a contract-bound root of every page-component `visibleWhen` —
+ * had nothing to bind there, and a predicate that follows a bound count or the
+ * organisation's plan could not be written. This binding gives the page its
+ * row, and the page's components read it as `record`: the root ADR-0089 D1
+ * already names for runtime surfaces. No root is added, and nothing only one
+ * host could fill is named — the row is read through the data API every host
+ * serves.
+ *
+ * Semantics are the one-record binding the record blocks take from an element
+ * `dataSource`: read the bound set under the caller's identity, take its FIRST
+ * row by `sort`, re-read when the bound object is written. Zero rows, or a row
+ * the caller may not read, leaves `record` unbound: a predicate reading it
+ * faults, and a faulting `visibleWhen` renders the component. There is no
+ * `limit` — the page binds one row by definition.
+ *
+ * What a predicate wants from the row is a FIELD on it: a count is a
+ * `summary` (roll-up) field, a plan or tier is the field the object carries —
+ * `record.environment_count > 1`, `record.plan != 'free'`.
+ *
+ * Planned in the renderer: until the console mounts this binding, `record`
+ * stays unbound on an app page, as it was before the key existed.
+ */
+export const PageRecordBindingSchema = lazySchema(() => strictObject({
+  surface: 'this page record binding',
+  history: PAGE_HISTORY,
+  aliases: {
+    objectName: 'object', from: 'object', source: 'object', entity: 'object',
+    viewName: 'view', listView: 'view',
+    filters: 'filter', where: 'filter', criteria: 'filter',
+    orderBy: 'sort', sortBy: 'sort',
+  },
+  guidance: {
+    limit: 'a page binds ONE row, the first of the bound set by `sort`, so there is no `limit` — drop it, and give a `sort` or a `filter` that matches one row to say which row you mean',
+    id: 'a page record binding is a query, not an id — match the row with a `filter` rule on `id`',
+    recordId: 'a page record binding is a query, not an id — match the row with a `filter` rule on `id`',
+  },
+}, {
+  object: z.string().describe('Object the page row is read from'),
+  view: z.string().optional().describe('Named view to apply'),
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the filter of the named view'),
+  sort: z.array(SortItemSchema).optional().describe('Sort order — the page row is the FIRST row of the bound set under it'),
 }));
 
 /**
@@ -1612,6 +1677,35 @@ export function checkPageDefaultPlacement(
 }
 
 /**
+ * The `record` binding placement check attached to {@link PageSchema}: the
+ * page `record` binding ({@link PageRecordBindingSchema}) is refused on any
+ * page that is not `type: 'app'`.
+ *
+ * A record page already has its row — the record it opens — so a second
+ * binding would give one root two rows; a `home`, `list` or `utility` page is
+ * not about a row at all. On each of them the key would parse and decide
+ * nothing, so it is refused where it is written.
+ *
+ * Exported for the reason {@link checkPageSourceCompleteness} is, and
+ * attached by identifier — pinned in `object-refinement-check-exports.test.ts`.
+ */
+export function checkPageRecordBindingPlacement(
+  page: { record?: unknown; type?: unknown },
+  ctx: z.RefinementCtx,
+): void {
+  if (page.record === undefined) return;
+  const type = page.type === undefined ? PAGE_TYPE_DEFAULT : page.type;
+  if (type === 'app') return;
+  ctx.addIssue({
+    code: 'custom',
+    path: ['record'],
+    message: type === 'record'
+      ? "`record` binds the row of an app page — a record page's row is the record it opens, so it takes no binding. Delete `record`, or make the page `type: 'app'`."
+      : `\`record\` binds the row of an \`app\` page, and this page is \`type: '${String(type)}'\`, which has no row to bind. Delete \`record\`, or make the page \`type: 'app'\`.`,
+  });
+}
+
+/**
  * Role names an author reaches for, and the slot that plays the role — named
  * in the refusal when the page's template places that slot.
  */
@@ -1699,6 +1793,7 @@ export const PageSchema = lazySchema(() => strictObject({
   aliases: {
     title: 'label', displayName: 'label',
     objectName: 'object', entity: 'object',
+    boundRecord: 'record', recordBinding: 'record', recordSource: 'record', dataSource: 'record',
     pageType: 'type', kindType: 'type',
     layout: 'template', layoutTemplate: 'template',
     sections: 'regions', areas: 'regions', zones: 'regions',
@@ -1782,6 +1877,14 @@ export const PageSchema = lazySchema(() => strictObject({
 
   /** Context */
   object: z.string().optional().describe('Bound object (for Record pages)'),
+
+  /**
+   * The row an app page is about, read as `record` by every component
+   * predicate on the page. See {@link PageRecordBindingSchema}; refused on
+   * every other page type ({@link checkPageRecordBindingPlacement}).
+   */
+  record: PageRecordBindingSchema.optional()
+    .describe("The row an app page is about — a one-row query `{ object, view?, filter?, sort? }` whose FIRST row (by `sort`, read under the caller's identity) the page's components read as `record` in `visibleWhen`. A count or a plan is a field on that row: a `summary` roll-up (`record.environment_count > 1`) or the object's own field (`record.plan != 'free'`). No row, no `record`: the predicate faults and the component renders. Only on `type: 'app'` — refused on every other page type (a record page's row is the record it opens). Planned in the renderer: until the console mounts it, `record` stays unbound on an app page."),
 
   // recordReview / blankLayout fields removed — the record_review/blank page
   // types have no renderer and were dropped from PageTypeSchema (framework#2265);
@@ -1995,12 +2098,16 @@ export const PageSchema = lazySchema(() => strictObject({
   // does not place, are refused. Attached by identifier for the same reason
   // as the checks above.
   .superRefine(checkPageDefaultPlacement)
-  .superRefine(checkPageRegionPlacement));
-// PageSchema's cross-field rules are the six checks above: the
+  .superRefine(checkPageRegionPlacement)
+  // The page `record` binding exists only on an app page — the one page
+  // type that opens no row of its own. Attached by identifier for the same
+  // reason as the checks above.
+  .superRefine(checkPageRecordBindingPlacement));
+// PageSchema's cross-field rules are the seven checks above: the
 // ADR-0080/0081 source completeness check, the compiled-kind `requires`
 // check, the print-page composition check, the `details` + `tabs` slot
-// pair check, the `isDefault` placement check and the region placement
-// check. A component's `properties` bag is judged by none of them: it is
+// pair check, the `isDefault` placement check, the region placement
+// check and the `record` binding placement check. A component's `properties` bag is judged by none of them: it is
 // `@objectstack/lint`'s `validateComponentProps`, at the CLI doors and the
 // runtime save door alike. It once also required
 // `recordReview`/`blankLayout` and `slots` (all removed — unrendered roadmap /
@@ -2037,6 +2144,13 @@ export type ElementDataSource = z.input<typeof ElementDataSourceSchema>;
  * isomorphic family the way `element:number` and `element:record_picker` did.
  */
 export type ElementDataSourceParsed = z.infer<typeof ElementDataSourceSchema>;
+export type PageRecordBinding = z.input<typeof PageRecordBindingSchema>;
+/**
+ * Post-parse shape of {@link PageRecordBinding} — `filter` carries
+ * `z.array(ViewFilterRuleSchema)`, whose input ≠ infer (`operator` is
+ * normalized on parse), as on {@link ElementDataSourceParsed}.
+ */
+export type PageRecordBindingParsed = z.infer<typeof PageRecordBindingSchema>;
 /**
  * The API binding of a page element (`{ provider: 'api', read: { url }, path? }`).
  * One shape: no default and no transform in its tree, so the author state and

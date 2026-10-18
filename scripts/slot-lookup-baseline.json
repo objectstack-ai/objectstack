@@ -18,7 +18,7 @@
   "packages/services/service-messaging/src/messaging-service-plugin.ts": 1,
   "packages/services/service-queue/src/queue-service-plugin.ts": 4,
   "packages/services/service-realtime/src/realtime-service-plugin.ts": 1,
-  "packages/services/service-settings/src/settings-service-plugin.ts": 2,
+  "packages/services/service-settings/src/settings-service-plugin.ts": 1,
   "packages/services/service-sms/src/sms-plugin.ts": 1,
   "packages/services/service-storage/src/storage-service-plugin.ts": 5,
   "packages/triggers/trigger-record-change/src/formula-context.test.ts": 2,

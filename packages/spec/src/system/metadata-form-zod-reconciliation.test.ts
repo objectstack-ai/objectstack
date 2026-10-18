@@ -344,6 +344,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'print',
     why: "planned, not yet rendered — the print declaration's keys (paper, margins, running header and footer, page numbers, page-break hints) are validated at parse and its printable block subset is enforced at the authoring doors, but no renderer applies them until the console's print rendering lands, and the ruling places the authoring UI in the Studio page designer with it. A form control offered today would let an author set a layout nothing prints",
   },
+  // #24265 — an app page's row binding lands spec-first the same way:
+  // `planned` in the liveness ledger, read by no renderer until the console
+  // mounts it at the page root.
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'record',
+    why: "planned, not yet rendered — the binding's one-row query is validated at parse and refused on every page that is not `type: 'app'`, but no renderer mounts it as the page's `record` until the console's page-root binding lands. A form control offered today would let an author bind a row no predicate can read yet",
+  },
   // #22228 — a field's cell formatting rules land spec-first the same way:
   // `planned` in the liveness ledger, read by no renderer until objectui's cell
   // card. Offering the key in the field form first would be the UI half of

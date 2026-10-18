@@ -114,7 +114,7 @@ import {
   SYSTEM_FIELDS,
   indexUnprovisionedAnchors,
   unprovisionedAnchorCause,
-  unprovisionedAnchorHint,
+  unprovisionedAnchorFix,
 } from './system-fields.js';
 // [#13855] The field-group reference question, shared with `validate-form-layout`
 // so both layout escape hatches resolve a `section.group` against one index.
@@ -556,7 +556,9 @@ export function checkFieldRefs(
             `field "${ref.name}" resolves on object "${objectName}", but ` +
             `${unprovisionedAnchorCause(objectName, ref.name)}` +
             FIELD_REF_MISS[consequence].unprovisioned,
-          hint: unprovisionedAnchorHint(objectName, ref.name),
+          // [#22161] The shared one-line anchor fix; how to vouch for or opt
+          // out of the anchor is `os explain page-field-unprovisioned`.
+          hint: unprovisionedAnchorFix(objectName, ref.name),
         });
       }
       continue;
