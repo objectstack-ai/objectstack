@@ -552,7 +552,11 @@ const MetadataProtectionEnvelopeFields = {
  * `studio`, `api`) last changed it, under which actor, and when. It is what
  * lets Studio's properties mark a field or a view setting the AI copilot
  * changed, with the draft chip and the source line objectui#12725 rules
- * (「由 AI 副驾在 2 分钟前作为草稿加入」). Four measured choices:
+ * (「由 AI 副驾在 2 分钟前作为草稿加入」). It carries ADR-0033's provenance
+ * item, "attribute each AI draft to the acting user + mark it AI-sourced",
+ * at the grain of a key: `actor` is the acting user and `by: 'copilot'` the
+ * AI-sourced mark, two members because one user makes both kinds of edit.
+ * Four measured choices:
  *
  * - **On this read, not on the `_drafts` row.** The reader is Studio's
  *   properties, and they read the item they edit through the strict draft
