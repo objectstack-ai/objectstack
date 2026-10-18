@@ -19,7 +19,11 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import type { EngineQueryOptions } from '@objectstack/spec/data';
+import { ObjectStackProtocolImplementation } from '@objectstack/metadata-protocol';
 import { ObjectQL } from './engine.js';
+
+type Search = EngineQueryOptions['search'];
 
 type Row = Record<string, unknown>;
 
@@ -111,17 +115,17 @@ describe('[#24284] a search over an empty resolved search set is refused', () =>
         }, 'test');
     });
 
-    const verbs: Array<[string, (e: ObjectQL, search: unknown) => Promise<unknown>]> = [
-        ['find', (e, search) => e.find('lib_loan', { search } as any)],
-        ['findOne', (e, search) => e.findOne('lib_loan', { search } as any)],
-        ['count', (e, search) => e.count('lib_loan', { search } as any)],
+    const verbs: Array<[string, (e: ObjectQL, search: Search) => Promise<unknown>]> = [
+        ['find', (e, search) => e.find('lib_loan', { search })],
+        ['findOne', (e, search) => e.findOne('lib_loan', { search })],
+        ['count', (e, search) => e.count('lib_loan', { search })],
         ['aggregate', (e, search) => e.aggregate('lib_loan', {
             search, groupBy: ['book'], aggregations: [{ function: 'count', alias: 'n' }],
-        } as any)],
+        })],
     ];
 
     it.each(verbs)('%s answers 400 INVALID_FIELD naming the object and both remedies — and reads nothing', async (_verb, run) => {
-        for (const term of ['zzzz-nothing', 'Dune', { query: 'Dune' }]) {
+        for (const term of ['zzzz-nothing', 'Dune', { query: 'Dune' }] as Search[]) {
             const err: any = await run(engine, term).then(() => null, (e) => e);
             expect(err, `term ${JSON.stringify(term)} was answered`).not.toBeNull();
             expect(err).toMatchObject(REFUSAL);
@@ -135,7 +139,7 @@ describe('[#24284] a search over an empty resolved search set is refused', () =>
 
     it('an explicit searchFields narrowing does not rescue it — the allowed set is empty, so the fallback is too', async () => {
         for (const searchFields of [['title'], ['book'], ['nope'], []]) {
-            const err: any = await engine.find('lib_loan', { search: 'Dune', searchFields } as any).then(() => null, (e) => e);
+            const err: any = await engine.find('lib_loan', { search: 'Dune', searchFields }).then(() => null, (e) => e);
             expect(err, `searchFields ${JSON.stringify(searchFields)}`).toMatchObject(REFUSAL);
         }
     });
@@ -162,10 +166,10 @@ describe('[#24284] a search over an empty resolved search set is refused', () =>
     });
 
     it('a blank or whitespace term is not a search: every row, where untouched, on every verb', async () => {
-        for (const search of ['', '   ', { query: '  ' }]) {
-            expect(await engine.find('lib_loan', { search } as any)).toHaveLength(5);
-            expect(await engine.count('lib_loan', { search } as any)).toBe(5);
-            expect(await engine.find('lib_loan', { search, where: { book: 'b1' } } as any)).toHaveLength(2);
+        for (const search of ['', '   ', { query: '  ' }] as Search[]) {
+            expect(await engine.find('lib_loan', { search })).toHaveLength(5);
+            expect(await engine.count('lib_loan', { search })).toBe(5);
+            expect(await engine.find('lib_loan', { search, where: { book: 'b1' } })).toHaveLength(2);
         }
     });
 
@@ -176,7 +180,7 @@ describe('[#24284] a search over an empty resolved search set is refused', () =>
         // A direct engine caller naming only fields outside the allowed set: the
         // tolerant intersection falls back to the allowed set — a FILTERED
         // answer, never every row.
-        expect((await engine.find('lib_book', { search: 'emma', searchFields: ['nope'] } as any)).map((r) => r.id)).toEqual(['b2']);
+        expect((await engine.find('lib_book', { search: 'emma', searchFields: ['nope'] })).map((r) => r.id)).toEqual(['b2']);
     });
 });
 
@@ -189,7 +193,6 @@ describe('[#24284] a search over an empty resolved search set is refused', () =>
  */
 describe('[#24284] the palette keeps its skip; the data door surfaces the refusal', () => {
     async function makeHarness() {
-        const { ObjectStackProtocolImplementation } = await import('@objectstack/metadata-protocol');
         const made = makeDriver();
         const engine = new ObjectQL();
         engine.registerDriver(made.driver, true);
