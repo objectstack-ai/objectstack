@@ -40,8 +40,8 @@ suite is what breaks.
 
 Deliberately absent (each a known escape hatch whose consumers
 feature-detect and degrade): `getRawApp()` (Hono-specific — metadata HMR,
-cloud-connection routes, static/SPA + CORS + Server-Timing), `mount()`,
-multipart parsing (binary bodies stay raw behind the lazy `req.rawBody()`).
+cloud-connection routes, static/SPA + CORS + Server-Timing) and `mount()`.
+Bodies: JSON and forms (multipart included) are parsed into `req.body`, and every other media type stays raw behind the lazy `req.rawBody()`.
 
 ## Not a product server
 

@@ -360,7 +360,9 @@ export class NodeHttpServer implements IHttpServer {
      *  4. **A handler that writes nothing leaves the standard answer.** The
      *     branch falls through to {@link writeUnmatchedResponse} — the 404, or
      *     the 405 + `Allow`, unchanged. Writing nothing is the documented way
-     *     to say "not mine".
+     *     to say "not mine". The one exception is a fallback that read a body
+     *     this adapter refused: as on the primary adapter, the refusal is then
+     *     the answer, whether the fallback threw, answered or wrote nothing.
      *
      * Locked cross-adapter by this package's own
      * `fallback-seam.conformance.test.ts`, which runs the same cases against
@@ -435,10 +437,11 @@ export class NodeHttpServer implements IHttpServer {
     }
 
     /**
-     * [#24083] The answer to a matched request whose handler read a body this
-     * adapter refused: `400 INVALID_REQUEST` in the ADR-0112 envelope, the
-     * same two keys the primary adapter renders for this throw. The request's
-     * body was never readable, so no other answer describes it.
+     * [#24083] The answer to a request whose handler (a matched route's, or
+     * the fallback's) read a body this adapter refused: `400 INVALID_REQUEST`
+     * in the ADR-0112 envelope, the same two keys the primary adapter renders
+     * for this throw. The request's body was never readable, so no other
+     * answer describes it.
      *
      * One shape cannot be matched on `node:http`: a handler that WROTE before
      * it read has put bytes on the wire, which the primary adapter (it holds
@@ -588,13 +591,13 @@ export class NodeHttpServer implements IHttpServer {
         };
 
         /**
-         * [#24083] On a matched route, a read of a refused body makes the
-         * refusal THE answer, whatever the handler made of the throw, as on
-         * the primary adapter: anything the handler writes after the read is
-         * dropped, and {@link writeBodyRefusal} answers once it returns. The
-         * fallback branch keeps its own answer to a throw.
+         * [#24083] A read of a refused body makes the refusal THE answer,
+         * whatever the handler made of the throw, on a matched route and in
+         * the fallback alike, as on the primary adapter: anything the handler
+         * writes after the read is dropped, and {@link writeBodyRefusal}
+         * answers once it returns.
          */
-        const refusalStands = (): boolean => matched !== undefined && refusedBodyRead !== undefined;
+        const refusalStands = (): boolean => refusedBodyRead !== undefined;
 
         // ── Response wrapper (contract + streaming extension) ───────────────
         const isHead = method === 'HEAD';
@@ -638,9 +641,18 @@ export class NodeHttpServer implements IHttpServer {
             // an unmatched request on this adapter today either, and changing
             // that is a separate decision from installing this seam.
             const handler = fallback as RouteHandler;
+            let threw = false;
             try {
                 await handler(req, res as IHttpResponse);
             } catch {
+                threw = true;
+            }
+            // [#24083] The fallback read a body this adapter refused: the
+            // refusal is the answer on every arm (thrown, caught and answered,
+            // caught and silent), as on the primary adapter, whose fallback
+            // runs through the same `runHandler` as its routes.
+            if (refusedBodyRead) return this.writeBodyRefusal(nodeRes, refusedBodyRead);
+            if (threw) {
                 // Prefer failing to falling back: a fallback that THREW is a
                 // broken consumer, and reporting its failure as this adapter's
                 // ordinary 404 would hide it behind the most unremarkable
