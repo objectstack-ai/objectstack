@@ -4,7 +4,7 @@
 
 feat(spec)!: `marketplace:installed-list` is retired — refused by name at the schema door; the separate Installed Apps view it drew was retired, and Setup → Packages filtered to Source = marketplace replaces it (#24230, ADR-0049)
 
-Clause-②: yes (narrowing)
+Clause-②: no (narrowing)
 
 <!-- adr-0087: registered ui-marketplace-installed-list-retired -->
 
