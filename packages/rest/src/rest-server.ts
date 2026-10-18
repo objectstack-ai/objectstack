@@ -8255,15 +8255,23 @@ export class RestServer {
      *                                          answering `{ id }` only (#22437)
      *
      * Both routes bypass `enforceAuth` even though anonymous-deny is on for the
-     * deployment (e.g. ObjectOS multi-tenant). Security is delegated to the
-     * `guest_portal` permission set carried on the execution context — the
-     * SecurityPlugin enforces INSERT-only access to the target object. If
-     * the deployment hasn't registered a `guest_portal` profile, the
-     * security middleware falls open with `permissions: []` (no userId),
-     * matching the existing anonymous-access semantics; deployers must
-     * keep secure-by-default deployments paired with a `guest_portal`
-     * profile (the CRM example does this) to enforce the INSERT-only
-     * contract.
+     * deployment (e.g. ObjectOS multi-tenant). The submit is authorized by the
+     * form's own declaration (ADR-0056 Option A): it hands the engine a
+     * `publicFormGrant` scoped to the form's target object, and the
+     * SecurityPlugin admits on that grant alone, before any permission set
+     * resolves. It admits the create and the read-back (`find` / `findOne` /
+     * `count`) on that object only, refuses every other operation and object,
+     * and strips the server-managed anchors (`PUBLIC_FORM_SERVER_MANAGED_FIELDS`)
+     * from the payload; the route's allow-list of the form's declared fields is
+     * the first net. No deployment configures anything for this, and the grant
+     * never falls open: it admits the same operations whether or not a
+     * `guest_portal` set is registered.
+     *
+     * The submit's context also names `guest_portal` in `permissions`. That
+     * name admits nothing. Where a deployment registers a set under it, the
+     * SecurityPlugin resolves that set as the caller's for the grant's result
+     * masker over what the grant hands back (ADR-0138 records the name); the
+     * submit answers the created id only (#22437).
      *
      * The matched FormView's parent ViewSchema is found by scanning
      * `protocol.getMetaItems({ type: 'view' })`. For each entry we inspect

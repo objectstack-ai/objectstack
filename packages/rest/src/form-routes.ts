@@ -407,8 +407,8 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
         },
     });
 
-    // POST /forms/:slug/submit — INSERT a record on the target object
-    // with the `guest_portal` permission set attached.
+    // POST /forms/:slug/submit — INSERT a record on the target object,
+    // authorized by the form's own declaration (`publicFormGrant`, below).
     this.routeManager.register({
         method: 'POST',
         path: `${basePath}/forms/:slug/submit`,
@@ -432,9 +432,11 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 // Only allow the fields declared on the matched FormView.
                 // This prevents a public visitor from stuffing privileged
                 // columns (owner_id, status, internal_notes, …) into the
-                // row. Object hooks (`beforeInsert`) are still responsible
-                // for stamping server-side defaults — see the CRM
-                // `lead.hook.ts` / `case.hook.ts` for the canonical pattern.
+                // row. What the form does not collect, the object fills: a
+                // field's `defaultValue` (`crm_lead.status` in
+                // `examples/app-crm`), or a `beforeInsert` hook where the value
+                // needs logic (`StampInquiryDefaultsHook` in
+                // `examples/app-showcase/src/data/hooks/index.ts`).
                 const allowedFields = new Set<string>();
                 // [#24131] …and, off the SAME entries, the fields the form
                 // requires the visitor to fill: an entry declaring
@@ -522,10 +524,26 @@ export function registerFormEndpoints(this: FormRouteHost, basePath: string): vo
                 // ADR-0056 (Option A): authorization DERIVED from the declared
                 // form — a narrow create grant scoped to exactly this form's target
                 // object. The SecurityPlugin honors `publicFormGrant` (create + the
-                // immediate read-back, that object ONLY), so public forms work under
-                // secure-by-default (anonymous-deny) WITHOUT a deployment-configured
-                // `guest_portal`. `guest_portal` + `anonymous` are kept for back-compat
-                // with object hooks (guest detection via falsy `ctx.user?.id`).
+                // immediate read-back, that object ONLY) before it resolves any
+                // permission set, so public forms work under secure-by-default
+                // (anonymous-deny) whether or not the deployment registers a
+                // `guest_portal` set, and no set's object bits widen or narrow
+                // this insert.
+                //
+                // `permissions: ['guest_portal']` admits nothing. It names the set
+                // the SecurityPlugin resolves for this caller: where a deployment
+                // registers one under that name, the grant's result masker reads
+                // that set's field permissions (and the capabilities it holds
+                // against a field's `requiredPermissions`) over what the grant
+                // hands back; where none is registered, it resolves to no set and
+                // the masker reads the zero-set posture. ADR-0138 records the name
+                // (fate: keep). The answer below is the created id only (#22437),
+                // so the masked record never reaches the visitor through this door.
+                //
+                // Neither `permissions` nor `anonymous` reaches an object hook:
+                // the engine builds `ctx.session` and `ctx.user` without either
+                // key. With no `userId` here, `ctx.user` is unset, so a hook sees
+                // this submission as a write with no user, like any other.
                 const context: any = {
                     publicFormGrant: { object: match.object },
                     permissions: ['guest_portal'],

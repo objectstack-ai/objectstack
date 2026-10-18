@@ -99,9 +99,14 @@ export const LeadViews = defineView({
      * Hosted at GET/POST `/api/v1/forms/contact-us` (+ `/submit`). An
      * unauthenticated visitor — or an `EmbeddableForm` iframe on a marketing
      * site — submits it to create a `crm_lead`. `sharing.allowAnonymous` opens
-     * the public endpoint; the `guest_portal` profile (INSERT-only on crm_lead)
-     * authorizes the write. The lead object's own defaults/hooks stamp internal
-     * fields (status, owner, score).
+     * the public endpoint, and this declaration is also what authorizes the
+     * write: the submit route derives a `publicFormGrant` on `crm_lead` from it
+     * (create + read-back on that object only, ADR-0056 Option A). No
+     * permission set is needed, `GuestPortalProfile` included (see its
+     * comment). Only the fields in `sections` are written; the lead object's
+     * field defaults fill what the form does not collect (`status`,
+     * `lead_score`), and the server-managed anchors (`owner_id`,
+     * `organization_id`, audit columns) are never taken from a submission.
      */
     web_to_lead: {
       type: 'simple',
