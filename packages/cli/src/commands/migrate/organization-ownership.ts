@@ -24,7 +24,6 @@ import { OCCUPANCY_STOP_HINT, probeMigrationTarget } from '../../utils/migrate-o
 import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
 import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { resolvePlannedDriverExec } from '../../utils/unmanaged-tables.js';
-import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
 import {
   buildOrganizationOwnershipPlan,
   OrganizationOwnershipPlanRefusal,
@@ -44,6 +43,7 @@ import {
   checkpointFromDetails,
   MetadataChoiceRefusal,
   ORGANIZATION_OWNERSHIP_MIGRATION_ID,
+  judgeDeclaredSharingRules,
   UNATTRIBUTABLE_REMEDY,
   ReviewedPlanRefusal,
   reviewedPlanFromFile,
@@ -311,20 +311,6 @@ class ReportFileReservation {
  * the drops go through the remote face's own drift detector and migration
  * door (`@objectstack/driver-turso`).
  */
-/** Why plugin-sharing does not serve a declared rule, in the operator's terms: the translation's own refusal. */
-function describeDeclaredRuleSkip(skip: DeclaredSharingRuleSkip): string {
-  switch (skip.kind) {
-    case 'unnamed':
-      return 'the declaration names no rule or no object';
-    case 'unmappable-recipient':
-      return `its recipient (sharedWith type ${JSON.stringify(skip.sharedWith ?? null)}) maps to no recipient the runtime grants to`;
-    case 'owner-rule':
-      return 'it is an owner-based rule, a retired authoring shape (use a criteria rule)';
-    case 'condition':
-      return `its condition does not translate (${skip.cause.reason}: ${skip.cause.detail})`;
-  }
-}
-
 export default class MigrateOrganizationOwnership extends Command {
   static override description =
     'The v18 organization-ownership ceremony (ADR-0131 D10). Without --apply, the read-only plan: per table, the fate, ' +
@@ -829,7 +815,6 @@ export default class MigrateOrganizationOwnership extends Command {
           // judged by the plugin's own translation, so a name it refuses to
           // serve is never one a mirror's grants are renamed onto.
           rules: async () => {
-            const { translateDeclaredSharingRule } = await import('@objectstack/plugin-sharing');
             const registry = engine.registry as { listItems?(type: string): unknown[] | undefined } | undefined;
             let items: unknown[] = registry?.listItems?.('sharing_rule') ?? [];
             if (items.length === 0) {
@@ -837,14 +822,7 @@ export default class MigrateOrganizationOwnership extends Command {
               const listed = await metadata?.list?.('sharing_rule');
               items = Array.isArray(listed) ? listed : [];
             }
-            const out: Array<{ name: string; refused: string | null }> = [];
-            for (const item of items) {
-              const name = (item as { name?: unknown } | null)?.name;
-              if (typeof name !== 'string' || name === '') continue;
-              const { skip } = translateDeclaredSharingRule(item);
-              out.push({ name, refused: skip ? describeDeclaredRuleSkip(skip) : null });
-            }
-            return out;
+            return judgeDeclaredSharingRules(items);
           },
         },
         door: {

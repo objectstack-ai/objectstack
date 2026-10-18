@@ -44,6 +44,7 @@ import {
   type UnnamedReason,
 } from './organization-ownership-grants.js';
 import { describeSecurityPluginComposition, type SchemaMigrationComposition } from './schema-migration-plugins.js';
+import type { DeclaredSharingRuleSkip } from '@objectstack/plugin-sharing';
 
 /**
  * The ADR-0131 D10 ceremony's apply step — ceremony items 2 to 4: the backup
@@ -264,6 +265,38 @@ export interface MetadataLockPort {
  */
 export interface DeclaredSharingRulesPort {
   rules(): Promise<ReadonlyArray<{ name: string; refused: string | null }>>;
+}
+
+/**
+ * Judge each declared `sharing_rule` item as plugin-sharing's enforcement does
+ * — through its own `translateDeclaredSharingRule`, never a copy of it — for
+ * {@link DeclaredSharingRulesPort}: a nameless item is no rule to rename onto
+ * and is left out.
+ */
+export async function judgeDeclaredSharingRules(items: readonly unknown[]): Promise<Array<{ name: string; refused: string | null }>> {
+  const { translateDeclaredSharingRule } = await import('@objectstack/plugin-sharing');
+  const out: Array<{ name: string; refused: string | null }> = [];
+  for (const item of items) {
+    const name = (item as { name?: unknown } | null)?.name;
+    if (typeof name !== 'string' || name === '') continue;
+    const { skip } = translateDeclaredSharingRule(item);
+    out.push({ name, refused: skip ? describeDeclaredRuleSkip(skip) : null });
+  }
+  return out;
+}
+
+/** Why plugin-sharing does not serve a declared rule, in the operator's terms: the translation's own refusal. */
+function describeDeclaredRuleSkip(skip: DeclaredSharingRuleSkip): string {
+  switch (skip.kind) {
+    case 'unnamed':
+      return 'the declaration names no object';
+    case 'unmappable-recipient':
+      return `its recipient (sharedWith type ${JSON.stringify(skip.sharedWith ?? null)}) maps to no recipient the runtime grants to`;
+    case 'owner-rule':
+      return 'it is an owner-based rule, a retired authoring shape (use a criteria rule)';
+    case 'condition':
+      return `its condition does not translate (${skip.cause.reason}: ${skip.cause.detail})`;
+  }
 }
 
 /** The `email_template` item the registry serves for one `(name, locale)` bundle member. */
