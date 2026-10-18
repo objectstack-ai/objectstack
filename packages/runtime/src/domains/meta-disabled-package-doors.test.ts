@@ -79,7 +79,7 @@ const SERVICE_ITEMS: Record<string, any> = {
 
 function boot(opts: { getMetaTypes?: boolean } = {}) {
     const disabled = { on: true };
-    const getMetaItem = vi.fn(async ({ type, name, packageId }: any) => {
+    const getMetaItem = vi.fn(async ({ type, name, packageId }: any): Promise<any> => {
         if (type === 'object' && name === DISABLED) throw refusal(name);
         if (type === 'object' && name === HEALTHY) return { type, name, item: schema(name) };
         // The protocol answers the disabled package's page as absent (#24210),
