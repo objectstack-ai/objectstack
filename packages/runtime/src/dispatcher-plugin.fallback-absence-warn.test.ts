@@ -166,3 +166,37 @@ describe('dispatcher declarative-endpoint seam — absence is loud (#5400)', () 
             .toBe(true);
     }, 60_000);
 });
+
+/**
+ * [#24228] The fallback seam also hands a domain that decides every verb
+ * (`/actions`, `/keys`, `/notifications`, `/mcp/skill`) the requests its
+ * router could not route on that domain's paths. Which paths those are is the
+ * router's verdict, asked through `IHttpServer.resolveMountedRoute` — OPTIONAL
+ * on the contract like the seam itself. A transport that has the seam but not
+ * the resolver answers those requests with its own 405, so its absence is
+ * announced the same way, once, at `warn`: a functional gap (the anonymous
+ * floor and the domain's `Allow` are skipped), nothing persisted.
+ */
+describe('dispatcher domain-decided verbs — a missing route resolver is loud (#24228)', () => {
+    const resolverLines = (logs: LogLine[]) => logs.filter((l) => l.message.includes('resolveMountedRoute'));
+
+    it('announces a seam without `resolveMountedRoute` once, at `warn`, naming the consequence and the remedy', async () => {
+        const logs = await bootWith(makeSeamedServer());
+
+        const lines = resolverLines(logs);
+        expect(lines).toHaveLength(1);
+        expect(lines[0].level).toBe('warn');
+        expect(lines[0].message).toMatch(/\/actions/);
+        expect(lines[0].message).toMatch(/instead of 401/);
+        expect(lines[0].message).toMatch(/`Allow`/);
+        expect(lines[0].message).toMatch(/@objectstack\/plugin-hono-server/);
+    }, 60_000);
+
+    it('stays SILENT when the adapter exposes both the seam and the resolver', async () => {
+        const server = makeSeamedServer();
+        server.resolveMountedRoute = () => undefined;
+        const logs = await bootWith(server);
+
+        expect(resolverLines(logs)).toEqual([]);
+    }, 60_000);
+});

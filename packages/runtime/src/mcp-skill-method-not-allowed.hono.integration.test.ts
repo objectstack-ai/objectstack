@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { request as httpRequest } from 'node:http';
 import { LiteKernel, Plugin, PluginContext } from '@objectstack/core';
 import { HonoServerPlugin } from '@objectstack/plugin-hono-server';
 import type { IHttpServer } from '@objectstack/spec/contracts';
@@ -213,28 +214,50 @@ describe('POST /api/v1/mcp/skill answers the standard 405 envelope (integration,
         expect(text).toContain(`${baseUrl}/api/v1/mcp`);
     });
 
-    // A verb with no mount at all still falls to the adapter, and should:
-    // `unmatchedResponse()` is the correct owner of a route that does not
-    // exist under that verb. This pins the BOUNDARY of the fix rather than
-    // claiming the adapter answer is wrong everywhere.
-    it('PUT — unmounted — still falls through to the adapter (boundary, not a regression)', async () => {
-        const { res, body } = await call('PUT');
-        expect(res.status).toBe(405);
+    // [#24228] A verb with no mount reaches the domain branch too. This case
+    // used to pin the BOUNDARY the other way: `PUT` fell to the adapter, whose
+    // `405` listed `DELETE, GET, HEAD, POST` in `Allow` — the verbs REGISTERED
+    // on the path, two of which (`POST`, `DELETE`) are mounted only so the
+    // domain can refuse them. RFC 9110 §15.5.6: `Allow` names the SUPPORTED
+    // methods. The dispatcher declares this path as one whose domain decides
+    // every verb, and its fallback seam hands the domain each request the
+    // router cannot route here: `PUT`/`PATCH` (unmounted), `OPTIONS` (CORS is
+    // off in this boot) and `TRACE` (any verb `IHttpServer` cannot register).
+    // Raw `node:http`: `fetch` refuses `TRACE`.
+    function rawCall(method: string): Promise<{ status: number; allow: string | null; body: Record<string, any> }> {
+        const { hostname, port } = new URL(baseUrl);
+        return new Promise((resolve, reject) => {
+            const req = httpRequest({ host: hostname, port, method, path: SKILL_PATH }, (res) => {
+                let text = '';
+                res.setEncoding('utf8');
+                res.on('data', (chunk) => { text += chunk; });
+                res.on('end', () => {
+                    const allow = res.headers.allow;
+                    resolve({
+                        status: res.statusCode ?? 0,
+                        allow: typeof allow === 'string' ? allow : null,
+                        body: JSON.parse(text) as Record<string, any>,
+                    });
+                });
+            });
+            req.on('error', reject);
+            req.end();
+        });
+    }
 
-        // The adapter's own 405. Since #9364 it speaks the SAME declared
-        // envelope as the domain branch, so `success`/`error.code` no longer
-        // tell the two apart — `error.details.allowed` is what does, and it is
-        // the direct successor of the top-level `allowed` this case used to
-        // read. Asserted by VALUE, not by presence — and the value is the
-        // whole four-verb set because #7649's fix mounts GET/POST/DELETE, with
-        // Hono registering HEAD implicitly alongside GET. That is precisely
-        // why PUT is the boundary probe: it is the one verb left unmounted.
-        expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
-        expect(body.error.details.allowed).toEqual(['DELETE', 'GET', 'HEAD', 'POST']);
-        expect(body.error.details.method).toBe('PUT');
-        expect(body.error.details.path).toBe(SKILL_PATH);
-        // …and it is NOT the domain branch's answer, which fills `httpStatus`
-        // and no `details`.
-        expect(body.error).not.toHaveProperty('httpStatus');
-    });
+    for (const method of ['PUT', 'PATCH', 'OPTIONS', 'TRACE'] as const) {
+        it(`${method} — no mount — gets the domain branch's 405 with \`Allow: GET\`, not the adapter's four-verb list (#24228)`, async () => {
+            const { status, allow, body } = await rawCall(method);
+
+            expect(status).toBe(405);
+            expect(allow).toBe('GET');
+            expect(body.success).toBe(false);
+            expect(body.error.code).toBe('METHOD_NOT_ALLOWED');
+            expect(body.error.message).toBe(EXPECTED_MESSAGE);
+            // The domain branch fills `httpStatus`; the adapter's 405 fills
+            // `details.{method,path,allowed}`.
+            expect(body.error.httpStatus).toBe(405);
+            expect(body.error).not.toHaveProperty('details');
+        });
+    }
 });

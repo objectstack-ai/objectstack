@@ -25,10 +25,11 @@
  *     standalone `os dev` / `os serve` composition), read through `fetch`.
  *     `/api/v1/keys` is mounted for every verb, so a signed-in `GET` reaches
  *     the domain and its 405 is the one on the wire. `/actions` is mounted for
- *     `POST` alone there, so a `GET` never reaches the domain: the adapter's
- *     own unmatched-method 405 answers it, and that one already names `POST`.
- *     The row is kept so "both hosts" is a statement about the wire for both
- *     domains, not about one handler.
+ *     `POST` alone there; since #24228 the dispatcher's fallback seam hands the
+ *     domain every other verb, so its 405 is the one on the wire too (before
+ *     that, the adapter's own unmatched-method 405 answered, also naming
+ *     `POST`). The row is kept so "both hosts" is a statement about the wire
+ *     for both domains, not about one handler.
  *
  * ## The anonymous baseline stays first (ADR-0138 D2)
  *
@@ -176,7 +177,7 @@ describe('the keys and actions 405s carry `Allow` on the wire of the standalone 
         expect(res.headers.get('allow')).toBeNull();
     });
 
-    it(`signed-in GET /api/v1/actions/task/close → 405 with \`Allow: ${ALLOW}\` (the adapter's: GET is not mounted)`, async () => {
+    it(`signed-in GET /api/v1/actions/task/close → 405 with \`Allow: ${ALLOW}\` (the domain's, through the fallback seam since #24228)`, async () => {
         const { res, body } = await call('GET', '/actions/task/close', true);
 
         expect(res.status).toBe(405);
