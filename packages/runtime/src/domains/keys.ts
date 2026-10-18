@@ -51,6 +51,7 @@ import { generateApiKey } from '../security/api-key.js';
 import { buildApiError } from '../error-envelope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 
 const DAY_MS = 86_400_000;
 
@@ -114,6 +115,9 @@ export async function handleKeysRequest(
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
         };
     }
+    // [#24151] The body is read once the baseline above has admitted the
+    // caller, never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     if (method !== 'POST') {
         // RFC 9110 §15.5.6: a 405 MUST carry an `Allow` header naming the

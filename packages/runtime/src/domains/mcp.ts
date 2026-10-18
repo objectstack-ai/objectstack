@@ -18,6 +18,7 @@ import * as actionExec from '../action-execution.js';
 import { isSystemObjectName } from '../action-execution.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 // [#15705] The resume door's one refusal table, shared with
 // `POST /automation/:name/runs/:runId/resume` so the two doors answer one
 // engine result identically.
@@ -90,6 +91,9 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
         }
         return { handled: true, response };
     }
+    // [#24151] The body is read once the anonymous decision above has admitted
+    // the caller, never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     // ── OAuth scope → tool-family enforcement (fail-closed, #2698) ──
     // `oauthScopes` is set ONLY for OAuth-token provenance. A token that

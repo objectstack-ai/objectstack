@@ -7,6 +7,7 @@ import type { IAuthService, IMetadataService, Logger } from '@objectstack/spec/c
 import type { CounterStore } from '@objectstack/plugin-auth/rate-limit-storage';
 import { HttpDispatcher, HttpDispatcherResult, type HttpProtocolContext } from './http-dispatcher.js';
 import { isServiceServeable } from './service-serveable.js';
+import { deferRequestBody } from './deferred-request-body.js';
 import { validationFailureDetails, VALIDATION_FAILED_STATUS } from './validation-failure.js';
 import { buildApiError } from './error-envelope.js';
 import { appEndpointMountPrefix, isAppEndpointPath, runAppEndpointStep } from './api-endpoint-step.js';
@@ -985,6 +986,16 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 sendResultBase(result, res, securityHeaders, { logger: ctx.logger });
             const errorResponse = (err: any, res: any) =>
                 errorResponseBase(err, res, securityHeaders, { logger: ctx.logger });
+            // [#24151] Every mount below whose domain reads a body hands
+            // `dispatch()` `deferRequestBody(req)`, ⛔ never `req.body`. Reading
+            // `req.body` here runs the transport's refuse-on-read ahead of
+            // `dispatch()`, so a body it cannot parse was answered `400` before
+            // the domain's anonymous decision (ADR-0138 D2: the domain's first
+            // statement) could answer `401`. Deferred, the domain reads the body
+            // once it has admitted the caller (`readDispatchedBody`), so the
+            // anonymous answer no longer depends on whether the body parses,
+            // and an admitted caller's unparseable body still gets the
+            // transport's refusal. See `./deferred-request-body.ts`.
 
             // ── Observability ──────────────────────────────────────────
             // Noop defaults; production hosts inject real adapters.
@@ -1279,7 +1290,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             if (analyticsInstalled) {
                 server.post(`${prefix}/analytics/query`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', '/analytics/query', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', '/analytics/query', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1297,7 +1308,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server.post(`${prefix}/analytics/sql`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', '/analytics/sql', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', '/analytics/sql', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1323,7 +1334,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
                 register.call(server, `${prefix}/mcp`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch(method, '/mcp', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch(method, '/mcp', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1359,7 +1370,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 const register = method === 'GET' ? server.get : method === 'DELETE' ? server.delete : server.post;
                 register.call(server, `${prefix}/mcp/skill`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch(method, '/mcp/skill', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch(method, '/mcp/skill', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1392,7 +1403,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
             // Proxy above like every other mount here (#24025).
             server.post(`${prefix}/keys`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.dispatch('POST', '/keys', req.body, req.query, { request: req });
+                    const result = await dispatcher.dispatch('POST', '/keys', deferRequestBody(req), req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -1406,7 +1417,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                                 : server.delete;
                 register.call(server, `${prefix}/keys`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch(method, '/keys', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch(method, '/keys', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1444,7 +1455,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             server.post(`${prefix}/notifications/read`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.dispatch('POST', '/notifications/read', req.body, req.query, { request: req });
+                    const result = await dispatcher.dispatch('POST', '/notifications/read', deferRequestBody(req), req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -1453,7 +1464,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
             server.post(`${prefix}/notifications/read/all`, async (req: any, res: any) => {
                 try {
-                    const result = await dispatcher.dispatch('POST', '/notifications/read/all', req.body, req.query, { request: req });
+                    const result = await dispatcher.dispatch('POST', '/notifications/read/all', deferRequestBody(req), req.query, { request: req });
                     sendResult(result, res);
                 } catch (err: any) {
                     errorResponse(err, res);
@@ -1550,7 +1561,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                             const result = await dispatcher.dispatch(
                                 verb.toUpperCase(),
                                 `/packages${toSubPath(req)}`,
-                                req.body,
+                                deferRequestBody(req),
                                 req.query ?? {},
                                 { request: req },
                             );
@@ -1673,7 +1684,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // the list is `GET /api/v1/meta/flow`.
                 server!.post(`${base}/automation`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', '/automation', req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', '/automation', deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1732,7 +1743,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.put(`${base}/automation/:name`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('PUT', `/automation/${req.params.name}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('PUT', `/automation/${req.params.name}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1750,7 +1761,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.post(`${base}/automation/trigger/:name`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/trigger/${req.params.name}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/trigger/${req.params.name}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1759,7 +1770,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.post(`${base}/automation/:name/trigger`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/trigger`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/trigger`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1768,7 +1779,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.post(`${base}/automation/:name/toggle`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/toggle`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/toggle`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1792,7 +1803,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // dispatch path, which the domain answers `trigger` first.
                 server!.post(`${base}/automation/:name/clone`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/clone`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/clone`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1821,7 +1832,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // screen node's collected input, and re-fetch its pending screen.
                 server!.post(`${base}/automation/:name/runs/:runId/resume`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/resume`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/resume`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1845,7 +1856,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // second policy that happens to agree today.
                 server!.post(`${base}/automation/:name/runs/:runId/cancel`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/cancel`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/cancel`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1854,7 +1865,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
 
                 server!.post(`${base}/automation/:name/runs/:runId/restore-suspension`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/restore-suspension`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/automation/${req.params.name}/runs/${req.params.runId}/restore-suspension`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1906,7 +1917,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                             const fullPath: string = req.path ?? '';
                             const idx = fullPath.lastIndexOf('/ai');
                             const aiSubPath = idx >= 0 ? fullPath.slice(idx) : '/ai';
-                            const result = await dispatcher.dispatch(method.toUpperCase(), aiSubPath, req.body, req.query, { request: req });
+                            const result = await dispatcher.dispatch(method.toUpperCase(), aiSubPath, deferRequestBody(req), req.query, { request: req });
                             sendResult(result, res);
                         } catch (err: any) {
                             errorResponse(err, res);
@@ -1944,7 +1955,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 // the two-segment route below (verified against the router).
                 server!.post(`${base}/actions//:action`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/actions//${req.params.action}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/actions//${req.params.action}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1952,7 +1963,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 });
                 server!.post(`${base}/actions/:object/:action`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -1960,7 +1971,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                 });
                 server!.post(`${base}/actions/:object/:action/:recordId`, async (req: any, res: any) => {
                     try {
-                        const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}/${req.params.recordId}`, req.body, req.query, { request: req });
+                        const result = await dispatcher.dispatch('POST', `/actions/${req.params.object}/${req.params.action}/${req.params.recordId}`, deferRequestBody(req), req.query, { request: req });
                         sendResult(result, res);
                     } catch (err: any) {
                         errorResponse(err, res);
@@ -2003,7 +2014,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         const result = await dispatcher.dispatch(
                             'POST',
                             `/security/_activation/${req.params.type}/${req.params.name}`,
-                            req.body,
+                            deferRequestBody(req),
                             req.query,
                             { request: req },
                         );
@@ -2017,7 +2028,7 @@ export function createDispatcherPlugin(config: DispatcherPluginConfig = {}): Plu
                         const result = await dispatcher.dispatch(
                             'POST',
                             `/security/permission-sets/${encodeURIComponent(req.params.name)}/clone`,
-                            req.body,
+                            deferRequestBody(req),
                             req.query,
                             { request: req },
                         );

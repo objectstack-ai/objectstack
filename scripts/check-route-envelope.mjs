@@ -819,6 +819,24 @@ const MODULES = {
     stringError: 1,
     siblingCode: 1,
   },
+
+  // [#23050 slice 13c] The fifth `/meta` group of
+  // `RestServer#registerMetadataEndpointsInner`' body — the per-item writes (the
+  // item save and the reset, `PUT` and `DELETE {metaPath}/:type/:name`) — moved
+  // out of `rest-server.ts` on exactly slice 1's terms above: a MOVE, no wire
+  // answer changed, so it inherits `dialectOnly` and the two dialect facts, and no
+  // write-site count. Both counts were measured on the moved file at 0 (each door's
+  // 403 and 501 bodies, and the save's 400, are the nested `{ error: { code,
+  // message } }`) and `rest-server.ts` keeps its 7 / 3, so each sum is unchanged. Both
+  // only ever tick down. Discovered by the `*-routes.ts` convention and declared in
+  // the same PR that created the module, so the gap never exists.
+  'packages/rest/src/meta-item-write-routes.ts': {
+    dialectOnly:
+      'moved out of `rest-server.ts` by #23050 slice 13c and held to exactly the guarantee it had there — the two dialect facts, never a write-site count',
+    ratchet: '#9559 (option 1: convert onto the shared sendOk/sendError)',
+    stringError: 0,
+    siblingCode: 0,
+  },
 };
 
 /** Identifiers whose `.json()` READS a request rather than writing a response. */

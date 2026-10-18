@@ -347,7 +347,11 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         // the reference sweep, the layered read, the book tree and the item read
         // coerce no number of the query:
         // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 14 → 15.
-        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(15);
+        // [#23050 slice 13c] Nor do the per-item writes (`meta-item-write-routes.ts`):
+        // the item save and the reset read their switches as strings and coerce no
+        // number of the query:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 15 → 16.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(16);
         expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
         expect(sites).toHaveLength(9);
     });

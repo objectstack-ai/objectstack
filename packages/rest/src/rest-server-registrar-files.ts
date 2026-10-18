@@ -59,6 +59,9 @@ export const REST_SERVER_REGISTRAR_FILES = [
     // [#23050 slice 13b] The fourth `/meta` group of `registerMetadataEndpointsInner`'
     // body, the per-item reads — see {@link REST_SERVER_META_ROUTE_FILES}.
     'meta-item-read-routes.ts',
+    // [#23050 slice 13c] The fifth `/meta` group of `registerMetadataEndpointsInner`'
+    // body, the per-item writes — see {@link REST_SERVER_META_ROUTE_FILES}.
+    'meta-item-write-routes.ts',
 ] as const;
 
 /** One file on {@link REST_SERVER_REGISTRAR_FILES}. */
@@ -87,6 +90,10 @@ export const REST_SERVER_META_ROUTE_FILES: readonly RestServerRegistrarFile[] = 
     // [#23050 slice 13b] The per-item reads: `/references`, `/layers`, the book tree
     // and the item read.
     'meta-item-read-routes.ts',
+    // [#23050 slice 13c] The per-item writes: the item save and the reset. The first
+    // module here that registers nothing on the route manager itself: both routes go
+    // through the inner method's per-item registrar, handed over in its scope.
+    'meta-item-write-routes.ts',
 ];
 
 /**

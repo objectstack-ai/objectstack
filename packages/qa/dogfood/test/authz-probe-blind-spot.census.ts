@@ -540,17 +540,18 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'module on the registrar list (`packages/rest/src/rest-server-registrar-files.ts`) — ' +
       '`data-action-routes.ts`, `batch-routes.ts`, `approvals-routes.ts`, `sharing-routes.ts`, ' +
       '`analytics-routes.ts`, `security-routes.ts`, `discovery-routes.ts`, `email-routes.ts`, ' +
-      '`search-routes.ts`, `ui-routes.ts`, `form-routes.ts`, `crud-routes.ts`, `meta-collection-routes.ts` and ' +
-      '`meta-item-read-routes.ts`, ' +
+      '`search-routes.ts`, `ui-routes.ts`, `form-routes.ts`, `crud-routes.ts`, `meta-collection-routes.ts`, ' +
+      '`meta-item-read-routes.ts` and `meta-item-write-routes.ts`, ' +
       'the modules the bodies of ' +
       '`registerDataActionEndpoints`, `registerBatchEndpoints`, `registerApprovalsEndpoints`, ' +
       '`registerSharingEndpoints`, `registerSharingRuleEndpoints`, `registerAnalyticsEndpoints`, ' +
       '`registerSecurityExplainEndpoints`, `registerSecurityEndpoints`, `registerDiscoveryEndpoints`, ' +
       '`registerOpenApiEndpoints`, `registerEmailEndpoints`, `registerSearchEndpoints`, ' +
-      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints`, and the first four `/meta` ' +
+      '`registerUiEndpoints`, `registerFormEndpoints` and `registerCrudEndpoints`, and the first five `/meta` ' +
       'groups of `registerMetadataEndpointsInner`, moved to; ' +
       'reachable = those inside registerMetadataEndpoints, PLUS every site in the registrar list\'s named `/meta` ' +
-      'subset (`REST_SERVER_META_ROUTE_FILES`: `meta-collection-routes.ts` and `meta-item-read-routes.ts`), whose ' +
+      'subset (`REST_SERVER_META_ROUTE_FILES`: `meta-collection-routes.ts`, `meta-item-read-routes.ts` and ' +
+      '`meta-item-write-routes.ts`), whose ' +
       'registrations the inner method ' +
       'runs inside the umbrella\'s swap',
     // [#15542 / #15854] ⭐ THE POPULATION RULE LEARNED A SECOND SPELLING, and
@@ -866,10 +867,34 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
     // 6 + 6 + 4), `private register*Endpoints(` stays 16, `registerPerItemRoute(`
     // stays 8 and `enforceAuth` stays 112: the moved group spells neither term,
     // and neither does the seam.
+    // [#23050 slice 13c] 70 / 19 / 51 UNCHANGED, `reachable` again held by 13a's
+    // rule with no rule change, and TWO controls re-keyed, as ruled for this
+    // slice. The fifth `/meta` group, the per-item writes (`PUT` and `DELETE
+    // {metaPath}/:type/:name`, two helper-routed registration sites, REACHABLE
+    // through the same umbrella key), moved to `meta-item-write-routes.ts`, which
+    // joins the list (length 15 -> 16) and the named `/meta` subset (2 -> 3). It
+    // is the first module on the list with NO direct site: both of its routes
+    // register through the inner method's per-item registrar, which reaches it in
+    // the `/meta` scope as the one closure the inner head declares and which
+    // still reads the route manager at call time, inside the swap. So (1) its own
+    // control counts `registerPerItemRoute(` (2), the population rule's second
+    // spelling, instead of `this.routeManager.register(`, which reads 0 there and
+    // would be a zero read as a reading; and (2) the `registerPerItemRoute(`
+    // control is RE-ANCHORED, not relaxed, over the same haystack as
+    // `this.routeManager.register(` and the population rule (this file plus every
+    // module on the list), where it stays 8 (6 here + 2 in the module); over this
+    // file alone it would read 6. The subset's length and the module calls
+    // inside the inner method move together (both 3). Measured at the move
+    // commit, before the list learned the module: population 68, the two sites
+    // out of reach, and the `.call(` control at 3 against a subset of 2.
+    // `this.routeManager.register(` stays 63 over the sixteen files (the module
+    // spells it nowhere), `private register*Endpoints(` stays 16,
+    // `const registerPerItemRoute =` stays 1 and `enforceAuth` stays 112: the
+    // moved group spells none of them, and neither does the seam.
     controls: {
       'private register*Endpoints(': 16,
       'this.routeManager.register(': 63,
-      'registrar list length': 15,
+      'registrar list length': 16,
       'data-action-routes.ts: this.routeManager.register(': 9,
       'batch-routes.ts: this.routeManager.register(': 5,
       'approvals-routes.ts: this.routeManager.register(': 7,
@@ -884,6 +909,9 @@ export const PROBE_FILE_CENSUS: readonly ProbeFileReading[] = [
       'crud-routes.ts: this.routeManager.register(': 6,
       'meta-collection-routes.ts: this.routeManager.register(': 6,
       'meta-item-read-routes.ts: this.routeManager.register(': 4,
+      // [#23050 slice 13c] Controlled on the helper's call spelling: this module
+      // has no direct site (see above).
+      'meta-item-write-routes.ts: registerPerItemRoute(': 2,
       // [#23050 slice 13a] Recorded AS the subset's length, not as a literal: the
       // measured side is the module calls inside the inner method, so the two
       // can only move together.
@@ -1405,9 +1433,21 @@ export function deriveProbeFileCensus(): {
         // [#23050 slice 1] The moved module's own share, so a reading that
         // silently stopped appending it cannot hide behind the total above.
         // [#23050 slice 3] One such control per module on the list.
-        ...Object.fromEntries(movedModules.map(([file, text]) =>
-          [`${file}: this.routeManager.register(`, occurrences(text, /this\.routeManager\.register\(/g)])),
-        'registerPerItemRoute(': occurrences(src, /registerPerItemRoute\(/g),
+        // [#23050 slice 13c] …one per SPELLING the module registers through, as
+        // the population rule counts both: a module whose routes all go through
+        // the per-item registrar has no direct site, and a control that read 0
+        // there would be instrument failure by this census's own rule. A
+        // spelling a module does not spell mints no control, so a module that
+        // stops spelling the one its control was recorded on makes that control
+        // VANISH, which is as loud as moving it.
+        ...Object.fromEntries(movedModules.flatMap(([file, text]) => [
+          [`${file}: this.routeManager.register(`, occurrences(text, /this\.routeManager\.register\(/g)] as const,
+          [`${file}: registerPerItemRoute(`, occurrences(text, /registerPerItemRoute\(/g)] as const,
+        ].filter(([, count]) => count > 0))),
+        // [#23050 slice 13c] Over `all`, the population rule's own haystack, since
+        // a `/meta` module now carries helper call sites too (re-anchored, not
+        // relaxed: 6 here + 2 in `meta-item-write-routes.ts` = 8).
+        'registerPerItemRoute(': occurrences(all, /registerPerItemRoute\(/g),
         'const registerPerItemRoute =': occurrences(src, /const\s+registerPerItemRoute\s*=/g),
         // ⭐ The one control here that is NOT a whole-file count, deliberately:
         // it is the SHAPE of the slice the population rule subtracts, and it is
