@@ -62,9 +62,10 @@ function makeHarness() {
             if (table !== 'sys_metadata') return null;
             return findRow(o.where)?.row ?? null;
         },
-        async find(table: string, o: { where: Record<string, unknown> }) {
+        async find(table: string, o: { where: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
-            return Array.from(rows.values()).filter((r) => matchesWhere(r, o.where));
+            const matched = Array.from(rows.values()).filter((r) => matchesWhere(r, o.where));
+            return typeof o?.limit === 'number' ? matched.slice(0, o.limit) : matched;
         },
         async insert(table: string, data: Record<string, unknown>) {
             if (table !== 'sys_metadata') return { id: `rec_${++nextId}` };
