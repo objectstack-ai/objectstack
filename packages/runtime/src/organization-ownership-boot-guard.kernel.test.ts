@@ -109,13 +109,11 @@ const seededApp = () => new AppPlugin({
  * before the engine and before the guard — so only their declared ordering can
  * put the guard's judgment ahead of their writes.
  */
-async function boot(file: string, opts: { writers?: boolean } = {}): Promise<{ kernel: ObjectKernel; error: unknown }> {
+async function boot(file: string, opts: { writers?: 'seed' | 'all' } = {}): Promise<{ kernel: ObjectKernel; error: unknown }> {
   const kernel = new ObjectKernel({ logger: { level: 'silent' }, gracefulShutdown: false });
   kernels.push(kernel);
-  if (opts.writers) {
-    await kernel.use(seededApp());
-    await kernel.use(createIdentityObjectsPlugin() as never);
-  }
+  if (opts.writers) await kernel.use(seededApp());
+  if (opts.writers === 'all') await kernel.use(createIdentityObjectsPlugin() as never);
   await kernel.use(new DriverPlugin(new SqlDriver({
     client: 'better-sqlite3',
     connection: { filename: file },
@@ -201,7 +199,7 @@ describe('a refused boot writes nothing (ADR-0131 D10 item 5: the guard judges b
   it('⭐ the seed and the Default Organization, use()d ahead of the guard, start only after it judged: the refused file holds neither', async () => {
     const file = databaseFile();
     seedV17Shape(file);
-    const { kernel, error } = await boot(file, { writers: true });
+    const { kernel, error } = await boot(file, { writers: 'all' });
     expect(refusalIn(error)?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
     expect(kernel.getState()).not.toBe('running');
     // The engine's additive schema sync ran before the refusal (the ceremony's
@@ -212,9 +210,17 @@ describe('a refused boot writes nothing (ADR-0131 D10 item 5: the guard judges b
     expect(sql(file, 'SELECT id FROM guard_event')).toEqual([]);
   });
 
+  it('⭐ AppPlugin alone, use()d ahead of the guard: its own declaration holds the inline seed back', async () => {
+    const file = databaseFile();
+    seedV17Shape(file);
+    const { error } = await boot(file, { writers: 'seed' });
+    expect(refusalIn(error)?.code, String(error)).toBe(ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE);
+    expect(sql(file, 'SELECT id FROM guard_event')).toEqual([]);
+  });
+
   it('control: the same composition over a fresh file writes the Default Organization and the seed', async () => {
     const file = databaseFile();
-    const { kernel, error } = await boot(file, { writers: true });
+    const { kernel, error } = await boot(file, { writers: 'all' });
     expect(error).toBeNull();
     expect(sql<{ slug: string }>(file, 'SELECT slug FROM sys_organization').map((o) => o.slug)).toEqual(['default']);
     expect(sql<{ subject: string }>(file, 'SELECT subject FROM guard_event ORDER BY subject').map((r) => r.subject)).toEqual(['one', 'two']);
