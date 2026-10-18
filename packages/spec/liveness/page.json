@@ -46,7 +46,67 @@
       "status": "planned",
       "verifiedAt": "2026-10-18",
       "evidence": "packages/spec/src/ui/page.zod.ts#checkPageRecordBindingPlacement (the parse refuses `record` on every page that is not `type: 'app'`, so the key reaches only the one page type that opens no row of its own); packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (the strict one-row query shape: `object`, `view`, `filter`, `sort`, and no `limit`)",
-      "note": "PLANNED, the renderer half pending: measured on objectui `main` @79cb8c03eb, nothing reads a page-level `record` yet. `SchemaRenderer`'s `configEvaluationScope` binds `record` from `RecordContext` (`boundRecord = recordContext?.data`), and on an `app` page the only provider of that context is a record block's own one-row binding (`plugin-detail/src/renderers/recordBinding.tsx`), which wraps that block's BODY — so neither the block's own `visibleWhen` nor a sibling's sees the row. The renderer half mounts the page binding with that same one-record semantics at the page root, so every component predicate reads it as `record`. Until then `record` is unbound on an `app` page exactly as before the key existed: a predicate reading it faults, and a faulting `visibleWhen` renders the component. Flip to `live` when the console mounts it, citing the read point."
+      "note": "PLANNED, the renderer half pending: measured on objectui `main` @79cb8c03eb, nothing reads a page-level `record` yet. `SchemaRenderer`'s `configEvaluationScope` binds `record` from `RecordContext` (`boundRecord = recordContext?.data`), and on an `app` page the only provider of that context is a record block's own one-row binding (`plugin-detail/src/renderers/recordBinding.tsx`), which wraps that block's BODY — so neither the block's own `visibleWhen` nor a sibling's sees the row. The renderer half mounts the page binding with that same one-record semantics at the page root, so every component predicate reads it as `record`. Until then `record` is unbound on an `app` page exactly as before the key existed: a predicate reading it faults, and a faulting `visibleWhen` renders the component. Flip to `live` when the console mounts it, citing the read point.",
+      "children": {
+        "object": {
+          "status": "planned",
+          "verifiedAt": "2026-10-18",
+          "evidence": "packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (declares `object` on the strict one-row query shape)",
+          "note": "The object the page row is read from. Planned with its container: no renderer reads a page-level `record` yet."
+        },
+        "view": {
+          "status": "planned",
+          "verifiedAt": "2026-10-18",
+          "evidence": "packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (declares `view` on the strict one-row query shape)",
+          "note": "The named view whose filter AND-combines with `filter` — the element `dataSource` semantics. Planned with its container."
+        },
+        "filter": {
+          "status": "planned",
+          "verifiedAt": "2026-10-18",
+          "evidence": "packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (declares `filter` on the strict one-row query shape)",
+          "note": "ViewFilterRule array form, the one orthography every `filter` door shares. Planned with its container.",
+          "children": {
+            "field": {
+              "status": "planned",
+              "verifiedAt": "2026-10-18",
+              "evidence": "packages/spec/src/ui/view.zod.ts#ViewFilterRuleSchema (declares `field` on the rule the binding's `filter` array holds)",
+              "note": "`field` of one `filter` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+            },
+            "operator": {
+              "status": "planned",
+              "verifiedAt": "2026-10-18",
+              "evidence": "packages/spec/src/ui/view.zod.ts#ViewFilterRuleSchema (declares `operator` on the rule the binding's `filter` array holds)",
+              "note": "`operator` of one `filter` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+            },
+            "value": {
+              "status": "planned",
+              "verifiedAt": "2026-10-18",
+              "evidence": "packages/spec/src/ui/view.zod.ts#ViewFilterRuleSchema (declares `value` on the rule the binding's `filter` array holds)",
+              "note": "`value` of one `filter` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+            }
+          }
+        },
+        "sort": {
+          "status": "planned",
+          "verifiedAt": "2026-10-18",
+          "evidence": "packages/spec/src/ui/page.zod.ts#PageRecordBindingSchema (declares `sort` on the strict one-row query shape)",
+          "note": "Decides which row is FIRST — the page row. Planned with its container.",
+          "children": {
+            "field": {
+              "status": "planned",
+              "verifiedAt": "2026-10-18",
+              "evidence": "packages/spec/src/shared/enums.zod.ts#SortItemSchema (declares `field` on the item the binding's `sort` array holds)",
+              "note": "`field` of one `sort` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+            },
+            "order": {
+              "status": "planned",
+              "verifiedAt": "2026-10-18",
+              "evidence": "packages/spec/src/shared/enums.zod.ts#SortItemSchema (declares `order` on the item the binding's `sort` array holds)",
+              "note": "`order` of one `sort` item on the page record binding. Planned with its container: no renderer reads a page-level `record` yet."
+            }
+          }
+        }
+      }
     },
     "template": {
       "status": "live",

@@ -1610,7 +1610,7 @@
       "sites": [
         "",
         "interfaceConfig.emptyState.link.url",
-        "interfaceConfig.filterBy.element",
+        "record.filter.element",
         "slots.header.options[0].type"
       ]
     },
@@ -1618,6 +1618,11 @@
       "sites": [
         "dataSource.options[0].filter.element",
         "type"
+      ]
+    },
+    "ui/PageRecordBinding": {
+      "sites": [
+        "filter.element"
       ]
     },
     "ui/PageRegion": {

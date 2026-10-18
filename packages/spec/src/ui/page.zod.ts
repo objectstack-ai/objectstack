@@ -338,54 +338,6 @@ export const ElementDataSourceSchema = lazySchema(() => strictObject({
 }));
 
 /**
- * The ONE row an `app` page is about — {@link PageSchema}'s `record` key.
- *
- * A record page's row is the record it opens. An `app` page opens no record,
- * so `record` — a contract-bound root of every page-component `visibleWhen` —
- * had nothing to bind there, and a predicate that follows a bound count or the
- * organisation's plan could not be written. This binding gives the page its
- * row, and the page's components read it as `record`: the root ADR-0089 D1
- * already names for runtime surfaces. No root is added, and nothing only one
- * host could fill is named — the row is read through the data API every host
- * serves.
- *
- * Semantics are the one-record binding the record blocks take from an element
- * `dataSource`: read the bound set under the caller's identity, take its FIRST
- * row by `sort`, re-read when the bound object is written. Zero rows, or a row
- * the caller may not read, leaves `record` unbound: a predicate reading it
- * faults, and a faulting `visibleWhen` renders the component. There is no
- * `limit` — the page binds one row by definition.
- *
- * What a predicate wants from the row is a FIELD on it: a count is a
- * `summary` (roll-up) field, a plan or tier is the field the object carries —
- * `record.environment_count > 1`, `record.plan != 'free'`.
- *
- * Planned in the renderer: until the console mounts this binding, `record`
- * stays unbound on an `app` page, as it was before the key existed.
- */
-export const PageRecordBindingSchema = lazySchema(() => strictObject({
-  surface: 'this page record binding',
-  history: PAGE_HISTORY,
-  aliases: {
-    objectName: 'object', from: 'object', source: 'object', entity: 'object',
-    viewName: 'view', listView: 'view',
-    filters: 'filter', where: 'filter', criteria: 'filter',
-    orderBy: 'sort', sortBy: 'sort',
-  },
-  guidance: {
-    limit: 'a page binds ONE row, the first of the bound set by `sort`, so there is no `limit` — drop it, and give a `sort` or a `filter` that matches one row to say which row you mean',
-    id: 'a page record binding is a query, not an id — match the row with a `filter` rule on `id`',
-    recordId: 'a page record binding is a query, not an id — match the row with a `filter` rule on `id`',
-  },
-}, {
-  object: z.string().describe('Object the page row is read from'),
-  view: z.string().optional().describe('Named view to apply'),
-  filter: z.array(ViewFilterRuleSchema).optional()
-    .describe('Filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the filter of the named view'),
-  sort: z.array(SortItemSchema).optional().describe('Sort order — the page row is the FIRST row of the bound set under it'),
-}));
-
-/**
  * The SAME-ORIGIN API PATH an element's `api` data source reads — one string
  * the parse can judge on its own, so a URL that would leave this deployment's
  * origin is refused in front of the author and never reaches a browser.
@@ -851,6 +803,54 @@ export const PageComponentSchema = lazySchema(() => strictObject({
 
   /** ARIA accessibility attributes */
   aria: AriaPropsSchema.optional().describe('ARIA accessibility attributes'),
+}));
+
+/**
+ * The ONE row an `app` page is about — {@link PageSchema}'s `record` key.
+ *
+ * A record page's row is the record it opens. An `app` page opens no record,
+ * so `record` — a contract-bound root of every page-component `visibleWhen` —
+ * had nothing to bind there, and a predicate that follows a bound count or the
+ * organisation's plan could not be written. This binding gives the page its
+ * row, and the page's components read it as `record`: the root ADR-0089 D1
+ * already names for runtime surfaces. No root is added, and nothing only one
+ * host could fill is named — the row is read through the data API every host
+ * serves.
+ *
+ * Semantics are the one-record binding the record blocks take from an element
+ * `dataSource`: read the bound set under the caller's identity, take its FIRST
+ * row by `sort`, re-read when the bound object is written. Zero rows, or a row
+ * the caller may not read, leaves `record` unbound: a predicate reading it
+ * faults, and a faulting `visibleWhen` renders the component. There is no
+ * `limit` — the page binds one row by definition.
+ *
+ * What a predicate wants from the row is a FIELD on it: a count is a
+ * `summary` (roll-up) field, a plan or tier is the field the object carries —
+ * `record.environment_count > 1`, `record.plan != 'free'`.
+ *
+ * Planned in the renderer: until the console mounts this binding, `record`
+ * stays unbound on an `app` page, as it was before the key existed.
+ */
+export const PageRecordBindingSchema = lazySchema(() => strictObject({
+  surface: 'this page record binding',
+  history: PAGE_HISTORY,
+  aliases: {
+    objectName: 'object', from: 'object', source: 'object', entity: 'object',
+    viewName: 'view', listView: 'view',
+    filters: 'filter', where: 'filter', criteria: 'filter',
+    orderBy: 'sort', sortBy: 'sort',
+  },
+  guidance: {
+    limit: 'a page binds ONE row, the first of the bound set by `sort`, so there is no `limit` — drop it, and give a `sort` or a `filter` that matches one row to say which row you mean',
+    id: 'a page record binding is a query, not an id — match the row with a `filter` rule on `id`',
+    recordId: 'a page record binding is a query, not an id — match the row with a `filter` rule on `id`',
+  },
+}, {
+  object: z.string().describe('Object the page row is read from'),
+  view: z.string().optional().describe('Named view to apply'),
+  filter: z.array(ViewFilterRuleSchema).optional()
+    .describe('Filter criteria — the ViewFilterRule array form `[{ field, operator, value }, ...]`, AND-combined with the filter of the named view'),
+  sort: z.array(SortItemSchema).optional().describe('Sort order — the page row is the FIRST row of the bound set under it'),
 }));
 
 /**
@@ -2144,6 +2144,13 @@ export type ElementDataSource = z.input<typeof ElementDataSourceSchema>;
  * isomorphic family the way `element:number` and `element:record_picker` did.
  */
 export type ElementDataSourceParsed = z.infer<typeof ElementDataSourceSchema>;
+export type PageRecordBinding = z.input<typeof PageRecordBindingSchema>;
+/**
+ * Post-parse shape of {@link PageRecordBinding} — `filter` carries
+ * `z.array(ViewFilterRuleSchema)`, whose input ≠ infer (`operator` is
+ * normalized on parse), as on {@link ElementDataSourceParsed}.
+ */
+export type PageRecordBindingParsed = z.infer<typeof PageRecordBindingSchema>;
 /**
  * The API binding of a page element (`{ provider: 'api', read: { url }, path? }`).
  * One shape: no default and no transform in its tree, so the author state and
