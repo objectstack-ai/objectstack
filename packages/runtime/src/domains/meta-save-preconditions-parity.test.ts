@@ -119,6 +119,8 @@ interface SaveOptions { headers?: Record<string, string>; query?: Record<string,
 interface Door {
     save(name: string, label: string, opts?: SaveOptions): Promise<Answer>;
     stored(name: string, state: 'active' | 'draft'): Promise<string[]>;
+    /** [#24395] The item read through THIS door, with `query` (`{ state: 'draft' }` for the strict draft read). */
+    read(name: string, query?: Record<string, string>): Promise<{ status: number; envelope: any }>;
 }
 
 /** The refusal's `code` in either door's envelope: nested under `error`, or beside a string `error`. */
@@ -148,8 +150,17 @@ async function bootRestServer(): Promise<Door> {
     rest.registerRoutes();
     const route = rest.getRoutes().find((r: any) => r.method === 'PUT' && r.path === `${META}/:type/:name`);
     if (!route) throw new Error(`PUT ${META}/:type/:name is not registered`);
+    const getRoute = rest.getRoutes().find((r: any) => r.method === 'GET' && r.path === `${META}/:type/:name`);
+    if (!getRoute) throw new Error(`GET ${META}/:type/:name is not registered`);
     return {
         stored,
+        read: async (name, query = {}) => {
+            const res = makeRes();
+            await getRoute.handler({
+                method: 'GET', path: `${META}/view/${name}`, params: { type: 'view', name }, headers: {}, query,
+            }, res);
+            return { status: res.statusCode, envelope: res.body };
+        },
         save: async (name, label, { headers = {}, query = {} } = {}) => {
             const res = makeRes();
             await route.handler({
@@ -206,6 +217,12 @@ async function bootCatchAll(): Promise<Door> {
     const dispatcher = dispatcherOver({ protocol });
     return {
         stored,
+        read: async (name, query = {}) => {
+            const url = new URL(`http://localhost${META}/view/${name}`);
+            for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
+            const res = await catchAll(dispatcher, new Request(url, { method: 'GET' }));
+            return { status: res.response?.status ?? 0, envelope: res.response?.body?.data };
+        },
         save: async (name, label, opts = {}) => {
             const res = await catchAll(dispatcher, putRequest(name, label, opts));
             const body = res.response?.body;
@@ -342,3 +359,64 @@ describe('[#22141] the catch-all\'s fallback writer cannot carry a pin or a life
         expect(saveItem.mock.calls[0].slice(0, 2)).toEqual(['view', 'case_grid']);
     });
 });
+
+// ── [#24395] ?surface= and the strict draft read's draftChanges, on each door ─
+
+for (const [doorName, boot] of DOORS) {
+    describe(`[#24395] ${doorName}: ?surface= is stamped per key path, and the strict draft read serves it`, () => {
+        const changes = async (door: Door, name: string) => {
+            const answer = await door.read(name, { state: 'draft' });
+            expect(answer.status, JSON.stringify(answer.envelope)).toBe(200);
+            return answer.envelope.draftChanges;
+        };
+
+        it('studio, api and none each stamp `by` on the draft\'s first save; the actor is the caller\'s', async () => {
+            const door = await boot();
+            for (const [name, query] of [
+                ['s_studio', { mode: 'draft', surface: 'studio' }],
+                ['s_api', { mode: 'draft', surface: 'api' }],
+                ['s_none', { mode: 'draft' }],
+            ] as const) {
+                ok(await door.save(name, 'staged', { query }));
+                const entries = await changes(door, name);
+                expect(entries).toEqual([{
+                    path: [], by: 'surface' in query ? query.surface : 'api', actor: AUTHOR.userId,
+                    at: expect.stringMatching(/Z$/),
+                }]);
+            }
+        }, 60_000);
+
+        it('over a published row the first draft save records only the keys it changed, and a second save replaces at the path', async () => {
+            const door = await boot();
+            ok(await door.save('s_base', 'live'));
+            ok(await door.save('s_base', 'by api', { query: { mode: 'draft', surface: 'api' } }));
+            const first = await changes(door, 's_base');
+            expect(first.map((e: any) => [e.path, e.by])).toEqual([[['label'], 'api']]);
+            ok(await door.save('s_base', 'by studio', { query: { mode: 'draft', surface: 'studio' } }));
+            expect((await changes(door, 's_base')).map((e: any) => [e.path, e.by])).toEqual([[['label'], 'studio']]);
+        }, 60_000);
+
+        it('ABSENT on the active read and on ?preview=draft', async () => {
+            const door = await boot();
+            ok(await door.save('s_abs', 'live'));
+            ok(await door.save('s_abs', 'staged', { query: { mode: 'draft', surface: 'studio' } }));
+            expect(await changes(door, 's_abs')).toHaveLength(1);
+            for (const query of [{}, { preview: 'draft' }]) {
+                const answer = await door.read('s_abs', query);
+                expect(answer.status, JSON.stringify(query)).toBe(200);
+                expect('draftChanges' in (answer.envelope ?? {}), JSON.stringify(query)).toBe(false);
+            }
+        }, 60_000);
+
+        it('?surface=copilot is refused 400 VALIDATION_ERROR and writes nothing: only an in-process tool states it', async () => {
+            const door = await boot();
+            const refused = await door.save('s_cop', 'never', { query: { mode: 'draft', surface: 'copilot' } });
+            expect({ status: refused.status, code: refused.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+            expect(refused.message).toContain('copilot');
+            const misspelt = await door.save('s_cop', 'never', { query: { mode: 'draft', surface: 'Studio' } });
+            expect({ status: misspelt.status, code: misspelt.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
+            expect(await door.stored('s_cop', 'draft')).toEqual([]);
+            expect(await door.stored('s_cop', 'active')).toEqual([]);
+        }, 60_000);
+    });
+}
