@@ -219,8 +219,26 @@ describe('ADR-0131 D10 preflight — the per-table plan', () => {
   it('a deployment composed without the auth family holds no organization: nothing derives, the plan still runs', async () => {
     db.exec('DROP TABLE sys_organization');
     const p = await plan('single');
-    expect(p).toMatchObject({ organizations: 0, defaultOrganization: null });
+    expect(p).toMatchObject({ organizations: 0, defaultOrganization: null, defaultOrganizationCreatedByApply: false });
     expect(table(p, 'crm_deal').unattributable).toEqual([{ id: 'deal_2', reason: expect.stringContaining('no Default Organization') }]);
+  });
+
+  it('⭐ under single, a database that holds no organization at all: what no anchor derives falls to the Default Organization --apply creates, and a warning says so', async () => {
+    db.exec('DELETE FROM sys_organization');
+    const p = await plan('single');
+    expect(p).toMatchObject({ organizations: 0, defaultOrganization: null, defaultOrganizationCreatedByApply: true });
+    expect(table(p, 'crm_deal').attribution).toEqual({ 'default-organization': 1 });
+    expect(table(p, 'crm_deal').unattributable).toEqual([]);
+    expect(p.summary.unattributableRows).toBe(0);
+    expect(p.warnings).toContainEqual(expect.stringMatching(/^This database holds no organization, and the tenancy posture is single: --apply creates the Default Organization \(slug 'default'\)/));
+    // Read-only still: SELECTs only.
+    expect(statements.every((s) => /^\s*SELECT/i.test(s))).toBe(true);
+
+    // Under a wall nothing derives to an organization that does not exist.
+    const walled = await plan('isolated');
+    expect(walled.defaultOrganizationCreatedByApply).toBe(false);
+    expect(table(walled, 'crm_deal').unattributable.map((u) => u.id)).toEqual(['deal_2']);
+    expect(walled.warnings.some((w) => /creates the Default Organization/.test(w))).toBe(false);
   });
 
   it('a v17 database still holding the retired sys_scim_provider plans, listing it as fate 4', async () => {

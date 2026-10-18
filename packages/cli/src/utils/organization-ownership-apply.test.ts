@@ -26,6 +26,7 @@ import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn, hashSpec
 import { buildOrganizationOwnershipPlan, inventoryDigest } from './organization-ownership-plan.js';
 import {
   applyOrganizationOwnership,
+  CEREMONY_STEPS,
   MetadataChoiceRefusal,
   ReviewedPlanRefusal,
   reviewedConflictsOf,
@@ -36,6 +37,7 @@ import {
   type CeremonyCheckpoint,
   type CeremonyLedgerPort,
   type ColumnDropPort,
+  type DefaultOrganizationPort,
   type MetadataDoorPort,
   type MetadataLockPort,
   type OrganizationOwnershipApplyReport,
@@ -425,6 +427,7 @@ const apply = (
     reviewed?: Partial<ReviewedPlan>;
     lock?: MetadataLockPort;
     securityPlugin?: SchemaMigrationComposition['securityPlugin'];
+    defaultOrganization?: DefaultOrganizationPort;
   } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
@@ -446,6 +449,7 @@ const apply = (
     ...(opts.templateChoices ? { templateChoices: opts.templateChoices } : {}),
     ...(opts.metadataChoices ? { metadataChoices: opts.metadataChoices } : {}),
     ...(opts.securityPlugin ? { securityPlugin: opts.securityPlugin } : {}),
+    ...(opts.defaultOrganization ? { defaultOrganization: opts.defaultOrganization } : {}),
     posture: opts.posture ?? 'single',
     database: file,
     catalog: c,
@@ -2284,5 +2288,164 @@ describe('ADR-0131 D10 --apply — under a wall, the rewrite gate names the act 
     expect(deletion.status).toBe('blocked');
     expect(remedyOf(blockerOf(deletion, 'position zz_undeclared '))).toBe(`deleting them would lose a grant. ${POINTER}`);
     expect(lock.asked).toEqual([]);
+  });
+});
+
+describe('ADR-0131 D10 --apply — a single-posture database that holds no organization (D3: the Default Organization exists before the first write that needs an owner)', () => {
+  /** What a 17.x single-posture install whose seed ran before any organization existed left: rows, and no owner. */
+  const NO_ORGANIZATION = `
+    CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT, name TEXT);
+    CREATE TABLE crm_event (id TEXT PRIMARY KEY, organization_id TEXT, subject TEXT);
+    INSERT INTO crm_event VALUES ('ev_1', NULL, 'one'), ('ev_2', NULL, 'two'), ('ev_3', NULL, 'three');
+    CREATE TABLE sys_job (id TEXT PRIMARY KEY, organization_id TEXT);
+    INSERT INTO sys_job VALUES ('job_1', NULL);
+  `;
+
+  /** Run `body` against a database holding `schema` alone. */
+  async function withDatabase(schema: string, body: () => Promise<void>): Promise<void> {
+    const own = new Database(join(dir, 'no-organization.db'));
+    own.exec(schema);
+    const saved = db;
+    db = own;
+    try {
+      await body();
+    } finally {
+      db = saved;
+      own.close();
+    }
+  }
+
+  /** The producer double: the Default Organization a single-posture boot creates, written where the plan reads it. */
+  function defaultOrganizationPort(opts: { fails?: string } = {}): DefaultOrganizationPort & { calls: number } {
+    const port = {
+      calls: 0,
+      async create() {
+        port.calls++;
+        if (opts.fails) throw new Error(opts.fails);
+        db.prepare(`INSERT INTO sys_organization (id, slug, name) VALUES ('org_created', 'default', 'Default Organization')`).run();
+        return { id: 'org_created' };
+      },
+    };
+    return port;
+  }
+
+  it('⭐ the plan says --apply creates the Default Organization; --apply creates it before its first write and gives it every row no anchor names: nothing stays NULL, and the marker verifies', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ organizations: 0, defaultOrganization: null, defaultOrganizationCreatedByApply: true });
+      expect(plan.summary.unattributableRows).toBe(0);
+      const events = plan.tables.find((t) => t.object === 'crm_event')!;
+      expect(events.attribution).toEqual({ 'default-organization': 3 });
+      expect(events.fateCounts).toMatchObject({ rowsToAttribute: 3, unattributableRows: 0 });
+      expect(events.notNull.willReceive).toBe(true);
+      expect(plan.warnings).toContainEqual(expect.stringMatching(
+        /^This database holds no organization, and the tenancy posture is single: --apply creates the Default Organization \(slug 'default'\) before its first write and gives it the 3 organization-less row\(s\) no anchor names/,
+      ));
+      // The plan only reads.
+      expect(rows('SELECT COUNT(*) AS n FROM sys_organization')).toEqual([{ n: 0 }]);
+
+      const port = defaultOrganizationPort();
+      const l = ledger();
+      const report = await apply(catalog(), l, { defaultOrganization: port });
+
+      expect(port.calls).toBe(1);
+      expect(report.warnings).toEqual(plan.warnings);
+      expect(report.steps[0]).toMatchObject({ step: 'attribution', status: 'done', summary: { rowsAttributed: 3 } });
+      expect(rows('SELECT id, organization_id FROM crm_event ORDER BY id')).toEqual([
+        { id: 'ev_1', organization_id: 'org_created' },
+        { id: 'ev_2', organization_id: 'org_created' },
+        { id: 'ev_3', organization_id: 'org_created' },
+      ]);
+      expect(tableOf(report, 'crm_event')).toMatchObject({ attributed: 3, unattributable: [], remaining: 0, after: { organizationNull: 0 } });
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+    });
+  });
+
+  it('with no way to create it, the run blocks at attribution: nothing is written, nothing is checkpointed, nothing is certified', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      const l = ledger();
+      const report = await apply(catalog(), l);
+
+      expect(report.steps[0]).toMatchObject({ step: 'attribution', status: 'blocked' });
+      expect(report.steps[0]!.blockers).toEqual([
+        expect.stringMatching(/^This single-posture database holds no organization, and this run has no way to create the Default Organization/),
+      ]);
+      expect(report.steps.slice(1).every((s) => s.status === 'not-reached')).toBe(true);
+      expect([report.complete, report.blocking]).toEqual([false, 1]);
+      expect(l.checkpoint?.completed.attribution).toBeUndefined();
+      expect(rows('SELECT COUNT(*) AS n FROM crm_event WHERE organization_id IS NULL')).toEqual([{ n: 3 }]);
+      expect(writes).toEqual([]);
+    });
+  });
+
+  it('a producer that fails blocks at attribution, naming its cause; nothing is attributed', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      const report = await apply(catalog(), ledger(), { defaultOrganization: defaultOrganizationPort({ fails: 'UNIQUE constraint failed: sys_organization.slug' }) });
+
+      expect(report.steps[0]).toMatchObject({ step: 'attribution', status: 'blocked' });
+      expect(report.steps[0]!.blockers[0]).toMatch(/^The Default Organization could not be created \(UNIQUE constraint failed: sys_organization\.slug\)/);
+      expect(rows('SELECT COUNT(*) AS n FROM crm_event WHERE organization_id IS NULL')).toEqual([{ n: 3 }]);
+    });
+  });
+
+  it('control — under a wall nothing is created: the rows are reported, never assigned', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'isolated', database: file });
+      expect(plan.defaultOrganizationCreatedByApply).toBe(false);
+      expect(plan.warnings.some((w) => /creates the Default Organization/.test(w))).toBe(false);
+      const port = defaultOrganizationPort();
+      const report = await apply(catalog(), ledger(), { posture: 'isolated', defaultOrganization: port });
+
+      expect(port.calls).toBe(0);
+      expect(tableOf(report, 'crm_event').unattributable.map((u) => u.id)).toEqual(['ev_1', 'ev_2', 'ev_3']);
+      expect(rows('SELECT COUNT(*) AS n FROM sys_organization')).toEqual([{ n: 0 }]);
+    });
+  });
+
+  it('control — organizations exist and none is the Default Organization: nothing is created, the rows are reported with the reason', async () => {
+    await withDatabase(`${NO_ORGANIZATION} INSERT INTO sys_organization VALUES ('org_acme', 'acme', 'Acme');`, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ organizations: 1, defaultOrganizationCreatedByApply: false });
+      const port = defaultOrganizationPort();
+      const report = await apply(catalog(), ledger(), { defaultOrganization: port });
+
+      expect(port.calls).toBe(0);
+      expect(tableOf(report, 'crm_event').unattributable).toEqual([
+        expect.objectContaining({ id: 'ev_1', reason: expect.stringContaining("no Default Organization (slug 'default') exists to fall back to") }),
+        expect.objectContaining({ id: 'ev_2' }),
+        expect.objectContaining({ id: 'ev_3' }),
+      ]);
+    });
+  });
+
+  it('⭐ a checkpointed attribution runs again when the plan derives an owner for rows still NULL — the state an earlier run left when it found no Default Organization — and the ceremony verifies', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      // What the release before this one left after a later boot created the
+      // Default Organization: every step checkpointed (attribution at zero rows),
+      // the column dropped, and the rows still NULL.
+      db.exec(`INSERT INTO sys_organization VALUES ('org_boot', 'default', 'Default Organization'); ALTER TABLE sys_job DROP COLUMN organization_id;`);
+      const l = ledger();
+      l.checkpoint = {
+        ceremony: 'ADR-0131 D10',
+        inventoryDigest: inventoryDigest(),
+        completed: Object.fromEntries(CEREMONY_STEPS.map((s) => [s, {
+          at: '2026-10-17T00:00:00.000Z',
+          summary: s === 'attribution' ? { rowsAttributed: 0, passes: 1 } : {},
+        }])),
+      };
+
+      const report = await apply(catalog(), l);
+
+      expect(report.resumedFrom).toEqual([...CEREMONY_STEPS]);
+      expect(report.steps.map((s) => `${s.step}:${s.status}`)).toEqual(
+        CEREMONY_STEPS.map((s) => `${s}:${s === 'attribution' ? 'done' : 'checkpointed'}`),
+      );
+      expect(report.steps[0]!.summary).toEqual({ rowsAttributed: 3, passes: 2 });
+      expect(l.checkpoint!.completed.attribution!.summary).toEqual({ rowsAttributed: 3, passes: 2 });
+      expect(rows('SELECT DISTINCT organization_id FROM crm_event')).toEqual([{ organization_id: 'org_boot' }]);
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+    });
   });
 });
