@@ -546,6 +546,49 @@ const MetadataProtectionEnvelopeFields = {
  * live and kept out of the ETag ({@link GetMetaItemCachedResponseSchema}). It
  * is absent wherever no automation engine answered, so absence is never read
  * as `registered`.
+ *
+ * [#24298] `draftChanges` is a pending draft's per-key provenance: for each
+ * changed key path of the draft body, which authoring surface (`copilot`,
+ * `studio`, `api`) last changed it, under which actor, and when. It is what
+ * lets Studio's properties mark a field or a view setting the AI copilot
+ * changed, with the draft chip and the source line objectui#12725 rules
+ * (「由 AI 副驾在 2 分钟前作为草稿加入」). It carries ADR-0033's provenance
+ * item, "attribute each AI draft to the acting user + mark it AI-sourced",
+ * at the grain of a key: `actor` is the acting user and `by: 'copilot'` the
+ * AI-sourced mark, two members because one user makes both kinds of edit.
+ * Four measured choices:
+ *
+ * - **On this read, not on the `_drafts` row.** The reader is Studio's
+ *   properties, and they read the item they edit through the strict draft
+ *   read (`?state=draft`, the client's `getDraft`); the `_drafts` list is the
+ *   change badge's and the changes drawer's read, one row per item. Here the
+ *   provenance comes from the same stored row as the body and `version` it
+ *   sits beside, so a mark can never describe a body the editor has not
+ *   loaded.
+ * - **Beside `item`, never inside it**, like `registration`: a fact about the
+ *   stored row the document cannot carry. Inside the body it would be one more
+ *   read decoration every GET → edit → PUT round trip must strip
+ *   (`METADATA_READ_DECORATIONS`), and `provenance` is already the ADR-0010
+ *   envelope key (where the item came from), hence the distinct name.
+ * - **A path is an array of keys, and an array value is one leaf.** Keys may
+ *   contain dots (a permission set's `fields` map is keyed `object.field`), so
+ *   a dotted string would be ambiguous; and an index (`columns[3]`) moves when
+ *   a column is inserted or reordered, so the path stops at `columns` — the
+ *   granularity the ruling names, "a field or a view setting". The ruled
+ *   properties artboard also marks ELEMENTS of an array setting: a kanban
+ *   card's two copilot-added fields, under the line
+ *   「读者」「应还日期」两项由 AI 副驾在 2 分钟前作为草稿加入. The reader finds
+ *   which elements by comparing the draft's array with the published body's,
+ *   and the array's entry says who last changed it and when. Attribution is
+ *   per array, never per element.
+ * - **Optional, never defaulted to `[]`.** Absent means "not recorded" (a
+ *   server with no writer, or a draft row saved before one); an empty-array
+ *   default would answer "nothing changed" for exactly those rows.
+ *
+ * The history log's per-event `source` (see `HistoryMetaItemResponseSchema`)
+ * is not this vocabulary: it is an open label of the code path that wrote the
+ * event, not the surface a person or the copilot used, and it is per write,
+ * not per key.
  */
 export const GetMetaItemResponseSchema = lazySchema(() => z.object({
   type: z.string().describe('Metadata type name'),
@@ -588,6 +631,49 @@ export const GetMetaItemResponseSchema = lazySchema(() => z.object({
     + 'the answering process\'s engine. Beside `item`, never inside it: the item\'s `status` stays what '
     + 'its author declared.',
   ),
+  draftChanges: z.array(z.object({
+    path: z.array(z.string().min(1)).describe(
+      'The changed key path inside `item`: one object key per segment, from the body root down to the '
+      + 'deepest key whose value the write changed, added or removed. `["fields", "renewal_count"]` is a '
+      + 'field the write added; `["fields", "renewal_count", "label"]` is one property of it. A segment '
+      + 'is the key exactly as stored, dots included (a permission set\'s `fields` map is keyed '
+      + '`object.field`), so a path is never one dotted string. An array is one value: its path ends at '
+      + 'its key (`["columns"]`) and never carries an index, which an insert or a reorder would shift. '
+      + 'Which elements of an array the draft added or dropped is read by comparing it with the '
+      + 'published body\'s array; the entry answers only who last changed the array as a whole. '
+      + '`[]` is the whole body: the write that created the draft of an item with no published body.',
+    ),
+    by: z.enum(['copilot', 'studio', 'api']).describe(
+      'The authoring surface of the write that last changed this path. Closed: `copilot` is an AI '
+      + 'assistant\'s tool writing on a person\'s behalf (Studio\'s AI copilot); `studio` is a person '
+      + 'editing in Studio; `api` is any other caller of the save door. It names the surface, not the '
+      + 'person: a copilot write and a Studio write of the same user carry the same `actor`.',
+    ),
+    actor: z.string().nullable().describe(
+      'The identity that write was recorded under: the save\'s `actor`, the value its history event '
+      + 'carries. `null` when the write recorded none, never a sentinel string.',
+    ),
+    at: z.string().datetime().describe(
+      'When that write happened: an ISO-8601 instant in UTC, written with `Z` (the form '
+      + '`toISOString()` produces). An offset or a local time is refused.',
+    ),
+  }).describe('One changed key path of the pending draft, and the last write that changed it.'))
+    .optional().describe(
+      'Per-key provenance of the pending draft: which authoring surface last changed each key path of '
+      + '`item`, under which actor, and when. No server writes the key yet: until the engine\'s draft '
+      + 'save records it, every draft read is one whose saves recorded none, and the key is absent. '
+      + 'The contract a writer must meet: it compares each draft save with the body that save replaced '
+      + '(the previous draft, or the published body for the draft\'s first save); it keeps the entries '
+      + 'from the first recorded save until the draft is published or discarded, which remove the draft '
+      + 'row and the entries with it; and it keeps no two entries on one path, replacing every entry at '
+      + 'or under a path a save changes, so the last write to change a key is the entry whose `path` is '
+      + 'the longest prefix of that key\'s path, and entries under a key\'s path are changes inside it. '
+      + 'The entries name which writes changed what; they are not a list of every difference from the '
+      + 'published body (compare the two bodies for that). Served only on a `?state=draft` read that '
+      + 'answers a stored draft row. ABSENT on the active read, the cached branch and a '
+      + '`?preview=draft` read, and for a draft row whose saves recorded none: absence means "not '
+      + 'recorded", never "no changes".',
+    ),
 }));
 
 /**
@@ -1962,6 +2048,12 @@ export const GetPublishedMetaItemResponseSchema = lazySchema(() => z.unknown().d
  * one template are two drafts with one `type` and `name`. It is the row's
  * stored member, never read off the body, and it is the value the by-name
  * doors' `member` selector takes back.
+ *
+ * [#24298] Per-key provenance (which surface changed which key of the draft,
+ * and when) is deliberately NOT on this row: it is
+ * {@link GetMetaItemResponseSchema}'s `draftChanges`, on the strict draft read
+ * Studio's properties load the item from. `updatedBy` here stays the row's
+ * last actor, the same person for a copilot write and a hand edit.
  */
 export const ListDraftsResponseSchema = lazySchema(() => z.object({
   drafts: z.array(z.object({
