@@ -74,7 +74,7 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
     }
 
     if (!isMcpServerEnabled()) {
-        return { handled: true, response: deps.error('MCP server is not enabled for this environment', 404) };
+        return { handled: true, response: deps.error('MCP server is not enabled', 404) };
     }
     const mcp: any = await deps.resolveService(context, 'mcp', context.environmentId);
     if (!mcp || typeof mcp.handleHttpRequest !== 'function') {
@@ -161,7 +161,7 @@ export async function handleMcpRequest(deps: DomainHandlerDeps, body: any, conte
  */
 export async function handleMcpSkillRequest(deps: DomainHandlerDeps, method: string, context: HttpProtocolContext): Promise<HttpDispatcherResult> {
     if (!isMcpServerEnabled()) {
-        return { handled: true, response: deps.error('MCP server is not enabled for this environment', 404) };
+        return { handled: true, response: deps.error('MCP server is not enabled', 404) };
     }
     if (method !== 'GET') {
         // Hand-rolled rather than `deps.error(...)` only because it carries an

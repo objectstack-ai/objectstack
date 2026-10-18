@@ -34,7 +34,6 @@ const homePage = {
     },
     {
       name: 'main',
-      width: 'large',
       components: [
         {
           type: 'list_view',
@@ -141,7 +140,6 @@ regions: [
   },
   {
     name: 'main',
-    width: 'large',
     components: [/* ... */],
   },
 ]
@@ -150,7 +148,7 @@ regions: [
 | Property | Type | Required | Description |
 | :--- | :--- | :--- | :--- |
 | `name` | `string` | ✅ | The template slot the region fills (see [Templates](#templates)); a name the template does not place is refused |
-| `width` | `enum` | optional | `'small'`, `'medium'`, `'large'`, `'full'` |
+| `width` | `enum` | optional | `'small'`, `'medium'`, `'large'`, `'full'`. A region named `main` takes only `'full'`, which is page-wide: the page drops its max-width cap and fills the screen. `main` is drawn at the width its template leaves it, so `'small'`, `'medium'` and `'large'` are refused there |
 | `components` | `PageComponent[]` | ✅ | Components in this region |
 
 ### Templates
@@ -336,7 +334,6 @@ const accountRecordPage = {
     },
     {
       name: 'main',
-      width: 'large',
       components: [
         {
           type: 'record:related_list',

@@ -359,6 +359,15 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
       () => ComponentPropsMap['list-view'].safeParse({ [alias]: alias === 'objectName' ? 'deal' : 'kanban' }),
     ),
   ),
+  // The data-at-rest half of the `main` region width refusal, retired after
+  // 17.7.0; the prescription is the parse's own refusal at the region's width.
+  'page-main-region-width-removed': (['small', 'medium', 'large'] as const).map((width) =>
+    refusal(
+      `width '${width}' on a page region named main`,
+      () => PageSchema.safeParse({ name: 'sales_home_page', label: 'Sales Home', type: 'home', template: 'three-column', regions: [{ name: 'main', width, components: [] }] }),
+      'regions',
+    ),
+  ),
   'page-template-full-width-to-default': [
     refusal(
       "page template 'full-width'",

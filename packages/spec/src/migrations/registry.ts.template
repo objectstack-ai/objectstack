@@ -3216,8 +3216,13 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'green over a grid of empty cells. The row declares the fifteen keys the renderer '
       + 'reads, requires `relationshipField` and at least one column, and its `columns` references '
       + '`InlineGridColumnSchema`; the showcase columns are respelled `name` in the same change. The '
-      + 'panel draws its columns as authored, with no hydration from the child object\'s field, so '
-      + '`defineStack`\'s identity-only check does not reach it. Its D3 record is the semantic entry '
+      + 'panel hydrates a column that declares no `type` from the child object\'s field, as the '
+      + 'other carriers do, so `defineStack`\'s identity-only check reaches the block, with the reach '
+      + '`inline-grid-column-identity-only-currency-scale-refused` records for the first two '
+      + 'carriers, against the child object the panel lists (the object `dataSource` binding\'s '
+      + '`object` when the node carries one, else `childObject`). It judges the block in a page '
+      + 'region\'s components, in a container\'s component children and in a slot; a block under a '
+      + '`page:tabs` item\'s `children` is not yet judged. Its D3 record is the semantic entry '
       + '`ui-record-line-items-props-closed`.',
   },
   {
