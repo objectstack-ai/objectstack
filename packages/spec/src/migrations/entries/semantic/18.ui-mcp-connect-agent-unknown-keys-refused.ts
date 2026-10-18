@@ -16,8 +16,8 @@ export const entry: SemanticMigration = {
   reason:
     'This was a third instance of the class closed for the `record:*` blocks by declaring a '
     + 'strict `ComponentPropsMap` row measured from the renderer\'s read points (the strict, '
-    + 'empty `cloud-connection:panel` / `marketplace:installed-list` rows closed the previous '
-    + 'two): a '
+    + 'empty `cloud-connection:panel` row, and the `marketplace:installed-list` row since retired '
+    + 'by name, closed the previous two): a '
     + 'console-registered widget on `@objectstack/mcp`\'s plugin-shipped Setup page, '
     + 'reachable through the component type union\'s open string arm, with a registered '
     + 'renderer but no `ComponentPropsMap` row — so the props gate\'s dispatch (it parses '

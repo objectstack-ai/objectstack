@@ -162,6 +162,30 @@ export const RETIRED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = new Map
     + 'need to read a record as raw JSON, so no renderer draws the type and no page places it, and '
     + 'its `field`, `label` and `requiredPermissions` props configure nothing. Delete the '
     + '`record:json` component node and put nothing in its place.'],
+  // #24230, ADR-0049 enforce-or-remove, executing ruling B on #23892 (record
+  // 6216295104, item 2: "the separate Installed Apps view retires once the
+  // filtered view serves its actions"). objectui#12733 (PR objectui#12926,
+  // merged 35244b6379) deleted the type's one renderer, and its one producer,
+  // `@objectstack/cloud-connection`'s `marketplace_installed` page, had already
+  // left the `MARKETPLACE_INSTALLED_UI_BUNDLE` (#23933): the bundle's "Installed
+  // Apps" navigation entry now opens the console's `developer:packages`
+  // component with `params: { source: 'marketplace' }`. The type was never a
+  // `PageComponentType` member (a plugin console widget on the open string
+  // arm, in a namespace the enum does not reserve), so without this entry the
+  // retired name would fall back to an open-arm custom string and parse in
+  // silence. The `ai:chat_window` shape: the kept `ComponentPropsMap` row
+  // refuses the WHOLE bag (`retiredComponentProps`) with this text; it never
+  // had a key. No `os migrate meta` sentence: deleting an authored page node is
+  // the author's layout decision, which the D3 entry
+  // `ui-marketplace-installed-list-retired` delegates.
+  ['marketplace:installed-list', '`marketplace:installed-list` was removed in @objectstack/spec '
+    + '18 (ADR-0049) — the separate Installed Apps view it drew was retired, so no renderer '
+    + 'draws the type and the console would show "Unknown component type" in its place. The '
+    + 'Installed Apps list is Setup → Packages filtered to Source = marketplace: the console\'s '
+    + '`developer:packages` component opened with `params: { source: \'marketplace\' }`. Delete '
+    + 'the `marketplace:installed-list` component node; to send users to that list, add a '
+    + 'navigation item of type `component` with `componentRef: \'developer:packages\'` and '
+    + '`params: { source: \'marketplace\' }` instead.'],
   ['element:form', '`element:form` was removed in @objectstack/spec 17 '
     + '(ADR-0049) — the whole `element:form` element is retired: no renderer for it '
     + 'ever shipped in objectui, framework or cloud (Studio\'s designer palette lists it as a '
@@ -605,7 +629,7 @@ export const PageComponentSchema = lazySchema(() => strictObject({
     if (guidance) {
       ctx.addIssue({ code: 'custom', message: guidance, params: { retiredComponentType: type } });
     }
-  }).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable; `ai:chat_window` — no renderer by design, the floating chat overlay is the AI chat entry point; `element:filter` and `element:form` — retired whole, no renderer for either ever shipped; `record:json` — the raw-JSON panel it was declared for was dropped) is refused at the parse itself, with the retirement prescription.'),
+  }).describe('Component Type — a standard vocabulary member, or a custom/registered component type in its own namespace (e.g. `object-grid`, `mcp:connect-agent`). The spec\'s own type namespaces are a closed vocabulary at author time: inside them, a type the vocabulary does not declare is refused by `os validate` / `os build` / `os lint` (rule `component-type-unknown`); a type the vocabulary RETIRED by name (`user:profile` — shell chrome, not author-placeable; `ai:chat_window` — no renderer by design, the floating chat overlay is the AI chat entry point; `element:filter` and `element:form` — retired whole, no renderer for either ever shipped; `record:json` — the raw-JSON panel it was declared for was dropped; `marketplace:installed-list` — the separate Installed Apps view it drew was retired, Setup → Packages filtered to Source = marketplace replaces it) is refused at the parse itself, with the retirement prescription.'),
   id: z.string().optional().describe('Unique instance ID'),
   
   /** Configuration */
@@ -1331,7 +1355,6 @@ export const PRINT_REFUSED_PAGE_COMPONENT_TYPES: ReadonlyMap<string, string> = n
   ['global:search', 'is shell chrome, not document content'],
   ['global:notifications', 'is shell chrome, not document content'],
   ['cloud-connection:panel', 'is a console administration widget, not document content'],
-  ['marketplace:installed-list', 'is a console administration widget, not document content'],
   ['mcp:connect-agent', 'is a console administration widget, not document content'],
   ['ai:suggestion', 'is an AI suggestion generated for each viewer, not document content'],
 ]);

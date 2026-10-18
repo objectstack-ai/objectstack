@@ -431,15 +431,17 @@ const COMPONENT_LEVEL_GUIDANCE: readonly KeySetGuidance[] = [
 /**
  * A component that declares no props at all — `app:launcher`, `nav:menu`,
  * `nav:breadcrumb`, `global:search`, `global:notifications`,
- * `element:divider`, the three plugin console widgets
- * `cloud-connection:panel` and `marketplace:installed-list` (#11575) and
- * `mcp:connect-agent` (#12344), and `record:approval_decision` (#22472) and
- * `record:attachments` (#22537), which read the record context alone.
+ * `element:divider`, the two plugin console widgets
+ * `cloud-connection:panel` (#11575) and `mcp:connect-agent` (#12344), and
+ * `record:approval_decision` (#22472) and `record:attachments` (#22537),
+ * which read the record context alone.
  * (`record:approvals` declares no props either, but its row is its own
  * {@link RecordApprovalsProps}, which names the two host-channel keys its
  * renderer reads.) `user:profile` left this list at #14159 — it
  * is not author-placeable at all, so its row refuses the whole bag
- * ({@link retiredComponentProps}).
+ * ({@link retiredComponentProps}) — and `marketplace:installed-list`, the third
+ * console widget (#11575), left it at #24230, when its one renderer was
+ * deleted with the separate Installed Apps view.
  *
  * A factory rather than one shared `EmptyProps` const, because the surface name
  * is the whole value of the rejection here: an empty shape has no candidate
@@ -466,7 +468,8 @@ const emptyProps = (type: string) =>
 /**
  * A component RETIRED at element grain whose props bag is refused WHOLE —
  * `user:profile` (#14159), `ai:chat_window` (#21504), whose four keys left
- * with its props def, and `record:json` (#24162), whose three did. The
+ * with its props def, `record:json` (#24162), whose three did, and
+ * `marketplace:installed-list` (#24230), which never had one. The
  * `retiredKey` channel one grain wider: where a tombstoned KEY accepts absence
  * and refuses any value, a retired ELEMENT has
  * nothing an author may write at all, so the row is `z.never` — `{}` is refused
@@ -8401,7 +8404,7 @@ export const ComponentPropsMap = {
 
   // Plugin console widgets — #11575, the #8691/#8744 mechanism two instances
   // over, on `@objectstack/cloud-connection`'s published Setup pages: both
-  // types are console-registered renderers reachable only through the type
+  // types were console-registered renderers reachable only through the type
   // union's open string arm, and with no row here the #5068 gate's dispatch
   // skipped them as unregistered — any authored key would have ridden through
   // in silence (nothing authors one today: both shipped pages carry `{}`).
@@ -8412,7 +8415,16 @@ export const ComponentPropsMap = {
   // `inputs: []` happen to agree here, but the row is the measurement, not
   // the claim (#8691/#8744 record where those diverge).
   'cloud-connection:panel': emptyProps('cloud-connection:panel'),
-  'marketplace:installed-list': emptyProps('marketplace:installed-list'),
+  // RETIRED by name (#24230, ADR-0049; ruling B on #23892 retired the separate
+  // Installed Apps view, objectui#12733 deleted its one renderer, and its one
+  // page left `@objectstack/cloud-connection` at #23933 — Setup's "Installed
+  // Apps" entry opens Packages filtered to Source = marketplace instead). The
+  // row STAYS, for the reason `user:profile`'s does, and here it matters more:
+  // the type is not a `PageComponentType` member, so this row is the only
+  // thing that makes the name KNOWN — delete it and every reader that
+  // dispatches on the row skips the retired name as an unregistered custom
+  // string. It never had a key, so the WHOLE bag is refused, `{}` included.
+  'marketplace:installed-list': retiredComponentProps('marketplace:installed-list'),
   // #12344 — the same mechanism a third instance over, on `@objectstack/mcp`'s
   // plugin-shipped Setup page (`CONNECT_AGENT_PAGE`, `connect-ui.ts`): a
   // console-registered widget reachable only through the type union's open
