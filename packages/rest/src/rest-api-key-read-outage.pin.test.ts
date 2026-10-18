@@ -24,7 +24,7 @@
  * 2026-08-30 ruling (option A) draws.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashApiKey } from '@objectstack/core';
 import { RestServer } from './rest-server.js';
 
@@ -34,6 +34,23 @@ const COOKIE_USER = 'u_cookie';
 const DATA_COLLECTION = '/api/v1/data/:object';
 
 type KeyRead = 'healthy' | 'rejects' | 'unprovisioned';
+
+/** Equality and `$in` — the two shapes the resolver's reads use here; any other operator is refused, never matched. */
+function matchesWhere(row: any, where: any): boolean {
+  for (const [field, cond] of Object.entries(where ?? {})) {
+    if (field.startsWith('$')) throw new Error(`fixture where-matcher: unsupported combinator '${field}'`);
+    if (cond !== null && typeof cond === 'object') {
+      const ops = Object.keys(cond as object);
+      if (ops.length !== 1 || ops[0] !== '$in' || !Array.isArray((cond as any).$in)) {
+        throw new Error(`fixture where-matcher: unsupported operator shape on '${field}'`);
+      }
+      if (!(cond as any).$in.includes(row[field])) return false;
+      continue;
+    }
+    if (row[field] !== cond) return false;
+  }
+  return true;
+}
 
 function makeQl(keyRead: KeyRead) {
   const tables: Record<string, any[]> = {
@@ -47,9 +64,7 @@ function makeQl(keyRead: KeyRead) {
     find: async (object: string, q: any = {}) => {
       if (object === 'sys_api_key' && keyRead === 'rejects') throw new Error('connection terminated unexpectedly');
       if (object === 'sys_api_key' && keyRead === 'unprovisioned') throw new Error('no such table: sys_api_key');
-      const rows = (tables[object] ?? []).filter((row: any) => Object.entries(q?.where ?? {}).every(([field, cond]: [string, any]) => (
-        cond !== null && typeof cond === 'object' ? Array.isArray(cond.$in) && cond.$in.includes(row[field]) : row[field] === cond
-      )));
+      const rows = (tables[object] ?? []).filter((row: any) => matchesWhere(row, q?.where));
       return typeof q?.limit === 'number' ? rows.slice(0, q.limit) : rows;
     },
     update: async () => ({}),
@@ -93,6 +108,10 @@ async function get(rest: any, headers: Record<string, string>) {
   await route.handler({ method: 'GET', path: '/api/v1/data/account', params: { object: 'account' }, query: {}, headers }, res);
   return { status: res.statusCode as number, body: res.body };
 }
+
+// This file silences the REST fault log it does not assert on, so it declares the level it runs at.
+beforeAll(() => { vi.stubEnv('OS_REST_LOG', 'info'); });
+afterAll(() => { vi.unstubAllEnvs(); });
 
 let errorSpy: ReturnType<typeof vi.spyOn>;
 let warnSpy: ReturnType<typeof vi.spyOn>;
