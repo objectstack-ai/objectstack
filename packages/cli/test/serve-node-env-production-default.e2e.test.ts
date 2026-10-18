@@ -78,10 +78,12 @@
  * `'AuthPlugin: secret is required'` synchronously otherwise, which is a
  * boot failure, not a signal about this gate.
  *
- * The probed Origin is `http://localhost:<a DIFFERENT random port>` —
- * different from the port `serve` itself binds to — so a pass can only be
- * explained by the wildcard `http://localhost:*` substitution, never by
- * better-auth's own default trust of the deployment's own origin.
+ * The probed Origin is `http://localhost:<a port this file HOLDS>` —
+ * different from the port `serve` itself binds to and from the fixture's own
+ * `baseUrl` — so a pass can only be explained by the wildcard
+ * `http://localhost:*` substitution, never by better-auth's own default trust
+ * of the deployment's own origin. Both of those ports are held for the whole
+ * boot (#24295), so neither can be the port the kernel assigns the child.
  *
  * ## WHY THIS FILE IS THE REASON `@objectstack/cli#test` DECLARES `build`
  *
@@ -117,9 +119,10 @@
  * boot reports itself READY — the SILENT-DRIFT column, where their own
  * requests then reach whatever else holds the port they reserved (measured:
  * reserved 34259, child bound 34260, the next request answered by a
- * neighbouring dev server). Only THIS file — `--dev` absent, so unset
- * `NODE_ENV` defaults to production — is in the LOUD column where a taken port
- * is a hard `exit 1` and `portContentionError()` below has something to read.
+ * neighbouring dev server). THIS file — `--dev` absent, so unset `NODE_ENV`
+ * defaults to production — is in the LOUD column where a taken port is a hard
+ * `exit 1`, which is why its server takes a kernel-assigned port (#24295) and
+ * has no taken port left to lose.
  * ⚠️ That `--dev` has been on their spawn lines since `83e6016fa`, long
  * predating #11707: it was never read, not newly introduced. Each of those
  * three carries its own port-drift check now; ⛔ do not read this paragraph as
@@ -170,10 +173,11 @@ import { fileURLToPath } from 'node:url';
 import {
   childEnv,
   E2E_SECRET_KEY,
-  portContentionError,
+  holdPort,
+  KERNEL_ASSIGNED_PORT,
   probeThroughChild,
+  readKernelAssignedPort,
   requireBuiltCli,
-  reservePort,
 } from './helpers/serve-process.js';
 
 /** What `spawn(..., { stdio: ['ignore', 'pipe', 'pipe'] })` actually returns — no `stdin`. */
@@ -357,23 +361,38 @@ const READY_BANNER_TAIL = /Press Ctrl\+C to stop/;
  * stringifying them, so this is not the same as `NODE_ENV=''`.
  */
 async function probeOriginCheck(env: Record<string, string | undefined>): Promise<OriginCheckResult> {
-  // A BIND-PROBED port, from the one draw this directory has (#12441). It used
-  // to be a blind `41000 + Math.random() * 19000` under a docblock claiming "a
-  // run never contends with another agent's dev server on this host" — and this
-  // very file is where that claim was falsified, with `✗ Port 49402 is already
-  // in use`. ⚠️ `reservePort()` narrows that race, it does not close it; the
-  // `exit` handler below is what makes the residual loss legible. Read
-  // `reservePort()`'s own docblock before trusting either half of that.
-  //
-  // ⛔ This must stay a DRAWN port, not a fixed one: `serve` is driven here with
+  // ⭐ The SERVER's port is kernel-assigned (#24295). `serve` is driven here with
   // `NODE_ENV` unset, i.e. into its production posture, where it refuses to
-  // auto-select a different port on purpose (#11113) — so a pinned port would
-  // convert an unlikely collision into a certain one.
-  const port = reservePort();
-  const untrustedOriginPort = port + 1;
-  writeFileSync(join(dir, 'objectstack.config.ts'), configFor(port), 'utf8');
+  // auto-select a different port on purpose (#11113) — so a port drawn and
+  // released before the spawn was a red whenever another process took it in the
+  // gap. This very file is where a blind draw first went red (`✗ Port 49402 is
+  // already in use`), and a bind-probed draw (#12441) only narrowed that gap.
+  // `-p 0` closes it: no number is unheld between a pick and the bind.
+  //
+  // The two numbers this probe must know BEFORE the spawn are not the server's
+  // at all — the fixture's `baseUrl` (the deployment's own origin) and the
+  // probed Origin. Each is a port this file HOLDS for the whole boot, so the two
+  // are distinct from each other and neither can be the port the child binds:
+  // the Origin can never be trusted as "the deployment's own" by accident.
+  const deployment = await holdPort();
+  const probedOrigin = await holdPort();
+  try {
+    return await bootAndProbe(env, deployment.port, probedOrigin.port);
+  } finally {
+    await deployment.release();
+    await probedOrigin.release();
+  }
+}
 
-  const child = spawn(process.execPath, [CLI, 'serve', '-p', String(port)], {
+/** {@link probeOriginCheck}'s boot and probe, given the two ports it holds. */
+async function bootAndProbe(
+  env: Record<string, string | undefined>,
+  deploymentPort: number,
+  probedOriginPort: number,
+): Promise<OriginCheckResult> {
+  writeFileSync(join(dir, 'objectstack.config.ts'), configFor(deploymentPort), 'utf8');
+
+  const child = spawn(process.execPath, [CLI, 'serve', '-p', KERNEL_ASSIGNED_PORT], {
     cwd: dir,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: childEnv({
@@ -444,7 +463,7 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
   let out = '';
   let err = '';
 
-  await new Promise<void>((readyResolve, readyReject) => {
+  const port = await new Promise<number>((readyResolve, readyReject) => {
     const timer = setTimeout(() => {
       readyReject(new Error(
         'serve never printed its COMPLETE ready banner (last line: "Press Ctrl+C to stop")'
@@ -454,28 +473,20 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
     const onData = () => {
       if (READY_BANNER_TAIL.test(out + err)) {
         clearTimeout(timer);
-        readyResolve();
+        // The child is the only authority on the port the kernel assigned it.
+        const bound = readKernelAssignedPort(out + err, 'os serve (bin/run.js, NODE_ENV unset ⇒ production)');
+        if (bound instanceof Error) readyReject(bound);
+        else readyResolve(bound);
       }
     };
     child.stdout.on('data', (d) => { out += String(d); onData(); });
     child.stderr.on('data', (d) => { err += String(d); onData(); });
     child.on('exit', (code) => {
       clearTimeout(timer);
-      // ⭐ Port contention gets its OWN failure, before the generic one (#12441).
-      // The generic message — `serve exited 1 before "Server is ready"` — is
-      // literally what a lost port race produced in this file, and it costs a
-      // reader a round to work out that a file about NODE_ENV defaulting just
-      // failed for a reason that has nothing to do with NODE_ENV. `serve` in
-      // production posture prints `✗ Port <n> is already in use.` and exits 1,
-      // so the evidence is already in `err` — it just was not being read.
-      readyReject(
-        portContentionError(
-          out + err,
-          'os serve (bin/run.js, NODE_ENV unset ⇒ production ⇒ no auto-select)',
-          port,
-        )
-        ?? new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`),
-      );
+      // No port-contention branch: a lost port race was what this generic
+      // message used to hide here (#12441), and a kernel-assigned port has no
+      // number to lose (#24295) — so an exit here is the boot's own failure.
+      readyReject(new Error(`serve exited ${code} before "Server is ready"\n--- stdout ---\n${out}\n--- stderr ---\n${err}`));
     });
   });
 
@@ -499,7 +510,7 @@ async function probeOriginCheck(env: Record<string, string | undefined>): Promis
             'content-type': 'application/json',
             // No cookie header — this is the shape `validateFormCsrf` forces an
             // origin check for when neither Sec-Fetch-* nor a cookie is present.
-            origin: `http://localhost:${untrustedOriginPort}`,
+            origin: `http://localhost:${probedOriginPort}`,
           },
           body: JSON.stringify({ email: 'nobody@example.com', password: 'definitely-wrong-password' }),
         });
