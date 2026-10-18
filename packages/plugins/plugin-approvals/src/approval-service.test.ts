@@ -1271,6 +1271,44 @@ describe('ApprovalService (node era)', () => {
     expect(req.step_label).toBe('Approve Step');     // from `approve_step`
   });
 
+  // [#24281] The record page's step chip lists `current_step_label`, a declared
+  // field of `sys_approval_request`, and the console reads the page's request
+  // through this get. So the get serves the step label under that name too,
+  // with exactly `step_label`'s value, while `current_step` stays the raw id.
+  describe('the get serves the step label as current_step_label, beside step_label', () => {
+    const stored = (id: string) => engine._tables['sys_approval_request'].find((r) => r.id === id)!;
+    const stepFields = (row: any) => ({
+      current_step_label: row.current_step_label,
+      step_label: row.step_label,
+      current_step: row.current_step,
+    });
+
+    it('a labelled row serves its stored label', async () => {
+      const req = await svc.openNodeRequest(openInput(['u9'], { nodeLabel: 'Manager Review' }), CTX);
+      expect(stored(req.id).current_step_label).toBe('Manager Review');
+      expect(stepFields(await svc.getRequest(req.id, SYS))).toEqual({
+        current_step_label: 'Manager Review', step_label: 'Manager Review', current_step: 'approve_step',
+      });
+      // The list door builds its rows the same way.
+      const [listed] = await svc.listRequests({ status: 'pending' }, SYS);
+      expect(stepFields(listed)).toEqual(stepFields(await svc.getRequest(req.id, SYS)));
+    });
+
+    it('a row opened before the column serves the snapshot label, else the humanized machine id', async () => {
+      const snap = await svc.openNodeRequest(openInput(['u9'], { nodeLabel: 'Manager Review' }), CTX);
+      const bare = await svc.openNodeRequest(openInput(['u9'], { recordId: 'opp2' }), CTX);
+      // No stored label: the row the boot backfill has not reached.
+      stored(snap.id).current_step_label = null;
+      stored(bare.id).current_step_label = null;
+      expect(stepFields(await svc.getRequest(snap.id, SYS))).toEqual({
+        current_step_label: 'Manager Review', step_label: 'Manager Review', current_step: 'approve_step',
+      });
+      expect(stepFields(await svc.getRequest(bare.id, SYS))).toEqual({
+        current_step_label: 'Approve Step', step_label: 'Approve Step', current_step: 'approve_step',
+      });
+    });
+  });
+
   it('listRequests enriches record_title and submitter_name', async () => {
     engine._tables['opportunity'] = [{ id: 'opp1', name: 'Acme Renewal', amount: 100 }];
     engine._tables['sys_user'] = [{ id: 'u1', name: 'Ada Lovelace', email: 'ada@example.com' }];
