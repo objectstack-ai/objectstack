@@ -129,6 +129,13 @@ describe('[ADR-0106 D1] references to a denied field — object level', () => {
         const readable = scope('title != null && owner_id == current_user.id');
         const served = mask({ name: 'thing', fields: fieldsWith(), defaultRowScope: readable });
         expect(served.defaultRowScope).toEqual(readable);
+
+        // The leg that tells the classification from the unclassified fail-safe, which
+        // drops on a mention too: a denied field named like one of the policy's own
+        // schema words (`operation`) costs the scope nothing, because in a classified
+        // position a key is a schema word, never a field reference.
+        const wordy = mask({ name: 'thing', fields: { ...fieldsWith(), operation: { type: 'text' } }, defaultRowScope: readable });
+        expect(wordy.defaultRowScope).toEqual(readable);
     });
 
     it('scrubs the nested policy blocks: tenancy, lifecycle, publicSharing, external, userActions', () => {
