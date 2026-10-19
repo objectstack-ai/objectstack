@@ -15,7 +15,7 @@
  *      `record:approval_decision` node, `record:details`, `sys_approval_action`
  *      as the related list, no discussion thread, and a highlights strip that
  *      leaves `record_id` to the details grid (the seat's choice on the ui
- *      seat's design input `6081889955`);
+ *      seat's design input `6081889955`) and names nothing by a machine name;
  *   3. the page passes what `os validate` judges a page by — the parse, the
  *      component-type vocabulary, the props rows and the build rules — with a
  *      control for each half that can go red;
@@ -181,6 +181,30 @@ describe('sys_approval_request detail page — the slot map', () => {
     // Control: the machine id stays a declared field. It is dropped from the
     // two lists, not from the object.
     expect(fields.current_step).toMatchObject({ type: 'text' });
+  });
+
+  it('draws no Object chip: object_name, the target\'s API name, is in neither list, and the Details tab is the pointer pair\'s card', () => {
+    // `object_name` holds the target object's API name (`showcase_announcement`)
+    // and the object declares no field holding that object's label. The page
+    // names the target object on the card the console draws for the
+    // `record_id` / `object_name` pair in the Details tab, which heads the
+    // record with its object's label. The object's list moves with the strip
+    // for the reason the flow chip's does: dropped from the strip alone,
+    // `object_name` would be drawn as a row in that tab.
+    const strip = SLOTS.highlights.properties.fields as string[];
+    const declared = SysApprovalRequest.highlightFields ?? [];
+    const fields = SysApprovalRequest.fields as AnyRec;
+    expect({ strip: strip.includes('object_name'), declared: declared.includes('object_name') })
+      .toEqual({ strip: false, declared: false });
+    // The Details tab's bare `record:details` node draws the object's list
+    // minus the strip: the id half of the pair, whose type half names the
+    // target object.
+    expect(TAB_ITEMS[0].children).toEqual([{ type: 'record:details' }]);
+    expect(declared.filter((f: string) => !strip.includes(f))).toEqual(['record_id']);
+    expect(fields.record_id?.referenceVia).toBe('object_name');
+    // Control: the type half stays a declared, required field. It is dropped
+    // from the two lists, not from the object.
+    expect(fields.object_name).toMatchObject({ type: 'text', required: true });
   });
 
   it('tabs: Details is record:details, Timeline is sys_approval_action as a related list on request_id', () => {
