@@ -3,7 +3,7 @@
 import type { IDataEngine, IRealtimeService, RealtimeEventPayload } from '@objectstack/spec/contracts';
 import type { WebhookTriggerType } from '@objectstack/spec/automation';
 import type { EnqueueHttpInput } from '@objectstack/service-messaging';
-import { omitInternalFieldsFromWriteResponse } from '@objectstack/core';
+import { METADATA_ACTIVATION_TABLE, omitInternalFieldsFromWriteResponse } from '@objectstack/core';
 import {
     WEBHOOK_SECRET_FIELD,
     WEBHOOK_SECRET_REFUSAL_CODE,
@@ -11,16 +11,24 @@ import {
     onCryptoProviderChange,
     readLegacySecret,
     resolveWebhookSecret,
+    splitWebhookSecret,
 } from './webhook-secret.js';
 import {
     WEBHOOK_HEADERS_FIELD,
     readLegacyHeaders,
     resolveWebhookHeaders,
+    splitWebhookHeaders,
 } from './webhook-headers.js';
 import {
     WebhookLegacyCleartextError,
     type LegacyDefinitionCredentialKey,
 } from './webhook-legacy-cleartext.js';
+import {
+    classifyDeclaredNameHolder,
+    declaredWebhookRefId,
+    type DeclaredWebhook,
+    type DeclaredWebhookReader,
+} from './declared-webhooks.js';
 
 /**
  * [#21913] The execution context the subscription cache refresh
@@ -147,6 +155,20 @@ interface CachedSubscription {
      */
     organizationId?: string;
     /**
+     * [ADR-0131 D2/D9] Set on a DECLARED webhook when the deployment's posture
+     * builds no organization wall (`single`). A declared webhook is the
+     * application's, not one organization's, so it has no `organizationId` of
+     * its own — and under `single` every record event is stamped with the
+     * Default Organization (D9), so the org-less refusal below would make it
+     * receive nothing at all. Deployment-wide, it receives every organization's
+     * events and each delivery row is stamped with the EVENT's organization:
+     * exactly what the 18.0 seeded copy did, whose row the boot stamped with
+     * that same Default Organization. Never set under a wall, where the
+     * ruling's org-less refusal ({@link AutoEnqueuer.admitsOrganization})
+     * stands.
+     */
+    deploymentWide?: boolean;
+    /**
      * [#8069] Set when a credential this subscription needs could not be
      * recovered. The subscription stays CACHED — that is the change — but every
      * event it matches is written to `sys_http_delivery` as a parked `dead` row
@@ -174,6 +196,23 @@ export interface AutoEnqueuerOptions {
      * the subscription-change event is missed. Default 60s.
      */
     refreshIntervalMs?: number;
+
+    /**
+     * [ADR-0131 D2/D6] The declared webhooks (`defineStack({ webhooks })`),
+     * read from the registry with their activation-ledger switch resolved.
+     * Each one switched on is a subscription of its own, beside the
+     * `sys_webhook` rows — see `declared-webhooks.ts` for how a row holding a
+     * declared name is read. Absent: rows only.
+     */
+    declaredWebhooks?: DeclaredWebhookReader;
+
+    /**
+     * Whether the deployment's tenancy posture builds no organization wall,
+     * read on every refresh. True makes each declared webhook deployment-wide
+     * (see `CachedSubscription.deploymentWide`); absent or false keeps it
+     * org-less, refused for an organization-walled event.
+     */
+    declaredWebhooksDeploymentWide?: () => boolean;
 
     logger?: OptionalLogger;
 }
@@ -277,6 +316,17 @@ export class AutoEnqueuer {
      * is deleted and re-created reports again.
      */
     private readonly organizationRefusalReported = new Set<string>();
+    /** [ADR-0131 D2/D6] The declared-webhook reader, when the host binds one. */
+    private readonly declared?: DeclaredWebhookReader;
+    private readonly declaredDeploymentWide?: () => boolean;
+    /** Self-heal subscription on the activation ledger — bound only with {@link declared}. */
+    private subIdLedger: string | undefined;
+    /**
+     * Declared names already reported as withheld behind a `sys_webhook` row
+     * that holds the name (see {@link resolveDeclared}) — said once per name
+     * per process, the #8022 say-once rule.
+     */
+    private readonly declarationWithheldReported = new Set<string>();
 
     constructor(
         private readonly engine: IDataEngine,
@@ -287,6 +337,8 @@ export class AutoEnqueuer {
         this.subscriptionsObject = opts.subscriptionsObject ?? 'sys_webhook';
         this.refreshIntervalMs = opts.refreshIntervalMs ?? 60_000;
         this.logger = opts.logger;
+        this.declared = opts.declaredWebhooks;
+        this.declaredDeploymentWide = opts.declaredWebhooksDeploymentWide;
     }
 
     /**
@@ -322,6 +374,18 @@ export class AutoEnqueuer {
             { object: this.subscriptionsObject },
         );
 
+        // [ADR-0131 D6 regime C] A declared webhook is switched by an
+        // activation-ledger row, not by a `sys_webhook` write — so a switch
+        // refreshes the cache the way a row edit does, in the request that
+        // wrote it rather than at the next periodic refresh.
+        if (this.declared) {
+            this.subIdLedger = await this.realtime.subscribe(
+                'webhook-auto-enqueuer-activation',
+                (event) => this.handleLedgerEvent(event),
+                { object: METADATA_ACTIVATION_TABLE },
+            );
+        }
+
         if (this.refreshIntervalMs > 0) {
             this.refreshTimer = setInterval(() => {
                 this.refresh().catch((err) =>
@@ -338,10 +402,12 @@ export class AutoEnqueuer {
         this.running = false;
         if (this.subId) await this.realtime.unsubscribe(this.subId);
         if (this.subIdSelfHeal) await this.realtime.unsubscribe(this.subIdSelfHeal);
+        if (this.subIdLedger) await this.realtime.unsubscribe(this.subIdLedger);
         if (this.refreshTimer) clearInterval(this.refreshTimer);
         this.unbindCryptoListener?.();
         this.subId = undefined;
         this.subIdSelfHeal = undefined;
+        this.subIdLedger = undefined;
         this.refreshTimer = undefined;
         this.unbindCryptoListener = undefined;
     }
@@ -401,8 +467,22 @@ export class AutoEnqueuer {
             return;
         }
 
+        // [ADR-0131 D2/D6] The declared webhooks, and the 18.0 mirror rows they
+        // replace. A failed read keeps the previous cache, exactly as a failed
+        // row read above does: neither a double fire nor a silent loss.
+        const declared = await this.resolveDeclared();
+        if (!declared) return;
+
         const next = new Map<string, CachedSubscription[]>();
+        const add = (sub: CachedSubscription) => {
+            // Empty objectName == "any object" → indexed under '*'.
+            const key = sub.objectName ?? '*';
+            const arr = next.get(key) ?? [];
+            arr.push(sub);
+            next.set(key, arr);
+        };
         for (const row of rows) {
+            if (declared.mirrorIds.has(String(row?.id))) continue;
             const sub = this.parseRow(row);
             if (!sub) continue;
             // [#7799, #7986] Neither credential is in the row we just read —
@@ -416,12 +496,9 @@ export class AutoEnqueuer {
             // as undeliverable instead of silently discarded (#8069). See
             // `attachCredentials`.
             await this.attachCredentials(sub, row);
-            // Empty objectName == "any object" → indexed under '*'.
-            const key = sub.objectName ?? '*';
-            const arr = next.get(key) ?? [];
-            arr.push(sub);
-            next.set(key, arr);
+            add(sub);
         }
+        for (const sub of declared.subscriptions) add(sub);
 
         this.subscriptions.clear();
         for (const [k, v] of next) this.subscriptions.set(k, v);
@@ -432,6 +509,7 @@ export class AutoEnqueuer {
         // broken would have its first report suppressed as a repeat.
         if (this.droppedForSecret.size > 0 || this.organizationRefusalReported.size > 0) {
             const live = new Set(rows.map((r) => String(r?.id)));
+            for (const sub of declared.subscriptions) live.add(sub.id);
             for (const id of this.droppedForSecret) {
                 if (!live.has(id)) this.droppedForSecret.delete(id);
             }
@@ -444,7 +522,131 @@ export class AutoEnqueuer {
         this.logger?.debug?.('[webhook-auto-enqueuer] cache refreshed', {
             objects: this.subscriptions.size,
             rows: rows.length,
+            declared: declared.subscriptions.length,
         });
+    }
+
+    /**
+     * [ADR-0131 D2/D6] The declared webhooks switched on, as subscriptions,
+     * and the ids of the 18.0 mirror rows they replace. `undefined` when a read
+     * failed, so the caller keeps the cache it has.
+     *
+     * A `sys_webhook` row holding a declared name — any row, active or not — is
+     * read the way the 18.0 seeder would have treated it on this boot
+     * (`classifyDeclaredNameHolder`): a pristine mirror is skipped and the
+     * declaration answers; a customized or administrator-authored row answers
+     * as itself and the declaration is withheld, said once per name. That is
+     * what keeps a declared webhook from firing twice on an upgraded database,
+     * and an administrator's `active: false` on a seeded row in force.
+     */
+    private async resolveDeclared(): Promise<
+        { subscriptions: CachedSubscription[]; mirrorIds: Set<string> } | undefined
+    > {
+        const empty = { subscriptions: [], mirrorIds: new Set<string>() };
+        if (!this.declared) return empty;
+        let declared: DeclaredWebhook[];
+        try {
+            declared = await this.declared.list();
+        } catch (err) {
+            this.logger?.warn?.('[webhook-auto-enqueuer] failed to read the declared webhooks', err);
+            return undefined;
+        }
+        if (declared.length === 0) return empty;
+
+        let holders: any[];
+        try {
+            holders = await this.engine.find(
+                this.subscriptionsObject,
+                {
+                    where: { name: { $in: declared.map((d) => d.webhook.name) } },
+                    fields: ['id', 'name', 'managed_by', 'customized'],
+                },
+                { context: SYSTEM_CTX },
+            );
+        } catch (err) {
+            this.logger?.warn?.(
+                `[webhook-auto-enqueuer] failed to read the ${this.subscriptionsObject} rows holding declared names`,
+                err,
+            );
+            return undefined;
+        }
+
+        const mirrorIds = new Set<string>();
+        const heldByRow = new Set<string>();
+        for (const row of Array.isArray(holders) ? holders : []) {
+            if (classifyDeclaredNameHolder(row) === 'mirror') mirrorIds.add(String(row.id));
+            else heldByRow.add(String(row.name));
+        }
+
+        let deploymentWide = false;
+        try {
+            deploymentWide = this.declaredDeploymentWide?.() === true;
+        } catch {
+            /* an unreadable posture is not an open one: org-less, as under a wall */
+        }
+        const subscriptions: CachedSubscription[] = [];
+        for (const d of declared) {
+            const name = d.webhook.name;
+            if (heldByRow.has(name)) {
+                this.reportDeclarationWithheld(name);
+                continue;
+            }
+            // `active` is the declared `isActive`, or the activation ledger's switch over it.
+            if (!d.active) continue;
+            const sub = this.projectDeclared(d);
+            if (!sub) continue;
+            if (deploymentWide) sub.deploymentWide = true;
+            subscriptions.push(sub);
+        }
+        return { subscriptions, mirrorIds };
+    }
+
+    /**
+     * One declared webhook as a cached subscription. The shape goes through
+     * {@link parseRow} — the same trigger drift-guard and the same
+     * `webhook/without-triggers` refusal as a row — and both credentials come
+     * from the declaration itself: they are code, held in memory like the
+     * plaintext a row's refresh decrypts, and never written anywhere.
+     */
+    private projectDeclared(d: DeclaredWebhook): CachedSubscription | null {
+        const wh = d.webhook;
+        const sub = this.parseRow({
+            id: declaredWebhookRefId(wh.name),
+            name: wh.name,
+            object_name: wh.object ?? null,
+            triggers: wh.triggers ?? [],
+            url: wh.url,
+            method: wh.method,
+            definition_json: JSON.stringify({ timeoutMs: wh.timeoutMs }),
+        });
+        if (!sub) return null;
+        const { secret } = splitWebhookSecret(wh as Record<string, unknown>);
+        const { headers } = splitWebhookHeaders(wh as Record<string, unknown>);
+        if (secret) sub.secret = secret;
+        if (headers) sub.headers = headers;
+        return sub;
+    }
+
+    /**
+     * A declared webhook withheld because a `sys_webhook` row holds its name:
+     * a seeded row an administrator edited before this release, or a row an
+     * administrator authored under the name. The row answers; the declaration
+     * does not also fire beside it. Said once per name per process at `warn` —
+     * the row is in force and dispatching (or switched off on purpose), so
+     * nothing claimed is being lost.
+     */
+    private reportDeclarationWithheld(name: string): void {
+        if (this.declarationWithheldReported.has(name)) return;
+        this.declarationWithheldReported.add(name);
+        this.logger?.warn?.(
+            `[webhook-auto-enqueuer] declared webhook '${name}' is not dispatched: a ${this.subscriptionsObject} row ` +
+                'of the same name answers for it (a seeded copy edited before declared webhooks were read from the ' +
+                'registry, or a row authored under the name). The row stays in force as it is. To return to the ' +
+                'declaration, delete the row; to change the declared webhook, author a copy under a new name and ' +
+                `switch the declared one off (POST /api/v1/security/_activation/webhook/${name} with ` +
+                '{ "enabled": false }).',
+            { webhook: name },
+        );
     }
 
     /**
@@ -997,8 +1199,9 @@ export class AutoEnqueuer {
                 // organization — the one honest tenant in scope on this
                 // fire-and-forget path (no request context exists here).
                 // Absent for an org-less subscription; the row then lands
-                // NULL, the global-row shape.
-                organizationId: sub.organizationId,
+                // NULL, the global-row shape. A deployment-wide declared
+                // webhook takes the event's organization instead.
+                organizationId: sub.deploymentWide ? organization.organizationId : sub.organizationId,
                 // [#3946] Envelope keys are written LAST so the event payload
                 // cannot rewrite them. Behaviour-neutral for the engine's own
                 // publishers — since #4626 a `data.record.*` payload is a
@@ -1145,7 +1348,7 @@ export class AutoEnqueuer {
                 timeoutMs: sub.timeoutMs,
                 // [#13546] See the per-record path — the subscription's own
                 // organization, absent for an org-less subscription.
-                organizationId: sub.organizationId,
+                organizationId: sub.deploymentWide ? organization.organizationId : sub.organizationId,
                 // [#3946] Envelope keys last so the payload cannot rewrite them.
                 payload: {
                     ...payload,
@@ -1206,11 +1409,17 @@ export class AutoEnqueuer {
      * webhook — accepted, and said once so the subscription is not dead while
      * looking armed.
      *
-     * **`none` × `absent` — deliver.** A `single`-posture deployment stamps
-     * nothing on either side (`postureStampsOrganization` is false there), so
-     * this cell is every event on every non-walled install; on a walled one
-     * it is an environment-wide subscription taking an environment-wide
-     * event. No organization is named anywhere, so there is no wall to cross.
+     * **`none` × `absent` — deliver.** An environment-wide subscription taking
+     * an environment-wide event: no organization is named anywhere, so there is
+     * no wall to cross. ⚠ It is NOT every event on a `single` install: since
+     * ADR-0131 D9 every record there is stamped with the Default Organization,
+     * so a `single` event names that organization like a walled one does.
+     *
+     * **A deployment-wide declared webhook — deliver, whatever the event names.**
+     * Checked first ({@link CachedSubscription.deploymentWide}): a declared
+     * webhook on a posture with no wall belongs to the deployment, so every
+     * organization's event is its own. Without it the `none` × `org A` row
+     * above would refuse every event on a `single` install.
      *
      * Both refusals are said ONCE per subscription (the #8022 say-once rule,
      * ledger {@link organizationRefusalReported}): the first refused event is
@@ -1224,6 +1433,9 @@ export class AutoEnqueuer {
         eventOrganizationId: string | undefined,
         event: RealtimeEventPayload,
     ): boolean {
+        // [ADR-0131 D2/D9] A declared webhook on a deployment with no wall
+        // belongs to the deployment, so every organization's event is its own.
+        if (sub.deploymentWide) return true;
         // org A × org A, and none × absent.
         if (sub.organizationId === eventOrganizationId) return true;
         // org A × org B — another organization's subscription is simply not a
@@ -1279,6 +1491,14 @@ export class AutoEnqueuer {
         if (!event.type?.startsWith('data.record.') && !event.type?.startsWith('data.records.')) return;
         this.refresh().catch((err) =>
             this.logger?.warn?.('[webhook-auto-enqueuer] self-heal refresh failed', err),
+        );
+    }
+
+    private handleLedgerEvent(event: RealtimeEventPayload): void {
+        if (event.object !== METADATA_ACTIVATION_TABLE) return;
+        if (!event.type?.startsWith('data.record.') && !event.type?.startsWith('data.records.')) return;
+        this.refresh().catch((err) =>
+            this.logger?.warn?.('[webhook-auto-enqueuer] activation refresh failed', err),
         );
     }
 

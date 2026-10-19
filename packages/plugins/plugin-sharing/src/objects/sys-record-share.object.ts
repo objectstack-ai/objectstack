@@ -45,6 +45,11 @@ export const SysRecordShare = ObjectSchema.create({
   titleFormat: '{object_name}/{record_id} → {recipient_id} ({access_level})',
   highlightFields: ['object_name', 'record_id', 'recipient_id', 'access_level', 'source'],
 
+  // A list names the shared record with the pointer's id half, `record_id`:
+  // the console draws it as the target record and fetches the type half
+  // `object_name` for that cell without a column (objectui#13036). No list
+  // view shows the type half, which would draw the stored API name as text
+  // (`sharing-pointer-pairs.test.ts`).
   listViews: {
     // [#21972] Declared FIRST on purpose: a route that names no view opens the
     // first declared list view, so a caller-scoped view (`granted_to_me`,
@@ -55,7 +60,7 @@ export const SysRecordShare = ObjectSchema.create({
       name: 'all_shares',
       label: 'All',
       data: { provider: 'object', object: 'sys_record_share' },
-      columns: ['object_name', 'record_id', 'recipient_type', 'recipient_id', 'access_level', 'source', 'created_at'],
+      columns: ['record_id', 'recipient_type', 'recipient_id', 'access_level', 'source', 'created_at'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
     },
@@ -64,7 +69,7 @@ export const SysRecordShare = ObjectSchema.create({
       name: 'granted_to_me',
       label: 'Granted to Me',
       data: { provider: 'object', object: 'sys_record_share' },
-      columns: ['object_name', 'record_id', 'access_level', 'source', 'granted_by', 'created_at'],
+      columns: ['record_id', 'access_level', 'source', 'granted_by', 'created_at'],
       filter: [
         { field: 'recipient_type', operator: 'equals', value: 'user' },
         { field: 'recipient_id', operator: 'equals', value: '{current_user_id}' },
@@ -77,7 +82,7 @@ export const SysRecordShare = ObjectSchema.create({
       name: 'granted_by_me',
       label: 'Granted by Me',
       data: { provider: 'object', object: 'sys_record_share' },
-      columns: ['object_name', 'record_id', 'recipient_id', 'access_level', 'source', 'created_at'],
+      columns: ['record_id', 'recipient_id', 'access_level', 'source', 'created_at'],
       filter: [
         { field: 'granted_by', operator: 'equals', value: '{current_user_id}' },
       ],
@@ -89,7 +94,7 @@ export const SysRecordShare = ObjectSchema.create({
       name: 'by_object',
       label: 'By Object',
       data: { provider: 'object', object: 'sys_record_share' },
-      columns: ['object_name', 'record_id', 'recipient_id', 'access_level', 'source', 'created_at'],
+      columns: ['record_id', 'recipient_id', 'access_level', 'source', 'created_at'],
       sort: [{ field: 'object_name', order: 'asc' }, { field: 'created_at', order: 'desc' }],
       grouping: { fields: [{ field: 'object_name', order: 'asc', collapsed: false }] },
       pagination: { pageSize: 100 },
@@ -99,7 +104,7 @@ export const SysRecordShare = ObjectSchema.create({
       name: 'manual_grants',
       label: 'Manual Grants',
       data: { provider: 'object', object: 'sys_record_share' },
-      columns: ['object_name', 'record_id', 'recipient_id', 'access_level', 'granted_by', 'reason', 'created_at'],
+      columns: ['record_id', 'recipient_id', 'access_level', 'granted_by', 'reason', 'created_at'],
       filter: [{ field: 'source', operator: 'equals', value: 'manual' }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
@@ -109,7 +114,7 @@ export const SysRecordShare = ObjectSchema.create({
       name: 'rule_grants',
       label: 'Rule Grants',
       data: { provider: 'object', object: 'sys_record_share' },
-      columns: ['object_name', 'record_id', 'recipient_id', 'access_level', 'source_id', 'created_at'],
+      columns: ['record_id', 'recipient_id', 'access_level', 'source_id', 'created_at'],
       filter: [{ field: 'source', operator: 'in', value: ['rule', 'team', 'inherited'] }],
       sort: [{ field: 'source_id', order: 'asc' }, { field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },

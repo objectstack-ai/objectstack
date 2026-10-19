@@ -305,8 +305,8 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         const res = await protocol.duplicatePackage({ sourcePackageId: P, targetPackageId: Q });
 
         expect(res.success).toBe(false);
-        expect(res.failed).toHaveLength(1);
-        const [refusal] = res.failed;
+        expect(res.failed).toHaveLength(2);
+        const [refusal, viewRefusal] = res.failed;
         expect(refusal).toMatchObject({ type: 'object', name: 'ticket' });
         // Located: the object, the name it would take, who holds that name,
         // and the source rename that clears it.
@@ -314,6 +314,11 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         expect(refusal.error).toContain("'dupdst_ticket'");
         expect(refusal.error).toContain("'dupsrc_ticket'");
         expect(refusal.error).toContain("Rename 'ticket' on the source");
+        // [#24563] The `ticket` copy was refused, so the copy of `ticket_views`
+        // keeps the source's `ticket` — an object outside the copy package's
+        // closure — and the save door refuses it with the same rule.
+        expect(viewRefusal).toMatchObject({ type: 'view', name: 'ticket_views' });
+        expect(viewRefusal.error).toContain('views[0].object [list-view-object-outside-closure]');
 
         // NEGATIVE CONTROL: the prefixed sibling took the name, with its own
         // body, and nothing of `ticket` was written under it.

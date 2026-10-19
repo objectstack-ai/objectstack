@@ -255,7 +255,13 @@ describe('ADR-0070 D4 — duplicatePackage keeps a copied name in step with what
         await protocol.installPackage({ manifest: { id: R, name: 'Other', type: 'app' } });
         await save(R, 'object', accountBody);
         await saveStoredBeforeRule(R, 'object', extBody);
-        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
+        // [#24563] The source DECLARES the third package it references: the save
+        // door judges a package's list view against the package's closure and
+        // refuses a binding outside it (`list-view-object-outside-closure`), so
+        // `dupext_account.board` and `dupsrc_ext.board` are views of objects
+        // outside the package that the package may reach. The copy inherits the
+        // declaration with the rest of the manifest.
+        await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app', dependencies: { [R]: '*' } } });
         expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
         await save(P, 'object', customerBody);
         await saveStoredBeforeRule(P, 'object', ticketBody);

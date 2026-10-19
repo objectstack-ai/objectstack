@@ -58,16 +58,17 @@ export type WebhookTriggerType = z.input<typeof WebhookTriggerType>;
  * Webhook Protocol - Outbound HTTP Integration
  * Push data to external URLs when events occur in the system.
  *
- * **RUNTIME MATERIALIZATION (#3461):**
- * A webhook authored on a stack (`defineStack({ webhooks })`) is not dispatched
- * directly from this envelope. On boot, `@objectstack/plugin-webhooks`
- * materializes each declared webhook into a `sys_webhook` data row (mapping
- * `object → object_name`, `isActive → active`, and stashing the full envelope
- * in `definition_json`); the auto-enqueuer dispatches off those rows. Declared
- * webhooks re-seed every boot as `managed_by: 'package'`, but a row an admin has
- * edited in Setup (`customized: true`) is never clobbered — a deactivated noisy
- * webhook survives redeploys. Authoring `webhooks:` is therefore live, not a
- * no-op. (A connector's NESTED `webhooks` array never was — it was never
+ * **RUNTIME (ADR-0131 D2, D6):**
+ * A webhook authored on a stack (`defineStack({ webhooks })`) is code, and the
+ * dispatcher reads it from the metadata registry: `@objectstack/plugin-webhooks`
+ * subscribes each declared webhook on every cache refresh (mapping
+ * `object → object_name`, with `secret` and `headers` held in memory), and no
+ * `sys_webhook` row is written for it. `sys_webhook` holds the webhooks an
+ * organization authors. A declared webhook is read-only: it is switched on or
+ * off for the deployment through the activation ledger
+ * (`POST /api/v1/security/_activation/webhook/:name`), which overrides
+ * `isActive` in either direction, and changed by a copy under a new name.
+ * Authoring `webhooks:` is therefore live, not a no-op. (A connector's NESTED `webhooks` array never was — it was never
  * registered as a `webhook` item — and was retired under ADR-0049; declare
  * every webhook here.)
  *
@@ -113,10 +114,10 @@ export type WebhookTriggerType = z.input<typeof WebhookTriggerType>;
  *
  *  1. {@link defineWebhook} — the authoring factory.
  *  2. `defineStack({ webhooks })` — `StackSchema` holds `z.array(WebhookSchema)`.
- *  3. **Boot** — `plugin-webhooks`' `bootstrapDeclaredWebhooks` re-parses every
- *     declared webhook before materializing it into a `sys_webhook` row
- *     (`bootstrap-declared-webhooks.ts`), and a parse failure there warns and
- *     SKIPS the webhook. So an undeclared key here is not merely stripped — from
+ *  3. **Dispatch** — `plugin-webhooks`' declared-webhook reader re-parses every
+ *     declared webhook on each subscription-cache refresh
+ *     (`declared-webhooks.ts`, which replaced the boot seeder ADR-0131 D2
+ *     retired), and a parse failure there warns and SKIPS the webhook. So an undeclared key here is not merely stripped — from
  *     this change on it is the difference between a subscription that exists and
  *     one that does not, which is why the rejection has to carry its fix.
  *
@@ -136,8 +137,8 @@ export const WebhookSchema = lazySchema(() => strictObject({
   surface: 'this webhook',
   aliases: {
     // Real, in-repo spellings of the same field on the OTHER side of the
-    // materialization bridge: `sys_webhook`'s columns are `object_name` /
-    // `active` (`mapWebhookToRow` in plugin-webhooks does the remap). An admin
+    // dispatcher: `sys_webhook`'s columns are `object_name` / `active` (the
+    // declared-webhook projection in plugin-webhooks makes the same remap). An admin
     // or agent reading a row back and re-authoring it from those column names
     // is the concrete path here, and neither word is within edit distance.
     // The column spelling alone covers `objectName` too — `aliasProbe` folds
@@ -225,7 +226,7 @@ export const WebhookSchema = lazySchema(() => strictObject({
   // Declared in #4001 batch 11 for the reason the module header states: both
   // metadata load paths call `applyProtection` on EVERY type, so a
   // package-loaded webhook has always carried these keys by the time
-  // `bootstrapDeclaredWebhooks` re-parses it. `.strip` discarded them; the
+  // the declared-webhook reader re-parses it. `.strip` discarded them; the
   // `.strict()` gate above would have rejected them, and the observable failure
   // would not have looked like a validation problem at all — just a webhook
   // that stopped existing after a redeploy, with one `warn` to say so.
