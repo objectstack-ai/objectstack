@@ -204,8 +204,13 @@ class ReportFileReservation {
 }
 
 /**
- * `os migrate organization-ownership` — the v18 organization-ownership
- * ceremony's preflight (ADR-0131 D10, ceremony item 1): per table, the fate,
+ * The v18 organization-ownership ceremony behind `os migrate
+ * organization-ownership` — in 18.0 the registered command refuses before
+ * this class runs (see {@link MigrateOrganizationOwnership} at the end of this
+ * file). This class is the ceremony itself, kept whole for the 18.x release
+ * that carries the upgrade path; its tests run it directly.
+ *
+ * The ceremony's preflight (ADR-0131 D10, ceremony item 1): per table, the fate,
  * the row counts each fate will touch, the rows whose owner cannot be derived
  * (listed by id), and the tables that will and will not receive NOT NULL.
  *
@@ -311,7 +316,7 @@ class ReportFileReservation {
  * the drops go through the remote face's own drift detector and migration
  * door (`@objectstack/driver-turso`).
  */
-export default class MigrateOrganizationOwnership extends Command {
+export class OrganizationOwnershipCeremony extends Command {
   static override description =
     'The v18 organization-ownership ceremony (ADR-0131 D10). Without --apply, the read-only plan: per table, the fate, ' +
     'the row counts, the rows whose owner cannot be derived (by id), and which tables will receive NOT NULL, written ' +
@@ -393,7 +398,7 @@ export default class MigrateOrganizationOwnership extends Command {
   };
 
   async run(): Promise<void> {
-    const { flags } = await this.parse(MigrateOrganizationOwnership);
+    const { flags } = await this.parse(OrganizationOwnershipCeremony);
     const timer = createTimer();
     const json = Boolean(flags.json);
     const refuse = async (payload: Record<string, unknown>, message: string): Promise<void> => {
@@ -1086,5 +1091,56 @@ export default class MigrateOrganizationOwnership extends Command {
     }
     console.log(chalk.dim(`  ${timer.display()}`));
     if (verdictCode !== 0) this.exit(1);
+  }
+}
+
+/**
+ * What `os migrate organization-ownership` answers in 18.0, plan and apply
+ * alike (ruling record 6259608309 on the v18 epic, item 1).
+ *
+ * 18.0 supports fresh installs only. Its ceremony is knowingly incomplete:
+ * several fates, and the moves they carry, were deferred to 18.x. An
+ * incomplete ceremony must never certify an old database, because the boot
+ * guard (`OrganizationOwnershipBootGuardPlugin`) would then serve it. So the
+ * registered command refuses before it reads anything. It opens no database,
+ * reads no plan, supplement or report file, writes nothing, and boots nothing.
+ * The code is the standard `NOT_IMPLEMENTED` (ADR-0112): the capability is
+ * not in this release. No flag and no environment variable lifts the refusal.
+ */
+export const ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE =
+  'os migrate organization-ownership is not available in 18.0. 18.0 supports fresh installs only; the v17 → v18 ' +
+  'upgrade path ships in an 18.x release. Keep a v17 database on a 17.x release until then. Nothing was read or written.';
+
+/** The ADR-0112 code the 18.0 refusal carries: the standard code for a capability this release does not implement. */
+export const ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE_CODE = 'NOT_IMPLEMENTED' as const;
+
+/**
+ * `os migrate organization-ownership` in 18.0: the ceremony's flags and help,
+ * and a refusal instead of the ceremony
+ * ({@link ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE}). The 18.x release that
+ * carries the upgrade path deletes this class and registers the ceremony.
+ */
+export default class MigrateOrganizationOwnership extends OrganizationOwnershipCeremony {
+  static override description =
+    'Refused in 18.0, which supports fresh installs only: the v17 → v18 upgrade path ships in an 18.x release. ' +
+    OrganizationOwnershipCeremony.description;
+
+  override async run(): Promise<void> {
+    const { flags } = await this.parse(MigrateOrganizationOwnership);
+    if (flags.json) {
+      await emitJson(
+        {
+          error: flags.apply ? 'apply_refused' : 'plan_refused',
+          reason: 'upgrade-unavailable',
+          code: ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE_CODE,
+          detail: ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE,
+        },
+        1,
+        { compact: true },
+      );
+      return;
+    }
+    printError(`${ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE} (${ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE_CODE})`);
+    this.exit(1);
   }
 }

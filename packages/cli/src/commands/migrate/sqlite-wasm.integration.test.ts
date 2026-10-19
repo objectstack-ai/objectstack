@@ -36,7 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { isExitSignal } from '../../utils/format.js';
 import MigrateApply from './apply.js';
 import MigratePlan from './plan.js';
-import MigrateOrganizationOwnership from './organization-ownership.js';
+import { OrganizationOwnershipCeremony as MigrateOrganizationOwnership } from './organization-ownership.js';
 
 // [#10126] Pay the first transform of the dist-resolved workspace deps the
 // commands reach through dynamic `import()`s at MODULE LOAD, not inside a case.
