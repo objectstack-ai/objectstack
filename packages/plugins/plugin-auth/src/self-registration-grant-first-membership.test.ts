@@ -34,6 +34,17 @@ const CLAIM_IDENTIFIER = `self-registration-grant:${USER.id}`;
 type Tables = Map<string, any[]>;
 type Mw = (opCtx: any, next: () => Promise<void>) => Promise<void>;
 
+/** Equality, plus the one operator the writer sends (`$gt` on a date); every combinator is refused. */
+function matches(row: any, where: Record<string, any> = {}): boolean {
+  return Object.entries(where).every(([k, v]) => {
+    if (k.startsWith('$')) throw new Error(`memory engine: unsupported combinator ${k}`);
+    if (v && typeof v === 'object' && !(v instanceof Date) && '$gt' in v) {
+      return new Date(row[k]).getTime() > new Date(v.$gt).getTime();
+    }
+    return row[k] === v;
+  });
+}
+
 /**
  * An in-memory engine over `tables` (shared across engines to model a store
  * that outlives a restart). `withMiddleware: false` models an engine that
@@ -44,13 +55,6 @@ function memoryEngine(tables: Tables = new Map(), opts: { withMiddleware?: boole
     if (!tables.has(name)) tables.set(name, []);
     return tables.get(name)!;
   };
-  const matches = (row: any, where: Record<string, any> = {}) =>
-    Object.entries(where).every(([k, v]) => {
-      if (v && typeof v === 'object' && !(v instanceof Date) && '$gt' in v) {
-        return new Date(row[k]).getTime() > new Date(v.$gt).getTime();
-      }
-      return row[k] === v;
-    });
   const middlewares: Mw[] = [];
   let seq = 0;
   const engine: any = {
