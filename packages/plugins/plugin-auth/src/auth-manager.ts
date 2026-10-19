@@ -1657,6 +1657,11 @@ export class AuthManager {
     // full rationale.
     installWebContainerRequestStatePolyfill();
 
+    // [ADR-0131 D3] The self-registration grant settles on the first
+    // membership: watch `sys_member` inserts on the engine from boot, so a
+    // claim persisted before a restart settles whichever writer binds it.
+    this.observeFirstMemberships(config.dataEngine);
+
     // Use provided auth instance
     if (config.authInstance) {
       this.auth = config.authInstance;
@@ -5630,9 +5635,8 @@ export class AuthManager {
    * tenant-column object carries when nothing on the write names one: the
    * Default Organization under `single` — the only organization there is —
    * and none under a wall, where `tenancy.defaultOrgId()` answers `null`. One
-   * reading for every such producer here (the self-registration grant and the
-   * auth mails that are about a user rather than an organization), so they
-   * cannot disagree about it. `undefined` when no tenancy service is wired or
+   * reading for every such producer here (the auth mails that are about a user
+   * rather than an organization), so they cannot disagree about it. `undefined` when no tenancy service is wired or
    * it cannot answer: the producer then names nothing, as before.
    */
   private async derivableWriteOrganizationId(): Promise<string | undefined> {
@@ -5652,14 +5656,21 @@ export class AuthManager {
   }
 
   /**
-   * Land the staged self-registration grant for a freshly created user — the
-   * `user.create.after` half of an admitted self-registration. Idempotent
-   * (existing `(user, set)` pair wins), owned by the organization
-   * {@link derivableWriteOrganizationId} derives — the same target org the
-   * membership reconciler resolves. Under a wall none is derivable when the
-   * registrant is created (multi-org self-registration binds no org either),
-   * so the row is written without one and its fate is the engine's (ADR-0131
-   * D9).
+   * [ADR-0131 D3/D9 — the self-registration grant settles on the first
+   * membership] The `user.create.after` half of an admitted self-registration.
+   * The grant is an organization row (D3), so it is written WITH a membership,
+   * owned by that membership's organization, under every posture:
+   *
+   *  - the registrant already holds one (`single`, where the reconciler bound
+   *    the Default Organization a moment earlier in the same hook, or a host
+   *    hook that provisioned a personal organization first) → the grant lands
+   *    now, owned by it;
+   *  - it holds none (a wall: the registrant joins or creates an organization
+   *    later, possibly days and restarts later) → the grant is PERSISTED as a
+   *    pending claim ({@link persistSelfRegistrationGrantClaim}) and lands when
+   *    the first `sys_member` row for the user is written
+   *    ({@link settleDeferredSelfRegistrationGrant}). Nothing is written to
+   *    `sys_user_permission_set` without an organization.
    *
    * A failure here is reported at the DURABILITY level (`error` when the sink
    * carries it): the system keeps looking normal from the outside while a
@@ -5683,36 +5694,193 @@ export class AuthManager {
         return;
       }
       const sys = withSystemReadContext(engine) as any;
-      const organizationId = await this.derivableWriteOrganizationId();
-      // [ADR-0131 D3/D4] The grant names the declared set BY NAME — the name
-      // admission asked the security catalog and the activation ledger about —
-      // so no `sys_permission_set` row is read to write it, and none needs to
-      // exist. Already held? Asked by the same name: a self-registrant is a
-      // user created moments ago, so any grant it holds naming this set, in any
-      // organization, settles the question and no second grant is written.
-      const existing: any[] = await sys.find('sys_user_permission_set', {
-        where: { user_id: userId, [GRANT_SET_NAME_FIELD]: staged.setName },
-        limit: 1,
-      });
-      if (existing.length > 0) return;
-      const id = `ups_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-      await sys.insert('sys_user_permission_set', {
-        id,
-        user_id: userId,
-        [GRANT_SET_NAME_FIELD]: staged.setName,
-        ...(organizationId ? { organization_id: organizationId } : {}),
-      });
-      this.config.logger?.info?.('[audience] granted the declared self-registration permission set', {
-        userId,
-        permissionSet: staged.setName,
-        organizationId,
-      });
+      // A user created moments ago holds at most the one membership its own
+      // creation bound, so the first row found is THE first membership.
+      const memberships: any[] = await sys.find('sys_member', { where: { user_id: userId }, limit: 1 });
+      const organizationId = memberships[0]?.organization_id;
+      if (typeof organizationId === 'string' && organizationId) {
+        await this.landSelfRegistrationGrant(engine, userId, staged.setName, organizationId);
+        return;
+      }
+      await this.persistSelfRegistrationGrantClaim(engine, userId, staged.setName);
     } catch (error) {
       this.reportUngrantedSelfRegistrant(
         typeof user?.id === 'string' ? user.id : '(unknown)',
         staged?.setName ?? '(unknown)',
         (error as Error)?.message ?? String(error),
       );
+    }
+  }
+
+  /**
+   * Write the self-registration grant, owned by `organizationId` — the
+   * organization of the membership it travels with. Idempotent: a grant the
+   * user already holds naming this set settles the question.
+   *
+   * [ADR-0131 D3/D4] The grant names the declared set BY NAME — the name
+   * admission asked the security catalog and the activation ledger about — so
+   * no `sys_permission_set` row is read to write it, and none needs to exist.
+   * Already held? Asked by the same name, in any organization: the grant is
+   * the self-registrant's one declared set, so a second membership (or a
+   * replayed claim) writes no second grant.
+   */
+  private async landSelfRegistrationGrant(
+    engine: unknown,
+    userId: string,
+    setName: string,
+    organizationId: string,
+  ): Promise<void> {
+    const sys = withSystemReadContext(engine as never) as any;
+    const existing: any[] = await sys.find('sys_user_permission_set', {
+      where: { user_id: userId, [GRANT_SET_NAME_FIELD]: setName },
+      limit: 1,
+    });
+    if (existing.length > 0) return;
+    const id = `ups_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+    await sys.insert('sys_user_permission_set', {
+      id,
+      user_id: userId,
+      [GRANT_SET_NAME_FIELD]: setName,
+      organization_id: organizationId,
+    });
+    this.config.logger?.info?.('[audience] granted the declared self-registration permission set', {
+      userId,
+      permissionSet: setName,
+      organizationId,
+    });
+  }
+
+  /**
+   * The `identifier` prefix of a pending self-registration grant claim — a
+   * `sys_verification` row whose identifier is this prefix plus the user id
+   * and whose `value` is the declared set's name.
+   *
+   * Why `sys_verification`, and not a new object or a column: it is the auth
+   * layer's existing store of one-shot claims keyed on an identifier with an
+   * expiry (reset tokens, OTPs, magic links), it survives a restart, and it is
+   * deployment-level — no organization column (ADR-0131 D1, fate 1), so a
+   * claim held before any organization exists is not an organization-less
+   * tenant row. Nothing the user row or account records tells a self-registrant
+   * apart from an invited, operator-created or bootstrap user (admission
+   * decides that from the request, not from stored state), so the claim is the
+   * one persisted fact that does.
+   */
+  private static readonly SELF_REG_GRANT_CLAIM_PREFIX = 'self-registration-grant:';
+
+  /**
+   * How long a pending claim waits for the first membership. better-auth's
+   * own verification cleanup deletes expired rows, and an expired claim is
+   * never honoured, so a registrant who first joins an organization after
+   * this window holds only the deployment's baseline.
+   */
+  private static readonly SELF_REG_GRANT_CLAIM_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+
+  /**
+   * Persist the pending grant for a registrant who belongs to no organization
+   * yet. Refused (reported, nothing written) when the engine offers no
+   * middleware seam: the claim could never settle there, and a claim nothing
+   * will consume is the declared≠enforced state this path closes.
+   */
+  private async persistSelfRegistrationGrantClaim(engine: unknown, userId: string, setName: string): Promise<void> {
+    if (!AuthManager.firstMembershipObservedEngines.has(engine as object)) {
+      this.reportUngrantedSelfRegistrant(
+        userId,
+        setName,
+        'the user belongs to no organization yet and the data engine offers no middleware seam on which the ' +
+          'first membership could settle the grant',
+      );
+      return;
+    }
+    const sys = withSystemReadContext(engine as never) as any;
+    await sys.insert('sys_verification', {
+      id: `ver_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`,
+      identifier: `${AuthManager.SELF_REG_GRANT_CLAIM_PREFIX}${userId}`,
+      value: setName,
+      expires_at: new Date(Date.now() + AuthManager.SELF_REG_GRANT_CLAIM_TTL_MS),
+    });
+    this.config.logger?.info?.(
+      '[audience] the self-registrant belongs to no organization yet — the declared permission set is granted ' +
+        'with their first membership',
+      { userId, permissionSet: setName },
+    );
+  }
+
+  /** The engines whose `sys_member` inserts {@link observeFirstMemberships} watches. */
+  private static readonly firstMembershipObservedEngines = new WeakSet<object>();
+
+  /**
+   * Register, once per engine, the middleware that settles a pending
+   * self-registration grant when a `sys_member` row is written. A data-layer
+   * seam rather than one hook per membership path, because the first
+   * membership arrives through several writers — better-auth's organization
+   * create (the creator as owner) and invitation acceptance, its server-side
+   * add-member, the membership reconciler, the Default Organization bootstrap
+   * and host hooks — and every one of them inserts through this engine.
+   */
+  private observeFirstMemberships(engine: unknown): void {
+    if (!engine || typeof engine !== 'object') return;
+    const register = (engine as { registerMiddleware?: unknown }).registerMiddleware;
+    if (typeof register !== 'function') return;
+    if (AuthManager.firstMembershipObservedEngines.has(engine)) return;
+    try {
+      (register as (fn: (opCtx: any, next: () => Promise<void>) => Promise<void>) => void).call(
+        engine,
+        async (opCtx: any, next: () => Promise<void>) => {
+          await next();
+          if (opCtx?.object !== 'sys_member') return;
+          if (opCtx?.operation !== 'insert' && opCtx?.operation !== 'create') return;
+          const written = opCtx?.result ?? opCtx?.data;
+          for (const row of Array.isArray(written) ? written : [written]) {
+            const userId = row?.user_id;
+            const organizationId = row?.organization_id;
+            if (typeof userId !== 'string' || !userId) continue;
+            if (typeof organizationId !== 'string' || !organizationId) continue;
+            await this.settleDeferredSelfRegistrationGrant(engine, userId, organizationId);
+          }
+        },
+      );
+      AuthManager.firstMembershipObservedEngines.add(engine);
+    } catch {
+      // An engine that refuses the registration has no seam: a registrant with
+      // no organization is then reported ungranted at sign-up, never parked.
+    }
+  }
+
+  /**
+   * Land a pending self-registration grant on the user's first membership,
+   * owned by that membership's organization. The claim is CONSUMED before the
+   * grant is written — read, deleted by id, then acted on — so it is honoured
+   * once; a later membership finds no claim and writes no second grant.
+   */
+  private async settleDeferredSelfRegistrationGrant(
+    engine: unknown,
+    userId: string,
+    organizationId: string,
+  ): Promise<void> {
+    let setName: string | undefined;
+    try {
+      const sys = withSystemReadContext(engine as never) as any;
+      const claims: any[] = await sys.find('sys_verification', {
+        where: {
+          identifier: `${AuthManager.SELF_REG_GRANT_CLAIM_PREFIX}${userId}`,
+          expires_at: { $gt: new Date() },
+        },
+        limit: 1,
+      });
+      const claim = claims[0];
+      if (!claim?.id) return;
+      // `value` is `internal: true`: the engine's read path strips it, so it is
+      // recovered through the privileged accessor (`internal-field-readback.ts`).
+      await recoverInternalFieldsForSystemRead(engine as never, 'sys_verification', claim, ['value']);
+      await sys.delete('sys_verification', { where: { id: claim.id } });
+      setName = typeof claim.value === 'string' && claim.value ? claim.value : undefined;
+      if (!setName) {
+        this.reportUngrantedSelfRegistrant(userId, '(unreadable)', 'the pending grant claim carries no set name');
+        return;
+      }
+      await this.landSelfRegistrationGrant(engine, userId, setName, organizationId);
+    } catch (error) {
+      this.reportUngrantedSelfRegistrant(userId, setName ?? '(unknown)', (error as Error)?.message ?? String(error));
     }
   }
 
@@ -8295,12 +8463,14 @@ export class AuthManager {
     const hostUserAfter = (host as any)?.user?.create?.after;
     const membershipReconciler = async (user: any) => {
       await this.settleMembership(user?.id);
-      // [#11739] The second half of an admitted SELF-registration: land the
-      // DECLARED permission-set grant staged by the validateUserInfo gate.
-      // Same seam as the membership bind (the one every creation path flows
-      // through), same never-throw posture — but a failure here is reported
-      // at the durability level, because an admitted-but-ungranted
-      // self-registrant is the declared≠enforced state this card closes.
+      // [#11739] The second half of an admitted SELF-registration: settle the
+      // DECLARED permission-set grant staged by the validateUserInfo gate —
+      // landed now, owned by the membership the line above bound, or held as
+      // a claim until the first membership (ADR-0131 D3). Same seam as the
+      // membership bind (the one every creation path flows through), same
+      // never-throw posture — but a failure here is reported at the
+      // durability level, because an admitted-but-ungranted self-registrant
+      // is the declared≠enforced state this card closes.
       await this.settleSelfRegistrationGrant(user);
     };
     const userAfter = hostUserAfter
