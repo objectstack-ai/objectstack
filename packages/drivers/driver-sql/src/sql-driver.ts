@@ -15601,15 +15601,20 @@ export class SqlDriver implements IDataDriver {
         void b.whereIn(field, tenantIds.map(String)).orWhereNull(field);
       });
     }
-    // `(field = :tenantId OR field IS NULL)` — a NULL tenant column marks a
-    // GLOBAL/platform row (bootstrap-seeded positions and permission sets,
-    // business units, pre-org first-boot seeds). Such a row belongs to no
-    // OTHER tenant, so the cross-tenant wall must not hide it: with strict
-    // equality every tenant admin saw ZERO RBAC rows on a fresh deployment,
-    // because every platform row is org-less (#2734). Rows stamped with a
-    // DIFFERENT tenant stay invisible exactly as before; authorization on
-    // global rows remains the job of the layers above (RBAC, RLS,
-    // managed_by gates).
+    // `(field = :tenantId OR field IS NULL)`. The NULL arm is the v17 reading
+    // (#2734), in which an org-less row stood for platform state (seeded
+    // positions and permission sets, business units, first-boot seeds).
+    // ADR-0131 replaces that reading with three rules. A managed package's
+    // metadata is not in the database: its definitions are sealed, and
+    // customization is environment-level state (D2, D6). A row with an
+    // organization column was written by that organization, and NULL is not
+    // an owner (D1); references to declared items are by machine name (D4). A
+    // table with no organization column is deployment-level or code-level,
+    // protected by permissions rather than by this wall (D7). So on a fresh
+    // 18.0 `single` install, where every insert carries its organization, the
+    // arm matches nothing. The arm is removed on the 18.x line, after the
+    // upgrade ceremony (ADR-0131 D14). Rows stamped with a DIFFERENT tenant
+    // stay invisible either way.
     return builder.where((b) => {
       void b.where(field, String(tenantId)).orWhereNull(field);
     });

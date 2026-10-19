@@ -34,7 +34,7 @@ import {
 // The posture vocabulary, read from the package that DEFINES it (#5382) — the
 // fix list below enumerates the accepted values, and a second literal list
 // would be free to drift the day a posture is added.
-import { TENANCY_POSTURES, type TenancyPosture } from '@objectstack/spec/security';
+import { TENANCY_POSTURES, postureEnforcesWall, type TenancyPosture } from '@objectstack/spec/security';
 
 interface HealthCheckResult {
   name: string;
@@ -823,6 +823,32 @@ export function resolveTenancyPostureOrFinding(reading: DotenvReading): TenancyP
       },
     };
   }
+}
+
+/**
+ * The row doctor reports for a walled posture (`group` / `isolated`) in 18.0,
+ * or `null` for any other.
+ *
+ * 18.0 supports the `single` posture only, and `os serve` (so `os dev` and
+ * `os start`) refuses a walled one before it reads a config
+ * (`walledPostureRefusal` in `serve.ts`). Without this row doctor printed
+ * nothing about a valid posture, so it said nothing about a boot that will be
+ * refused. A `warning`, not an `error`: the one-shot commands doctor also
+ * fronts (`os migrate`, `os verify`, `os secret`, `os storage`) still boot
+ * under it. The 18.x release that restores walled postures deletes this row.
+ */
+export function walledPostureFinding(posture: TenancyPosture): HealthCheckResult | null {
+  if (!postureEnforcesWall(posture)) return null;
+  return {
+    name: 'Tenancy posture',
+    status: 'warning',
+    message:
+      `the tenancy posture is '${posture}' — 18.0 supports the 'single' posture only, so the next`
+      + ' `os serve` (and so `os dev` and `os start`) refuses it at boot',
+    fix:
+      'Set OS_TENANCY_POSTURE=single, or unset both OS_TENANCY_POSTURE and OS_MULTI_ORG_ENABLED;\n'
+      + '      or keep this deployment on a 17.x release until the 18.x release that carries walled postures.',
+  };
 }
 
 // ─── Config-Aware Checks ────────────────────────────────────────────
@@ -2393,9 +2419,13 @@ export default class Doctor extends Command {
     // #5382 — the posture verdict resolved at the top of `run()`, reported here
     // among the other environment facts. Only an unrecognized value produces a
     // row: a valid posture is not a finding, and doctor's output for every
-    // environment that can actually start is unchanged.
+    // environment that can actually start is unchanged. In 18.0 a walled
+    // posture cannot start under `os serve`, so it gets a row too.
     if (!postureReading.ok) {
       results.push(postureReading.result);
+    } else {
+      const walled = walledPostureFinding(postureReading.posture);
+      if (walled) results.push(walled);
     }
 
     // ── Installed-package ledger readability (#5429) ─────────────────
