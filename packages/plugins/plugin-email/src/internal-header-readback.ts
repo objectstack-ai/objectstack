@@ -63,8 +63,14 @@
  * privileged read there at all.
  */
 
-/** The object this seam reads, and the one column it recovers. */
-export const SYS_EMAIL_OBJECT = 'sys_email';
+import { TENANT_EMAIL_OBJECT, type EmailLogObject } from './email-log-objects.js';
+
+/**
+ * The object this seam reads by default, and the one column it recovers.
+ * `sys_identity_email` shares `sys_email`'s fields — the column and its flag
+ * included — so the same seam serves both logs, named per call.
+ */
+export const SYS_EMAIL_OBJECT = TENANT_EMAIL_OBJECT;
 export const HEADERS_COLUMN = 'headers_json';
 
 /**
@@ -91,11 +97,14 @@ export interface InternalFieldResolvingEngine {
  * `true` value does not enrol a field in the redaction, so it must not enrol
  * one in the recovery either.
  */
-export function isHeadersColumnRedacted(engine: InternalFieldResolvingEngine): boolean {
+export function isHeadersColumnRedacted(
+  engine: InternalFieldResolvingEngine,
+  object: EmailLogObject = SYS_EMAIL_OBJECT,
+): boolean {
   if (typeof engine?.getSchema !== 'function') return false;
   let schema: { fields?: Record<string, { internal?: unknown } | undefined> } | undefined;
   try {
-    schema = engine.getSchema(SYS_EMAIL_OBJECT) as typeof schema;
+    schema = engine.getSchema(object) as typeof schema;
   } catch {
     // An engine that cannot describe the object cannot be redacting it on a
     // path this package controls; treat the row's own value as authoritative.
@@ -117,12 +126,13 @@ export function isHeadersColumnRedacted(engine: InternalFieldResolvingEngine): b
 export async function readInternalHeadersJson(
   engine: InternalFieldResolvingEngine | undefined,
   rowIds: readonly string[],
+  object: EmailLogObject = SYS_EMAIL_OBJECT,
 ): Promise<Map<string, unknown> | undefined> {
   if (!engine || rowIds.length === 0) return undefined;
-  if (!isHeadersColumnRedacted(engine)) return undefined;
+  if (!isHeadersColumnRedacted(engine, object)) return undefined;
   if (typeof engine.resolveInternalField !== 'function') {
     throw new Error(
-      `EmailService: ${SYS_EMAIL_OBJECT}.${HEADERS_COLUMN} is declared \`internal: true\`, but this `
+      `EmailService: ${object}.${HEADERS_COLUMN} is declared \`internal: true\`, but this `
       + 'data engine does not implement resolveInternalField() — the custom headers this message was '
       + 'authored with are stored but cannot be recovered, and a message must not be sent missing them: '
       + 'a missing header does not announce itself, so the send would succeed while silently deviating '
@@ -130,7 +140,7 @@ export async function readInternalHeadersJson(
       + 'intact once an engine that implements the privileged accessor is mounted.',
     );
   }
-  return engine.resolveInternalField(SYS_EMAIL_OBJECT, rowIds, HEADERS_COLUMN);
+  return engine.resolveInternalField(object, rowIds, HEADERS_COLUMN);
 }
 
 /**

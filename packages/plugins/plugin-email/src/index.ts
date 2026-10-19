@@ -106,6 +106,15 @@ export {
   type EmailTransportProvider,
   type ApiKeyEmailProvider,
 } from './transports/index.js';
+// [ADR-0131 D7, Q2 A] The two mail logs: tenant `sys_email` and its
+// deployment-level identity-mail sibling.
+export {
+  TENANT_EMAIL_OBJECT,
+  IDENTITY_EMAIL_OBJECT,
+  EMAIL_LOG_OBJECTS,
+  isEmailLogObject,
+  type EmailLogObject,
+} from './email-log-objects.js';
 export {
   sweepStrandedOutbox,
   OUTBOX_OBJECT,

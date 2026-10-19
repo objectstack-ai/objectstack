@@ -54,6 +54,7 @@ import {
   collectAttachmentParts,
   type PersistedEmailAttachment,
 } from './sys-email-payload.js';
+import type { EmailLogObject } from './email-log-objects.js';
 
 /**
  * The slice of the `storage` capability (`IStorageService`) that
@@ -152,10 +153,15 @@ export const EMAIL_ATTACHMENT_RECLAIM_GRACE_MS = 24 * 60 * 60_000;
  * content and left it in the bucket forever.
  */
 export interface EmailAttachmentReclaimPayload {
-  /** `sys_email.id` whose content this job reclaims. */
+  /** `sys_email.id` (or `sys_identity_email.id`) whose content this job reclaims. */
   rowId: string;
   /** Every storage key written for that row. Authoritative — see above. */
   keys: string[];
+  /**
+   * The log the row lives in. Written only for `sys_identity_email`; absent
+   * reads as `sys_email`, which is also every job an 18.0 process published.
+   */
+  object?: EmailLogObject;
 }
 
 /** Characters a storage key segment may contain; everything else is folded. */

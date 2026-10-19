@@ -25,7 +25,7 @@ import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
 import {
   bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup,
-  temporalComparandKind, temporalStorageForm, isMissing,
+  temporalComparandKind, temporalStorageForm, type TemporalComparandKind, isMissing,
 } from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
 // failure" — duck-typed on `code`/`name`, the same predicate `mapDataError` and
@@ -474,6 +474,24 @@ function seedValuesInStoredForm(record: Record<string, unknown>, definition: unk
     const kind = temporalComparandKind(fields[key]?.type);
     if (kind) record[key] = temporalStorageForm(value, kind);
   }
+}
+
+/**
+ * [#24562] Field name → storage kind, for every field the definition declares
+ * `datetime`, `date` or `time` — the fields a replay compares in their STORED
+ * form (see {@link SeedLoaderService.isNoOpReplay}). Same field-type reading
+ * as {@link seedValuesInStoredForm}; a definition the loader cannot resolve
+ * declares none, and its fields keep the type-blind comparison.
+ */
+function temporalFieldKinds(definition: unknown): ReadonlyMap<string, TemporalComparandKind> {
+  const kinds = new Map<string, TemporalComparandKind>();
+  const fields = (definition as { fields?: Record<string, { type?: unknown } | undefined> } | null | undefined)?.fields;
+  if (!fields || typeof fields !== 'object') return kinds;
+  for (const [name, field] of Object.entries(fields)) {
+    const kind = temporalComparandKind(field?.type);
+    if (kind) kinds.set(name, kind);
+  }
+  return kinds;
 }
 
 export class SeedLoaderService implements ISeedLoaderService {
@@ -1222,6 +1240,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     // judge, and nothing here refuses a row for an owner it cannot prove.
     const objectDefinition = await this.resolveObjectDefinition(objectName);
     const rowsCarryOrganization = objectDefinition == null || seedRowNeedsOrganization(objectDefinition);
+    // [#24562] What a replay compares in the stored form (`isNoOpReplay`).
+    const temporalKinds = temporalFieldKinds(objectDefinition);
     // [ADR-0131 D9] With no organization pinned and none derivable on an install
     // that registers the organization object, a row of an organization-owned
     // object has no owner: it is REFUSED below, never written NULL.
@@ -1697,7 +1717,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       // it, and which organization an unowned row belongs to is the
       // organization-ownership ceremony's attribution, never the loader's.
       if (unownedHolders && unownedHolders.size > 0) {
-        const decision = this.decideWriteAction(record, mode, externalId, existingRecords, unownedHolders);
+        const decision = this.decideWriteAction(record, mode, externalId, existingRecords, temporalKinds, unownedHolders);
         if (decision.action === 'refuse') {
           errored++;
           const label = this.externalIdLabel(externalId);
@@ -1751,7 +1771,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       // verbatim — this line only moves WHEN the author learns, from after the
       // engine's rejection to before the write that provokes it.
       if (!config.dryRun && requiredDeferrals.length > 0) {
-        if (this.decideWriteAction(record, mode, externalId, existingRecords).action === 'insert') {
+        if (this.decideWriteAction(record, mode, externalId, existingRecords, temporalKinds).action === 'insert') {
           for (const deferral of requiredDeferrals) {
             if (earlySignalledFields.has(deferral.field)) continue;
             earlySignalledFields.add(deferral.field);
@@ -1782,7 +1802,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           // against an earlier one via `insertedRecords` — see `hasSelfRef`.
           try {
             const result = await this.writeRecord(
-              objectName, record, mode, externalId, existingRecords
+              objectName, record, mode, externalId, existingRecords, temporalKinds
             );
 
             if (result.action === 'inserted') inserted++;
@@ -1820,7 +1840,7 @@ export class SeedLoaderService implements ISeedLoaderService {
             );
           }
         } else {
-          const decision = this.decideWriteAction(record, mode, externalId, existingRecords);
+          const decision = this.decideWriteAction(record, mode, externalId, existingRecords, temporalKinds);
           const externalIdValue = this.externalIdKey(record, externalId);
 
           if (decision.action === 'skip') {
@@ -2620,7 +2640,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     record: Record<string, unknown>,
     mode: string,
     externalId: string | string[],
-    existingRecords?: Map<string, any>,
+    existingRecords: Map<string, any> | undefined,
+    temporalKinds: ReadonlyMap<string, TemporalComparandKind>,
   ): Promise<{ action: 'inserted' | 'updated' | 'skipped'; id?: string }> {
     const existing = existingRecords?.get(this.externalIdKey(record, externalId));
     const opts = SeedLoaderService.SEED_OPTIONS as any;
@@ -2636,7 +2657,7 @@ export class SeedLoaderService implements ISeedLoaderService {
           return { action: 'skipped' };
         }
         const id = this.extractId(existing);
-        if (this.isNoOpReplay(record, existing)) {
+        if (this.isNoOpReplay(record, existing, temporalKinds)) {
           return { action: 'skipped', id };
         }
         await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
@@ -2646,7 +2667,7 @@ export class SeedLoaderService implements ISeedLoaderService {
       case 'upsert': {
         if (existing) {
           const id = this.extractId(existing);
-          if (this.isNoOpReplay(record, existing)) {
+          if (this.isNoOpReplay(record, existing, temporalKinds)) {
             return { action: 'skipped', id };
           }
           await this.writeRecoveringSummary(objectName, () => withTransientRetry(() => this.engine.update(objectName, { ...record, id }, opts)));
@@ -2697,7 +2718,8 @@ export class SeedLoaderService implements ISeedLoaderService {
     record: Record<string, unknown>,
     mode: string,
     externalId: string | string[],
-    existingRecords?: Map<string, any>,
+    existingRecords: Map<string, any> | undefined,
+    temporalKinds: ReadonlyMap<string, TemporalComparandKind>,
     unownedHolders?: Map<string, any>,
   ):
     | { action: 'insert' }
@@ -2712,12 +2734,12 @@ export class SeedLoaderService implements ISeedLoaderService {
     switch (mode) {
       case 'update':
         if (!existing) return { action: 'skip' };
-        return this.isNoOpReplay(record, existing)
+        return this.isNoOpReplay(record, existing, temporalKinds)
           ? { action: 'skip', id: this.extractId(existing) }
           : { action: 'update', id: this.extractId(existing)! };
       case 'upsert':
         if (!existing) return { action: 'insert' };
-        return this.isNoOpReplay(record, existing)
+        return this.isNoOpReplay(record, existing, temporalKinds)
           ? { action: 'skip', id: this.extractId(existing) }
           : { action: 'update', id: this.extractId(existing)! };
       case 'ignore':
@@ -2741,19 +2763,47 @@ export class SeedLoaderService implements ISeedLoaderService {
    * pin — never block the skip). Comparison is conservative: any doubt
    * (unparseable dates, type mismatches) reads as "changed", falling back to
    * the historical update behavior.
+   *
+   * [#24562] A field the object declares `datetime`, `date` or `time`
+   * (`temporalKinds`, from {@link temporalFieldKinds}) is compared in its
+   * STORED form: both sides go through `temporalStorageForm`, the one rule
+   * every driver applies on write (ADR-0053). The question a replay asks is
+   * whether writing the seed value would change what the column holds, and a
+   * driver stores `'09:15'` as `'09:15:00'` and `'…T14:30:00Z'` as
+   * `'…T14:30:00.000Z'` — so two spellings of one instant, one calendar day or
+   * one wall clock are the same stored value and the row is skipped. Read
+   * literally, they rewrote the row on every boot.
    */
-  private isNoOpReplay(record: Record<string, unknown>, existing: Record<string, unknown>): boolean {
+  private isNoOpReplay(
+    record: Record<string, unknown>,
+    existing: Record<string, unknown>,
+    temporalKinds: ReadonlyMap<string, TemporalComparandKind>,
+  ): boolean {
     for (const [key, value] of Object.entries(record)) {
       if (key === 'id') continue;
-      if (!this.seedValueEquals(value, existing[key])) return false;
+      if (!this.seedValueEquals(value, existing[key], temporalKinds.get(key))) return false;
     }
     return true;
   }
 
-  /** Loose equality across driver round-trip representations (see isNoOpReplay). */
-  private seedValueEquals(a: unknown, b: unknown): boolean {
+  /**
+   * Loose equality across driver round-trip representations (see isNoOpReplay).
+   *
+   * `kind` is the field's declared temporal kind, when it has one: both sides
+   * are then compared in the storage form of that kind, and equal only when
+   * that form is the same TEXT. `temporalStorageForm` hands a value it cannot
+   * read back unchanged (it never invents one), so an unparseable value keeps
+   * reading as changed against anything but its own identical spelling — the
+   * "any doubt reads as changed" rule — and a non-text result (an Invalid
+   * Date, a structure) is never equal.
+   */
+  private seedValueEquals(a: unknown, b: unknown, kind?: TemporalComparandKind): boolean {
     if (a === b) return true;
     if (a == null || b == null) return a == null && b == null;
+    if (kind) {
+      const stored = temporalStorageForm(a, kind);
+      return typeof stored === 'string' && stored === temporalStorageForm(b, kind);
+    }
     // Booleans come back as 0/1 from SQLite.
     if (typeof a === 'boolean' || typeof b === 'boolean') {
       const toNum = (v: unknown) => (typeof v === 'boolean' ? Number(v) : Number(String(v)));
