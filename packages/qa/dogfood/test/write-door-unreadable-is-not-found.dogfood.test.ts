@@ -126,7 +126,14 @@ async function boot(inside: boolean, email: string): Promise<Booted> {
   for (const name of GRANTS) {
     const set = await catalogPermissionSet(ql, name);
     expect(set, `fixture permission set ${name} served by the security catalog`).toBeTruthy();
-    await ql.insert('sys_user_permission_set', { user_id: userId, permission_set: set.name }, { context: { ...SYS } });
+    // [C8 stage 8b] A GLOBAL grant, which the outside principal (no membership, no
+    // active organization) must still hold: under `single` the engine now stamps an
+    // organization-less system insert with the Default Organization (ADR-0131 D9),
+    // so the global row is landed beneath the engine, as the residue an older
+    // release left. The readers still apply it until C8's NULL-reader stages.
+    await ql.getDriver('sys_user_permission_set').create('sys_user_permission_set', {
+      id: `ups_${userId}_${set.name}`, user_id: userId, permission_set: set.name, organization_id: null,
+    });
   }
   if (!inside) token = await leaveOrganization(stack, email);
   return { stack, rootDir, ql, adminId, token };

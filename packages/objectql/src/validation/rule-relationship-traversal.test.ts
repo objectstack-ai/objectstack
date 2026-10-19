@@ -436,3 +436,52 @@ describe('#20006 — the reference-cleanup binding changes a text, never a verdi
     expect(message).toMatch(/^Validation rule 'r' could not be evaluated \(runtime: No such key: kind\)/);
   });
 });
+
+describe('[#24468] undeclared related fields are judged per RULE, never per reference', () => {
+  // The engine leaves every rule's undeclared columns out of the shared read
+  // and lists them on the binding beside the row the declared rest read.
+  const withUndeclared = (r: Record<string, unknown>) => ({ ...row(r), undeclaredFields: ['region'] });
+  const both = {
+    fields: opportunity.fields,
+    validations: [
+      opportunity.validations[0],
+      { name: 'north_only', type: 'script', severity: 'error', message: 'north', condition: "record.account.region == 'north'" },
+    ],
+  };
+  const errorsOf = (data: Record<string, unknown>, related: Record<string, unknown>): string => {
+    try {
+      evaluateValidationRules(both as any, data, 'insert', { related: related as never });
+    } catch (e) {
+      return JSON.stringify((e as unknown as { errors?: unknown }).errors ?? (e as Error).message);
+    }
+    return '';
+  };
+
+  it('a valid sibling keeps its own verdict: it admits, and only the bad rule refuses, naming its own field', () => {
+    const text = errorsOf({ name: 'A', amount: 50000, account: 'acc_1' },
+      { account: withUndeclared({ id: 'acc_1', type: 'direct' }) });
+    expect(text).toContain("Validation rule 'north_only' could not be evaluated");
+    expect(text).toContain("declares no 'region'");
+    expect(text).not.toContain('partner_cap');
+  });
+
+  it('a valid sibling keeps its own verdict: it refuses with its own message', () => {
+    const text = errorsOf({ name: 'A', amount: 50000, account: 'acc_1' },
+      { account: withUndeclared({ id: 'acc_1', type: 'partner' }) });
+    expect(text).toContain('Partner accounts are capped at 10000.');
+    expect(text).not.toContain("Validation rule 'partner_cap' could not be evaluated");
+  });
+
+  it('the bad rule names only its own undeclared field, not a sibling\'s', () => {
+    const text = errorsOf({ name: 'A', amount: 1, account: 'acc_1' },
+      { account: { ...row({ id: 'acc_1', type: 'direct' }), undeclaredFields: ['region', 'tier'] } });
+    expect(text).toContain("declares no 'region'");
+    expect(text).not.toContain("'tier'");
+  });
+
+  it('with no declared column left, every rule through the reference still names its own', () => {
+    const only = { fields: opportunity.fields, validations: [both.validations[1]] };
+    expect(() => evaluateValidationRules(only as any, { name: 'A', account: 'acc_1' }, 'insert',
+      { related: { account: unavailable('undeclared-field', ['region']) } as never })).toThrow(/declares no 'region'/);
+  });
+});

@@ -83,7 +83,11 @@ const CASE_OBJECT = {
   },
 } as any;
 
-const ORG_OBJECT = { name: 'sys_organization', fields: { name: { type: 'text' } } } as any;
+// [C8 stage 8b] Declared as the platform declares it (`sys-organization.object.ts`):
+// better-auth owns the table, so the registration injects no organization column.
+// A bare schema would gain one, and under `single` the first organization's own
+// insert would then be refused for want of an organization.
+const ORG_OBJECT = { name: 'sys_organization', managedBy: 'better-auth', fields: { name: { type: 'text' } } } as any;
 
 function createMetadata(objects: any[]) {
   const byName: Record<string, any> = Object.fromEntries(objects.map((o) => [o.name, o]));
@@ -548,8 +552,11 @@ describe('#8686 seed/API tenancy split — autonumber scope', () => {
     await driver.initObjects([sysObject, ORG_OBJECT]);
 
     // Land untenanted platform rows, then bring an organization into existence.
+    // [C8 stage 8b] Straight through the driver, as `landPreC1SeedResidue` does:
+    // under `single` the engine no longer writes an organization-less platform
+    // row, so these are the residue an older release left behind.
     for (let i = 0; i < 3; i++) {
-      await engine.insert('sys_audit_entry', { subject: `e${i}` }, { context: { isSystem: true } } as any);
+      await (driver as any).create('sys_audit_entry', { subject: `e${i}` });
     }
     await createOrganization(engine);
     expect(await readSequences(driver)).toEqual([{ tenant: GLOBAL_TENANT, lastValue: 3 }]);

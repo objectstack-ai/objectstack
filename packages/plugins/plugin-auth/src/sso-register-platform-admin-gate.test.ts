@@ -251,22 +251,19 @@ async function createOrg(
 
 /** Grant platform admin the ADR-0068 D2 way: an ORG-LESS `admin_full_access` link. */
 async function grantPlatformAdmin(engine: ObjectQL, userId: string): Promise<void> {
-  await engine.insert(
-    'sys_permission_set',
-    { id: 'ps_admin_full_access', name: ADMIN_FULL_ACCESS },
-    SYSTEM as never,
-  );
-  await engine.insert(
-    'sys_user_permission_set',
-    {
-      id: 'ups_platform_admin',
-      user_id: userId,
-      permission_set_id: 'ps_admin_full_access',
-      permission_set: 'admin_full_access',
-      organization_id: null,
-    },
-    SYSTEM as never,
-  );
+  // [C8 stage 8b] The legacy organization-less catalogue row and grant, landed
+  // beneath the engine: under `single` the engine refuses an organization-less
+  // platform insert while the install holds no organization (ADR-0131 D9).
+  const residue = (object: string, row: Record<string, unknown>) =>
+    (engine as any).getDriver(object).create(object, row);
+  await residue('sys_permission_set', { id: 'ps_admin_full_access', name: ADMIN_FULL_ACCESS });
+  await residue('sys_user_permission_set', {
+    id: 'ups_platform_admin',
+    user_id: userId,
+    permission_set_id: 'ps_admin_full_access',
+    permission_set: 'admin_full_access',
+    organization_id: null,
+  });
 }
 
 async function userIdOf(engine: ObjectQL, email: string): Promise<string> {

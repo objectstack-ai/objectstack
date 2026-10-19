@@ -140,6 +140,15 @@ async function boot(posture: 'isolated' | 'group' | 'single'): Promise<Harness> 
   return h;
 }
 
+/**
+ * [C8 stage 8b] The organization a `single` session is active in: the Default
+ * Organization, which an organization-less system grant is now stamped with
+ * (ADR-0131 D9). A precheck that resolves with no organization would read the
+ * global arm only, which no fresh `single` install writes any more.
+ */
+const sessionOrgOf = async (h: Harness): Promise<string | undefined> =>
+  (await (await h.stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy')).defaultOrgId()) ?? undefined;
+
 const grantsOf = (h: Harness, user: string, org: string | undefined) =>
   resolveUserAuthzGrants(h.ql as never, user, org ? { tenantId: org } : {});
 
@@ -305,7 +314,7 @@ describe('[ADR-0131 D3 · #15204 W3] single (CONTROL): the refusal is inert', ()
   });
 
   it('a `manage_metadata` holder below the operator runs every one of these doors on the operator\'s package as before', async () => {
-    const a = await grantsOf(h, h.userA, undefined);
+    const a = await grantsOf(h, h.userA, await sessionOrgOf(h));
     expect(a.systemPermissions).toContain('manage_metadata');
     expect(a.posture).not.toBe('PLATFORM_ADMIN');
     const ok = async (res: Response) => expect(res.status, await res.clone().text()).toBe(200);

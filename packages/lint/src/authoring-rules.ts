@@ -1579,11 +1579,40 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // any.) The reason was not describing this rule; it was the default a rule got
   // when nobody measured, which is the #4409/#4463 defect one layer in.
   //
+  // ─── …and on `page` writes too (#24491), per ruling B on #23388 ───
+  //
+  // The family runs for `page` as well as `view`, on the principle of the
+  // ruling of record 6161173492 on #23388 (letter B), which moved the two page
+  // component rules (`validateComponentProps`, `validateComponentTypes`) to this
+  // door: a page with a finding is fixed, then saved, so one rule holds at
+  // every door that accepts a page. Before this, a page component `visibleWhen`
+  // calling a function nothing registers (`totallyBogusFn(1)`) was refused by
+  // `os validate` / `os build` / `os lint` and saved clean through Studio,
+  // REST `/meta/page` and MCP. The door's finding is now the build's: the same
+  // rule id, location, message and hint.
+  //
+  // The crossing needed no gate change. `page` already maps to `pages`, and a
+  // page snapshot holds the item as `pages: [item]` with no `views`, so the
+  // view half contributes zero findings on a page write, as the page half does
+  // on a view write. `validatePredicatePathRefs` walks `stack.views` only (its
+  // oracle is a schema-bound form's `schemaId`, which a page component does not
+  // declare), so it judges nothing on a page at either door. It declares `page`
+  // because the family is one wall on the type axis too, which
+  // `authoring-rule-wiring.test.ts` pins.
+  //
+  // Stored pages: the gate judges writes, never the boot or read path, so a
+  // stored page carrying such a predicate keeps loading and serving, and its
+  // next save is refused with the fix. Measured at the crossing: 36 shipped
+  // pages (the examples, `platform-objects`, the plugins, `qa`), 8 component
+  // `visibleWhen` sites, 0 findings from either rule.
+  //
   // Runtime input tier: the gate hands the rules the body as persisted, without
   // `normalizeStackInput`. That costs the family nothing: the door parses the
   // body against the spec first (a 422 on refusal), and since the ADR-0089
   // aliases retired at 18 (#23543 F4) an accepted body spells the predicate
-  // `visibleWhen` only, the one key the family reads.
+  // `visibleWhen` only, the one key the family reads — on a page component as
+  // on a view form (the page-side `visibility` retired with the view-side
+  // `visibleOn`).
   {
     name: 'validateVisibilityPredicates',
     tier: 'gating',
@@ -1591,7 +1620,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     commands: ALL,
     source: 'packages/lint/src/validate-visibility-predicates.ts',
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['view'],
+    runtimeTypes: ['view', 'page'],
     run: (stack) => validateVisibilityPredicates(stack),
   },
   // #7010 — the same predicate surface, one question further in. The three
@@ -1627,9 +1656,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     source: 'packages/lint/src/validate-predicate-path-refs.ts',
     // The second half of the #7220 family move — see the block above the
     // `validateVisibilityPredicates` entry. This is the rule whose solo wiring
-    // was reverted; it is wired now because its siblings are.
+    // was reverted; it is wired now because its siblings are. It declares
+    // `page` with its sibling (#24491, ruling B on #23388) and judges nothing
+    // there: it walks `stack.views` only, so a page write draws no finding from
+    // it at either door.
     surfaces: CLI_AND_RUNTIME,
-    runtimeTypes: ['view'],
+    runtimeTypes: ['view', 'page'],
     run: (stack) => validatePredicatePathRefs(stack),
   },
   // #1874 — flow authoring anti-patterns. Advisory by default; a finding marked

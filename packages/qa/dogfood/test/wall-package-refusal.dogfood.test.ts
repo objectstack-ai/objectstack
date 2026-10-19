@@ -149,6 +149,15 @@ async function boot(posture: 'isolated' | 'group' | 'single'): Promise<Harness> 
   return h;
 }
 
+/**
+ * [C8 stage 8b] The organization a `single` session is active in: the Default
+ * Organization, which an organization-less system grant is now stamped with
+ * (ADR-0131 D9). A precheck that resolves with no organization would read the
+ * global arm only, which no fresh `single` install writes any more.
+ */
+const sessionOrgOf = async (h: Harness): Promise<string | undefined> =>
+  (await (await h.stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy')).defaultOrgId()) ?? undefined;
+
 const grantsOf = (h: Harness, user: string, org: string | undefined) =>
   resolveUserAuthzGrants(h.ql as never, user, org ? { tenantId: org } : {});
 
@@ -287,7 +296,7 @@ describe('[ADR-0131 D3 · #15204 W2] single (CONTROL): the refusal is inert', ()
   });
 
   it('a `manage_metadata` holder below the operator installs, upgrades and uninstalls catalog-carrying packages, and deletes one at /packages', async () => {
-    const a = await grantsOf(h, h.userA, undefined);
+    const a = await grantsOf(h, h.userA, await sessionOrgOf(h));
     expect(a.systemPermissions).toContain('manage_metadata');
     expect(a.posture).not.toBe('PLATFORM_ADMIN');
     const installed = await h.stack.apiAs(h.tokA, 'POST', INSTALL_LOCAL,
@@ -296,7 +305,7 @@ describe('[ADR-0131 D3 · #15204 W2] single (CONTROL): the refusal is inert', ()
     const upgraded = await h.stack.apiAs(h.tokA, 'POST', INSTALL_LOCAL,
       packageBody(OP_PKG, '1.1.0', { permissions: [set(OP_SET, ['manage_users'])] }));
     expect(upgraded.status, await upgraded.clone().text()).toBe(200);
-    expect((await grantsOf(h, h.userB, undefined)).systemPermissions).toContain('manage_users');
+    expect((await grantsOf(h, h.userB, await sessionOrgOf(h))).systemPermissions).toContain('manage_users');
     const removed = await h.stack.apiAs(h.tokA, 'DELETE', `${INSTALL_LOCAL}/${OP_PKG}`);
     expect(removed.status, await removed.clone().text()).toBe(200);
     const deleted = await h.stack.apiAs(h.tokA, 'DELETE', `/packages/${RT_PKG}`);

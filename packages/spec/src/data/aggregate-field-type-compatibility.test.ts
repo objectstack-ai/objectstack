@@ -31,9 +31,12 @@ import {
 } from './field-value.zod';
 import { isIncoherentAggregate } from './aggregation-policy';
 import { AGGREGATION_CASES } from './aggregation-conformance';
+import { SEARCH_VIRTUAL_TYPES } from './search-fields';
 import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
+  VIRTUAL_FIELD_AGGREGATE_REMEDY,
   isAggregateCompatibleWithFieldType,
+  virtualFieldAggregateRemedy,
 } from './aggregate-field-type-compatibility';
 
 const sorted = (xs: Iterable<string>) => [...xs].sort();
@@ -241,6 +244,57 @@ describe('isAggregateCompatibleWithFieldType — the pairs the card is about', (
     for (const t of ['text', 'select', 'lookup', 'autonumber']) {
       expect(isAggregateCompatibleWithFieldType('min', t)).toBe(false);
       expect(isAggregateCompatibleWithFieldType('max', t)).toBe(false);
+    }
+  });
+});
+
+describe('virtualFieldAggregateRemedy — the one prescription for a total over a virtual field', () => {
+  it('names the stored-number remedy for sum / avg / min / max over a formula, and a count only as another question', () => {
+    for (const aggregate of ['sum', 'avg', 'min', 'max']) {
+      // Not vacuous: the table refuses every one of these pairs.
+      expect(isAggregateCompatibleWithFieldType(aggregate, 'formula'), aggregate).toBe(false);
+      expect(virtualFieldAggregateRemedy(aggregate, 'formula'), aggregate).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    }
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).toContain('store the value as a number field');
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).toContain('and aggregate that');
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).toContain('answer a different question: how many records');
+    // The remedy comes FIRST: the count is named only after it.
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY.indexOf('number field'))
+      .toBeLessThan(VIRTUAL_FIELD_AGGREGATE_REMEDY.indexOf('`count`'));
+  });
+
+  it('is one line of at most 200 characters — the lint prints it whole as its `fix:` line', () => {
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY).not.toContain('\n');
+    expect(VIRTUAL_FIELD_AGGREGATE_REMEDY.length).toBeLessThanOrEqual(200);
+  });
+
+  it('answers undefined for every other pair — each keeps its own class\'s prescription', () => {
+    // An accepted pair over the virtual class: no refusal, no prescription.
+    expect(isAggregateCompatibleWithFieldType('count', 'formula')).toBe(true);
+    expect(virtualFieldAggregateRemedy('count', 'formula')).toBeUndefined();
+    expect(virtualFieldAggregateRemedy('count_distinct', 'formula')).toBeUndefined();
+    // A refused pair over a STORED class keeps its own words.
+    for (const fieldType of ['text', 'autonumber', 'json', 'datetime', 'percent']) {
+      for (const aggregate of ['sum', 'avg', 'min', 'max', 'count_distinct']) {
+        expect(virtualFieldAggregateRemedy(aggregate, fieldType), `${aggregate} × ${fieldType}`).toBeUndefined();
+      }
+    }
+    // Fail-closed on shape, like the predicate.
+    const loose = virtualFieldAggregateRemedy as unknown as (a: unknown, f: unknown) => string | undefined;
+    expect(loose(['sum'], 'formula')).toBeUndefined();
+    expect(loose('sum', ['formula'])).toBeUndefined();
+    expect(loose(undefined, 'formula')).toBeUndefined();
+  });
+
+  it('the virtual class is the drivers\' storage rule — every type in it is refused for all four value-reading rows', () => {
+    // The prescription keys on `SEARCH_VIRTUAL_TYPES`; a type joining that set
+    // must be one this table already refuses to add up, or the remedy would
+    // speak for an accepted pair.
+    expect([...SEARCH_VIRTUAL_TYPES]).toContain('formula');
+    for (const t of SEARCH_VIRTUAL_TYPES) {
+      for (const aggregate of ['sum', 'avg', 'min', 'max']) {
+        expect(AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate as 'sum'] as readonly string[]).not.toContain(t);
+      }
     }
   });
 });

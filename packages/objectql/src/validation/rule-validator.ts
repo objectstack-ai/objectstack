@@ -720,7 +720,13 @@ export interface RelatedFieldBinding {
   readonly row?: Record<string, unknown>;
   /** Why `row` is absent. Present iff `row` is absent. */
   readonly unavailable?: RelatedUnavailableReason;
-  /** For `undeclared-field`: the named fields the related object does not declare. */
+  /**
+   * The named fields the related object does not declare. [#24468] Judged per
+   * RULE, never per reference: a rule naming one of them has no verdict and
+   * refuses, naming only its own; a rule naming none is judged on `row` (or
+   * `unavailable`) as if no other rule read through this reference. With no
+   * declared column left to read, `unavailable` is `undeclared-field`.
+   */
   readonly undeclaredFields?: readonly string[];
 }
 
@@ -4182,6 +4188,24 @@ function resolveTraversalScope(
         : 'reads a reference field both through the relationship and as a value',
       detail: ' ' + conflicts.map((c) => c.message).join(' '),
     };
+  }
+
+  // [#24468] This rule's own undeclared reads first, before any row: they are a
+  // fault of the expression, whatever the record holds. The engine leaves the
+  // undeclared columns of every rule out of the shared read and lists them on
+  // the binding (`undeclaredFields`); a rule naming none of them is served
+  // from the read exactly as it is alone, and one naming any refuses, naming
+  // only its own.
+  for (const [field, named] of analysis.traversals) {
+    if (!isReference(field)) continue;
+    const binding = related?.[field];
+    const own = binding?.undeclaredFields?.filter((n) => named.has(n)) ?? [];
+    if (binding && own.length > 0) {
+      return {
+        ok: false,
+        ...traversalRefusal(field, { object: binding.object, unavailable: 'undeclared-field', undeclaredFields: own }, named),
+      };
+    }
   }
 
   // (2)/(3) Hydrate what is available; refuse on the first field that is not.

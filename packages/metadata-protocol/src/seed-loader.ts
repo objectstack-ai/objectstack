@@ -25,7 +25,7 @@ import { SEED_WRITE_EXECUTION_CONTEXT } from '@objectstack/spec/kernel';
 import { resolveSeedRecord } from '@objectstack/formula';
 import {
   bulkWrite, withTransientRetry, defaultIsTransientError, type BulkWriteRowResult, runWithAdvisoryAggregation, type AdvisoryGroup,
-  temporalComparandKind, temporalStorageForm,
+  temporalComparandKind, temporalStorageForm, isMissing,
 } from '@objectstack/core';
 // [#8442] The repo's ONE recogniser for "this throw is a record-validation
 // failure" — duck-typed on `code`/`name`, the same predicate `mapDataError` and
@@ -1403,7 +1403,9 @@ export class SeedLoaderService implements ISeedLoaderService {
       for (const pair of pointerPairs) {
         const pointerValue = record[pair.field];
         // Empty pointer = no pointer: nothing to resolve, nothing to refuse.
-        if (pointerValue === undefined || pointerValue === null || pointerValue === '') continue;
+        // "Empty" is the engine's own blank rule (`isMissing`), the one every
+        // reference below is skipped by.
+        if (isMissing(pointerValue)) continue;
         const targetName = record[pair.objectField];
         if (typeof targetName !== 'string' || targetName === '') {
           // UN-ADDRESSABLE: the id half is authored but the type half names no
@@ -1461,7 +1463,13 @@ export class SeedLoaderService implements ISeedLoaderService {
         // so naming an org by its natural key keeps working.
         if (stampedTenantOrg && ref.field === 'organization_id') continue;
         const fieldValue = record[ref.field];
-        if (fieldValue === undefined || fieldValue === null) continue;
+        // A blank reference is NO reference: the engine's blank rule
+        // (`isMissing` — `undefined`, `null`, `''`, whitespace-only) is the one
+        // the insert door stores as empty and the required check refuses by,
+        // so the value is left as written for those two. Resolving `''` as a
+        // natural key could only miss, and reported "Deferred reference
+        // unresolved" for a row that landed with the field empty.
+        if (isMissing(fieldValue)) continue;
 
         const pushError = (message: string, attemptedValue: unknown): ReferenceResolutionError => {
           const error: ReferenceResolutionError = {
@@ -1533,9 +1541,10 @@ export class SeedLoaderService implements ISeedLoaderService {
         let sawUnresolved = false;
 
         for (const item of items) {
-          // A null/undefined hole carries no reference — drop it rather than
-          // writing it into the stored array.
-          if (item === undefined || item === null) continue;
+          // A blank hole (`isMissing`: null, undefined, `''`, whitespace-only)
+          // carries no reference — drop it rather than writing it into the
+          // stored array, so the field's other elements still land.
+          if (isMissing(item)) continue;
 
           const outcome = await this.resolveReferenceItem(ref, item, insertedRecords, config);
           if (outcome.status === 'invalid') {
@@ -2211,7 +2220,9 @@ export class SeedLoaderService implements ISeedLoaderService {
       let stillUnresolved = false;
 
       for (const item of items) {
-        if (item === undefined || item === null) continue;
+        // The same blank rule pass 1 drops a hole by: the deferred value is the
+        // WHOLE authored array, holes included.
+        if (isMissing(item)) continue;
         const outcome = await this.resolveReferenceItem(
           deferred, item, insertedRecords, { organizationId },
         );

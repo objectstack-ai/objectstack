@@ -1774,12 +1774,25 @@ function storedMetadataBodyHopMessage(
  * words, so the two first-segment and second-segment verdicts read as one
  * family, and names the read, the target and where the field would have to be
  * declared — never on the object carrying the formula.
+ *
+ * [#24468] The same refusal for a validation rule's hydrated `condition`; only
+ * the consequence differs: the rule has no verdict, so every write it judges
+ * is refused.
  */
-function undeclaredHopFieldMessage(objectName: string, field: string, target: string, column: string): string {
-  return `unknown field \`${column}\` on \`${target}\`: this formula reads it through the reference `
-    + `${celMemberPath('record', field)}, and '${target}' declares no field '${column}', so the formula reads `
-    + `null on every row. Read a field '${target}' declares, or declare '${column}' on '${target}' — not on `
-    + `'${objectName}', the object carrying this formula.`;
+function undeclaredHopFieldMessage(
+  site: 'formula' | 'rule',
+  objectName: string,
+  field: string,
+  target: string,
+  column: string,
+): string {
+  const consequence = site === 'formula'
+    ? 'so the formula reads null on every row'
+    : 'so the rule has no verdict and every write it judges is refused';
+  return `unknown field \`${column}\` on \`${target}\`: this ${site} reads it through the reference `
+    + `${celMemberPath('record', field)}, and '${target}' declares no field '${column}', ${consequence}. `
+    + `Read a field '${target}' declares, or declare '${column}' on '${target}' — not on `
+    + `'${objectName}', the object carrying this ${site}.`;
 }
 
 /**
@@ -1969,6 +1982,11 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * written the formula reads null on every row; this says so where it is
    * written, at the build and at the object save door alike.
    *
+   * [#24468] The two sites that serve a hop share it: a formula field's
+   * `expression` ({@link judgeFieldFormula}) and a validation rule's hydrated
+   * `condition` ({@link check} with `traversalHydration`), where the rule has
+   * no verdict and refuses every write it judges.
+   *
    * Judged against the target's field index — its declared fields and the
    * system columns the platform injects on it, the set the registry carries —
    * and the primary key, which no field map carries and the loader reads. A
@@ -1977,22 +1995,30 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
    * not judged; a hop into the stored-metadata-body family is refused by
    * {@link refuseStoredMetadataBodyHop} and not judged twice.
    */
-  const refuseUndeclaredHopField = (where: string, raw: unknown, objectName: string): void => {
+  const refuseUndeclaredHopField = (
+    where: string,
+    raw: unknown,
+    objectName: string,
+    site: 'formula' | 'rule',
+  ): void => {
     const source = celSourceOf(raw);
     if (!source) return;
-    const traversals = analyzeRelationshipTraversals(source, 'record')?.traversals;
+    const analysis = analyzeRelationshipTraversals(source, 'record');
+    const traversals = analysis?.traversals;
     if (!traversals || traversals.size === 0) return;
     for (const obj of objects) {
       if (obj.name !== objectName) continue;
       for (const [field, def] of fieldEntries(obj)) {
-        const columns = traversals.get(field);
+        // [#24468] A reference read more than one hop deep is refused whole by
+        // the traversal checks; its first column is not judged a second time.
+        const columns = analysis?.multiHopFields.has(field) ? undefined : traversals.get(field);
         const target = columns ? referenceTargetOf(def)?.trim() : undefined;
         if (!columns || !target || isStoredMetadataBodyObject(target) || !fieldIndex.has(target)) continue;
         for (const column of [...columns].sort()) {
           if (column === 'id' || fieldIndex.get(target)?.includes(column)) continue;
           issues.push({
             where,
-            message: undeclaredHopFieldMessage(objectName, field, target, column),
+            message: undeclaredHopFieldMessage(site, objectName, field, target, column),
             source,
             severity: 'error',
           });
@@ -2180,6 +2206,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     }
     for (const w of res.warnings) issues.push({ where, message: w.message, source: w.source, severity: 'warning' });
     if (objectName && traversalHydration) refuseStoredMetadataBodyHop(where, raw, objectName, 'rule');
+    if (objectName && traversalHydration) refuseUndeclaredHopField(where, raw, objectName, 'rule');
     // [#8116] Provenance rides every object-bound predicate this helper
     // validates, whichever scope: the `record`/`previous` roots are explicit
     // in the source, so flattened flow conditions are covered without ever
@@ -2902,7 +2929,7 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
         for (const w of res.warnings) issues.push({ where: fieldWhere, message: w.message, source: w.source, severity: 'warning' });
         if (objectName) refuseStoredMetadataBodyHop(fieldWhere, f.expression, objectName, 'formula');
         // [#24410] And a hop to a field the target does not declare.
-        if (objectName) refuseUndeclaredHopField(fieldWhere, f.expression, objectName);
+        if (objectName) refuseUndeclaredHopField(fieldWhere, f.expression, objectName, 'formula');
         // [#8116] Formulas read the same record binding the predicates do, so
         // a `record.<anchor>` read inside one degrades identically.
         warnUnprovisionedAnchors(fieldWhere, f.expression, objectName);

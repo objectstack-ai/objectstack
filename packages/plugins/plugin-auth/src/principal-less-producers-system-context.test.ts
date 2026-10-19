@@ -182,7 +182,9 @@ describe('SCIM bearer verification — the credential probe carries the system o
     const { engine, seen } = await bootEngine();
     await engine.insert(
       SCIM_CREDENTIAL_OBJECT,
-      { connection_id: 'conn-pin', token_digest: digestScimBearerToken(SECRET, TOKEN), active: true },
+      // [C8 stage 8b] The row carries an organization: under `single` an organization-less
+      // system insert is refused while the install holds none, and this rig holds none.
+      { connection_id: 'conn-pin', token_digest: digestScimBearerToken(SECRET, TOKEN), active: true, organization_id: 'org_scim_8b' },
       SYSTEM,
     );
     seen.length = 0;

@@ -199,6 +199,7 @@ import {
   STRUCTURED_JSON_TYPES,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
+  virtualFieldAggregateRemedy,
   type ValueShapeFieldDef,
 } from '@objectstack/spec/data';
 
@@ -417,6 +418,12 @@ function jsonStoredDimensionFinding(
  * further, the stored-numeric route for a sum or an average, and which door
  * refuses the same pair later (a dataset's compile, a cube's query) are the
  * same explanation's.
+ *
+ * [#24426] Except over a VIRTUAL field (`formula`): there the remedy line is
+ * the spec's `virtualFieldAggregateRemedy`, the sentence the compile leg prints
+ * too — store the value as a number field and aggregate that — because naming
+ * `count` as the way out steers a total to a plausible wrong number (a record
+ * count read as a sum). The count stays named, as a different question.
  */
 function refusedMeasureFinding(
   site: MemberSite,
@@ -441,6 +448,7 @@ function refusedMeasureFinding(
       : `${pair(`\`${fieldType}\``)} is refused by the aggregate × field-type table: the number would depend ` +
         'on the SQL dialect',
     hint:
+      virtualFieldAggregateRemedy(aggregate, fieldType) ??
       `Either point "${aggregate}" at a field of an accepted type, or aggregate ` +
       `"${site.column}" with one its ${declaredAs(shape)} ${shape.multiple === true ? 'declaration' : 'type'} accepts: ` +
       `${aggregatesAccepting(shape).join(', ')}.`,
