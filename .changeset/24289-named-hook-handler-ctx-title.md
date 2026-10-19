@@ -1,6 +1,6 @@
 ---
 '@objectstack/spec': minor
-'@objectstack/objectql': patch
+'@objectstack/objectql': minor
 '@objectstack/runtime': patch
 ---
 
