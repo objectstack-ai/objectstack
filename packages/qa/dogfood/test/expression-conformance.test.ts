@@ -178,8 +178,10 @@ const PARSE_METHODS = ['parse', 'safeParse', 'parseAsync', 'safeParseAsync'];
  * top-level function), and declares no slot. An occurrence that is NOT the
  * receiver — `z.union([X, …]).parse(v)`, or a second mention elsewhere on the
  * line — still counts, so the narrowing errs toward registering: a false alias
- * is a loud UNCLASSIFIED, a missed one is silent. A receiver split from its
- * `.parse(` across lines is not recognised and still registers, the loud way.
+ * is a loud UNCLASSIFIED, while a missed one drops every slot typed with it out
+ * of discovery, which is silent for a slot no ledger row covers yet. A receiver
+ * split from its `.parse(` across lines is not recognised and still registers,
+ * the loud way.
  */
 function parseCallsOf(names: readonly string[]): RegExp {
   return new RegExp(
