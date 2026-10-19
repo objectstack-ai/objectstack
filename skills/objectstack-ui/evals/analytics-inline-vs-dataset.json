@@ -70,7 +70,7 @@
       "files": [],
       "assertions": {
         "must_contain": ["$contains"],
-        "must_not_contain": ["field: 'tags'", "groupBy: 'tags'"]
+        "must_not_contain": ["field: 'tags'", "groupBy: 'tags'", "sql: 'tags'"]
       }
     }
   ]

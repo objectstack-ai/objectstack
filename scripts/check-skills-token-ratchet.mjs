@@ -573,7 +573,28 @@ export const CEILINGS = new Map([
   // is generator-owned and carries no row here on purpose (see the boundary
   // section). Its JSON twin was retired by #14296 item 3 and is gone entirely.
   ['skills/objectstack-ui/evals/README.md', 289],
-  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1102],
+  // 1102 -> 1229: the aggregate × field-type rule and the multi-value-dimension
+  // rule (card #24425, the skills half of cloud#2861 ruling B) each gain one
+  // regression case — a `formula` under `sum` and a `multiselect` as the
+  // group-by axis — because the published teaching is the only place an agent
+  // meets the rule before the refusal does, and this fixture is the only
+  // instrument that makes the wrong answer fail loudly at scoring (the repo has
+  // no eval runner). Maintainer ruling 2026-10-19, decision batch #369 item 1,
+  // letter A (the ruling comment on the card is 6259315766), verbatim and
+  // untranslated: 「其他同意」 — the card was presented as 「推荐:A」.
+  // Arithmetic, in bytes because that is what this convention divides, and
+  // PAID DOWN FIRST as the convention asks: on `origin/main` the file was 4388
+  // bytes (1097 tokens, headroom 5). The existing text was folded losslessly
+  // to 3780 bytes (945 tokens) — the description, the five expected_output
+  // strings, eval 2's note and prompts 1/3/4 tightened with every fact and
+  // every assertion kept — and the two cases then added +1135 bytes, so the
+  // LANDED file is 4915 bytes -> 1229 tokens: the 5 tokens of existing headroom
+  // are absorbed and the ceiling moves 1102 -> 1229 (+127). Pinned AT the
+  // measurement — zero headroom, so the next token added here is paid for by
+  // deleting one from this file. Independently reproducible without running
+  // this script:
+  //   ceil($(wc -c < skills/objectstack-ui/evals/analytics-inline-vs-dataset.json) / 4) == ceil(4915 / 4)
+  ['skills/objectstack-ui/evals/analytics-inline-vs-dataset.json', 1229],
 
   // objectstack-ui `rules/` — the five files the #14296 item 1 split created.
   // Each row is an INITIAL measurement AT its landed count, so every one starts

@@ -88,15 +88,15 @@ Standardized answers to the recurring ambiguous cases:
 - **To-one enrichment** ("revenue by `account.industry`") keeps grain — `account`
   in `include`, `account.industry` as a dimension.
 - **Computed column.** Format/currency → the measure's `format`/`currency`;
-  arithmetic over declared measures → a **derived measure**; CASE / bins /
+  arithmetic over measures → a **derived measure**; CASE / bins /
   `revenue*0.8` / computed dimensions → **not** a dataset.
 - **Total over a computed value.** `sum`/`avg`/`min`/`max` need a STORED numeric
   or boolean field (`percent` not under `sum`; `min`/`max` also dates); a `formula`
   has no column: refused whatever its `returnType` says. Store the number
   (user-entered, a `summary` rollup, or hook-kept) or title the widget the `count`
   it is. Leave days: `sum` over the `formula` `days_requested` (`end - start`) is
-  refused ⇒ a `number` a `beforeInsert`/`beforeUpdate` hook writes, then
-  `{ name: 'days_sum', aggregate: 'sum', field: 'days_requested' }`.
+  refused ⇒ a stored `number` `days_count` a `beforeInsert`/`beforeUpdate` hook
+  writes, then `{ name: 'days_sum', aggregate: 'sum', field: 'days_count' }`.
 - **Breakdown by a multi-value field.** `multiselect`/`checkboxes`/`tags` and
   any `multiple: true` field is refused as a dataset or cube dimension and as
   `groupBy` (`INVALID_FIELD`; no per-member buckets). One widget per member,
@@ -104,8 +104,8 @@ Standardized answers to the recurring ambiguous cases:
 - **Filter by a parent's attribute** → a **dimension** (guaranteed to join); a
   lookup-path *filter* is not a reliable analytics-path construct.
 - **A dashboard filter driving several charts** → **not** a dataset: `globalFilters`
-  + per-widget `filterBindings` (below); a parameter that **reshapes** the query
-  (grain/window/join) is beyond the envelope.
+  + per-widget `filterBindings` (below); a parameter that **reshapes**
+  grain/window/join is beyond the envelope.
 
 **Level B — naming is governance, not expressibility.** An inline dataset draft
 (Studio Live Canvas) and a saved named dataset have **identical** expressibility;
