@@ -2890,7 +2890,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "acceptance[2] asserts the composite details shape (QA run #24541 acceptance[2] fail, disposition assertion-defect; parked on #24579 §1). #24541: \"details carry field only when the driver names a single column; a tenancy-scoped composite unique names none\" — the pin packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts asserts the details keys are exactly developerMessage and object for an engine write, adding field only when DuplicateRecordError states a column, and driver-sql builds a field's unique: true as the (organization, field) composite. The clause asked for details naming the field, which no stock unique field produces. acceptance[1] is unchanged: QA run #24558's fail there is the product defect #24561; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
-          "ref": "#PR-PENDING"
+          "ref": "#24622"
         }
       ]
     }

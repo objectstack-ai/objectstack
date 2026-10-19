@@ -2060,7 +2060,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "acceptance[2] narrowed to what the PUT door refuses (QA run #24545 acceptance[2] fail, disposition stale-spec; parked on #24579 §1; QA run #24558 flagged the same clause's \"PUT 422\" as too broad). #24545: the runtime PUT gate \"deliberately stands down on the CEL root-scope judgment (whole-stack, owned by os validate — which still refuses both arms, so negative clauses hold)\", by rulings 5791822697 (item 3) and 6104584601 (letter B) as packages/lint/src/flow-cel-root-scope.ts#perWriteSnapshotEntrance records, and the item's own pin validate-expressions.flow-cel-root.test.ts asserts the stand-down. So the record.x and user.id arms now expect 200 and a stored row at PUT. The job arm and the endpoint arm are not PUT /meta/flow bodies — job and api are code-only types, 403 NOT_CREATABLE (#24558) — so the clause names the flow-side twins the door does refuse: a try_catch node's retry.maxRetry, and the runAs: \"system\" flow a code-declared anonymous endpoint names (422 at runAs, #24545). steps[1] and the title follow; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
-          "ref": "#PR-PENDING"
+          "ref": "#24622"
         }
       ]
     },

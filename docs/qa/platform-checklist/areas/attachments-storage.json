@@ -1143,7 +1143,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "acceptance[3] re-pointed and the chunk numbering made the API's (QA run #24560 acceptance[3] fail, disposition stale spec; parked on #24579 §1). #24560: \"the progress door (#22218, storage-routes.ts) deliberately keeps answering the uploader from any organization when there is nothing to stamp\" — packages/services/service-storage/src/storage-routes.ts#registerStorageRoutes asks the starting-organization gate on progress only when the expiry stamp is due, so after an org switch progress answers 200 unless the session's expires_at has passed, and 409 then; chunk PUT and complete answer 409 as before. The steps numbered chunks from 1 while the API numbers them from 0 (#24560 and #24558: the server answered missingChunks [1] for the step's \"chunk 2\"), so the steps now number from 0, acceptance[1] expects [1], and the org-switch step names all three calls. The title follows; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
-          "ref": "#PR-PENDING"
+          "ref": "#24622"
         }
       ]
     }

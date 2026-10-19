@@ -3870,7 +3870,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "acceptance[3] re-pointed to open/refused parity (QA run #24559 acceptance[3] fail, disposition assertion defect; parked on #24579 §1; QA run #24558 scored the same clause on that corrected intent). #24559 records the divergence as \"the pinned design (share-link-envelope.conformance.test.ts: messages for an unresolvable token → 404 NOT_FOUND; for a non-ai_conversations link → 400 UNSUPPORTED)\" and re-points the clause to \"/messages opens iff /resolve opens\". packages/plugins/plugin-sharing/src/share-link-routes.ts#registerShareLinkRoutes hands /messages the same audience inputs and answers every refusal 404 NOT_FOUND, and packages/runtime/src/domains/share-links-messages-audience.test.ts holds both mounts to one open/refused verdict per audience. The clause asked for identical status+code pairs, which the design contradicts on every refused call. The title follows; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
-          "ref": "#PR-PENDING"
+          "ref": "#24622"
         }
       ]
     }
