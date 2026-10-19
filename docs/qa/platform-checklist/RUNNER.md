@@ -548,8 +548,9 @@ contradicts it, and correct it here when it does.
 - **A map view draws its markers under a "Map failed to load" banner here, because the
   default base style is unreachable — an environment fact, not a product defect.** The
   console's map uses `https://demotiles.maplibre.org/style.json` unless the view declares a
-  style (objectui `packages/plugin-map/src/ObjectMap.tsx`, `DEFAULT_MAP_STYLE`, at the pin
-  `4016370a`), and this container's egress proxy refuses that host
+  style (objectui `packages/plugin-map/src/ObjectMap.tsx`, `DEFAULT_MAP_STYLE`, the same at
+  the pin `4016370a` QA run #24616 ran and at the pin `12dc7b47c340` #24660 moved it to), and
+  this container's egress proxy refuses that host
   (`curl https://demotiles.maplibre.org/style.json` → `CONNECT tunnel failed, response 403`,
   at `bfc1539fe0`). The map's `error` event then renders an amber `role="alert"` banner,
   "Map failed to load (…). Markers below are still listed in the search box", over a canvas
