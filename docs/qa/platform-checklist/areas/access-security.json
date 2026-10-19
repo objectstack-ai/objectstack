@@ -345,7 +345,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.record-access-explain; wave anchor #24579 §3): the step named 'the console's access explain panel' without saying where it opens; at the console pin 4016370a it is the 'Explain access' action in Studio's Access pillar header (/_console/studio/PKG/access), the route the run drove. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -822,7 +822,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[5] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.fls-mask-and-strip steps[5]; wave anchor #24579 §3): the step still told the run to author a scratch readable:false set, while fixtures.requires[2] and knownGaps[0] already record that the stock showcase_client_liaison set (examples/app-showcase/src/security/permission-sets.ts) is that grant. The step now grants the stock set to a fresh member who holds no showcase_contributor. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -926,7 +926,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[0] and automated.ref corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24559, access-security.scope-depth-asymmetry; wave anchor #24579 §3; round 2's Tier 1 record #24598, which names this item among the refs that over-claim clause coverage). steps[0] POSTed a showcase_inquiry with `subject`; the object has no such field and requires name, email and message (examples/app-showcase/src/data/objects/inquiry.object.ts). The three dogfood pins exercise the business-unit depth axis (unit / unit_and_below / own_and_reports and the fallback profile), not the manager / executive / ops org-read and own-write asymmetry the clauses score, so automated.ref now says so and that no clause rests on them. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1150,7 +1150,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[6] and acceptance[4] (clause, verify, evidence) re-pointed — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.sharing-rules-widen acceptance[4]; wave anchor #24579 §3) with its oracle from round 2 (QA run #24601). §A13 asked that an admin edit to the SEEDED sys_sharing_rule row survive a restart; the seeder that copied declared rules into that table is retired (ADR-0131 D2, packages/plugins/plugin-sharing/src/declared-sharing-rules.ts) and GET /api/v1/data/sys_sharing_rule answers total 0, so there is no seeded row to edit. The administrator's durable act on a declared rule is now the activation switch (POST /api/v1/security/_activation/sharing_rule/NAME), and the clause asserts that switch across two restarts. QA run #24601 drove exactly this recipe at ba4afcc2 and passed. It measured that GET /api/v1/meta/sharing_rule/NAME keeps reading active: true while the ledger holds the rule off, so the oracle is the ledger row and the member's reads, never the metadata read. acceptance[0]–[3] are unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1284,7 +1284,7 @@
           "revision": 6,
           "date": "2026-10-19",
           "change": "acceptance[6] (clause, verify, evidence) corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.record-share-grant-revoke acceptance[6]; wave anchor #24579 §3). The clause required source_id to be the rule's sys_sharing_rule ROW id and NOT its name; that holds only for an organization-authored rule. The rule it evaluates, share_key_account_qualified_contacts_with_managers, is DECLARED, and a declared rule is projected with id = name (sharing-rule-service.ts projectDeclaredRule, ADR-0131 D2), so its grants carry the name. The clause now asserts source_id equals the rule's id as evaluate reports it, and the verify names revokeRuleGrants, the current name of the purge it cited as purgeRuleGrants",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1386,7 +1386,7 @@
           "revision": 7,
           "date": "2026-10-19",
           "change": "steps[7] and acceptance[5].verify clarified — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.audit-log-browser; wave anchor #24579 §3): the 405 body advertises allowed [get, list, aggregate, search, export], which a run reading 'get + list only' could take for a widened door. sys_audit_log still declares apiMethods ['get', 'list']; the other three are the read verbs list derives (packages/spec/src/data/api-derivation.ts). The append-only clause is unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -2226,7 +2226,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "steps[0], [1] and [3] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.permission-matrix-edit-loop step 4; wave anchor #24579 §3): the DELETE probes named seeded task ids, but a permission set silent on writeScope is owner-only (plugin-security permission-evaluator.ts), so a seeded row owned by someone else stays refused after the delete bit flips ON. The probes now use rows M creates. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -2338,7 +2338,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[7] and acceptance[1].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24559, access-security.capability-declaration-lifecycle; wave anchor #24579 §3). The located `capabilities.0.scope` refusal appears only for a raw capabilities entry: defineCapability parses its argument (packages/spec/src/security/capabilities.ts), so a malformed shape written through it throws at config load. The item stated no expectation for the admin on showcase_zoo_perm_held. The run measured the admin refused, and actionPermissionError has no administrator exemption (only a system context skips it), so the verify now says so. The run also measured DELETE /api/v1/meta/capability/NAME answering 200 while removing nothing; no clause asserts that door, and it is left to the wave anchor as an observation, not encoded here",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -3333,7 +3333,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[1] marked CLOSED — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.anonymous-floor-v18-doors; wave anchor #24579 §3): the gap said a non-POST /keys never reaches the floor on a stock boot and answers 405; since #23909 the dispatcher registers /keys for every verb (packages/runtime/src/dispatcher-plugin.ts) and the run measured anonymous GET /api/v1/keys → 401. No clause changed: acceptance[1] already demanded 401",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -3481,7 +3481,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "acceptance[2] (clause, verify) and steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.meta-authoring-trail-and-audience-gates; wave anchor #24579 §3). The clause said every by-name door of the gated view answers 403 PERMISSION_DENIED. /history is an authoring-trail door: it asks mayReadAuthoringTrail (studio.access or manage_metadata, packages/rest/src/rest-server.ts) before anything, so a member without either is refused 403 FORBIDDEN first — acceptance[1]'s gate — and PERMISSION_DENIED is reached only by a member the trail admits. The run saw exactly that split. The other doors and clauses are unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -3723,7 +3723,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "acceptance[2] (clause, verify) corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24559, access-security.grant-table-write-contract acceptance[2]; wave anchor #24579 §3): the clause required constraint.rule validity_window_order on the refusal, which is unobservable — a plain rule violation carries field, code and message and no constraint object (packages/objectql/src/validation/rule-validator.ts); only an unevaluable predicate attaches one. The clause now asserts what the rule's verdict carries and what the item's own pin sys-user-permission-set-window-order.test.ts asserts (valid_until · rule_violation, the authored message, no unevaluable reason). The walled leg acceptance[4] is §2's and is unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -3871,7 +3871,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "automated.ref and steps[2] corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24559, access-security.deployment-tables-platform-only; wave anchor #24579 §3). acceptance[0] says the SEVEN tables are pinned, but the named pin, deployment-level-no-tenant-column.test.ts, lists five — the platform-objects ones. sys_flow_dispatch and sys_presence live in service-automation and service-realtime, and each has its own object pin asserting no tenant column and requiredPermissions manage_platform_settings (sys-flow-dispatch.object.test.ts, sys-presence.object.test.ts). automated.ref now names both, so the seven are pinned, and says which tables each file holds. steps[2]'s filter must be URL-encoded. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -3954,7 +3954,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "automated.ref gains packages/runtime/src/domains/share-links-messages-audience.test.ts — the out-of-scope §3 note of #24622's round (wave anchor #24579 §3; QA run #24559). That file pins the parity acceptance[3] has asserted since revision 2: /messages hands resolveToken every audience input /resolve hands it, on the plugin mount and the dispatcher twin, so /messages serves exactly the callers /resolve serves. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     }

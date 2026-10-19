@@ -709,7 +709,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "automated.ref and acceptance[0].verify corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24560, attachments-storage.orphan-tombstone-reap acceptance[0]; wave anchor #24579 §3): the verify said the dogfood block's cases map one-to-one onto the five variants, but two of them — the byte-delete-failure veto and the field file kept while the gate is closed — are pinned only by packages/services/service-storage/src/attachment-lifecycle.test.ts (createSysFileReapGuard), which automated.ref did not name. The run ran it singly and scored the clause on both files. automated.ref now names it and the verify says which file pins which variant. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1158,7 +1158,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "acceptance[0].clause narrowed to what its pins prove and fixtures.knownGaps added — the out-of-scope §3 note of #24622's round (wave anchor #24579 §3; QA run #24560): none of the three automated.ref pins drives a chunked door after an organization switch, so the door-level 409 acceptance[3] asserts is unpinned. The only door-level pin of the shared guard (storage-routes.ts requireStartingOrganization) is the presigned commit door's, in error-envelope.conformance.test.ts, and chunk-part-record-concurrency.test.ts pins the store-level miss only. acceptance[0] no longer claims the org-switch guard. The knownGap records the unpinned leg, and points at §2 for its live half, which needs a second organization stock 18.0 refuses. acceptance[1]–[3] (#24622) are unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     }

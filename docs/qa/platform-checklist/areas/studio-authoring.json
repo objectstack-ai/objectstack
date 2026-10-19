@@ -754,7 +754,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "acceptance[2] (clause, verify) and acceptance[4] (clause, verify, evidence) re-pointed from the editor's WARNING tier to the engine's ERROR tier for a non-lowerable RLS read predicate — §1 of wave anchor #24579 (added by its round-2 comment 6272314386), from QA run #24604 at ba4afcc2 and QA run #24571 at 5b14b7f3. The two clauses required a non-pushdownable USING filter to be an advisory warning with Save enabled and fail-open framing. The engine refuses that predicate at build and publish (packages/lint/src/validate-rls-predicate-enforceability.ts, rls-predicate-unenforceable, error; ADR-0056 D4), and the runtime fails CLOSED (plugin-security's compileFilter answers the deny filter). So the item contradicted its own negative[0], which fails any editor verdict that differs from the engine, and #24604 scored acceptance[4] 'pass (as written)' beside that negative[0] FAIL. Riding the same re-point, so the item does not contradict it: steps[4] and variants[2] now expect the error tier; steps[0] names the build/publish gate as the RLS probes' engine truth (validate_expression has no RLS site); acceptance[4] names the Studio package door's autosave-held status beside the environment door's disabled Save (#24604: the package door has no Save button); and a knownGap records that the clauses fail until objectstack-ai/objectui#13061 lands",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },

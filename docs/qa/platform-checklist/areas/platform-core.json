@@ -630,7 +630,7 @@
           "revision": 7,
           "date": "2026-10-19",
           "change": "steps[2] and steps[5] corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.builtin-apps-nav-render; wave anchor #24579 §3). steps[5] said 45 Setup destinations; the run's GET /api/v1/meta/app payload at 5b14b7f3 served 42, which matches the nav source minus its gates, and no nav source changed between 5b14b7f3 and this edit's base (the count was #23803 item 4's to re-measure, and #23803 is closed). steps[2] now has the walk expand the groups that render collapsed (Advanced and Developer declare expanded: false in setup.app.ts / account.app.ts; the run also found Configuration collapsed) before it navigates. No acceptance clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -889,7 +889,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "steps[0] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.package-lifecycle-enable-disable; wave anchor #24579 §3, and QA run #24571 measured the same gate on a runtime object): the probe object needs `sharingModel` and the probe view its `viewKind` before publish accepts them — the draft PUT answers 200 and publish then refuses (security-owd-unset is error-tier in packages/lint/src/validate-security-posture.ts; the view overlay requires object + viewKind in packages/spec/src/ui/view.zod.ts). No acceptance clause changed; acceptance[5]'s FAIL is the objectui defect objectstack-ai/objectui#13052 and is untouched",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -989,7 +989,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[0], steps[7], acceptance[0].verify and acceptance[5] (clause, verify) corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.notification-center; wave anchor #24579 §3). At the console pin 4016370a the bell does not poll GET /api/v1/notifications?view=mine: its feed reads sys_inbox_message joined with sys_notification_receipt through the data API (objectui sharedUserFeeds.ts), which is the payload the run counted the badge from. The Approvals tab shows a pending count and a 'View approvals' link, not a list of requests (InboxPopover.tsx); the run scored acceptance[5] on the count match. Mark-read still POSTs /api/v1/notifications/read[/all] (useInboxBell.ts), and acceptance[6]'s post-reload GET /api/v1/notifications is a direct read of the same rows, so those clauses are unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1296,7 +1296,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[0] and acceptance[3] (clause, verify) corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.docs-audience-gate; wave anchor #24579 §3). knownGaps[0] said stock showcase authors neither a public nor a permissionSet book; it ships the public `showcase_manual` (examples/app-showcase/src/system/books/index.ts), so only the permissionSet half is a fixture gap. acceptance[3] said a lesser persona's tree is a subset of admin's; audienceAllows (packages/spec/src/system/book.zod.ts) admits a permissionSet doc for holders only and has no admin bypass, so for those books the run's admin non-holder saw less than a holder — the subset relation is holder vs non-holder. acceptance[2]'s unknown-shape half (unreachable live, no pin) is a fixture/pin gap left on #24579 §4",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1506,7 +1506,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[3] and negative[2] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.manifest-install-contract; wave anchor #24579 §3): both said NamespaceConflictError has no `code`, so its wire mapping was unpinned. Since commit df657d9df the class carries code NAMESPACE_CONFLICT and status 422 (packages/objectql/src/registry.ts), and the run observed 422 NAMESPACE_CONFLICT on POST /api/v1/packages. knownGaps[3] is now marked CLOSED with that reading, and negative[2] scores a 5xx as a FAIL instead of a finding to record. No acceptance clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1753,7 +1753,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "the scope wall widened from four metadata_type values to five — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.activation-ledger-row-contract; wave anchor #24579 §3, which lists it under access-security). The security catalog activation door now also accepts :type sharing_rule (packages/runtime/src/domains/catalog-activation.ts CATALOG_ACTIVATION_SUBJECTS, ADR-0131 D6 regime C) and writes its row to this ledger through the same ObjectStoreMetadataActivationStore — a fifth writer the item's hand-enumerated variants did not carry, the case negative[4] says is a checklist defect. Title, steps[0] and [2], fixtures.requires[1], knownGaps[0], acceptance[4] (clause, verify) and negative[5] now name sharing_rule, variants gains it, and steps[0] flips the showcase's declared rule share_new_inquiries_with_field_ops. QA run #24601 drove that switch and read the row {metadata_type: sharing_rule, active: false}. No other clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1963,7 +1963,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "personas[1], steps[3] and fixtures.requires[0] corrected — three checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.marketplace-install-local-lifecycle; wave anchor #24579 §3). The plain member cannot be a fresh sign-up: the stock audience posture is invite_only (plugin-auth audience-posture.ts), so the run created the member through the admin create-user door. steps[3] read `install./examples` (a missing space). On showcase the cloud arm of boot A, and runtime-config on both boots, are mounted by the host config (examples/app-showcase/objectstack.config.ts), and Serve.planMarketplaceWiring wires only what the host did not — the matrix the clauses score is unchanged. No acceptance clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -2151,7 +2151,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "steps[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.runtime-config-boot-read steps[1]; wave anchor #24579 §3): the branding block carries logoUrl, faviconUrl and brandColor only when they are configured — runtime-config-plugin.ts reads each from the plugin config or its env var and serialises an unset one as undefined, which JSON drops — so their absence on a stock boot is the contract, not a missing key. No acceptance clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -2347,7 +2347,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "steps[5], acceptance[4] (clause, verify, evidence) and automated.ref corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.url-overlay-contract; wave anchor #24579 §3). The from trail no longer renders as a breadcrumb: since objectui#12461 the top bar draws no record crumb and RecordDetailView.tsx shows an inline back link to the immediate parent, each parent's link carrying the trail above it, so the clause now scores that chain. automated.ref described useUrlOverlay.test.tsx as pinning replace semantics; at the console pin it asserts param state only and nothing about history, which is why the run evidenced replace by hand. The push/replace clauses themselves are unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -2545,7 +2545,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "acceptance[3] (clause, verify) corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.home-admin-cluster-links acceptance[3]; wave anchor #24579 §3): the member's Help menu does not list documentation entries only — at the console pin 4016370a it also lists Keyboard shortcuts and About (objectui packages/app-shell/src/layout/AppHeader.tsx). The clause's point is unchanged: no Administration entry anywhere in the member's chrome",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -3115,7 +3115,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "steps[1], acceptance[1] (clause, verify) and acceptance[3].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24557, platform-core.v18-boot-refusals; wave anchor #24579 §3). steps[1] booted `os dev` with `services: {auth: false}`, which is not a stack key (packages/spec/src/stack.zod.ts), so the run recorded acceptance[3] blocked(fixture); a stock boot composes the security plugin only beside AuthPlugin (packages/core/src/stack-auth.ts resolvePlatformAuthComposition), so the step now names a scratch config that mounts SecurityPlugin itself with the auth tier off, marked as not yet replayed live, and acceptance[3] names its pin as the fallback. acceptance[1] said the boot exits with ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED on a log oracle; that literal is only the refusal error's code (OrganizationOwnershipBootRefusal) and serve.ts prints the message alone, so the log oracle now reads the named tables and command and the code is left to the pins. acceptance[2] and steps[0] (#24592) are unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -3353,7 +3353,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.requires[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24557, platform-core.serve-composition-v18; wave anchor #24579 §3): examples/app-crm no longer declares a datasourceMapping (its config records why the rule was deleted, #4462), and no other example declares one, so the leg's scratch config authors the mapping itself, in the shape the item's own pin serve-datasource-mapping-before-sync.integration.test.ts boots. No acceptance clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     }

@@ -95,7 +95,7 @@
           "revision": 8,
           "date": "2026-10-19",
           "change": "acceptance[3].verify corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24542, approvals.per-group-signoff acceptance[3]; wave anchor #24579 §3): it asked for 'the approve branch taken' in the run read, but end nodes log no step and showcase_expense_signoff's approve edge ends at an end node, so no run read can show the branch. The verify now scores the run status transition and the request status, as approvals.quorum-m-of-n already words the same evidence. Clause text unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -187,7 +187,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "fixtures.requires[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24542, approvals.quorum-m-of-n; wave anchor #24579 §3): in a shared boot an earlier item (approvals.account-app-entry's runtime persona) had bound another member to 'finance', so the committee slate resolved four distinct holders; the run deleted that binding before opening the quorum requests. The fixture now says to clear such bindings first. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -538,7 +538,7 @@
           "revision": 6,
           "date": "2026-10-19",
           "change": "steps[7] and acceptance[1].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.decision-action-matrix; wave anchor #24579 §3). steps[7] reminded 'the admin-submitted invoice request', which a shared boot's approvals.decision-only-via-service has already decided; any admin-submitted pending request serves, and the run used a budget request. acceptance[1] asked for 'the approve/reject edge taken', but end nodes log no step, so the run evidenced the reject by the absence of the approve edge's successor, the needs_exec decision node (examples/app-showcase/src/automation/flows/index.ts). The verify now names that discriminator. Clause text unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1019,7 +1019,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "fixtures.requires[2] and acceptance[6].verify corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.account-app-entry; wave anchor #24579 §3). 'Make that invoice one the persona OWNS' did not say which field owns it: showcase_invoice's contributor RLS reads the text field `owner` against current_user.email (invoice_own_rows), so a persona-created invoice is unreadable to its creator until an admin sets `owner`. acceptance[6] did not say where the language switch is: at the console pin 4016370a it is the avatar menu's Preferences › Language row (AppHeader.tsx). No clause text changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1343,7 +1343,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[6]–[7] and acceptance[3]–[5] verify corrected — three checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.approver-resolution-matrix; wave anchor #24579 §3). node_config_json, and so __resolvedFrom, is not on GET /api/v1/approvals/requests/:id — rowFromRequest in approval-service.ts projects no node_config_json — and the run read it through GET /api/v1/data/sys_approval_request/ID as the admin, so the steps and verifies now name that door. output.autoApproved is not surfaced by the automation runs read (no step output, run output {}), so the auto_approve leg proves the approve edge with a marker node, as the run did. acceptance[3]'s quoted warn was a paraphrase of the live line; the verify now matches the two names it carries instead of a sentence. No clause text changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1586,7 +1586,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "steps[1] and automated.ref corrected — two checklist-accuracy findings of the 18.0 QA sweep (QA run #24542, approvals.request-page-reply-and-reader-visibility; wave anchor #24579 §3). The comment route's body key is `comment`, not `body`: {body} answers 400 VALIDATION_FAILED 'comment is required' (approval-service.ts comment). automated.ref named request-child-read-gate.integration.test.ts, which covers only the child tables, and omitted request-read-gate.integration.test.ts, the pin of the request object's own generic-door gate that acceptance[2] asserts. That clause's live leg is unreachable on stock showcase (no member reads sys_approval_request), a fixture gap left on #24579 §4. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },

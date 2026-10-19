@@ -380,7 +380,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "fixtures.requires[0]–[1] and automated.ref corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24538, identity-auth.invitation-scope-gates; wave anchor #24579 §3). The item required a multi-org boot; every clause runs on the stock single-tenancy showcase's Default Organization, which is what its own pin boots (delegated-admin-invite.dogfood.test.ts: bootShowcase({}), reading the slug-default organization rather than minting one). automated.ref now says the pin's first case asserts the row and its role but not status pending, which the run proved live. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -701,7 +701,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "source[2] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.api-key-ui-lifecycle; wave anchor #24579 §3): the citation said sys_api_key declares apiMethods ['get','list']; packages/platform-objects/src/identity/sys-api-key.object.ts declares ['get','list','update'], which is why the revoke/restore PATCH answers 200. Citation only; behaviour and clauses unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -791,7 +791,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.requires[2], knownGaps[0] and steps[7] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.self-service-profile-password; wave anchor #24579 §3): the knownGap said the set-initial-password branch needs an IdP, but a credential-less user is provisionable on stock showcase through POST /api/v1/auth/admin/import-users with passwordPolicy 'none' (admin-import-users.ts) and a session through POST /api/v1/auth/admin/impersonate-user — the recipe the run scored acceptance[5] pass on. The knownGap is marked CLOSED and the step drives the recipe. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -892,7 +892,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[5] and acceptance[3].clause corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.org-membership-team-management; wave anchor #24579 §3): after a rename the step expected the nav label to follow, but nav_organization's label is the static 'Organization' (setup-nav.contributions.ts); what follows is the organization record page's title, which the run observed. Not a loosening: the persisted name and the page title must both show the rename",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
     ]
     },
@@ -1057,7 +1057,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "acceptance[0].oracle 'log' → 'api' — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.self-service-password-reset acceptance[0]; wave anchor #24579 §3): the clause's verify and evidence already read the sys_email row the request wrote, an API read, not a log line; the oracle label now names what the run consults. Clause text, verify and evidence unchanged",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -1887,7 +1887,7 @@
           "revision": 5,
           "date": "2026-10-19",
           "change": "steps[0] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.self-signup-gate; wave anchor #24579 §3): the step quoted the by-invitation notice as 'Self-registration is not open on this environment…'; the pinned console (objectui 4016370a, RegisterPage.tsx) renders '…not open on this system…'. The step no longer pins the sentence; the data-testid and the absent form are the oracle. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -2276,7 +2276,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.requires[1] corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.auth-gate-held-session-raw-host-families; wave anchor #24579 §3): the MFA hold appeared ~70 s after require_mfa was switched on, because plugin-auth reads organization MFA through a 60 s-TTL cache refreshed in the background (auth-manager.ts refreshOrgMfaCacheIfStale). A runner probing at once sees 200 and could score a false FAIL; the fixture now says to poll. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
@@ -2495,7 +2495,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "steps[0] and acceptance[1].verify corrected — a checklist-accuracy finding of the 18.0 QA sweep (QA run #24538, identity-auth.default-organization-boot-invariant; wave anchor #24579 §3): at os dev's default log level the boot prints no Default-Organization line, so 'read the boot log ordering' had nothing to read — ensure-default-organization.ts logs its success lines at info. The step now names --log-level info and the created_at ordering the run used instead. No clause changed",
-          "ref": "#PENDING-24579R2"
+          "ref": "#24632"
         }
       ]
     },
