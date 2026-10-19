@@ -7,7 +7,7 @@
  * this package's shipped permission sets carry for that object today — read
  * here off `defaultPermissionSets`, never retyped.
  *
- * Three pins:
+ * Four pins:
  *   1. The declarers are exactly the 23 objects the ruling names: every object
  *      `@objectstack/platform-objects` and `@objectstack/plugin-audit` register
  *      that declares a default is on the list, every listed object declares
@@ -19,17 +19,28 @@
  *   3. `sys_user` is the one merge: the key holds one policy, so its two
  *      shipped literals (`sys_user_self`, `sys_user_org_members`) are joined
  *      with `||`, and the merged predicate admits exactly the union of the two
- *      literals' rows whenever `org_user_ids` is resolved.
- *
- * No reader of the key is wired yet, and the shipped sets keep their spreads,
- * so nothing here moves a served row.
+ *      literals' rows whenever `org_user_ids` is resolved. The same holds on
+ *      each user-context producer's real context:
+ *      `service-automation/src/sys-user-default-row-scope.integration.test.ts`.
+ *   4. The security plugin's collection applies a declared default where the
+ *      caller's held sets carry no row policy for the object and operation, and
+ *      the shipped sets keep their spreads: a deployment with the shipped
+ *      baseline serves every persona the rows it served before the
+ *      declarations, and the census names where a default is now collected.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterAll } from 'vitest';
 import * as PlatformObjects from '@objectstack/platform-objects';
 import { AuditPlugin } from '@objectstack/plugin-audit';
+import { ObjectQL } from '@objectstack/objectql';
+import { SqlDriver } from '@objectstack/driver-sql';
 import { defaultPermissionSets } from './default-permission-sets.js';
 import { RLSCompiler } from '../rls-compiler.js';
+import { SecurityPlugin } from '../security-plugin.js';
+import { isObjectDefaultRowScopePolicy } from '../object-default-row-scope.js';
+import { SysPosition, SysPermissionSet, SysPositionPermissionSet } from '../__tests__/legacy-catalog-objects.testkit.js';
+import { SysUserPosition } from './sys-user-position.object.js';
+import { SysUserPermissionSet } from './sys-user-permission-set.object.js';
 
 type Policy = {
   name: string;
@@ -225,5 +236,255 @@ describe('sys_user\'s merged predicate admits the union of its two literals\' ro
     expect(admits(compiler.compileFilter([asLiteral('sys_user', declared) as any], ctx), rows)).toEqual([]);
     // The two literals apart keep the self arm.
     expect(admits(compiler.compileFilter(policiesFor('organization_admin', 'sys_user') as any, ctx), rows)).toEqual(['u_me']);
+  });
+});
+
+/**
+ * [#24164 ruling E′ item 6; #24340's review of record, ③.11] A deployment
+ * with the shipped baseline serves byte-for-byte what it served before the
+ * identity objects declared their defaults, now that the security plugin's
+ * collection applies a declared default wherever the caller's held sets carry
+ * no row policy for the object and operation.
+ *
+ * Booted on the real `SecurityPlugin` + `ObjectQL` over a real `SqlDriver`,
+ * with every declarer as this tree declares it ("after") and the same objects
+ * with `defaultRowScope` dropped ("before"), the shipped sets, and the
+ * platform baseline composed. Each persona reads every declarer, and is
+ * explained for every operation, identically in both; the census then names
+ * every persona, object and operation where the declared default is what the
+ * collection now applies.
+ */
+
+type Persona = Record<string, unknown>;
+
+/** Organisation X: `u_x` and `u_x2`. Organisation Y: `u_y`. `u_loner` belongs to none. */
+const ORG_X_USERS = ['u_x', 'u_x2'];
+const BASELINE_USERS = ['u_x', 'u_x2', 'u_y', 'u_loner', 'a_x', 'p_admin'];
+
+const BASELINE_PERSONAS: Record<string, Persona> = {
+  member: {
+    userId: 'u_x', tenantId: 'org_x', positions: ['org_member'], permissions: ['member_default'],
+    posture: 'MEMBER', org_user_ids: ORG_X_USERS, email: 'u_x@example.test',
+  },
+  viewer: {
+    userId: 'u_x2', tenantId: 'org_x', positions: ['org_member'], permissions: ['viewer_readonly'],
+    posture: 'MEMBER', org_user_ids: ORG_X_USERS, email: 'u_x2@example.test',
+  },
+  organization_admin: {
+    userId: 'a_x', tenantId: 'org_x', positions: ['org_admin'], permissions: ['organization_admin'],
+    posture: 'TENANT_ADMIN', org_user_ids: [...ORG_X_USERS, 'a_x'], email: 'a_x@example.test',
+  },
+  // The resolver's answer for a user in no organisation: no positions, no
+  // sets of their own, the peer list seeded with themself alone.
+  'user with no organisation': {
+    userId: 'u_loner', positions: [], permissions: [], posture: 'MEMBER', org_user_ids: ['u_loner'],
+    email: 'u_loner@example.test',
+  },
+  platform_admin: {
+    userId: 'p_admin', tenantId: 'org_x', positions: [], permissions: ['admin_full_access'], posture: 'PLATFORM_ADMIN',
+  },
+  // An MCP OAuth agent as core's `assembleExecutionContext` shapes it: the
+  // ceiling on `permissions`, `userId` the delegating member (ADR-0090 D10).
+  'mcp agent for the member': {
+    userId: 'u_x', tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_read'], principalKind: 'agent',
+    onBehalfOf: { userId: 'u_x', principalKind: 'human' }, posture: 'MEMBER', org_user_ids: ORG_X_USERS,
+    email: 'u_x@example.test',
+  },
+  'mcp agent for the organization admin': {
+    userId: 'a_x', tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_read'], principalKind: 'agent',
+    onBehalfOf: { userId: 'a_x', principalKind: 'human' }, posture: 'TENANT_ADMIN', org_user_ids: [...ORG_X_USERS, 'a_x'],
+    email: 'a_x@example.test',
+  },
+  'mcp agent for the platform admin': {
+    userId: 'p_admin', tenantId: 'org_x', positions: [], permissions: ['mcp_agent_data_read'], principalKind: 'agent',
+    onBehalfOf: { userId: 'p_admin', principalKind: 'human' }, posture: 'PLATFORM_ADMIN', org_user_ids: ['p_admin'],
+    email: 'p_admin@example.test',
+  },
+};
+
+/** A plausible value for a required column the fixture does not care about. */
+function filler(type: string, key: string): unknown {
+  if (type === 'boolean') return true;
+  if (type === 'number' || type === 'currency' || type === 'percent') return 0;
+  if (type === 'datetime' || type === 'date') return '2026-01-01T00:00:00.000Z';
+  return key;
+}
+
+/** One row of `schema`: every required column filled, then those of `values` it declares. */
+function rowOf(schema: ObjectDef, values: Record<string, unknown>): Record<string, unknown> {
+  const fields = (schema.fields ?? {}) as Record<string, { type: string; required?: boolean }>;
+  const out: Record<string, unknown> = {};
+  for (const [name, def] of Object.entries(fields)) if (def.required) out[name] = filler(def.type, `${name}-${String(values.id)}`);
+  for (const [name, value] of Object.entries(values)) if (name === 'id' || name in fields) out[name] = value;
+  return out;
+}
+
+/** The rows written for `object`: one per user, each user's own where it names one, in that user's organisation. */
+function fixtureRowsFor(schema: ObjectDef): Array<Record<string, unknown>> {
+  if (schema.name === 'sys_user') {
+    return BASELINE_USERS.map((id) => rowOf(schema, { id, name: id, email: `${id}@example.test` }));
+  }
+  if (schema.name === 'sys_organization') {
+    return ['org_x', 'org_y'].map((id) => rowOf(schema, { id, name: id, slug: id }));
+  }
+  const orgOf = (user: string) => (user === 'u_y' ? 'org_y' : user === 'u_loner' || user === 'p_admin' ? null : 'org_x');
+  return BASELINE_USERS.map((user) =>
+    rowOf(schema, { id: `${schema.name}:${user}`, user_id: user, organization_id: orgOf(user), actor_id: user }),
+  );
+}
+
+const baselineEngines: ObjectQL[] = [];
+afterAll(async () => {
+  for (const engine of baselineEngines.splice(0)) {
+    try { await engine.destroy(); } catch { /* noop */ }
+  }
+});
+
+async function bootBaseline(declared: boolean) {
+  const objects = await registeredObjects();
+  const declarers = DECLARERS.map((name) => {
+    const { defaultRowScope: _declared, ...schema } = objects.get(name)!;
+    return (declared ? objects.get(name)! : schema) as ObjectDef;
+  });
+  const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
+  const engine = new ObjectQL();
+  baselineEngines.push(engine);
+  engine.registerDriver(driver as never, true);
+  await engine.init();
+  engine.registerApp({
+    id: 'com.objectstack.qa.identity-default-row-scope-baseline',
+    name: 'Identity default row scope baseline',
+    version: '1.0.0',
+    type: 'plugin',
+    scope: 'system',
+    objects: [...declarers, objects.get('sys_member')!, SysUserPermissionSet, SysUserPosition],
+  } as never);
+  await engine.syncSchemas();
+  for (const o of [SysPosition, SysPermissionSet, SysPositionPermissionSet]) {
+    if (!engine.registry.getObject(o.name)) engine.registry.registerObject(o as never, 'qa.authz-read-set');
+  }
+
+  const services: Record<string, unknown> = {
+    'org-scoping': { name: 'com.objectstack.org-scoping' },
+    tenancy: { posture: 'isolated' },
+    manifest: { register: vi.fn() },
+    objectql: engine,
+    metadata: { get: async (_t: string, name: string) => engine.getSchema(name) ?? null, list: async () => defaultPermissionSets },
+  };
+  let security: any;
+  const ctx = {
+    logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+    registerService: (name: string, impl: unknown) => { if (name === 'security') security = impl; },
+    getService: (name: string) => {
+      if (!(name in services)) throw new Error(`service not registered: ${name}`);
+      return services[name];
+    },
+  };
+  // The shipped sets, the platform baseline composed: the stock deployment.
+  const plugin = new SecurityPlugin({ defaultPermissionSets });
+  await plugin.init(ctx as never);
+  await plugin.start(ctx as never);
+  vi.spyOn((engine as unknown as { logger: { warn: () => void } }).logger, 'warn').mockImplementation(() => undefined);
+
+  const knex = (driver as unknown as { knex: (t: string) => { insert(rows: object[]): Promise<unknown> } }).knex;
+  for (const schema of declarers) await knex(schema.name).insert(fixtureRowsFor(schema));
+  // What an agent's delegator resolves from (ADR-0090 D10: the delegator leg is
+  // rebuilt from the store): the memberships, and the two administrators' grants.
+  const member = objects.get('sys_member')!;
+  await knex('sys_member').insert([
+    ['u_x', 'org_x', 'member'], ['u_x2', 'org_x', 'member'], ['a_x', 'org_x', 'admin'], ['u_y', 'org_y', 'member'],
+  ].map(([user, org, role]) => rowOf(member, { id: `mem:${user}`, user_id: user, organization_id: org, role })));
+  await knex('sys_user_permission_set').insert([
+    { id: 'ups:a_x', user_id: 'a_x', permission_set: 'organization_admin', organization_id: 'org_x' },
+    { id: 'ups:p_admin', user_id: 'p_admin', permission_set: 'admin_full_access', organization_id: null },
+  ]);
+
+  const served = async (object: string, persona: Persona): Promise<string[] | string> => {
+    try {
+      const rows = (await engine.find(object, { context: { ...persona } } as never)) as Array<{ id: string }>;
+      return rows.map((r) => r.id).sort();
+    } catch (e) {
+      const err = e as { code?: string; status?: number };
+      return `refused ${err.code} ${err.status}`;
+    }
+  };
+  return { engine, plugin: plugin as any, security, served };
+}
+
+describe('a deployment with the shipped baseline is byte-for-byte unchanged on the real declarations (ruling E′ item 6, ③.11)', () => {
+  // Explain is read for `read`; the census below reads the collection itself,
+  // the one source every door and every explain composes from, for all four.
+  const EXPLAINED = ['read'] as const;
+  const COLLECTED = ['select', 'insert', 'update', 'delete'] as const;
+  const isAgent = (persona: string) => BASELINE_PERSONAS[persona].principalKind === 'agent';
+  /** What explain decided, without its prose and composed filter: `allowed` and each layer's verdict. */
+  const decided = (e: { allowed: boolean; layers: Array<{ layer: string; verdict: string }> }) =>
+    JSON.stringify({ allowed: e.allowed, layers: e.layers.map((l) => `${l.layer}:${l.verdict}`) });
+
+  it('every persona reads every declarer exactly as without the declarations, and is explained the same', { timeout: 30_000 }, async () => {
+    const after = await bootBaseline(true);
+    const before = await bootBaseline(false);
+    const rowsMoved: string[] = [];
+    const explainMoved: string[] = [];
+    for (const [persona, context] of Object.entries(BASELINE_PERSONAS)) {
+      for (const object of DECLARERS) {
+        const label = `${persona} on ${object}`;
+        const was = await before.served(object, context);
+        const now = await after.served(object, context);
+        if (JSON.stringify(now) !== JSON.stringify(was)) rowsMoved.push(`${label}: ${JSON.stringify(was)} -> ${JSON.stringify(now)}`);
+        for (const operation of EXPLAINED) {
+          const e0 = await before.security.explain({ object, operation }, { ...context });
+          const e1 = await after.security.explain({ object, operation }, { ...context });
+          // A baseline holder's explain is byte-for-byte. A delegated agent's
+          // decision is the same, but its ceiling's leg now collects the object
+          // default, so the rls layer names it and the composed filter carries
+          // that leg's conjunct (the delegator's own scope, `userId` being the
+          // delegator's) beside the delegator's.
+          const same = isAgent(persona) ? decided(e1) === decided(e0) : JSON.stringify(e1) === JSON.stringify(e0);
+          if (!same) explainMoved.push(`${label} (${operation})`);
+        }
+      }
+    }
+    expect(rowsMoved).toEqual([]);
+    expect(explainMoved).toEqual([]);
+    // CONTROL: the comparison has teeth — the baseline narrows each persona,
+    // the fixture holds rows they must not read, and the platform administrator
+    // reads them all.
+    expect(await after.served('sys_user', BASELINE_PERSONAS.member)).toEqual(['u_x', 'u_x2']);
+    expect(await after.served('sys_session', BASELINE_PERSONAS['user with no organisation'])).toEqual(['sys_session:u_loner']);
+    expect(await after.served('sys_session', BASELINE_PERSONAS['mcp agent for the member'])).toEqual(['sys_session:u_x']);
+    expect(await after.served('sys_session', BASELINE_PERSONAS.platform_admin)).toHaveLength(BASELINE_USERS.length);
+  });
+
+  it('census: the declared default is collected for no baseline holder, and on a delegated agent ceiling\'s leg', async () => {
+    const { plugin } = await bootBaseline(true);
+    const objects = await registeredObjects();
+    const applied: string[] = [];
+    for (const [persona, context] of Object.entries(BASELINE_PERSONAS)) {
+      // The platform administrator's superuser bypass is decided before the collection.
+      if (persona === 'platform_admin') continue;
+      const sets = await plugin.resolvePermissionSetsForContext({ ...context });
+      for (const object of DECLARERS) {
+        for (const operation of COLLECTED) {
+          const collected = plugin.collectRLSPolicies(sets, object, operation, (context.positions ?? []) as string[]);
+          if (collected.some((p: object) => isObjectDefaultRowScopePolicy(p))) applied.push(`${persona} ${object} ${operation}`);
+        }
+      }
+    }
+    // Every human holds `member_default` beside their own sets, and it carries
+    // a policy for every declarer on every operation (its literals, and its
+    // `'*'` write floor), so no baseline holder collects a default.
+    expect(applied.filter((line) => !line.startsWith('mcp agent'))).toEqual([]);
+    // The agent ceilings carry no row policy (ADR-0090 D10): an agent's own
+    // leg collects each declarer's default, on exactly the operations the
+    // declaration names.
+    const agents = Object.keys(BASELINE_PERSONAS).filter(isAgent);
+    const expected = agents.flatMap((persona) =>
+      DECLARERS.flatMap((object) => {
+        const scope = objects.get(object)!.defaultRowScope!;
+        return COLLECTED.filter((op) => scope.operation === 'all' || scope.operation === op).map((op) => `${persona} ${object} ${op}`);
+      }),
+    );
+    expect(applied.sort()).toEqual(expected.sort());
   });
 });

@@ -50,13 +50,13 @@ export const SysScimGroup = ObjectSchema.create({
     },
   },
 
-  // [ADR-0095 D1, 2026-10-18 note] This object's default row scope: the one
-  // policy plugin-security's shipped permission sets spread for it today
-  // (`scimProjectionRowScope` in `default-permission-sets.ts`), moved here
-  // verbatim. Layer 0 is inert on this table (no organization column), so Layer 1
-  // silence is to mean this scope, not no filter. Not read yet: the sets keep
-  // carrying the same literal, and the security plugin's collection is to apply
-  // this key when no held set carries a policy for the object. An `extend`
+  // [ADR-0095 D1, 2026-10-18 note] This object's default row scope: the one policy
+  // plugin-security's shipped permission sets spread for it today
+  // (`scimProjectionRowScope` in `default-permission-sets.ts`), moved here verbatim.
+  // Layer 0 is inert on this table (no organization column), so Layer 1 silence means
+  // this scope, not no filter. The security plugin's row-policy collection applies it
+  // when no set the caller holds carries a row policy for the object and operation; the
+  // shipped sets still carry it, so their holders read as before. An `extend`
   // contribution cannot set or loosen it (refused at registration).
   defaultRowScope: {
     name: 'sys_scim_group_none',
