@@ -827,6 +827,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.item-read-overlay-cache.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.layered-code-unshipped-name.test.ts",
       "verb": "findOne",
       "pinned": 1

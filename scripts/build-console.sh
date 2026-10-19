@@ -338,6 +338,10 @@ echo "→ Console will bundle @objectstack/spec from ${SPEC_PKG}"
 # exactly as before. A pin with it but without the hook refuses, like the two
 # vite.config.ts guards above, rather than letting objectui build its own pin.
 OBJECTSTACK_PIN_SCRIPT="${BUILD_ROOT}/scripts/objectstack-pin.mjs"
+# The spec the injection assertion at the end judges the bundle against: objectui's
+# own install, on a pin without `.objectstack-sha` (the block below says what
+# replaces it on a pin with one).
+VENDORED_SPEC="${BUILD_ROOT}/node_modules/@objectstack/spec"
 if [[ -f "${BUILD_ROOT}/.objectstack-sha" ]]; then
   if [[ ! -f "$OBJECTSTACK_PIN_SCRIPT" ]] || ! grep -q "OBJECTSTACK_ROOT" "$OBJECTSTACK_PIN_SCRIPT"; then
     echo "✗ objectui@${PINNED_SHA:0:12} carries .objectstack-sha but has no OBJECTSTACK_ROOT hook in"
@@ -382,6 +386,29 @@ if [[ -f "${BUILD_ROOT}/.objectstack-sha" ]]; then
     fi
     (cd "$FRAMEWORK_ROOT" && unset OS_SKIP_DTS && pnpm exec turbo run build "${OBJECTSTACK_TURBO_FILTERS[@]}" --output-logs=new-only)
   fi
+
+  # The REFERENCE for the injection assertion. Once this tree stands in below,
+  # objectui's install IS this tree, so its spec equals --injected and the
+  # assertion would pass any bundle with no witness. What a broken pack-or-inject
+  # ships here is objectui's own build of the commit its .objectstack-sha names, so
+  # build that first by objectui's own recipe (the pin script without
+  # OBJECTSTACK_ROOT, declarations included as it requires) and keep a copy, the
+  # pin's .stamp.json with it, outside the cache the stand-in replaces. The
+  # assertion refuses any other reference on such a pin. Reused while its stamp
+  # names this pin: the build of a fixed commit does not change.
+  OBJECTSTACK_PIN_SHA="$(tr -d '[:space:]' < "${BUILD_ROOT}/.objectstack-sha")"
+  PIN_REFERENCE="${BUILD_ROOT}/node_modules/.cache/objectstack-pin-reference"
+  REFERENCE_SHA="$(node -e '
+    try { const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); if (s.source === "pin") process.stdout.write(String(s.sha)); } catch {}
+  ' "${PIN_REFERENCE}/.stamp.json")"
+  if [[ "$REFERENCE_SHA" != "$OBJECTSTACK_PIN_SHA" ]]; then
+    echo "→ Building objectui's own @objectstack/* at its .objectstack-sha ${OBJECTSTACK_PIN_SHA:0:12}, the reference the spec assertion judges this bundle against..."
+    (cd "$BUILD_ROOT" && env -u OBJECTSTACK_ROOT -u OS_SKIP_DTS node scripts/objectstack-pin.mjs build)
+    rm -rf "$PIN_REFERENCE" "${PIN_REFERENCE}.partial"
+    cp -R "${BUILD_ROOT}/node_modules/.cache/objectstack" "${PIN_REFERENCE}.partial"
+    mv "${PIN_REFERENCE}.partial" "$PIN_REFERENCE"
+  fi
+  VENDORED_SPEC="${PIN_REFERENCE}/spec"
 
   # The pin script refuses (exit 1, reason on stderr) on a missing entry point,
   # and on two dependency mismatches between these packages and objectui's pin:
@@ -484,11 +511,11 @@ fi
 # --objectui is the checkout just built: objectui's own registry mirrors spec
 # descriptions, so text its tracked source carries is not evidence of either spec.
 # On a pin that installs @objectstack/* from this tree (the OBJECTSTACK_ROOT block
-# above), --vendored IS this tree's spec, packed: the script then reports no
-# skew, because objectui's install no longer holds a published spec to leak.
+# above), objectui's install is this tree's spec, packed, so --vendored is the
+# reference that block kept instead: objectui's own build of its .objectstack-sha.
 node "${FRAMEWORK_ROOT}/scripts/assert-console-spec-injection.mjs" \
   --injected "$SPEC_PKG" \
-  --vendored "${BUILD_ROOT}/node_modules/@objectstack/spec" \
+  --vendored "$VENDORED_SPEC" \
   --objectui "$BUILD_ROOT" \
   --assets "${TARGET}/assets"
 

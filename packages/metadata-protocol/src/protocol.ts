@@ -84,7 +84,7 @@ import {
     bumpWriteEpoch,
     metaOverlayCacheTtlMs,
     readMetaOverlayCache,
-    readWriteEpoch,
+    readOverlayCacheGeneration,
     writeMetaOverlayCache,
     type MetaOverlayCacheKey,
 } from './meta-overlay-cache.js';
@@ -10811,8 +10811,8 @@ export class ObjectStackProtocolImplementation implements
             type: request.type,
             packageId,
         };
-        const overlayCacheEpoch = readWriteEpoch(this.engine);
         const overlayCacheTtlMs = metaOverlayCacheTtlMs();
+        const overlayCacheEpoch = overlayCacheTtlMs > 0 ? readOverlayCacheGeneration(this.engine) : undefined;
         const overlayCacheNow = Date.now();
         const cachedRecords = readMetaOverlayCache(
             this.engine, overlayCacheKey, overlayCacheEpoch, overlayCacheTtlMs, overlayCacheNow,
@@ -11141,18 +11141,43 @@ export class ObjectStackProtocolImplementation implements
      * on every `/data` request (the API-exposure gate reads the object by
      * name), and every read is a round trip to a hosted database.
      *
-     * Read per call, never kept: a save is seen by the next read, as before.
      * The environment's rows only ({@link findEnvironmentRows}). A failed read
      * propagates: the caller owns its #5532 discrimination.
+     *
+     * [#10757 leg 6] `cached` — the served face only ({@link getMetaItem}) —
+     * reads through the overlay cache that already holds the list read's rows
+     * (`meta-overlay-cache.ts`, #11967), under a key naming this item: the
+     * same raw rows, upstream of every parse, merge and hydration, retired the
+     * moment a `sys_metadata` write settles (a save is seen by the next read,
+     * as before) or the epoch moves for a non-`write` reason, and bounded by
+     * `OS_METADATA_OVERLAY_CACHE_TTL_MS`. The REST
+     * API-exposure gate reads the object by name on every `/data` request, and
+     * this read was its one uncached `sys_metadata` round trip. Uncached, the
+     * read is per call and never kept, exactly as before.
      */
-    private async readItemActiveRows(type: string, name: string): Promise<StoredOverlayRow[]> {
+    private async readItemActiveRows(type: string, name: string, cached = false): Promise<StoredOverlayRow[]> {
         const other = PLURAL_TO_SINGULAR[type] ?? SINGULAR_TO_PLURAL[type];
-        // [#21911] The explicit system opt-in — see findServedOverlayRow.
-        const rows: StoredOverlayRow[] | null | undefined = await this.findEnvironmentRows('sys_metadata', {
-            where: { type: other === undefined ? type : { $in: [type, other] }, name, state: 'active' },
-            context: { isSystem: true },
-        });
-        return rows ?? [];
+        const read = async (): Promise<StoredOverlayRow[]> => {
+            // [#21911] The explicit system opt-in — see findServedOverlayRow.
+            const rows: StoredOverlayRow[] | null | undefined = await this.findEnvironmentRows('sys_metadata', {
+                where: { type: other === undefined ? type : { $in: [type, other] }, name, state: 'active' },
+                context: { isSystem: true },
+            });
+            return rows ?? [];
+        };
+        if (!cached) return read();
+        // ⭐ The epoch is read BEFORE the read and stored with its rows, as the
+        // list read's is (see `readActiveOverlayRows`): a write landing while
+        // this read is in flight leaves the entry dead on arrival.
+        const key: MetaOverlayCacheKey = { type, name };
+        const ttlMs = metaOverlayCacheTtlMs();
+        const epoch = ttlMs > 0 ? readOverlayCacheGeneration(this.engine) : undefined;
+        const now = Date.now();
+        const hit = readMetaOverlayCache(this.engine, key, epoch, ttlMs, now);
+        if (hit !== undefined) return hit as StoredOverlayRow[];
+        const rows = await read();
+        writeMetaOverlayCache(this.engine, key, epoch, rows, ttlMs, now);
+        return rows;
     }
 
     /**
@@ -11281,7 +11306,7 @@ export class ObjectStackProtocolImplementation implements
         if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
             throw objectPackageDisabledError(request.name);
         }
-        const answer = await this.readMetaItem(request);
+        const answer = await this.readMetaItem(request, { servedRead: true });
         if (request.type === 'object' || request.type === 'package'
             || !isItemOfDisabledPackage(this.engine?.registry, answer?.item)) {
             return answer;
@@ -11296,11 +11321,16 @@ export class ObjectStackProtocolImplementation implements
      * the object as the layers resolve it, whether or not its package is
      * disabled. Private on purpose; only this class's authoring callers read
      * it.
+     *
+     * [#10757 leg 6] `servedRead` is set by {@link getMetaItem} alone: the
+     * served face reads the item's active rows through the overlay cache
+     * ({@link readItemActiveRows}). An authoring caller passes nothing and
+     * reads the store, so a save is never judged against a cached row.
      */
     private async readMetaItem(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
-    }) {
+    }, opts: { servedRead?: boolean } = {}) {
         // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
         request = canonicalizeMetaRequestType(request);
         // [#23183] ADR-0048 §3.1: the app read keyed by PACKAGE ID, resolved
@@ -11406,11 +11436,12 @@ export class ObjectStackProtocolImplementation implements
         // ({@link readItemActiveRows}): the package-less binding, the served
         // row and the lock below each select from them by the `where` it would
         // have sent the store. They were five serial reads of the same rows,
-        // on every `/data` request. Read for this call only, never kept.
+        // on every `/data` request. [#10757 leg 6] On the served face the read
+        // goes through the overlay cache; an authoring read is never kept.
         let activeRows: StoredOverlayRow[] | undefined;
         if (readState === 'active') {
             try {
-                activeRows = await this.readItemActiveRows(request.type, request.name);
+                activeRows = await this.readItemActiveRows(request.type, request.name, opts.servedRead === true);
             } catch (error) {
                 // [#5532] Only an unprovisioned store holds no row; any other
                 // failure is a read that did not happen, never "no row".
