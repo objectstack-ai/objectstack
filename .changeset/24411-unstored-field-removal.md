@@ -4,7 +4,7 @@
 
 fix(metadata-protocol): removing a field that stores nothing is not a destructive change
 
-Clause-②: yes (widening)
+Clause-②: yes (widening) (the save door newly accepts, without `force`, a removal it refused; owes the seat's `TIER_DEFAULT` review of record before the queue)
 
 - **What changed.** The object save's safety diff (`PUT /api/v1/meta/object/:name`, and every other door that reaches `saveMetaItem`'s destructive gate) now judges each finding by whether the field is stored, using the spec's storage predicate `isVirtualSearchField` (`SEARCH_VIRTUAL_TYPES`) on the field's own declaration — the predicate the sortability projection already reads. A `formula` field is computed on read and has no column (ADR-0079 addendum, item 9), so:
   - removing a `formula` field saves `200` without `?force=true` (it answered `409 DESTRUCTIVE_CHANGE` with "existing data in this column will become inaccessible");
