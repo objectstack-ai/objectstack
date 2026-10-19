@@ -117,28 +117,32 @@ const storedRow = (
 /** A minimal `{ current, bump, subscribe }` seam — the shape the engine ships. */
 function makeEpochSeam() {
     let epoch = 0;
-    const listeners = new Set<(n: number) => void>();
+    const listeners = new Set<(n: number, reason: string) => void>();
     return {
         get current() {
             return epoch;
         },
-        bump(): number {
+        bump(reason = 'write'): number {
             epoch += 1;
-            for (const l of [...listeners]) l(epoch);
+            for (const l of [...listeners]) l(epoch, reason);
             return epoch;
         },
-        subscribe(listener: (n: number) => void): () => void {
+        subscribe(listener: (n: number, reason: string) => void): () => void {
             listeners.add(listener);
             return () => listeners.delete(listener);
         },
     };
 }
 
+type Middleware = (ctx: { object: string; operation: string }, next: () => Promise<void>) => Promise<void>;
+
 interface HarnessOptions {
     /** `undefined` (default) is the unscoped kernel — the only one that hydrates. */
     environmentId?: string;
     /** Omit the seam entirely, or hand over a partial one. */
     writeEpoch?: unknown;
+    /** [#10757 leg 6] `false` omits `registerMiddleware` — the other seam the cache requires. */
+    middleware?: boolean;
     /** What `registry.listItems` answers, if anything. */
     registryItems?: unknown[];
 }
@@ -153,6 +157,7 @@ function makeHarness(rows: StoredRow[], options: HarnessOptions = {}) {
     const registeredItems: Array<{ type: string; name: unknown }> = [];
 
     const seam = 'writeEpoch' in options ? options.writeEpoch : makeEpochSeam();
+    const middlewares: Middleware[] = [];
 
     const engine: any = {
         async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {
@@ -187,12 +192,13 @@ function makeHarness(rows: StoredRow[], options: HarnessOptions = {}) {
         // (`check:engine-double-contract`) no case here exercises. An
         // unexercised double is a pin that cannot fail, and the pinned ledger
         // would have to learn a double that protects nothing. A write is
-        // simulated by advancing the seam directly, which is exactly the
-        // observable a real engine write produces: `executeWithMiddleware`
-        // calls `writeEpoch.bump('write')` ahead of the middleware chain. That
-        // the engine does so on every insert/update/delete is already pinned by
+        // simulated as the observables a real engine write produces
+        // (`writeTo` below): `executeWithMiddleware` calls
+        // `writeEpoch.bump('write')` ahead of the middleware chain, then runs
+        // the chain around the driver step. That the engine does so on every
+        // insert/update/delete is already pinned by
         // `objectql/src/write-epoch.test.ts`; this file pins the CACHE's
-        // reaction to the bump, not the bump itself.
+        // reaction to those observables, not the engine's emission of them.
         registry: {
             registerItem: (type: string, item: any) => {
                 registeredItems.push({ type, name: item?.name });
@@ -208,6 +214,22 @@ function makeHarness(rows: StoredRow[], options: HarnessOptions = {}) {
         },
     };
     if (seam !== undefined) engine.writeEpoch = seam;
+    if (options.middleware !== false) {
+        engine.registerMiddleware = (fn: Middleware) => {
+            middlewares.push(fn);
+        };
+    }
+    /** One engine write of `object`: the epoch first, then the chain around the driver step. */
+    const writeTo = async (object: string, apply: () => void = () => {}, operation = 'update') => {
+        (seam as { bump?(reason: string): number } | undefined)?.bump?.('write');
+        const chain = [...middlewares];
+        let i = 0;
+        const next = async (): Promise<void> => {
+            if (i < chain.length) return chain[i++]!({ object, operation }, next);
+            apply();
+        };
+        await next();
+    };
 
     const protocol = new ObjectStackProtocolImplementation(
         engine,
@@ -221,7 +243,10 @@ function makeHarness(rows: StoredRow[], options: HarnessOptions = {}) {
         finds,
         registeredItems,
         rows,
-        bumpEpoch: () => (seam as { bump(): number } | undefined)?.bump(),
+        middlewares,
+        writeTo,
+        /** A `sys_metadata` write — the event that retires this cache. */
+        bumpEpoch: () => writeTo('sys_metadata'),
     };
 }
 
@@ -265,7 +290,7 @@ describe('[#11967] §1 cached ≡ uncached, and the repeat issues zero reads', (
 
         // The write: a new overlay row lands and the engine seam advances.
         cached.rows.push(storedRow('object', 'gamma'));
-        cached.bumpEpoch();
+        await cached.bumpEpoch();
 
         const afterBump = await cached.protocol.getMetaItems({ type: 'object' });
         // The staleness half: a bumped epoch re-read.
@@ -290,7 +315,7 @@ describe('[#11967] §1 cached ≡ uncached, and the repeat issues zero reads', (
         const before = await h.protocol.getMetaItems({ type: 'object' });
         const findsAfterFirst = h.finds.length;
 
-        h.bumpEpoch();
+        await h.bumpEpoch();
         const after = await h.protocol.getMetaItems({ type: 'object' });
 
         expect(h.finds.length).toBeGreaterThan(findsAfterFirst);
@@ -358,6 +383,15 @@ describe('[#11967] §3 a success is cached ONLY when the engine exposes the writ
         await h.protocol.getMetaItems({ type: 'object' });
 
         expect(h.finds.length).toBe(perCall * 3);
+    });
+
+    it('[#10757 leg 6] an engine with the epoch but no middleware seam keeps its exact query multiset too', async () => {
+        const h = makeHarness(clone(OVERLAY_ROWS), { middleware: false });
+        await h.protocol.getMetaItems({ type: 'object' });
+        const perCall = h.finds.length;
+        await h.protocol.getMetaItems({ type: 'object' });
+        expect(h.finds.length).toBe(perCall * 2);
+        expect(metaOverlayCacheEntryCount(h.engine)).toBe(0);
     });
 
     it('a partial `{ current }` object is NOT a seam and does not licence caching', async () => {
@@ -463,7 +497,7 @@ describe('[#11967] §4 the EMPTY result is cached, and that is the point', () =>
         // … and a publish still shows up on the very next read, with no clock
         // advance anywhere in this test.
         h.rows.push(storedRow('object', 'freshly_published'));
-        h.bumpEpoch();
+        await h.bumpEpoch();
 
         const after = await h.protocol.getMetaItems({ type: 'object' });
         expect((after.items as any[]).map((i) => i.name)).toContain('freshly_published');
@@ -501,7 +535,7 @@ describe('[#11967] §5 the TTL bounds what the epoch cannot see, and 0 is a real
         await h.protocol.getMetaItems({ type: 'object' });
         expect(h.finds.length).toBe(findsAfterFirst);
 
-        h.bumpEpoch();
+        await h.bumpEpoch();
         await h.protocol.getMetaItems({ type: 'object' });
         expect(h.finds.length).toBeGreaterThan(findsAfterFirst);
     });
@@ -646,10 +680,115 @@ describe('[#11967] §9 a write at a new epoch evicts the entries it orphaned', (
         await h.protocol.getMetaItems({ type: 'app' });
         expect(h.finds.length).toBe(findsBefore);
 
-        h.bumpEpoch();
+        await h.bumpEpoch();
         // One read at the new epoch is enough: every entry from the old one is
         // already dead by the read-side rule, so the bucket is dropped whole.
         await h.protocol.getMetaItems({ type: 'app' });
         expect(metaOverlayCacheEntryCount(h.engine)).toBe(1);
+    });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 10. [#10757 leg 6] Only a `sys_metadata` write retires it
+//
+// The measured defect: the cache was retired by the engine write epoch, which
+// every write to ANY object advances — on an idle stock boot the outbox
+// pollers' claim UPDATEs, on a live one every data write — so the `/data`
+// request after it paid the overlay read again. Each pin pairs "not retired"
+// with the hit it protects.
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('[#10757 leg 6] §10 a write to any OTHER object does not retire the overlay rows', () => {
+    it.each(['sys_http_delivery', 'sys_notification_delivery', 'showcase_task', 'sys_session', 'sys_setting'])(
+        'a `%s` write leaves the entry serving, with zero reads',
+        async (object) => {
+            const h = makeHarness(clone(OVERLAY_ROWS));
+            const first = await h.protocol.getMetaItems({ type: 'object' });
+            const perCall = h.finds.length;
+            await h.writeTo(object);
+            await h.writeTo(object, () => {}, 'insert');
+            await h.writeTo(object, () => {}, 'delete');
+            const second = await h.protocol.getMetaItems({ type: 'object' });
+            expect(h.finds.length).toBe(perCall);
+            expect(second).toEqual(first);
+        },
+    );
+
+    it('a `sys_metadata` write, by any verb, retires it and the new row is served', async () => {
+        for (const operation of ['insert', 'update', 'delete']) {
+            const rows = clone(OVERLAY_ROWS);
+            const h = makeHarness(rows);
+            await h.protocol.getMetaItems({ type: 'object' });
+            await h.writeTo('sys_metadata', () => rows.push(storedRow('object', 'gamma')), operation);
+            const after = await h.protocol.getMetaItems({ type: 'object' });
+            expect((after.items as any[]).map((i) => i.name), operation).toContain('gamma');
+        }
+    });
+
+    it('a READ of `sys_metadata` through the chain retires nothing', async () => {
+        const h = makeHarness(clone(OVERLAY_ROWS));
+        await h.protocol.getMetaItems({ type: 'object' });
+        const perCall = h.finds.length;
+        await h.writeTo('sys_metadata', () => {}, 'find');
+        await h.protocol.getMetaItems({ type: 'object' });
+        expect(h.finds.length).toBe(perCall);
+    });
+
+    it('the retirement lands AFTER the write settles — a read while it is in flight is dead on arrival', async () => {
+        const rows = clone(OVERLAY_ROWS);
+        const h = makeHarness(rows);
+        await h.protocol.getMetaItems({ type: 'object', packageId: 'pkg_other' }); // first sight: wires the seam
+        let land!: () => void;
+        const landed = new Promise<void>((r) => {
+            land = r;
+        });
+        let started = false;
+        const inFlight = (async () => {
+            (h.engine.writeEpoch as { bump(reason: string): number }).bump('write');
+            const chain = [...h.middlewares];
+            let i = 0;
+            const next = async (): Promise<void> => {
+                if (i < chain.length) return chain[i++]!({ object: 'sys_metadata', operation: 'insert' }, next);
+                started = true;
+                await landed;
+                rows.push(storedRow('object', 'gamma'));
+            };
+            await next();
+        })();
+        const during = await h.protocol.getMetaItems({ type: 'object' });
+        expect(started).toBe(true);
+        expect((during.items as any[]).map((i) => i.name)).not.toContain('gamma');
+        land();
+        await inFlight;
+        const after = await h.protocol.getMetaItems({ type: 'object' });
+        expect((after.items as any[]).map((i) => i.name)).toContain('gamma');
+    });
+
+    it('the observer is registered once per engine, unkeyed, and not at all with the TTL off', async () => {
+        const h = makeHarness(clone(OVERLAY_ROWS));
+        await h.protocol.getMetaItems({ type: 'object' });
+        await h.protocol.getMetaItems({ type: 'object', packageId: 'pkg_a' });
+        await h.protocol.getMetaItems({ type: 'object' });
+        expect(h.middlewares).toHaveLength(1);
+
+        const previous = process.env.OS_METADATA_OVERLAY_CACHE_TTL_MS;
+        process.env.OS_METADATA_OVERLAY_CACHE_TTL_MS = '0';
+        try {
+            const off = makeHarness(clone(OVERLAY_ROWS));
+            await off.protocol.getMetaItems({ type: 'object' });
+            expect(off.middlewares).toHaveLength(0);
+        } finally {
+            if (previous === undefined) delete process.env.OS_METADATA_OVERLAY_CACHE_TTL_MS;
+            else process.env.OS_METADATA_OVERLAY_CACHE_TTL_MS = previous;
+        }
+    });
+
+    it('a bare `write` epoch bump is the middleware\'s to judge, and on its own retires nothing', async () => {
+        const h = makeHarness(clone(OVERLAY_ROWS));
+        await h.protocol.getMetaItems({ type: 'object' });
+        const perCall = h.finds.length;
+        (h.engine.writeEpoch as { bump(reason: string): number }).bump('write');
+        await h.protocol.getMetaItems({ type: 'object' });
+        expect(h.finds.length).toBe(perCall);
     });
 });
