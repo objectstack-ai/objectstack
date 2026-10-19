@@ -10,7 +10,7 @@ Clause-②: no (narrowing) (a platform object stops declaring an action whose do
 
 The action now belongs to the composition that serves its route. That composition declares `change_slug` as a top-level action bound by `objectName: 'sys_organization'`, and the registry attaches such an action to the served object, whichever package registers first.
 
-**BREAKING — what moves for consumers.** A declared action leaves a published platform object, shipped as `minor` under the launch-window convention for breaking changes (`.changeset/pre.json` is open in `next` pre mode).
+**BREAKING — what moves for consumers.** A declared action leaves a published platform object, shipped as `minor` under the launch-window convention for breaking changes (pre mode was exited at `c46b5f14cf`, so the launch-window guard is armed and a breaking change ships as `minor`).
 
 - FROM: `GET /api/v1/meta/object/sys_organization` served `change_slug` on every composition, and the four generated locale bundles carried its `label`, `description` and `successMessage`.
 - TO: the object serves it only where a composition binds it. The open-source record header offers Invite User, Set Active and Rename Organization inline, and Leave Organization in the overflow; each of them is a better-auth door this composition mounts.

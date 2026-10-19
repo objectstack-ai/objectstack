@@ -147,7 +147,9 @@ describe('a cloud-shaped composition binds change_slug to sys_organization, and 
   });
 
   it('the boot names no collision for it: the platform object declares no change_slug of its own', () => {
-    expect(bootLines.some((line) => / WARN /.test(line))).toBe(true); // the capture saw the boot's warnings
+    // Positive control: the capture saw the boot's own kernel log (the ObjectQL
+    // plugin's lines), so an empty match below is a reading, not a dead spy.
+    expect(bootLines.some((line) => line.includes('[ObjectQLPlugin]'))).toBe(true);
     expect(bootLines.filter((line) => line.includes("'change_slug'") && / (WARN|ERROR) /.test(line))).toEqual([]);
   });
 });
