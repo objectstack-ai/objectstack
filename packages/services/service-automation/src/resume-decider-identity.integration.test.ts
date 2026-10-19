@@ -144,10 +144,10 @@ function reviewFlow(name: string, opts: { runAs?: 'system' | 'user'; gate?: stri
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Each user's grants as the resolver answers them, deliberately disjoint. */
-const GRANTS: Record<string, { positions: string[]; permissions: string[]; org_user_ids: string[] }> = {
-  usr_rep: { positions: ['sales_rep', 'everyone'], permissions: ['deal_rep'], org_user_ids: ['usr_rep', 'usr_mgr', 'usr_dir'] },
-  usr_mgr: { positions: ['sales_manager', 'everyone'], permissions: ['deal_manager'], org_user_ids: ['usr_mgr', 'usr_rep'] },
-  usr_dir: { positions: ['sales_director', 'everyone'], permissions: ['deal_director'], org_user_ids: ['usr_dir'] },
+const GRANTS: Record<string, { positions: string[]; permissions: string[]; org_user_ids: string[]; email: string }> = {
+  usr_rep: { positions: ['sales_rep', 'everyone'], permissions: ['deal_rep'], org_user_ids: ['usr_rep', 'usr_mgr', 'usr_dir'], email: 'rep@example.test' },
+  usr_mgr: { positions: ['sales_manager', 'everyone'], permissions: ['deal_manager'], org_user_ids: ['usr_mgr', 'usr_rep'], email: 'mgr@example.test' },
+  usr_dir: { positions: ['sales_director', 'everyone'], permissions: ['deal_director'], org_user_ids: ['usr_dir'], email: 'dir@example.test' },
 };
 
 function envelopeHarness(opts: { failFor?: string } = {}) {
@@ -162,7 +162,7 @@ function envelopeHarness(opts: { failFor?: string } = {}) {
         ...resolveRunDataContext(context),
         // The run context's own facts, beside the envelope: what `current_user`
         // is built from in the segment's CEL.
-        raw: { userId: context?.userId, positions: context?.positions, permissions: context?.permissions },
+        raw: { userId: context?.userId, positions: context?.positions, permissions: context?.permissions, email: context?.email },
       });
       return { success: true };
     },
@@ -205,6 +205,8 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
     expect(after.positions).toEqual(GRANTS.usr_mgr.positions);
     expect(after.permissions).toEqual(GRANTS.usr_mgr.permissions);
     expect(after.org_user_ids).toEqual(GRANTS.usr_mgr.org_user_ids);
+    expect(after.email, "the decider's own email, never the submitter's").toBe(GRANTS.usr_mgr.email);
+    expect(before.email).toBe(GRANTS.usr_rep.email);
     expect(after.positions).not.toContain('sales_rep');
     expect(after.permissions).not.toContain('deal_rep');
     // Through the same resolver the trigger was seeded through, for the decider.
@@ -257,6 +259,7 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
     expect(after.positions).toEqual([]);
     expect(after.permissions).toEqual([]);
     expect(after.org_user_ids).toBeUndefined();
+    expect(after.email, "the submitter's email does not stand in for the decider's").toBeUndefined();
   });
 
   it.each([['approve', 'after1'], ['reject', 'rejected']] as const)(
@@ -265,7 +268,7 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
       const h = envelopeHarness();
       h.engine.registerFlow('sys_review', reviewFlow('sys_review', { runAs: 'system', recorder: true }) as never);
       // The REST / action doors' shape: the trigger forwards its own grants.
-      const paused = await h.engine.execute('sys_review', { ...TRIGGER, positions: ['sales_rep'], permissions: ['deal_rep'] } as never);
+      const paused = await h.engine.execute('sys_review', { ...TRIGGER, positions: ['sales_rep'], permissions: ['deal_rep'], email: GRANTS.usr_rep.email } as never);
       expect(h.ctxOf('submit')).toMatchObject({ isSystem: true, userId: 'usr_rep' });
 
       await h.engine.resume(paused.runId!, decided(decision, 'usr_mgr'));
@@ -277,6 +280,8 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
       // grants left under the decider's name.
       expect(h.resolved.map(([u]) => u), 'a system run resolves no grant for the decider').not.toContain('usr_mgr');
       expect(after.raw).toEqual({ userId: 'usr_mgr', positions: undefined, permissions: undefined });
+      // The submitter's email is theirs too: it does not ride the decider's segment.
+      expect(after.raw.email).toBeUndefined();
     },
   );
 

@@ -449,7 +449,7 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
     const seen: Array<{ userId: string; tenantId?: string }> = [];
     engine.setUserGrantsResolver((userId, tenantId) => {
       seen.push({ userId, tenantId });
-      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'], org_user_ids: ['u1', 'u2'] };
+      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'], org_user_ids: ['u1', 'u2'], email: 'u1@example.test' };
     });
 
     // An already-resolved envelope — e.g. an ADR-0090 agent ceiling acting
@@ -463,10 +463,11 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
       expect(c.ctx.permissions).toEqual(['mcp_agent_read']);
       expect(c.ctx.positions).toEqual(['agent']);
       expect(c.ctx.org_user_ids, `${c.op} lost the seeded peer list`).toEqual(['u1', 'u2']);
+      expect(c.ctx.email, `${c.op} lost the seeded email`).toBe('u1@example.test');
     }
   });
 
-  it('resolves nothing when the trigger already carried permissions AND a peer list (a subflow child, a resumed leg)', async () => {
+  it('resolves nothing when the trigger already carried permissions, a peer list AND an email (a subflow child, a resumed leg)', async () => {
     const engine = new AutomationEngine(makeLogger());
     const { data, calls } = fakeData();
     registerCrudNodes(engine, ctxWith(data));
@@ -475,18 +476,91 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
     let called = 0;
     engine.setUserGrantsResolver(() => {
       called++;
-      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'], org_user_ids: ['SHOULD_NOT_APPLY'] };
+      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'], org_user_ids: ['SHOULD_NOT_APPLY'], email: 'SHOULD_NOT_APPLY' };
     });
 
     await engine.execute('usr', {
-      userId: 'u1', positions: ['member'], permissions: ['member_default'], tenantId: 't1', org_user_ids: ['u1', 'u3'],
+      userId: 'u1', positions: ['member'], permissions: ['member_default'], tenantId: 't1', org_user_ids: ['u1', 'u3'], email: 'u1@example.test',
     } as SeededRunContext);
     expect(called).toBe(0);
     expect(calls.length).toBeGreaterThan(0);
     for (const c of calls) {
       expect(c.ctx.permissions).toEqual(['member_default']);
       expect(c.ctx.org_user_ids).toEqual(['u1', 'u3']);
+      expect(c.ctx.email).toBe('u1@example.test');
     }
+  });
+
+  it('a context carrying permissions and a peer list but no email resolves the email alone, and keeps the rest verbatim', async () => {
+    const engine = new AutomationEngine(makeLogger());
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data));
+    engine.registerFlow('usr', allOpsFlow('usr', 'user'));
+
+    const seen: Array<{ userId: string; tenantId?: string }> = [];
+    engine.setUserGrantsResolver((userId, tenantId) => {
+      seen.push({ userId, tenantId });
+      return { positions: ['SHOULD_NOT_APPLY'], permissions: ['SHOULD_NOT_APPLY'], org_user_ids: ['SHOULD_NOT_APPLY'], email: 'u1@example.test' };
+    });
+
+    await engine.execute('usr', {
+      userId: 'u1', positions: ['member'], permissions: ['member_default'], tenantId: 't1', org_user_ids: ['u1', 'u3'],
+    } as SeededRunContext);
+    expect(seen).toEqual([{ userId: 'u1', tenantId: 't1' }]);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      expect(c.ctx.positions).toEqual(['member']);
+      expect(c.ctx.permissions).toEqual(['member_default']);
+      expect(c.ctx.org_user_ids).toEqual(['u1', 'u3']);
+      expect(c.ctx.email, `${c.op} lost the seeded email`).toBe('u1@example.test');
+    }
+  });
+
+  it('seeds the email beside the resolved grants and threads it to EVERY data op', async () => {
+    const engine = new AutomationEngine(makeLogger());
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data));
+    engine.registerFlow('usr', allOpsFlow('usr', 'user'));
+    engine.setUserGrantsResolver(() => ({ positions: ['org_member'], permissions: ['member_default'], org_user_ids: ['u1'], email: 'u1@example.test' }));
+
+    // The record-change trigger's shape: a user id and an organization, no email.
+    const res = await engine.execute('usr', { userId: 'u1', tenantId: 't1' });
+    expect(res.success).toBe(true);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) expect(c.ctx.email, `${c.op} lost the seeded email`).toBe('u1@example.test');
+  });
+
+  it('a context that already carries an email keeps it verbatim; the resolver\'s stored one is not applied', async () => {
+    const engine = new AutomationEngine(makeLogger());
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data));
+    engine.registerFlow('usr', allOpsFlow('usr', 'user'));
+    let called = 0;
+    engine.setUserGrantsResolver(() => {
+      called++;
+      return { positions: ['org_member'], permissions: ['member_default'], org_user_ids: ['u1'], email: 'SHOULD_NOT_APPLY' };
+    });
+
+    // A door that forwards the request's own (session) email.
+    await engine.execute('usr', { userId: 'u1', tenantId: 't1', email: 'u1.session@example.test' });
+    expect(called, 'the other facts are still resolved').toBe(1);
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) {
+      expect(c.ctx.email).toBe('u1.session@example.test');
+      expect(c.ctx.permissions).toEqual(['member_default']);
+    }
+  });
+
+  it('a resolver that answers no email seeds none — the data context carries no email, never a made-up one', async () => {
+    const engine = new AutomationEngine(makeLogger());
+    const { data, calls } = fakeData();
+    registerCrudNodes(engine, ctxWith(data));
+    engine.registerFlow('usr', allOpsFlow('usr', 'user'));
+    engine.setUserGrantsResolver(() => ({ positions: ['org_member'], permissions: ['member_default'], org_user_ids: ['u1'] }));
+
+    await engine.execute('usr', { userId: 'u1', tenantId: 't1' });
+    expect(calls.length).toBeGreaterThan(0);
+    for (const c of calls) expect('email' in c.ctx, `${c.op} carried an invented email`).toBe(false);
   });
 
   it('seeds the peer list beside the resolved grants and threads it to EVERY data op', async () => {
@@ -529,6 +603,7 @@ describe("runAs:'user' resolves the triggering user's grants at run setup (#3356
       expect(c.ctx.isSystem).toBe(false);
       expect(c.ctx.permissions).toEqual(['member_default']);
       expect('org_user_ids' in c.ctx).toBe(false);
+      expect('email' in c.ctx).toBe(false);
     }
   });
 
