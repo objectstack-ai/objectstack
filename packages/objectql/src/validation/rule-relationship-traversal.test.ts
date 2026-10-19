@@ -549,7 +549,7 @@ describe('[#24512] a `conditional` rule\'s `when` reads one hop through a refere
     it('a partner account runs `then`', () => {
       const refused = verdict(schema, deal(50000), PARTNER);
       expect(refused?.code).toBe('VALIDATION_FAILED');
-      expect(refused?.fields).toEqual([expect.objectContaining({ code: 'rule_violation', message: THEN })]);
+      expect(refused?.fields).toEqual([expect.objectContaining({ field: '_record', code: 'rule_violation', message: THEN })]);
       expect(refused?.fields[0]?.constraint?.reason).toBeUndefined();
       // `then` admits what it does not refuse, and `otherwise` is not run.
       expect(verdict(schema, deal(50), PARTNER)).toBeNull();
@@ -558,7 +558,7 @@ describe('[#24512] a `conditional` rule\'s `when` reads one hop through a refere
     it('any other account runs `otherwise`', () => {
       const refused = verdict(schema, deal(50), DIRECT);
       expect(refused?.code).toBe('VALIDATION_FAILED');
-      expect(refused?.fields).toEqual([expect.objectContaining({ code: 'rule_violation', message: OTHERWISE })]);
+      expect(refused?.fields).toEqual([expect.objectContaining({ field: '_record', code: 'rule_violation', message: OTHERWISE })]);
       // `otherwise` admits what it does not refuse, and `then` is not run.
       expect(verdict(schema, deal(50000), DIRECT)).toBeNull();
     });
@@ -601,6 +601,7 @@ describe('[#24512] a `conditional` rule\'s `when` reads one hop through a refere
       expect(refused?.code).toBe('VALIDATION_FAILED');
       const gateError = refused?.fields.find((f) => f.constraint?.rule === 'partner_gate');
       expect(gateError).toMatchObject({
+        field: '_record',
         code: 'rule_violation',
         constraint: { rule: 'partner_gate', reason: 'unevaluable', fault: 'reads more than one relationship hop' },
       });
@@ -619,7 +620,7 @@ describe('[#24512] a `conditional` rule\'s `when` reads one hop through a refere
       const refused = verdict(schema, deal(50000), related);
       expect(refused?.code).toBe('VALIDATION_FAILED');
       const gateError = refused?.fields.find((f) => f.constraint?.rule === 'partner_gate');
-      expect(gateError).toMatchObject({ code: 'rule_violation', constraint: { rule: 'partner_gate', reason: 'unevaluable' } });
+      expect(gateError).toMatchObject({ field: '_record', code: 'rule_violation', constraint: { rule: 'partner_gate', reason: 'unevaluable' } });
       expect(gateError?.message).toContain("'crm_account' declares no 'region'");
       // The sibling reading `type` through the same reference refuses with its own message…
       expect(messagesOf(refused)).toContain('Partner accounts are capped at 10000.');
@@ -631,7 +632,7 @@ describe('[#24512] a `conditional` rule\'s `when` reads one hop through a refere
     it('an empty reference is refused naming the guard, not as a fault in this object\'s columns', () => {
       const refused = verdict(schemaOf(gate("record.account.type == 'partner'")), { name: 'A', amount: 50, account: null },
         { account: unavailable('no-reference') });
-      expect(refused?.fields).toEqual([expect.objectContaining({ code: 'rule_violation', constraint: expect.objectContaining({ rule: 'partner_gate', reason: 'unevaluable' }) })]);
+      expect(refused?.fields).toEqual([expect.objectContaining({ field: '_record', code: 'rule_violation', constraint: expect.objectContaining({ rule: 'partner_gate', reason: 'unevaluable' }) })]);
       expect(refused?.fields[0]?.message).toContain('`conditional` rule whose `when` is `record.account != null`');
       expect(refused?.fields[0]?.message).not.toContain('which this object does not declare');
     });

@@ -323,10 +323,10 @@ describe('#18682 — engine-produced relationship bindings', () => {
       register([gate("record.account.type == 'partner'")]);
       const partner = await insert({ name: 'A', amount: 50000, account: 'acc_p' });
       expect(partner?.code).toBe('VALIDATION_FAILED');
-      expect(partner?.fields).toEqual([expect.objectContaining({ code: 'rule_violation', message: THEN })]);
+      expect(partner?.fields).toEqual([expect.objectContaining({ field: '_record', code: 'rule_violation', message: THEN })]);
       const direct = await insert({ name: 'B', amount: 50, account: 'acc_d' });
       expect(direct?.code).toBe('VALIDATION_FAILED');
-      expect(direct?.fields).toEqual([expect.objectContaining({ code: 'rule_violation', message: OTHERWISE })]);
+      expect(direct?.fields).toEqual([expect.objectContaining({ field: '_record', code: 'rule_violation', message: OTHERWISE })]);
       // Each branch admits what it does not refuse, and the other branch is not run.
       expect(await insert({ name: 'C', amount: 50, account: 'acc_p' })).toBeNull();
       expect(await insert({ name: 'D', amount: 50000, account: 'acc_d' })).toBeNull();
@@ -344,6 +344,7 @@ describe('#18682 — engine-produced relationship bindings', () => {
       const direct = await insert({ name: 'A', amount: 50000, account: 'acc_d' });
       expect(direct?.code).toBe('VALIDATION_FAILED');
       expect(direct?.fields).toEqual([expect.objectContaining({
+        field: '_record',
         code: 'rule_violation',
         constraint: expect.objectContaining({ rule: 'sneaky_gate', reason: 'unevaluable' }),
       })]);
