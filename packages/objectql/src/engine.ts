@@ -21805,10 +21805,13 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    * included; a context with no `tenantId` gets the user alone, as an
    * organisation-less request does. A resolver failure (an unreadable
    * permission store) is thrown to the caller, which keeps the unseeded api.
+   *
+   * Called on the api {@link withRunAs}`('user')` derived, which is never
+   * elevated, so it does not re-judge the elevation flag.
    */
   async withUserGrantsSeeded(): Promise<ScopedContext> {
     const ctx = this.executionContext;
-    if (ctx.isSystem || !ctx.userId) return this;
+    if (!ctx.userId) return this;
     const needsGrants = !Array.isArray(ctx.permissions);
     const needsPeers = !Array.isArray(ctx.org_user_ids);
     if (!needsGrants && !needsPeers) return this;
