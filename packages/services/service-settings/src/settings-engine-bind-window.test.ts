@@ -55,7 +55,7 @@ import { describe, expect, it } from 'vitest';
 import { LiteKernel } from '@objectstack/core';
 import type { Plugin, PluginContext } from '@objectstack/core';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysPlatformSetting, SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysPlatformSettingAudit, SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { SettingsServicePlugin, wrapEngineAsSettingsEngine } from './settings-service-plugin.js';
@@ -233,9 +233,12 @@ async function bootKernel(opts: { withEngine?: boolean } = {}) {
   engine.registerDriver(driver, true);
   await engine.init();
   // [#21516] The settings service writes its audit row through
-  // `sys_setting_audit`; the engine refuses a name its registry does not hold,
-  // so the harness registers it beside the two it already did, as a boot does.
-  for (const o of [SysSetting, SysPlatformSetting, SysSecret, SysSettingAudit]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
+  // `sys_setting_audit` (or, for the global rung, `sys_platform_setting_audit`
+  // — ADR-0131 D7, Q4 A); the engine refuses a name its registry does not hold,
+  // so the harness registers them beside the two it already did, as a boot does.
+  for (const o of [SysSetting, SysPlatformSetting, SysSecret, SysSettingAudit, SysPlatformSettingAudit]) {
+    engine.registry.registerObject(o as any, OWNER_PACKAGE);
+  }
 
   const probe = new ReadyHookFromInitPlugin();
   const kernel = new LiteKernel({ logger: { level: 'error' } as never });
@@ -251,9 +254,10 @@ async function bootKernel(opts: { withEngine?: boolean } = {}) {
   return {
     kernel, engine, svc, probe, rowsOf,
     // The probe manifests are `scope: 'global'`, so their rows are the global
-    // rung's: `sys_platform_setting` (ADR-0131 D7).
+    // rung's: `sys_platform_setting`, and its trail `sys_platform_setting_audit`
+    // (ADR-0131 D7; ruling record 6257510973, Q4 A).
     settingRows: () => [...rowsOf('sys_platform_setting').values()],
-    auditRows: () => [...rowsOf('sys_setting_audit').values()],
+    auditRows: () => [...rowsOf('sys_platform_setting_audit').values()],
   };
 }
 
@@ -376,9 +380,12 @@ describe('engine-less callers outside the window observe nothing new', () => {
     engine.registerDriver(driver, true);
     await engine.init();
     // [#21516] The settings service writes its audit row through
-    // `sys_setting_audit`; the engine refuses a name its registry does not hold,
-    // so the harness registers it beside the two it already did, as a boot does.
-    for (const o of [SysSetting, SysPlatformSetting, SysSecret, SysSettingAudit]) engine.registry.registerObject(o as any, OWNER_PACKAGE);
+    // `sys_setting_audit` (or, for the global rung, `sys_platform_setting_audit`
+    // — ADR-0131 D7, Q4 A); the engine refuses a name its registry does not hold,
+    // so the harness registers them beside the two it already did, as a boot does.
+    for (const o of [SysSetting, SysPlatformSetting, SysSecret, SysSettingAudit, SysPlatformSettingAudit]) {
+      engine.registry.registerObject(o as any, OWNER_PACKAGE);
+    }
 
     const svc = new SettingsService({ env: {}, engineBindPending: true });
     svc.registerManifest(probeManifest);

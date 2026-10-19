@@ -40,7 +40,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysPlatformSetting, SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysPlatformSettingAudit, SysSecret, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import type { SettingsManifest } from '@objectstack/spec/system';
 import type { IHttpRequest, IHttpResponse, IHttpServer, RouteHandler } from '@objectstack/spec/contracts';
 import {
@@ -232,6 +232,8 @@ async function bootPlugin(opts: BootOptions = {}) {
   engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
   engine.registry.registerObject(SysPlatformSetting as any, OWNER_PACKAGE);
   engine.registry.registerObject(SysSettingAudit as any, OWNER_PACKAGE);
+  // [ADR-0131 D7, Q4 A] The settings audit trail's global rung.
+  engine.registry.registerObject(SysPlatformSettingAudit as any, OWNER_PACKAGE);
   // [#21516] A secret-typed setting writes through `sys_secret`; the engine
   // refuses a name its registry does not hold, so the harness registers it as
   // a boot does (platform-objects owns it).
@@ -308,8 +310,15 @@ async function bootPlugin(opts: BootOptions = {}) {
     /** Every `sys_audit_log` row the write path asked the engine to insert. */
     ledgerRows: () => ledgerInserts.map((i) => i.row),
     ledgerOpts: () => ledgerInserts.map((i) => i.opts),
-    /** REAL `sys_setting_audit` rows, read out of the driver's store. */
-    settingAuditRows: () => [...rowsOf('sys_setting_audit').values()],
+    /**
+     * REAL settings-audit rows of this file's manifest, read out of the
+     * driver's store. It is `scope: 'global'`, so they are
+     * `sys_platform_setting_audit` rows — the audit trail's global rung
+     * (ADR-0131 D7, ruling record 6257510973 · Q4 A).
+     */
+    settingAuditRows: () => [...rowsOf('sys_platform_setting_audit').values()],
+    /** REAL `sys_setting_audit` rows — the tenant and user rungs' trail. */
+    scopedSettingAuditRows: () => [...rowsOf('sys_setting_audit').values()],
     /**
      * REAL settings rows of this file's manifest. It is `scope: 'global'`, so
      * they are `sys_platform_setting` rows — the global rung's own store
@@ -459,11 +468,13 @@ describe('#8145 — dual-write: `sys_setting_audit` keeps its rows', () => {
 
     await boot.service.setMany('branding_test', { workspace_name: 'ObjectStack' }, boot.writeCtx);
 
-    // The presence half. This is a REAL row in the REAL `sys_setting_audit`
-    // object, so the assertion cannot pass emptily on a fixture that never wrote
-    // there — which is exactly how an "existing behaviour unchanged" pin goes
-    // green for the wrong reason.
+    // The presence half. This is a REAL row in the REAL settings audit trail —
+    // `sys_platform_setting_audit`, the global rung's (ADR-0131 D7, Q4 A) —
+    // so the assertion cannot pass emptily on a fixture that never wrote there,
+    // which is exactly how an "existing behaviour unchanged" pin goes green for
+    // the wrong reason.
     const settingAudit = boot.settingAuditRows();
+    expect(boot.scopedSettingAuditRows()).toHaveLength(0);
     expect(settingAudit).toHaveLength(1);
     expect(settingAudit[0]).toMatchObject({
       namespace: 'branding_test',
@@ -622,6 +633,8 @@ describe('#8145 — a refused write emits NO config_change row', () => {
     engine.registry.registerObject(SysSetting as any, OWNER_PACKAGE);
     engine.registry.registerObject(SysPlatformSetting as any, OWNER_PACKAGE);
     engine.registry.registerObject(SysSettingAudit as any, OWNER_PACKAGE);
+    // [ADR-0131 D7, Q4 A] The settings audit trail's global rung.
+    engine.registry.registerObject(SysPlatformSettingAudit as any, OWNER_PACKAGE);
     // [#21516] A secret-typed setting writes through `sys_secret`; the engine
     // refuses a name its registry does not hold, so the harness registers it as
     // a boot does (platform-objects owns it).
@@ -660,7 +673,8 @@ describe('#8145 — a refused write emits NO config_change row', () => {
     // The #8026 pre-flight refuses the WHOLE batch before the write loop, so the
     // plain sibling key is neither persisted nor audited — a half-audited batch
     // would be worse than no audit at all.
-    const settingAudit = () => [...rowsOf('sys_setting_audit').values()];
+    // The manifest is global, so its trail is the global rung's (Q4 A).
+    const settingAudit = () => [...rowsOf('sys_platform_setting_audit').values()];
     expect(ledgerRows).toHaveLength(0);
     expect(settingAudit()).toHaveLength(0);
     expect([...rowsOf('sys_setting').values()]).toHaveLength(0);

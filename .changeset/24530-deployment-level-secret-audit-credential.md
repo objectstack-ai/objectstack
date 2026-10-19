@@ -16,7 +16,7 @@ Clause-②: yes (narrowing)
 
 - **`sys_secret` is deployment-level.**
   - **Before.** Under `single`, every `sys_secret` row was stamped with the Default Organization, and an encrypted tenant or user setting wrote its organization on the secret.
-  - **Now.** The object declares `tenancy: { enabled: false }`: nothing stamps, walls or scopes it by organization. A secret is owned by the row that holds its handle, and every read stays by id under privilege. The settings service no longer passes `organization_id` to its secret store, and `SettingsSecretStore.insert` no longer declares the property.
+  - **Now.** The object declares `tenancy: { enabled: false }`: nothing stamps, walls or scopes it by organization. A secret is owned by the row that holds its handle, and every read stays by id under privilege. The settings service no longer writes `organization_id` on a secret.
   - **The 18.0 column stays.** `organization_id` is still declared, nullable, read-only and unread, with the shape 18.0 gave it (a 255-wide string, no longer a lookup), so an 18.0 database boots and its schema sync proposes no change. A row an 18.0 install stamped keeps its organization and opens by id as before. The upgrade ceremony drops the column.
 - **`sys_flow_credential` is deployment-level**, in the same shape: `tenancy: { enabled: false }`, the 18.0 column kept declared and unread. A credential's ownership follows its flow, which is environment metadata. New credential rows, and the `sys_secret` rows their values mint, carry no organization. 18.0 rows keep theirs and resolve as before.
 - **The settings audit trail's global rung moves to `sys_platform_setting_audit`.**
