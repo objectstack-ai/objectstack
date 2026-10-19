@@ -173,8 +173,10 @@ contradicts it, and correct it here when it does.
   `@playwright/test` 1.63.0 (the `^1.63.0` `examples/app-showcase/package.json` declares, the
   only version in the store) resolves chromium build **1243**; only **1194** is installed.
   Re-measured at `bfc1539fe0`: this entry read 1.62.1 and build 1234 until the tree moved
-  to 1.63.0.
-  **Check:** `grep -A2 '"name": "chromium"' node_modules/playwright-core/browsers.json`
+  to 1.63.0; `playwright-core` sits only in the pnpm store (there is no root
+  `node_modules/playwright-core`), so the check reads it there.
+  **Check:**
+  `grep -A2 '"name": "chromium"' node_modules/.pnpm/playwright-core@*/node_modules/playwright-core/browsers.json`
   against `ls $PLAYWRIGHT_BROWSERS_PATH` (`/opt/pw-browsers` here, holding
   `chromium-1194` / `chromium_headless_shell-1194` only). The stock
   `examples/app-showcase/playwright.config.ts` sets no `executablePath`, so every test
@@ -338,19 +340,20 @@ contradicts it, and correct it here when it does.
      (`packages/plugins/plugin-auth/src/auth-manager.ts`, `hasPendingInvitationFor`).
      ⚠️ **The sign-up does not apply the invitation's role.** It binds the new user to the
      Default Organization as `member` whatever role was invited, and leaves the invitation
-     `pending` (`reconcileMembership` in `packages/plugins/plugin-auth/src/reconcile-membership.ts`
-     writes `role: 'member'`). For any other role (`admin`, `owner`), the persona — signed in
-     as itself — then sends `POST /api/v1/auth/organization/accept-invitation` with
-     `{"invitationId": "ID"}` (the `id` the invite-member call answered, or the row its own
+     `pending` (`reconcileMembership` in
+     `packages/plugins/plugin-auth/src/reconcile-membership.ts` writes `role: 'member'`). For
+     any other role (`admin`, `owner`), the persona — signed in as itself — then sends
+     `POST /api/v1/auth/organization/accept-invitation` with `{"invitationId": "ID"}` (the
+     `id` the invite-member call answered, or the row its own
      `GET /api/v1/auth/organization/list-user-invitations` lists). Acceptance writes the
      invitation's role onto that membership and the invitation reads `accepted`
      (`adoptExistingMembership` in `packages/plugins/plugin-auth/src/adopt-membership.ts`,
      which never lowers a grade; pinned by `accept-invitation-adopt-membership.test.ts`
-     beside it). The invitee's email need not be verified: the deployment declares
-     `requireEmailVerificationOnInvitation: false`. QA run #24616 met it: an `admin`
-     invitation signed up as `member`, and the persona held `org_admin` only after the accept.
-     **Check:** read the persona's `sys_member` row (`role`) before scoring a role-gated
-     clause, never the invitation you sent.
+     beside it, 6 passed at `bfc1539fe0`). The invitee's email need not be verified: the
+     deployment declares `requireEmailVerificationOnInvitation: false`. QA run #24616 met it:
+     an `admin` invitation signed up as `member`, and the persona held `org_admin` only after
+     the accept. **Check:** read the persona's `sys_member` row (`role`) before scoring a
+     role-gated clause, never the invitation you sent.
   2. **Admin create.** `POST /api/v1/auth/admin/create-user`, which answers
      `mustChangePassword: true` by default
      (`packages/plugins/plugin-auth/src/admin-user-endpoints.ts`, `runAdminCreateUser`);
@@ -463,13 +466,15 @@ contradicts it, and correct it here when it does.
   refusal promises the walled postures for "an 18.x release" and names none. Kernel-level
   boots (`@objectstack/verify`'s `bootStack`, the dogfood wall suites) never pass through
   `serve` and still boot walled, which is why a walled clause is proven by its pins.
-  **So:** score a walled clause from the pins its item names, and record its live leg
-  `skipped` with this entry cited — "not scored on a stock 18.0 boot" — as the clauses of
-  the withdrawn organization-ownership command are. ⛔ Never `blocked(fixture)`: no fixture
-  provisions a posture the release refuses. The 18.0 sweep's records met it and scored the
-  live leg both `blocked(environment)` (QA runs #24557, #24559) and `blocked(fixture)` (QA
-  run #24558); this entry is the one word. Each item that carries such a leg names it in its
-  own `fixtures.knownGaps`.
+  Measured at `bfc1539fe0`: `isolated`, `group` and `OS_MULTI_ORG_ENABLED=true` each exit 1
+  with that FATAL on `os serve` and on `os start`, `single` passes the gate, and the pin
+  reports 5 passed. **So:** score a walled clause from the pins its item names, and record
+  its live leg `skipped` with this entry cited — "not scored on a stock 18.0 boot" — as the
+  clauses of the withdrawn organization-ownership command are. ⛔ Never `blocked(fixture)`:
+  no fixture provisions a posture the release refuses. The 18.0 sweep's records met it and
+  scored the live leg both `blocked(environment)` (QA runs #24557, #24559) and
+  `blocked(fixture)` (QA run #24558); this entry is the one word. Each item that carries
+  such a leg names it in its own `fixtures.knownGaps`.
 
 - **A stock 18.0 boot holds exactly one organization, and no door mints a second — so an
   org-switch clause has no live leg on a stock boot either.**
@@ -488,7 +493,7 @@ contradicts it, and correct it here when it does.
   a stock 18.0 boot: record its live leg `skipped` with this entry cited, and score what its
   pins prove. A run that stages the second organization itself (QA run #24560 wrote one with
   a system write) scores a fixture of its own making, not a stock boot, and its record says
-  so. QA runs #24560 and #24558 met the 403.
+  so. QA runs #24560 and #24558 met the 403; the pin reports 25 passed at `bfc1539fe0`.
 
 - **One container builds one tree at a time: never run `pnpm build` and
   `pnpm objectui:build` together, and give the heavy steps a concurrency the shell's memory
@@ -520,10 +525,10 @@ contradicts it, and correct it here when it does.
   directions: a `*.e2e.test.ts` pin (`serve-organization-record-page.e2e.test.ts`) collects
   nothing without `OS_TEST_TIERS=nightly` (QA runs #24556 / #24558), and with it set, 28 of
   the 29 cli files the Tier 1 rerun named ran 0 tests (QA run #24598, #24579 round 2).
-  **Fix:** run a cli `*.e2e.test.*` pin in an invocation of its own
-  with `OS_TEST_TIERS=nightly`, and every other cli pin without it. ⛔ A named file that
-  collects no test is not a pass, and here it is not a stale ref either — re-run it under
-  the other setting before fixing the item.
+  **Fix:** run a cli `*.e2e.test.*` pin in an invocation of its own with
+  `OS_TEST_TIERS=nightly`, and every other cli pin without it. ⛔ A named file that collects
+  no test is not a pass, and here it is not a stale ref either — re-run it under the other
+  setting before fixing the item.
 
 - **`scripts/qa/qa-rollup.mjs` has two blind spots a runner meets at close-out.** (1) Only a
   BARE area name classifies as an area: `classifySelector('platform-core')` answers `area`,
