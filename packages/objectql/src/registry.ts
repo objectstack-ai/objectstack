@@ -154,9 +154,18 @@ export function describeUnboundActionTargets(
 }
 
 /**
+ * [#24472] The key {@link SchemaRegistry}'s bound-action collision audit is
+ * carried under. A symbol, and ⛔ deliberately NOT re-exported from the package
+ * entry (`index.ts`, `core.ts`), so the audit is no NAMEABLE member of the
+ * registry's published face: only the ObjectQL plugin's boot and late-artifact
+ * reports reach it, importing the key from this module.
+ */
+export const FIND_BOUND_ACTION_COLLISIONS: unique symbol = Symbol('objectstack.objectql.findBoundActionCollisions');
+
+/**
  * [#24472] A bound top-level action that its target object does NOT list,
  * because the object already lists a DIFFERENT declaration under the same
- * name — see {@link SchemaRegistry.findBoundActionCollisions}.
+ * name — see {@link FIND_BOUND_ACTION_COLLISIONS}.
  */
 export interface BoundActionCollision {
   /** The object both declarations are for. */
@@ -3572,7 +3581,7 @@ export class SchemaRegistry {
    * written back from a served read. An action the object already declares
    * keeps the object's declaration, the precedence the router applies (rung 1
    * before rung 2); when the two declarations differ, the ObjectQL plugin
-   * reports the pair at boot ({@link findBoundActionCollisions}). A target no
+   * reports the pair at boot ({@link FIND_BOUND_ACTION_COLLISIONS}). A target no
    * package registers is refused at boot, not here — see
    * {@link findUnboundActionTargets}.
    *
@@ -3660,9 +3669,10 @@ export class SchemaRegistry {
    * to the pairs naming one of those packages on either side — a late
    * artifact's, so a pair the boot already reported is not reported again.
    *
-   * @internal
+   * Keyed on {@link FIND_BOUND_ACTION_COLLISIONS}, a symbol the package entry
+   * does not export, so the audit adds no nameable member to the published face.
    */
-  findBoundActionCollisions(packageIds?: ReadonlySet<string>): BoundActionCollision[] {
+  [FIND_BOUND_ACTION_COLLISIONS](packageIds?: ReadonlySet<string>): BoundActionCollision[] {
     const out: BoundActionCollision[] = [];
     for (const action of this.boundCodeActions()) {
       const objectName = standaloneActionOwnerKey(action);

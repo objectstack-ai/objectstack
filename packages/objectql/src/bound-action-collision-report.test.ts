@@ -20,6 +20,7 @@ import { ObjectKernel, type PluginContext } from '@objectstack/core';
 import { defineStack } from '@objectstack/spec';
 import { ObjectQL } from './engine.js';
 import { ObjectQLPlugin } from './plugin.js';
+import { FIND_BOUND_ACTION_COLLISIONS, SchemaRegistry } from './registry.js';
 
 /** The package that OWNS the target object, with an action of its own. */
 const OWNER = {
@@ -59,14 +60,14 @@ async function engineWith(packages: any[]) {
 const servedRename = (engine: ObjectQL): any[] =>
     ((engine.registry.getObject('bc_org') as any)?.actions ?? []).filter((a: any) => a?.name === 'rename');
 
-describe('SchemaRegistry.findBoundActionCollisions', () => {
+describe('the registry\'s bound-action collision audit', () => {
     for (const [order, packages] of [
         ['owner first', [OWNER, TWIN]],
         ['twin first', [TWIN, OWNER]],
     ] as const) {
         it(`${order}: a different declaration under the object's own action name is one pair, naming both packages`, async () => {
             const engine = await engineWith([...packages]);
-            expect(engine.registry.findBoundActionCollisions()).toEqual([
+            expect(engine.registry[FIND_BOUND_ACTION_COLLISIONS]()).toEqual([
                 { objectName: 'bc_org', action: 'rename', servedPackageId: 'com.test.owner', shadowedPackageId: 'com.test.twin' },
             ]);
             // Reported, not acted on: the object still serves its own declaration.
@@ -76,7 +77,7 @@ describe('SchemaRegistry.findBoundActionCollisions', () => {
 
     it('one declaration carried by two packages is not a collision', async () => {
         const engine = await engineWith([OWNER, CARRIER]);
-        expect(engine.registry.findBoundActionCollisions()).toEqual([]);
+        expect(engine.registry[FIND_BOUND_ACTION_COLLISIONS]()).toEqual([]);
     });
 
     it('a same-stack bound action — merged onto its object and kept top-level — is not a collision', async () => {
@@ -88,7 +89,7 @@ describe('SchemaRegistry.findBoundActionCollisions', () => {
         // The JSON round trip is the compiled artifact's shape: two copies, not one reference.
         const engine = await engineWith([JSON.parse(JSON.stringify({ ...stack, ...stack.manifest }))]);
         expect((engine.registry.getObject('bc_same') as any)?.actions?.map((a: any) => a.name)).toEqual(['same_action']);
-        expect(engine.registry.findBoundActionCollisions()).toEqual([]);
+        expect(engine.registry[FIND_BOUND_ACTION_COLLISIONS]()).toEqual([]);
     });
 
     it('two packages binding different declarations of one name to a third package\'s object: the first attached is served, the second reported', async () => {
@@ -96,16 +97,26 @@ describe('SchemaRegistry.findBoundActionCollisions', () => {
         const second = { ...TWIN, id: 'com.test.second', name: 'second', actions: [{ ...TWIN.actions[0], label: 'Rename (second)', target: 'https://example.com/second' }] };
         const engine = await engineWith([owner, TWIN, second]);
         expect(servedRename(engine).map((a) => a._packageId)).toEqual(['com.test.twin']);
-        expect(engine.registry.findBoundActionCollisions()).toEqual([
+        expect(engine.registry[FIND_BOUND_ACTION_COLLISIONS]()).toEqual([
             { objectName: 'bc_org', action: 'rename', servedPackageId: 'com.test.twin', shadowedPackageId: 'com.test.second' },
         ]);
     });
 
+    it('is no nameable member of the published face: keyed on a symbol neither package entry exports', async () => {
+        const entry = await import('./index.js');
+        const core = await import('./core.js');
+        expect('FIND_BOUND_ACTION_COLLISIONS' in entry).toBe(false);
+        expect('FIND_BOUND_ACTION_COLLISIONS' in core).toBe(false);
+        expect(Object.values(entry)).not.toContain(FIND_BOUND_ACTION_COLLISIONS);
+        expect(Object.getOwnPropertyNames(SchemaRegistry.prototype)).not.toContain('findBoundActionCollisions');
+        expect(Object.getOwnPropertySymbols(SchemaRegistry.prototype)).toContain(FIND_BOUND_ACTION_COLLISIONS);
+    });
+
     it('narrowed to a set of packages, it answers only the pairs naming one of them', async () => {
         const engine = await engineWith([OWNER, TWIN, BYSTANDER]);
-        expect(engine.registry.findBoundActionCollisions(new Set(['com.test.bystander']))).toEqual([]);
-        expect(engine.registry.findBoundActionCollisions(new Set(['com.test.owner']))).toHaveLength(1);
-        expect(engine.registry.findBoundActionCollisions(new Set(['com.test.twin']))).toHaveLength(1);
+        expect(engine.registry[FIND_BOUND_ACTION_COLLISIONS](new Set(['com.test.bystander']))).toEqual([]);
+        expect(engine.registry[FIND_BOUND_ACTION_COLLISIONS](new Set(['com.test.owner']))).toHaveLength(1);
+        expect(engine.registry[FIND_BOUND_ACTION_COLLISIONS](new Set(['com.test.twin']))).toHaveLength(1);
     });
 });
 

@@ -46,7 +46,7 @@ import {
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
 // re-derived, when a residual object's name is already owned.
-import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeBoundActionCollision, describeUnboundActionTargets, type BoundActionCollision } from './registry.js';
+import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeBoundActionCollision, describeUnboundActionTargets, FIND_BOUND_ACTION_COLLISIONS, type BoundActionCollision } from './registry.js';
 
 export type { Plugin, PluginContext };
 
@@ -789,7 +789,7 @@ export class ObjectQLPlugin implements Plugin {
         if (this.boundActionTargetsSealed) {
           const arrived = new Set(scope.packageIds);
           if (residual?.ownerId !== undefined) arrived.add(residual.ownerId);
-          this.reportBoundActionCollisions(ctx, ql.registry.findBoundActionCollisions(arrived));
+          this.reportBoundActionCollisions(ctx, ql.registry[FIND_BOUND_ACTION_COLLISIONS](arrived));
         }
         // Manifests registered AFTER start() (marketplace install / ledger
         // rehydrate arrive on `kernel:ready` or an HTTP request) land in the
@@ -946,7 +946,7 @@ export class ObjectQLPlugin implements Plugin {
         // the action and both packages — judged here for the same reason, and
         // reported, never refused: the object keeps serving its own (rung 1)
         // and the boot goes on. Each late artifact is judged as it arrives.
-        this.reportBoundActionCollisions(ctx, this.ql?.registry.findBoundActionCollisions() ?? []);
+        this.reportBoundActionCollisions(ctx, this.ql?.registry[FIND_BOUND_ACTION_COLLISIONS]() ?? []);
         // #7737 — FIRST, before anything that might read data: bind every
         // declared federated object to its remote table now that every
         // plugin's `start()` (including the declared-datasource auto-connect
@@ -2887,7 +2887,7 @@ export class ObjectQLPlugin implements Plugin {
 
   /**
    * [#24472] One author-visible warning per same-name pair
-   * ({@link SchemaRegistry.findBoundActionCollisions}): the object, the action
+   * (the registry's audit under {@link FIND_BOUND_ACTION_COLLISIONS}): the object, the action
    * and both packages. `warn`, by the degradation-level question — the object
    * visibly serves one declaration and nothing claimed persisted is lost.
    */
