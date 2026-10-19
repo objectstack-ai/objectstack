@@ -3386,6 +3386,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       ciphertext: {
         label: "Ciphertext",
         help: "Provider-encoded ciphertext blob (base64 / JSON). Implementation-defined; only the matching ICryptoProvider can read it."
+      },
+      organization_id: {
+        label: "Organization (18.0, retired)",
+        help: "Retired: the organization an 18.0 install stamped on this row. Unread and never written; the upgrade ceremony drops the column."
       }
     },
     _views: {

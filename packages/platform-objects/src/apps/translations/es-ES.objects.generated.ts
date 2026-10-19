@@ -3386,6 +3386,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       ciphertext: {
         label: "Texto cifrado",
         help: "Blob de texto cifrado codificado por el proveedor (base64 / JSON). La implementación lo define; solo el ICryptoProvider correspondiente puede leerlo."
+      },
+      organization_id: {
+        label: "Organización (18.0, retirada)",
+        help: "Retirada: la organización que una instalación 18.0 registró en esta fila. No se lee ni se escribe; la ceremonia de actualización elimina la columna."
       }
     },
     _views: {

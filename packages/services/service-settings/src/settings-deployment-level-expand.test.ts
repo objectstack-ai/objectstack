@@ -175,7 +175,7 @@ describe('[18.x expand · Q4 A] the new write shape, under single with the Defau
     await engine.insert('sys_setting_audit', {
       namespace: 'n', key: 'k', scope: 'tenant', action: 'set', source: 'api', encrypted: false,
       created_at: new Date().toISOString(),
-    }, SYS as any);
+    }, SYS);
     expect(rows('sys_setting_audit')).toEqual([expect.objectContaining({ organization_id: DEFAULT_ORG })]);
   });
 
@@ -250,8 +250,8 @@ describe('[18.x expand · Q4 A] the dual read, on 18.0-shaped rows', () => {
     await svc.setMany('relay_probe', { api_key: 're_456' }, { tenantId: DEFAULT_ORG, userId: undefined });
 
     const where = { namespace: 'relay_probe', key: 'api_key', scope: 'global' };
-    const legacy = (await engine.find('sys_setting_audit', { where }, SYS as any)) as any[];
-    const current = (await engine.find('sys_platform_setting_audit', { where }, SYS as any)) as any[];
+    const legacy = (await engine.find('sys_setting_audit', { where }, SYS)) as any[];
+    const current = (await engine.find('sys_platform_setting_audit', { where }, SYS)) as any[];
     expect(legacy).toEqual([expect.objectContaining({ id: 'aud_18', organization_id: DEFAULT_ORG, new_hash: 'hmac-sha256:18' })]);
     expect(current).toHaveLength(1);
     expect(current[0]!.organization_id ?? null).toBeNull();
