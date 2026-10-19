@@ -123,6 +123,14 @@ const DEV_SEED_ADMIN_EMAIL_DEFAULT = 'admin@objectos.ai';
 /** `OS_SEED_ADMIN` spellings that turn the dev-admin seed off. */
 const DEV_SEED_DISABLED_SPELLINGS = ['0', 'false', 'off', 'no'];
 
+/**
+ * [#24409] The migrate-and-exit boot's flag. `objectstack serve` takes the
+ * boot down and exits once the kernel is ready when this reads exactly `'1'`,
+ * and {@link isDevAdminSeedArmed} compares the same spelling, so the two agree
+ * on which boots are migration runs.
+ */
+const MIGRATE_AND_EXIT_ENV = 'OS_MIGRATE_AND_EXIT';
+
 const env = (): Record<string, string | undefined> =>
   ((globalThis as { process?: { env?: Record<string, string | undefined> } })?.process?.env ?? {});
 
@@ -138,8 +146,18 @@ export function devSeedAdminEmail(): string {
 
 /**
  * Whether the dev-admin seed is armed for this process — HARD-gated to
- * `NODE_ENV==='development'`, opt-out via `OS_SEED_ADMIN=0|false|off|no`.
- * Same two clauses `maybeSeedDevAdmin` gates itself on, read from one place.
+ * `NODE_ENV==='development'`, never armed on a migrate-and-exit boot
+ * (`OS_MIGRATE_AND_EXIT=1`), opt-out via `OS_SEED_ADMIN=0|false|off|no`.
+ * Same clauses `maybeSeedDevAdmin` gates itself on, read from one place.
+ *
+ * [#24409] A migrate-and-exit boot is never a login-provisioning boot,
+ * whatever `NODE_ENV` says. It runs the whole kernel bootstrap, so the seed's
+ * `kernel:ready` hook used to fire before `serve` reached its exit check, and
+ * a deploy pipeline that migrates with `NODE_ENV=development` left a
+ * known-credential login in an empty database. The clause lives here, not in
+ * the seed, so the walled owner check below reads the same answer: on a
+ * migration run the seed is not a verification path either. It wins over an
+ * explicit `OS_SEED_ADMIN=1`: a migration run never provisions a login.
  *
  * "Armed" is a statement about CONFIGURATION, not about what the seed will do:
  * it also requires an empty database, which is runtime state neither the seed
@@ -147,6 +165,7 @@ export function devSeedAdminEmail(): string {
  */
 export function isDevAdminSeedArmed(): boolean {
   if (env().NODE_ENV !== 'development') return false;
+  if (env()[MIGRATE_AND_EXIT_ENV] === '1') return false;
   const flag = String(env().OS_SEED_ADMIN ?? '').trim().toLowerCase();
   return !DEV_SEED_DISABLED_SPELLINGS.includes(flag);
 }
