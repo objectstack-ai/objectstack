@@ -59,7 +59,7 @@ import { TursoDriver } from '@objectstack/driver-turso';
 import { ORGANIZATION_OWNERSHIP_MIGRATION_ID } from '@objectstack/spec/system';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { isExitSignal } from '../../utils/format.js';
-import MigrateOrganizationOwnership from './organization-ownership.js';
+import { OrganizationOwnershipCeremony as MigrateOrganizationOwnership } from './organization-ownership.js';
 
 // Paid at module load, not inside a clocked case (`check:test-source-alias`).
 import '@objectstack/runtime';

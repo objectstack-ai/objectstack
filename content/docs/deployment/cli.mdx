@@ -203,6 +203,11 @@ organization-ownership shape until the [ownership ceremony](#os-migrate-organiza
 has run on it. `os dev` runs that ceremony for you when the database is a local
 SQLite file:
 
+<Callout type="warn">
+18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 the ceremony refuses, so `os dev` stops at step 2 with its
+refusal and changes nothing.
+</Callout>
+
 1. It copies the database file and its `telemetry` sibling (each with its
    `-wal` / `-shm`) into `<data dir>/backups/organization-ownership-<timestamp>/`.
 2. It runs `os migrate organization-ownership --dev` (the plan), then applies
@@ -1197,7 +1202,7 @@ where the data lives.
 | `os migrate value-shapes` | Scan stored reference and structured-JSON field values against the platform's value contract, and record the deployment's migration flag when clean |
 | `os migrate summary-nulls` | Backfill roll-up `count` / `sum` columns still stored as `NULL` on parent rows created before the insert-time seed. Repairs values; no flag, nothing depends on it having run |
 | `os migrate comment-reactions` | Carry the emoji reactions a 17.x deployment stored in the retired `sys_comment.reactions` column into `sys_comment_reaction` records, list every stored value that does not read, and record the verified run that lets `os migrate apply --allow-destructive` drop the column |
-| `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. A v18 server refuses to start until it has run. See [below](#os-migrate-organization-ownership) |
+| `os migrate organization-ownership` | The v18 ownership ceremony (ADR-0131 D10): write a plan of what each table's rows will become, then `--apply` that reviewed plan. A v18 server refuses to start until it has run. 18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 the command refuses. See [below](#os-migrate-organization-ownership) |
 | `os migrate activity-changed-fields` | Stamp the two read-rule columns (`changed_fields`, `milestone_key`) on the `sys_activity` rows written before they existed. Until it runs, those rows are withheld from every reader but the system, so run it at once after upgrading. No flag; idempotent |
 | `os migrate comment-parent-pair` | Stamp the parent pair (`object_name`, `record_id`) on the `sys_comment` rows written before it existed. Until it runs, a broad comment read past 2,000 candidate rows omits comments the reader may see, and its total agrees with the short list, so run it at once after upgrading. No flag; idempotent |
 | `os migrate meta --stored` | Replay the metadata conversion chain over this deployment's `sys_metadata` rows and rewrite the ones still carrying a pre-protocol shape. Hygiene, not a gate — nothing depends on it having run |
@@ -1475,6 +1480,13 @@ The v18 ownership ceremony (ADR-0131 D10). A v18 `os serve` / `os start` refuses
 to start on a database still in the v17 organization-ownership shape until this
 has run. Under `os dev` it runs on its own for a local SQLite database (see
 [`os dev`](#os-dev)).
+
+<Callout type="warn">
+18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 this command refuses, plan and apply alike: it exits `1` with
+`NOT_IMPLEMENTED` (under `--json`, `code` beside `error`) and reads and
+writes nothing. Keep a v17 database on a 17.x release until the 18.x release
+that carries the upgrade path.
+</Callout>
 
 ```bash
 os migrate organization-ownership --out plan.json            # the plan: reads only

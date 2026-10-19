@@ -50,7 +50,26 @@
  * leaves the active row alone. Any other value is an active save, as it has
  * always been on `RestServer`.
  *
- * `query.mode` is read as the string a door has already judged for
+ * ## The authoring surface (#24395)
+ *
+ * `?surface=` is the save's `surface` (`SaveMetaItemRequestSchema`): which
+ * surface the save is made through, stamped by a draft save on every key path
+ * it changes and served on the strict draft read as `draftChanges[].by`.
+ * Absent, the protocol stamps `api`. A query parameter, as `?mode=` and
+ * `?force=` are: those are what this save is ASKED to do, while the headers
+ * above are HTTP's own preconditions; and a query name needs no CORS
+ * allow-list entry, which a custom request header from a browser on another
+ * origin would.
+ *
+ * Its value set is CLOSED and narrower than the schema's: `studio` or `api`,
+ * exactly. `copilot` is refused, because it is the mark of an in-process AI
+ * tool's write and a remote caller cannot be one — an HTTP request saying
+ * `copilot` would mark its own write as the AI's in Studio. Every other value
+ * is refused too (case included), never read as `api`: a misspelt `Studio`
+ * dropped to `api` would record the person's edit as some other caller's.
+ * Both refusals are `400`, as the precondition's are; neither door mints a code.
+ *
+ * `query.mode` and `query.surface` are read as the strings a door has already judged for
  * multiplicity. `RestServer` calls this AFTER `refuseRepeatedQueryParams`,
  * which refuses a repeated `mode` and unwraps one occurrence encoded as an
  * array; the `@objectstack/hono` catch-all flattens its query from the URL, one
@@ -68,7 +87,10 @@ export interface MetaSaveRequestHttp {
 }
 
 /** The `saveMetaItem` members {@link metaSaveRequestOptions} answers, each present only when the request asked for it. */
-export type MetaSaveRequestMembers = Pick<SaveMetaItemRequest, 'parentVersion' | 'mode'>;
+export type MetaSaveRequestMembers = Pick<SaveMetaItemRequest, 'parentVersion' | 'mode' | 'surface'>;
+
+/** [#24395] The `?surface=` values an HTTP save may state — the schema's set less `copilot`. */
+const HTTP_SAVE_SURFACES: ReadonlySet<string> = new Set(['studio', 'api']);
 
 /** {@link metaSaveRequestOptions}'s answer: the members to spread into the save, or the sentence of a `400`. */
 export type MetaSaveRequestOptions =
@@ -117,11 +139,30 @@ export function metaSaveRequestOptions(http: MetaSaveRequestHttp): MetaSaveReque
     }
     const mode = http.query?.mode;
     const draft = typeof mode === 'string' && mode.toLowerCase() === 'draft';
+    const surface = http.query?.surface;
+    if (surface !== undefined) {
+        if (surface === 'copilot') {
+            return {
+                ok: false,
+                message: '?surface=copilot is not accepted over HTTP: it marks a write as the AI copilot\'s, '
+                    + 'which only an AI tool calling the save in-process may state. Send ?surface=studio for a '
+                    + 'person editing in Studio, ?surface=api for any other caller, or omit it (recorded as api).',
+            };
+        }
+        if (typeof surface !== 'string' || !HTTP_SAVE_SURFACES.has(surface)) {
+            return {
+                ok: false,
+                message: `?surface= takes studio or api, exactly; got ${JSON.stringify(surface)}. `
+                    + 'Omit it for a save that is not made in Studio (recorded as api).',
+            };
+        }
+    }
     return {
         ok: true,
         request: {
             ...(parentVersion !== undefined ? { parentVersion } : {}),
             ...(draft ? { mode: 'draft' as const } : {}),
+            ...(surface !== undefined ? { surface: surface as 'studio' | 'api' } : {}),
         },
     };
 }

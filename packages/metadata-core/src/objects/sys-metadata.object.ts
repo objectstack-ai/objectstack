@@ -121,6 +121,24 @@ export const SysMetadataObject = ObjectSchema.create({
       description: 'JSON-serialized metadata payload',
     }),
 
+    /**
+     * [#24395] A draft row's per-key provenance — the entries the strict draft
+     * read serves as `draftChanges` (`GetMetaItemResponseSchema` in
+     * `@objectstack/spec/api`): which authoring surface, actor and instant last
+     * changed each key path of the draft body. JSON-serialized array, written
+     * by the overlay repository's draft save, never authored.
+     *
+     * On the row, ⛔ never inside `metadata`: publishing and discarding a draft
+     * both delete its row, so the entries go with it. NULL on every active row
+     * and on a draft row whose saves recorded none.
+     */
+    draft_changes: Field.textarea({
+      label: 'Draft Changes',
+      required: false,
+      description:
+        'JSON-serialized per-key provenance of a pending draft: which surface (copilot, studio, api), actor and time last changed each key path. Null on active rows.',
+    }),
+
     /** Parent metadata name for extension/override */
     extends: Field.text({
       label: 'Extends',

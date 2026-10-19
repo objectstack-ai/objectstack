@@ -158,6 +158,10 @@ import { readServiceSelfInfo, readChannelRoute, readAuthFamilies, isSubscribable
 // [#23183] The app item read's package-id key — the one spelling of the arm
 // `GetMetaItemRequestSchema.name` declares ({@link resolveAppPackageIdKey}).
 import { isAppPackageIdKey } from '@objectstack/spec/api';
+// [#24395] The save's authoring surface, and the draft row's per-key
+// provenance read back for the strict draft read.
+import { MetadataAuthoringSurfaceSchema, type MetadataAuthoringSurface } from '@objectstack/spec/api';
+import { storedDraftChanges } from './draft-changes.js';
 import {
     parseFilterAST, isFilterAST, VALID_AST_OPERATORS, REFERENCE_VALUE_TYPES, referenceTargetOf,
     AggregationFunction, DateGranularity, resolveSearchFieldResolution,
@@ -5685,12 +5689,22 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
 
     const issues: Array<{ code: string; field?: string; message: string }> = [];
 
+    // [#24411] Every finding below names STORED data a save makes unreachable,
+    // so a field with no stored column (a `formula`, computed on read —
+    // ADR-0079 addendum, item 9) loses nothing when it is removed or retyped.
+    // "Stored" is the spec's storage predicate — the one the sortability
+    // projection reads — judged from the field's own declaration, ⛔ never a
+    // type list kept here. A false finding trains callers to send `force=true`
+    // by reflex, which silences the true one on a stored field.
+    const isStored = (field: SearchFieldMeta | undefined): boolean => !isVirtualSearchField(field);
+
     // Removed fields — silently dropping a column is a data-loss event.
     for (const fname of Object.keys(prevFields)) {
         // Skip system fields — those are managed by applySystemFields and
         // re-injected on every registerObject call; they will look "removed"
         // in any user-supplied overlay.
         if (prevFields[fname]?.system) continue;
+        if (!isStored(prevFields[fname])) continue;
         if (!(fname in nextFields)) {
             issues.push({
                 code: 'field_removed',
@@ -5714,7 +5728,9 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
         if (!prevField) continue; // brand-new field — non-destructive
         const prevType = prevField.type;
         const nextType = nextField.type;
-        if (prevType && nextType && prevType !== nextType) {
+        // Judged by what the STORED side loses: an unstored previous field held
+        // no values, so retyping it into anything starts from an empty column.
+        if (prevType && nextType && prevType !== nextType && isStored(prevField)) {
             const compatible = TYPE_COMPATIBILITY[prevType]?.has(nextType);
             if (!compatible) {
                 issues.push({
@@ -11477,6 +11493,9 @@ export class ObjectStackProtocolImplementation implements
         // [#21899] Whether a stored row was found — the fact the origin-gated
         // repair's `deletable` reads ({@link servedLockState}).
         let storedRowServed = false;
+        // [#24395] The served draft row's per-key provenance — read off the
+        // row this read serves, so it can never describe another body.
+        let draftChanges: ReturnType<typeof storedDraftChanges>;
         try {
             let record = (await this.findServedOverlayRow({
                 type: request.type,
@@ -11512,6 +11531,7 @@ export class ObjectStackProtocolImplementation implements
                 if (recPkg && item && typeof item === 'object' && (item as any)._packageId === undefined) {
                     (item as any)._packageId = recPkg;
                 }
+                if (readState === 'draft') draftChanges = storedDraftChanges((record as { draft_changes?: unknown }).draft_changes);
             }
         } catch (error) {
             // [#5532] THE site this issue was raised on. Falling through to the
@@ -11540,6 +11560,10 @@ export class ObjectStackProtocolImplementation implements
                 // [#22877] The member's own row's, as a save of that member's
                 // body addresses it.
                 version: await this.readVersionToken({ ...request, member }, 'draft'),
+                // [#24395] `GetMetaItemResponseSchema.draftChanges`: present
+                // only when the draft row's saves recorded at least one entry
+                // — ⛔ never `[]` for a row that recorded none.
+                ...(draftChanges ? { draftChanges } : {}),
             };
         }
 
@@ -22688,7 +22712,7 @@ export class ObjectStackProtocolImplementation implements
     // STORED content hash itself (`migrateStoredMetadata`): it reaches the
     // repository as given. ⛔ No transport sets it — every door builds its
     // request field by field from named inputs, never by spreading a body.
-    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace }) {
+    async saveMetaItem(request: { type: string, name: string, item?: any, parentVersion?: string | null, storedParentVersion?: string | null, actor?: string, force?: boolean, mode?: 'draft' | 'publish', packageId?: string | null, source?: string, writeFace?: MetadataWriteFace, surface?: MetadataAuthoringSurface }) {
         // [ADR-0131 D6] FIRST, before every other gate and every read: an
         // organization-scoped write is refused for every type, draft or
         // publish. See {@link organizationScopedWriteRefusal}.
@@ -22732,6 +22756,21 @@ export class ObjectStackProtocolImplementation implements
                 `saveMetaItem requires an 'item' body for '${request.type}/${request.name}'. `
                 + `Send the metadata document as the request body, or wrap it as {"item": {...}} / {"metadata": {...}}. `
                 + `An explicitly null item is refused rather than persisted as an empty document.`,
+            );
+            err.code = 'INVALID_REQUEST';
+            err.status = 400;
+            throw err;
+        }
+        // [#24395] The authoring surface the draft save stamps on every key
+        // path it changes: a value outside the closed set is refused here,
+        // before any read or write, with the request-envelope refusal above —
+        // never stamped as `api`, which would record a caller's mistake as
+        // a fact about who wrote the draft. The HTTP doors never send
+        // `copilot` (`metaSaveRequestOptions`); an in-process tool may.
+        if (request.surface !== undefined && !MetadataAuthoringSurfaceSchema.safeParse(request.surface).success) {
+            const err: any = new Error(
+                `saveMetaItem 'surface' must be one of copilot, studio or api for '${request.type}/${request.name}'; `
+                + `got ${JSON.stringify(request.surface)}. Omit it for a save that is neither the copilot nor Studio (recorded as api).`,
             );
             err.code = 'INVALID_REQUEST';
             err.status = 400;
@@ -24002,6 +24041,13 @@ export class ObjectStackProtocolImplementation implements
                 intent,
                 state: mode === 'draft' ? 'draft' : 'active',
                 ...(request.packageId !== undefined ? { packageId: request.packageId } : {}),
+                // [#24395] An authoring draft save records which surface
+                // changed which key path (`api` when it names none). A
+                // server-stated rewrite — `migrate-stored`, the only caller
+                // that states a `source` — is not authoring and records none.
+                ...(mode === 'draft' && request.source === undefined
+                    ? { draftChangesBy: request.surface ?? 'api' }
+                    : {}),
             });
             // Persistence succeeded — NOW it's safe to mutate the
             // in-memory registry. If put() had thrown, the registry
@@ -27888,7 +27934,32 @@ export class ObjectStackProtocolImplementation implements
         // and `name` disagreed. `x_iojn_task` is another identifier, never the
         // object: `renameName` swaps the source prefix only at the START of a
         // name, and this rewrite now matches only a whole identifier too.
-        const olds = prefixed.filter((name) => renameMap.has(name)).sort((a, b) => b.length - a.length);
+        //
+        // ⭐ A PREFIXED NAME THAT IS ALSO A FIELD KEY IS NOT DISTINCTIVE. When a
+        // package object declares a field keyed like a prefixed package object
+        // (`fields.iojn_customer` beside the object `iojn_customer`), a free-text
+        // value spelled that way may name the field — a list view's `columns`,
+        // a form's `sections[].fields` — and the field keeps its key. Renaming
+        // it as the object copied a column or form field the copy does not
+        // have. Such a name is treated as a bare name is: rewritten only at an
+        // object-reference property (below), never in free text.
+        const fieldKeys = new Set<string>();
+        for (const row of rows) {
+            if (row?.type !== 'object') continue;
+            let body: any;
+            try {
+                body = typeof row.metadata === 'string' ? JSON.parse(row.metadata) : row.metadata;
+            } catch {
+                continue; // the copy loop reports an unparseable row at its own name
+            }
+            const fields = body?.fields;
+            if (fields && typeof fields === 'object' && !Array.isArray(fields)) {
+                for (const key of Object.keys(fields)) fieldKeys.add(key);
+            }
+        }
+        const olds = prefixed
+            .filter((name) => renameMap.has(name) && !fieldKeys.has(name))
+            .sort((a, b) => b.length - a.length);
         const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const re = olds.length
             ? new RegExp(`(?<![A-Za-z0-9_])(${olds.map(esc).join('|')})(?![A-Za-z0-9_])`, 'g')

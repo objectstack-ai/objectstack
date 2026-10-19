@@ -2334,7 +2334,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       packageId: {
         label: "所属包 ID",
-        helpText: "分发这个权限集的包；填写其他包的 id 会被拒绝。在本环境中创建的权限集请留空。"
+        helpText: "分发这个权限集的包；填写其他包的 id 会被拒绝。在本系统中创建的权限集请留空。"
       },
       systemPermissions: {
         label: "系统权限",

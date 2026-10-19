@@ -458,6 +458,8 @@
     "MarkNotificationsReadRequestSchema": "api/MarkNotificationsReadRequest",
     "MarkNotificationsReadResponse": "api/MarkNotificationsReadResponse",
     "MarkNotificationsReadResponseSchema": "api/MarkNotificationsReadResponse",
+    "MetadataAuthoringSurface": "api/MetadataAuthoringSurface",
+    "MetadataAuthoringSurfaceSchema": "api/MetadataAuthoringSurface",
     "MetadataBulkRegisterRequest": "api/MetadataBulkRegisterRequest",
     "MetadataBulkRegisterRequestSchema": "api/MetadataBulkRegisterRequest",
     "MetadataBulkResponse": "api/MetadataBulkResponse",

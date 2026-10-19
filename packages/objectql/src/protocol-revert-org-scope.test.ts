@@ -77,6 +77,8 @@ const sysMetadataObject: ServiceObject = {
         state: txt('state'), version: num('version'),
         created_at: dt('created_at'), updated_at: dt('updated_at'),
         created_by: txt('created_by'), updated_by: txt('updated_by'),
+        // [#24395] The draft row's per-key provenance, written by every draft save.
+        draft_changes: long('draft_changes'),
     },
 };
 

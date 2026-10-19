@@ -64,6 +64,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { assertEngineDeleteDispatch, assertEngineFindOnePredicate, assertEngineUpdateDispatch, isCodeArtifactBody } from '@objectstack/metadata-core';
 import { applyProtection } from '@objectstack/spec/shared';
+import { GetMetaItemResponseSchema } from '@objectstack/spec/api';
 import { resolveThrownHttpError } from '@objectstack/types';
 import { ObjectStackProtocolImplementation } from './protocol.js';
 import { resetEnvWritableMetadataTypes } from './sys-metadata-repository.js';
@@ -1364,5 +1365,124 @@ describe('[#23715] the strict draft read naming no package serves its content fr
         const read = await readDraft(f);
         expect(['q', 'r']).toContain(read.item.label);
         expect(read.version).toBeNull();
+    });
+});
+
+/**
+ * [#24395] The draft save records `draftChanges` and the strict draft read
+ * serves it — through the real save, read, publish and discard doors over this
+ * file's row-keeping engine (the write path is the same `resolveWriteHead`
+ * transaction the package-address rows above pin). The rules themselves (path
+ * grammar, keep rule, stored form) are `draft-changes.test.ts`'s.
+ */
+describe('[#24395] the draft save records per-key provenance, the strict draft read serves it', () => {
+    const view = (name: string, extra: Record<string, unknown> = {}) => ({ ...viewBody(name, 'Base'), ...extra });
+    const TWO_COLUMNS = [{ field: 'name', label: 'Name' }, { field: 'title', label: 'Title' }];
+    const readDraft = (protocol: any, name: string) => protocol.getMetaItem({ type: 'view', name, state: 'draft' });
+    const ISO_Z = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+    it('each surface is stamped as `by`; an absent surface stamps `api`; the actor is the save\'s', async () => {
+        const { protocol } = makeProtocol();
+        for (const surface of ['copilot', 'studio', 'api', undefined] as const) {
+            const name = `v_${surface ?? 'none'}`;
+            await protocol.saveMetaItem({
+                type: 'view', name, item: view(name), mode: 'draft', actor: 'u_1', ...(surface ? { surface } : {}),
+            });
+            const read = await readDraft(protocol, name);
+            expect(read.draftChanges).toEqual([{ path: [], by: surface ?? 'api', actor: 'u_1', at: expect.stringMatching(ISO_Z) }]);
+            expect(GetMetaItemResponseSchema.safeParse(read).success).toBe(true);
+        }
+        // No actor recorded → `null`, never a sentinel.
+        await protocol.saveMetaItem({ type: 'view', name: 'v_anon', item: view('v_anon'), mode: 'draft' });
+        expect((await readDraft(protocol, 'v_anon')).draftChanges[0].actor).toBeNull();
+    });
+
+    it('the first save is compared with the active row; the second replaces at or under what it changes', async () => {
+        const { protocol } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'v_b', item: view('v_b', { description: 'pub' }) });
+        await protocol.saveMetaItem({
+            type: 'view', name: 'v_b', mode: 'draft', surface: 'copilot', actor: 'u_1',
+            item: view('v_b', { description: 'pub', label: 'AI', columns: TWO_COLUMNS }),
+        });
+        const first = (await readDraft(protocol, 'v_b')).draftChanges;
+        expect(first.map((e: any) => [e.path, e.by])).toEqual([[['label'], 'copilot'], [['columns'], 'copilot']]);
+        await protocol.saveMetaItem({
+            type: 'view', name: 'v_b', mode: 'draft', surface: 'studio', actor: 'u_1',
+            item: view('v_b', { description: 'pub', label: 'Hand', columns: TWO_COLUMNS }),
+        });
+        const second = (await readDraft(protocol, 'v_b')).draftChanges;
+        // `columns` keeps the copilot's entry; `label` is restamped once, never twice.
+        expect(second.map((e: any) => [e.path, e.by])).toEqual([[['columns'], 'copilot'], [['label'], 'studio']]);
+        expect(second[0]).toEqual(first[1]);
+    });
+
+    it('a save that changes no key path leaves the entries as they were', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'v_same', item: view('v_same'), mode: 'draft', surface: 'copilot' });
+        const stored = rows('view', 'v_same', 'draft')[0].draft_changes;
+        await protocol.saveMetaItem({ type: 'view', name: 'v_same', item: view('v_same'), mode: 'draft', surface: 'studio' });
+        expect(rows('view', 'v_same', 'draft')[0].draft_changes).toBe(stored);
+    });
+
+    it('ABSENT on the active read, the ?preview=draft read, and a draft row saved before the writer', async () => {
+        const { protocol, seedRow } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'v_abs', item: view('v_abs') });
+        await protocol.saveMetaItem({ type: 'view', name: 'v_abs', item: view('v_abs', { label: 'D' }), mode: 'draft', surface: 'studio' });
+        expect((await readDraft(protocol, 'v_abs')).draftChanges).toHaveLength(1);
+        expect('draftChanges' in (await protocol.getMetaItem({ type: 'view', name: 'v_abs' }))).toBe(false);
+        expect('draftChanges' in (await protocol.getMetaItem({ type: 'view', name: 'v_abs', previewDrafts: true }))).toBe(false);
+        seedRow({ type: 'view', name: 'v_legacy', state: 'draft', metadata: JSON.stringify(view('v_legacy')), checksum: null });
+        const legacy = await readDraft(protocol, 'v_legacy');
+        expect(legacy.item.name).toBe('v_legacy');
+        expect('draftChanges' in legacy).toBe(false);
+    });
+
+    it('publish and discard leave no entry behind: the next draft starts from the published body', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'v_p', item: view('v_p') });
+        await protocol.saveMetaItem({ type: 'view', name: 'v_p', item: view('v_p', { label: 'AI' }), mode: 'draft', surface: 'copilot' });
+        await protocol.publishMetaItem({ type: 'view', name: 'v_p' });
+        expect(rows('view', 'v_p', 'draft')).toEqual([]);
+        expect(rows('view', 'v_p', 'active').map((r) => r.draft_changes ?? null)).toEqual([null]);
+        await protocol.saveMetaItem({ type: 'view', name: 'v_p', item: view('v_p', { label: 'AI', description: 'd' }), mode: 'draft', surface: 'studio' });
+        expect((await readDraft(protocol, 'v_p')).draftChanges.map((e: any) => [e.path, e.by])).toEqual([[['description'], 'studio']]);
+
+        expect((await protocol.deleteMetaItem({ type: 'view', name: 'v_p', state: 'draft' })).reset).toBe(true);
+        expect(rows('view', 'v_p', 'draft')).toEqual([]);
+        await protocol.saveMetaItem({ type: 'view', name: 'v_p', item: view('v_p', { label: 'AI', columns: TWO_COLUMNS }), mode: 'draft' });
+        expect((await readDraft(protocol, 'v_p')).draftChanges.map((e: any) => [e.path, e.by])).toEqual([[['columns'], 'api']]);
+    });
+
+    it('a draft whose body equals the published one records nothing, and the read answers it ABSENT, never []', async () => {
+        const { protocol } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'v_eq', item: view('v_eq') });
+        await protocol.saveMetaItem({ type: 'view', name: 'v_eq', item: view('v_eq'), mode: 'draft', surface: 'copilot' });
+        const read = await readDraft(protocol, 'v_eq');
+        expect(read.item.name).toBe('v_eq');
+        expect('draftChanges' in read).toBe(false);
+    });
+
+    it('a `migrate-stored` rewrite of a draft row records no path: it is not authoring', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'v_m', item: view('v_m'), mode: 'draft', surface: 'copilot' });
+        const stored = rows('view', 'v_m', 'draft')[0].draft_changes;
+        await protocol.saveMetaItem({ type: 'view', name: 'v_m', item: view('v_m', { label: 'Rewritten' }), mode: 'draft', source: 'migrate-stored' });
+        expect(JSON.parse(rows('view', 'v_m', 'draft')[0].metadata).label).toBe('Rewritten');
+        expect(rows('view', 'v_m', 'draft')[0].draft_changes).toBe(stored);
+    });
+
+    it('an active save records nothing', async () => {
+        const { protocol, rows } = makeProtocol();
+        await protocol.saveMetaItem({ type: 'view', name: 'v_a', item: view('v_a'), surface: 'studio' });
+        expect(rows('view', 'v_a', 'active')[0].draft_changes ?? null).toBeNull();
+    });
+
+    it('a surface outside the closed set is refused 400 INVALID_REQUEST before anything is written', async () => {
+        const { protocol, metadataWrites } = makeProtocol();
+        const envelope = resolveThrownHttpError(await refusalOf(() => protocol.saveMetaItem({
+            type: 'view', name: 'v_bad', item: view('v_bad'), mode: 'draft', surface: 'robot',
+        })));
+        expect(envelope).toMatchObject({ status: 400, code: 'INVALID_REQUEST' });
+        expect(metadataWrites()).toEqual([]);
     });
 });

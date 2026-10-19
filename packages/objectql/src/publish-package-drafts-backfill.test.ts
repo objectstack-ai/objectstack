@@ -33,6 +33,8 @@ const sysMetadataObject: ServiceObject = {
         organization_id: { name: 'organization_id', label: 'Org', type: 'text' as const },
         package_id: { name: 'package_id', label: 'Package', type: 'text' as const },
         metadata: { name: 'metadata', label: 'Body', type: 'textarea' as const },
+        // [#24395] The draft row's per-key provenance, written by every draft save.
+        draft_changes: { name: 'draft_changes', label: 'Draft Changes', type: 'textarea' as const },
         checksum: { name: 'checksum', label: 'Checksum', type: 'text' as const, maxLength: 71 },
         state: { name: 'state', label: 'State', type: 'text' as const },
         version: { name: 'version', label: 'Version', type: 'number' as const },
