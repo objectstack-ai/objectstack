@@ -1,19 +1,15 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * [ADR-0131 D6 regime O, guarded] `POST {basePath}/sharing/rules` and a
- * declared rule's name.
+ * [ADR-0131 D6 regime C] `POST {basePath}/sharing/rules` and a declared rule's
+ * name.
  *
- * A `sys_sharing_rule` row of a declared rule's name replaces the declaration
- * in its scope. The sharing-rule service refuses a NEW rule taking that name
- * with a declared envelope — `code: 'RESOURCE_CONFLICT'`, `status: 409`
- * (`DeclaredSharingRuleNameConflictError`, plugin-sharing) — and accepts the
- * EDIT of the declared rule, which the caller sends under the projection's id
- * (the rule's name). This door therefore owes two things:
- *
- *  - the refusal answers at its own status, in the nested envelope, through
- *    the classified-refusal arm of `handleError` — not as `500 RULE_DEFINE_FAILED`;
- *  - the body's `id` reaches the service, or no caller could make the edit.
+ * A declared sharing rule is read-only and clonable, so no `sys_sharing_rule`
+ * row may take its name. The sharing-rule service refuses such a write with a
+ * declared envelope — `code: 'RESOURCE_CONFLICT'`, `status: 409`
+ * (`DeclaredSharingRuleNameConflictError`, plugin-sharing). This door owes the
+ * refusal its own status, in the nested envelope, through the classified-refusal
+ * arm of `handleError` — not `500 RULE_DEFINE_FAILED`.
  *
  * The thrown error is built here in the service's declared shape: this package
  * does not depend on plugin-sharing, and the arm reads the shape, not the class.
@@ -81,7 +77,7 @@ function conflict(): Error {
     );
 }
 
-describe('[ADR-0131 D6 regime O, guarded] POST /sharing/rules — a declared rule’s name', () => {
+describe('[ADR-0131 D6 regime C] POST /sharing/rules — a declared rule’s name', () => {
     it('a new rule taking the name answers 409 RESOURCE_CONFLICT in the nested envelope, the service writing nothing else', async () => {
         const defineRule = vi.fn().mockRejectedValue(conflict());
         const answer = await boot({ defineRule })(RULE);
@@ -90,15 +86,6 @@ describe('[ADR-0131 D6 regime O, guarded] POST /sharing/rules — a declared rul
         expect(HttpStatusErrorCodeMap[409]).toBe(answer.body?.error?.code);
         expect(answer.body?.success).toBe(false);
         expect(defineRule).toHaveBeenCalledTimes(1);
-    });
-
-    it('PRESERVATION: the body’s `id` reaches the service — the edit of the declared rule is addressed by it', async () => {
-        const row = { id: 'srule_copy', name: RULE.name };
-        const defineRule = vi.fn().mockResolvedValue(row);
-        const answer = await boot({ defineRule })({ ...RULE, id: RULE.name, active: false });
-        expect(answer.status).toBe(201);
-        expect(answer.body).toEqual(row);
-        expect(defineRule.mock.calls[0][0]).toMatchObject({ id: RULE.name, name: RULE.name, active: false, object: 'project' });
     });
 
     it('ANTI-VACUITY: an unexpected fault is still the route’s own 500', async () => {
