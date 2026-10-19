@@ -431,6 +431,19 @@ spelling moves: the copy-once import, full editability, no upgrade channel and t
   naming the posture: a template import would hand every tenant an editable shared schema. Under `single`
   it is how a customer takes an app and makes it theirs wholesale — Salesforce's unmanaged package.
 
+> **Note (2026-10-19, ruling of record `6257388265` on #24378, letter B′) — `sharing_rule` is charted
+> under regime O, guarded.** A stored `sys_sharing_rule` row carrying a declared rule's name, in its
+> scope, replaces the declared rule **whole**; `active: false` on that row is the switch-off; D10's
+> ownership ceremony deletes only uncustomised mirrors. The row is made by editing the declared rule's
+> projected row in Setup. A sharing rule an organization writes stays its row (D3), so under a wall an
+> organization's overlay is its own and under `single` the one overlay answers everywhere (ruling item 4).
+> Two rules guard the regime. **The guard:** a write that creates a `sys_sharing_rule` row, or renames
+> one, to a declared rule's name in that scope, and is not an edit of the projected row, is refused at
+> the write door with the vendor rule named. **The immediate reconcile:** a same-name write (the
+> customised copy's creation, or its `active` change) reconciles the shadowed declaration's name-keyed
+> grants at once, not at the next boot's `sweepOrphanedRuleGrants`. Both are built by #24421. ⛔ Sharing
+> rules get no activation-ledger type, and same-name rows are not refused as a class.
+
 Creating one's own item — a new permission set, position, view, flow — is environment authoring
 (Studio, or Setup acting as a metadata editor under `single`), gated as D2/D3 describe and refused to
 tenants of a shared-DB deployment. It is not customization of a managed item; pre-filling the form from a
@@ -498,6 +511,17 @@ the tenancy anchor; cloud's `tenant_id` rule already reads it this way), and dep
 settings — `sys_setting`'s global rung leaves the tenant-scoped table: infrastructure values go to
 configuration; a tenant-less object holds only values an operator must change without a restart (ruled
 2026-09-04). Such objects are governed by object permission, not by the wall.
+
+> **Note (2026-10-19, ruling of record `6257388265` on #24378, letter B′) — the activation ledger reads
+> one way.** The clause above saying `sys_metadata_activation` "is reverted before 17.3 and does not
+> return" is left over from the draft before the standard-package reversal, which re-scoped its card
+> (#15024) from a revert to a column drop (§7). D6, D13, D14 and C0 hold the reading: the object
+> stays as the tenant-less activation ledger and carries regime C's disable bit. It is off D13's
+> retirement list, and its reserved organization column was dropped before 17.3. It is a member of this
+> paragraph's family. The code follows this reading: the object is declared with
+> `systemFields: { tenant: false }` (`packages/platform-objects/src/system/sys-metadata-activation.object.ts`),
+> and flows, actions, positions and permission sets read it. The clause stays as written, and this note
+> governs how it is read.
 
 ⚠️ **Membership in this list is decided by the writer, not by the object's name.** The read-side ledger
 grouped `sys_http_delivery`, `sys_inbox_message`, `sys_notification*` and `sys_email` as "plumbing"; the
