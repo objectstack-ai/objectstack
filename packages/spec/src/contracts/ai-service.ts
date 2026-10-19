@@ -223,8 +223,10 @@ export interface AIToolDefinition {
  *   declares params at all a platform `confirm` riding there is REFUSED as an
  *   unknown action param — a 400 raised before the confirmation gate is ever
  *   reached, not merely a collision with a name the author might already have
- *   used. On an action declaring no params that check is a pass-through, so
- *   the same member would be silently accepted there instead: one placement,
+ *   used. On a handler action declaring no params that check is a
+ *   pass-through (a declarative `operation: 'update'` is the exception: its
+ *   empty list is an empty accept set), so the same member would be silently
+ *   accepted there instead: one placement,
  *   two opposite behaviours, which on its own disqualifies it for a safety
  *   member.
  * - NOT a transport header. A header is invisible to the tool schema an agent

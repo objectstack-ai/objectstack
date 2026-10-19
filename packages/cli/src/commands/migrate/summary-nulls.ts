@@ -17,7 +17,8 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
-import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { refuseUndeclaredObjects } from '../../utils/migrate-object-scope.js';
 // Type-only, so the heavy engine package is still loaded lazily below: this is
@@ -51,7 +52,7 @@ async function confirm(question: string): Promise<boolean> {
  * A freshly seeded database has no such rows; this command is for the other
  * kind, and is needed exactly once per deployment.
  *
- * Dry run by default (writes nothing at all), `--apply` to backfill. Each
+ * Dry run by default (writes no row at all), `--apply` to backfill. Each
  * `NULL` row is RECOMPUTED — a pre-upgrade parent that has children is `NULL`
  * too and its correct value is the real aggregate, so writing 0 everywhere
  * would swap a missing value for a wrong one. Idempotent: a second run finds
@@ -156,7 +157,7 @@ export default class MigrateSummaryNulls extends Command {
     if (occupancy.status === 'busy' && !flags.json) {
       printWarning(apply
         ? `--force: ${describeOccupancy(occupancy)} Backfilling anyway — the live process may write rows mid-walk.`
-        : `${describeOccupancy(occupancy)} The dry run below writes nothing, but its counts may shift while that process is running.`);
+        : `${describeOccupancy(occupancy)} The dry run below writes no row or table, but its counts may shift while that process is running. ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
     if (occupancy.status === 'unknown' && !flags.json) {
       printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
@@ -254,7 +255,19 @@ export default class MigrateSummaryNulls extends Command {
 
       printInfo(`Database: ${chalk.white(stack.dbLabel)}`);
       console.log('');
-      console.log(formatSummaryBackfillReport(report).join('\n'));
+      // [#23726] A dry run that found NULL roll-ups ends the report with "Dry
+      // run — no row or table was written." (its last line). The read-only
+      // boot's connect may still have switched a SQLite file's journal mode
+      // (`SqlDriver.applySqliteJournalMode`, its rule for every connect), which
+      // rewrites the file header and no row, so on a SQLite file that line is
+      // followed by the note naming the switch. A target that is no SQLite file
+      // (PostgreSQL, MySQL) has no header to switch. The `--json` document
+      // carries no sentence and is unchanged.
+      const journalNote = !report.applied && report.nullRows > 0
+        && describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+      console.log(`${formatSummaryBackfillReport(report).join('\n')}${journalNote}`);
       console.log('');
 
       if (report.failures.length > 0) {
@@ -277,7 +290,18 @@ export default class MigrateSummaryNulls extends Command {
     } catch (error: any) {
       if (isExitSignal(error)) throw error;
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
-      printError(error.message || String(error));
+      // [#23899] `INVALID_FIELD` here is `backfillSummaryNulls` refusing a
+      // `--recompute-undefined-on-empty` name it cannot find (its one throw),
+      // which ends "Refused before the walk read or wrote any row." The boot
+      // above ran first in either mode, and its connect may have switched a
+      // SQLite file's journal mode (its header, no row), so on a SQLite file
+      // the refusal is followed by the note naming the switch. The `--json`
+      // envelope above carries the engine's message as it is.
+      const journalNote = error?.code === 'INVALID_FIELD'
+        && describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+      printError(`${error.message || String(error)}${journalNote}`);
       this.exit(1);
     } finally {
       await stack.shutdown();

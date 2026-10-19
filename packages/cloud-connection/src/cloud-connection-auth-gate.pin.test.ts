@@ -10,7 +10,8 @@
  *
  *  - `CloudConnectionPlugin` reads the session in ONE place
  *    (`sessionFromAuthService`, under both resolution modes). Seven of its
- *    eight doors call it; `/status` reads no session at all.
+ *    eight doors refuse on it; `/status` reads it only to decide what it
+ *    serves (#24148) and refuses no one.
  *  - `MarketplaceInstallLocalPlugin` reads it in ONE place
  *    (`resolveInstallPrincipal`), and all five doors answer a held session
  *    through the same refusal (`refuseHeldSession`).
@@ -28,7 +29,12 @@
  *    gate's `code` and `message`, and no effect fires (no control-plane call,
  *    no credential cleared; no registry, schema, ledger, seed or delete write).
  *  - UN-HELD: the same caller and grants, without a posture, are served.
- *  - Anonymous is refused `401` as before, and `/status` is untouched.
+ *  - Anonymous is refused `401` as before, and `/status` answers a held
+ *    session `200` with its narrowed shape (#24148).
+ *
+ * Every test user holds `setup.access`, so a refusal below is the gate's alone
+ * (#24148 makes three of the seven doors demand it; its own pins are
+ * `cloud-connection-setup-access.pin.test.ts`).
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -156,11 +162,16 @@ async function mountCloudConnection(mode: 'single' | 'multi') {
     const credentialPath = join(dir, 'cloud-connection.json');
     const store = new ConnectionCredentialStore(credentialPath);
     store.write({ runtimeToken: 'oscc_pin', runtimeId: 'rt_1', environmentId: 'env-1' });
+    // [#24148] The grants every test user holds (`setup.access` among them),
+    // read by the three connection-changing doors through the shared resolver.
+    const rows = grantRows();
+    const objectql = bindCatalogFromTables({ find: async (object: string) => rows[object] ?? [] }, rows);
+    const envKernelServices: Record<string, unknown> = { auth, objectql };
     const services: Record<string, unknown> = mode === 'single'
-        ? { auth }
+        ? { auth, objectql }
         : {
             'env-registry': { resolveByHostname: async () => ({ environmentId: 'env-1' }) },
-            'kernel-manager': { getOrCreate: async () => ({ getServiceAsync: async () => auth }) },
+            'kernel-manager': { getOrCreate: async () => ({ getServiceAsync: async (name: string) => envKernelServices[name] }) },
         };
     const ctx = {
         hook: (e: string, h: any) => hooks.set(e, h),
@@ -192,14 +203,18 @@ async function mountCloudConnection(mode: 'single' | 'multi') {
 }
 
 describe('ADR-0069 at CloudConnectionPlugin', () => {
-    it('census: eight routes, none allow-listed; seven resolve a session and /status resolves none', async () => {
-        const { rawApp, auth } = await mountCloudConnection('single');
+    it('census: eight routes, none allow-listed; seven refuse a held session and /status refuses none', async () => {
+        const { rawApp } = await mountCloudConnection('single');
         const keys = [...rawApp.routes.keys()];
         expect(keys).toHaveLength(8);
         for (const key of keys) expect(isAuthGateAllowlisted(key.split(' ')[1]), key).toBe(false);
         expect(keys.filter((k) => k !== `GET ${CC}/status`).sort()).toEqual(CC_SESSION_DOORS.map((d) => d.route).sort());
-        await rawApp.routes.get(`GET ${CC}/status`)!(makeC(`${ORIGIN}${CC}/status`, 'u_held_pw'));
-        expect(auth.reads.count, '/status read a session').toBe(0);
+        // [#24148] `/status` reads the session only to decide what it serves: a
+        // held session is answered, with the shape served to a caller without
+        // `setup.access` — never refused.
+        const res = await rawApp.routes.get(`GET ${CC}/status`)!(makeC(`${ORIGIN}${CC}/status`, 'u_held_pw'));
+        expect(res.status, JSON.stringify(res.payload)).toBe(200);
+        expect(Object.keys(res.payload.data).sort()).toEqual(['bound', 'provider', 'runtimeId']);
     });
 
     for (const mode of ['single', 'multi'] as const) {

@@ -63,7 +63,7 @@ import {
   boundPortFromBanner,
   holdPort,
   portDriftError,
-  randomPort,
+  readKernelAssignedPort,
   runServe,
 } from './helpers/serve-process.js';
 
@@ -171,6 +171,27 @@ describe('#12525: the child\'s REAL port is read back out of its own banner', ()
       // reads as a pass.
       const midPrint = ['', '  ✓ Server is ready', ''].join('\n');
       expect(boundPortFromBanner(midPrint)).toEqual({ state: 'no-banner' });
+    });
+  });
+
+  describe('a KERNEL-ASSIGNED boot (#24342): no number to drift from, so the read-back is the check', () => {
+    // `runServe()` with no `--port` hands the child port 0. These are the
+    // refusals that stand in for the drift comparison there; without them the
+    // check would read vacuously green on every boot of that family.
+    it('reads the bound port out of a complete banner', () => {
+      expect(readKernelAssignedPort(bannerFor(41234), 'os serve')).toBe(41234);
+    });
+
+    it('refuses a banner that announces the REQUEST, localhost:0', () => {
+      const error = readKernelAssignedPort(bannerFor(0), 'os serve');
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).toContain('localhost:0');
+    });
+
+    it('refuses an unreadable banner and a missing one', () => {
+      const external = bannerFor(41234, '  ➜  API:       https://app.example.com/');
+      expect((readKernelAssignedPort(external, 'os serve') as Error).message).toContain('CANNOT READ BACK');
+      expect(readKernelAssignedPort('', 'os serve')).toBeInstanceOf(Error);
     });
   });
 
@@ -337,16 +358,19 @@ describe('#12525: the child\'s REAL port is read back out of its own banner', ()
   });
 
   it(
-    'POSITIVE CONTROL: a real boot on a free port reads back as exactly that port',
+    'POSITIVE CONTROL: a real kernel-assigned boot reads back as the port runServe() returns',
     async () => {
-      const port = randomPort();
-      const { stdout, stderr } = await runServe(bareDir, ['--port', port], {
+      // No `--port`, so the child takes a kernel-assigned one (#24342) — there
+      // is no released number left to lose a race over. The run RESOLVING is
+      // already half the assertion: `runServe()` rejects a complete banner it
+      // cannot read a non-zero port out of, so a parse that stopped matching the
+      // LIVE banner reddens here, not in the forced drift below.
+      const { stdout, stderr, port } = await runServe(bareDir, [], {
         waitFor: /Press Ctrl\+C to stop/,
         timeoutMs: 240_000,
       });
-      // The run RESOLVING is already half the assertion — `runServe()` rejects
-      // on a drift now, so reaching this line means the check did not fire.
-      expect(boundPortFromBanner(stdout + stderr)).toEqual({ state: 'bound', port: Number(port) });
+      expect(port).toBeGreaterThan(0);
+      expect(boundPortFromBanner(stdout + stderr)).toEqual({ state: 'bound', port });
     },
     240_000,
   );

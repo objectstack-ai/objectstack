@@ -1,0 +1,8 @@
+{
+  "file": "packages/rest/src/meta-collection-routes.ts",
+  "adrs": [
+    "ADR-0131",
+    "ADR-0106"
+  ],
+  "invariant": "The `/meta` collection doors, moved here whole from `rest-server.ts` (#23050 slice 13a): the type list (`GET {metaPath}` and `GET {metaPath}/types`), the whole-store maintenance family (`GET {metaPath}/diagnostics`, `GET {metaPath}/_drafts` and `POST {metaPath}/_migrate-stored`) and the per-type list (`GET {metaPath}/:type`), mounted inside the umbrella's guarded registration. ADR-0131 — no door here reads or writes an organization's partition: the diagnostics sweep, the drafts list and the per-type list read environment → code, the partition every `/meta` write lands in, and the install-wide stored-metadata rewrite asks the walled refusal after its capability gate and before the protocol is resolved or a row is read. ADR-0106 — the pending-drafts list is an authoring surface gated per caller, because a pending object draft carries its full field map, and the per-type list serves an undetermined field visibility private and no-store. A collection door that reads an organization's partition, a rewrite that runs past the walled refusal, or a drafts list served to a caller who may not author is the drift these records forbid; the bodies' own comments carry each citation."
+}

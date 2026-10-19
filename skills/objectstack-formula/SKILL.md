@@ -13,7 +13,7 @@ license: Apache-2.0
 compatibility: Requires @objectstack/spec 18.x and @objectstack/formula 18.x (CEL)
 metadata:
   author: objectstack-ai
-  version: "18.0.0-next.1"
+  version: "18.0.0-next.4"
   domain: expression
   tags: cel, formula, predicate, condition, validation, visibility, seed-dynamic
 ---
@@ -303,19 +303,21 @@ roots — one scope, one meaning, whichever surface reads it.
 | Surface / event | `previous` |
 |:---|:---|
 | Update hook `condition` (single-record write), validation rule on update | the stored pre-write row |
-| Insert events (`beforeInsert` / `afterInsert`), validation rule on insert | **unbound** — there is no prior state |
+| Insert events (`beforeInsert` / `afterInsert`), validation rule on insert | **`null`** — `previous == null \|\| …` judges an insert, `previous != null && …` skips one; a column read off it (`previous.x`) has no value and faults |
+| A write to an existing row whose prior state is not in hand | **unbound** — fails closed, so `previous == null` never reads an update as an insert |
 | **`after*` hook `condition` / record-change flow trigger on a predicate (`multi: true`) write** | **that row's pre-write row** — a bulk write fires after-hooks once PER MATCHED ROW |
 | Validation rule on a predicate bulk update | that row's pre-write row — per row |
 | `before*` hook `condition` on a predicate (`multi: true`) write | **that row's pre-write row** — `beforeUpdate` / `beforeDelete` dispatch once PER MATCHED ROW too, each on a single-record-shaped context whose `input.id` names the row (ADR-0058 Addendum II, D1/D2); `record` is that row's state, stored ⊕ payload, as on any update. Only the *payload* stays batch-scoped — see below the table |
 
-⚠️ **An unevaluable condition ABORTS the operation.** Referencing
-`previous` where it is unbound — like a typo'd key (`record.stauts`), a retired
-field, or a comparison CEL has no overload for — does **not** degrade to "the
-hook did not fire": it **fails the write**, with an error naming the hook and
-the key — `before*` and `after*` alike, with no `onError` escape (`onError`
-governs a handler that throws, and the condition is evaluated before any handler
-runs). A condition that does not even **compile** aborts the same way. So write
-insert-event conditions over `record` alone.
+⚠️ **An unevaluable condition ABORTS the operation.** A column read off
+`previous` on an insert (`previous.status`, where `previous` is `null`) — like
+a typo'd key (`record.stauts`), a retired field, or a comparison CEL has no
+overload for — does **not** degrade to "the hook did not fire": it **fails the
+write**, with an error naming the hook and the key — `before*` and `after*`
+alike, with no `onError` escape (`onError` governs a handler that throws, and
+the condition is evaluated before any handler runs). A condition that does not
+even **compile** aborts the same way. So on an insert event read `previous`
+only against `null`, and put a column read off it behind `previous != null &&`.
 
 **A transition condition needs no special handling for bulk writes.**
 Write it once, on a `before*` or an `after*` event, and it means the same thing
@@ -371,9 +373,10 @@ When migrating Salesforce-flavor metadata, apply these rules in order:
 | `ISCHANGED(x)` | `previous.x != record.x` |
 | `MONTH_DIFF`, `MID`, `LEFT`, `RIGHT`, `SUBSTITUTE` | _not in stdlib — propose addition_ |
 
-> ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which exists only
-> where `previous` is **bound** — see §5. On an insert event it is not; that
-> does not quietly skip the hook, it **fails the write**. On update and delete
+> ⚠️ `OLD.x` and `ISCHANGED(x)` both land on `previous.x`, which has a value
+> only where `previous` is a **row** — see §5. On an insert event `previous` is
+> `null`, so the read does not quietly skip the hook, it **fails the write**
+> unless guarded by `previous != null &&`. On update and delete
 > events it IS bound, per matched row, in `before*` and `after*` alike, on bulk
 > and single-record writes.
 

@@ -44,6 +44,7 @@ import { parseCriteria, isMatchAllCriteria, MATCH_ALL_CRITERIA_MESSAGE } from '.
 import { TeamGraphService } from './team-graph.js';
 import { PositionGraphService } from './position-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
+import type { DeclaredSharingRule, DeclaredSharingRuleSource } from './declared-sharing-rules.js';
 
 /**
  * System-elevated context for the rule evaluator's own reconcile writes.
@@ -64,7 +65,7 @@ const SYSTEM_CTX: ExecutionContext = { isSystem: true, positions: [], permission
  * authoring seams that never run the spec parse — see
  * {@link SharingRuleService.defineRule}.
  */
-const FIELD_NAME_GRAMMAR = /^[a-z_][a-z0-9_]*$/;
+export const FIELD_NAME_GRAMMAR = /^[a-z_][a-z0-9_]*$/;
 
 /**
  * [#15072] The user ids a record's user-typed column names.
@@ -137,6 +138,67 @@ function rowFromRule(row: any): SharingRuleRow {
 }
 
 /**
+ * [ADR-0131 D2] A DECLARED rule as the rule set serves it: the declaration
+ * (read from the registry, {@link DeclaredSharingRuleSource}) projected into
+ * the runtime row shape for ONE scope — `null` under `single`, one
+ * organization under a wall. It is not a row: nothing is written for it.
+ *
+ * Its `id` is its NAME. That is what its grants carry as
+ * `sys_record_share.source_id` (ruling β item 5 (c) on the C3 epic: the
+ * ownership ceremony rewrites a declared-rule mirror's grants from the mirror
+ * row's id to the rule's name before it deletes the mirror), so every
+ * reconcile below reads and writes a declared rule's grants by name with no
+ * second code path. An organization-authored rule keeps its row id.
+ */
+function projectDeclaredRule(rule: DeclaredSharingRule, organizationId: string | null): SharingRuleRow {
+  return {
+    id: rule.name,
+    organization_id: organizationId,
+    name: rule.name,
+    label: rule.label,
+    description: rule.description,
+    object_name: rule.object,
+    criteria: rule.criteria,
+    recipient_type: rule.recipientType,
+    recipient_id: rule.recipientId,
+    access_level: normalizeStoredAccessLevel(rule.accessLevel),
+    active: rule.active,
+    managed_by: 'package',
+    customized: false,
+  };
+}
+
+/**
+ * Is `rule` a declared rule's projection ({@link projectDeclaredRule}) rather
+ * than a `sys_sharing_rule` row? A row's id is minted (`srule_…`, or the data
+ * API's), never its name, and `managed_by` is readonly to every non-system
+ * writer — so the pair cannot be forged by an author.
+ */
+export function isDeclaredSharingRule(rule: Pick<SharingRuleRow, 'id' | 'name' | 'managed_by'>): boolean {
+  return rule.managed_by === 'package' && rule.id === rule.name;
+}
+
+/**
+ * The `sys_record_share` rows a rule's grants are: `source: 'rule'` plus the
+ * rule's id. A declared rule served under a wall is one projection per
+ * organization, all carrying the rule's name, so its grants are told apart by
+ * the organization each one is stamped with — the rule's own, which the grant
+ * write threads ({@link SharingRuleService.criteriaContext}). Without it one
+ * organization's reconcile would read every other organization's grants of
+ * the same rule as its own stale rows, and revoke them.
+ */
+function ruleGrantScope(rule: SharingRuleRow): Record<string, unknown> {
+  const where: Record<string, unknown> = { source: 'rule', source_id: rule.id };
+  if (isDeclaredSharingRule(rule) && rule.organization_id != null) where.organization_id = rule.organization_id;
+  return where;
+}
+
+/** Name order, as `listRules` has always answered. */
+function byName(a: SharingRuleRow, b: SharingRuleRow): number {
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+}
+
+/**
  * [#14754] What one reconcile pass did, plus the grants the engine's
  * organization rule REFUSED in it.
  *
@@ -165,6 +227,12 @@ export interface SharingRuleReconcilePassResult extends SharingRuleEvaluationRes
 export interface SharingRuleServiceOptions {
   engine: SharingEngine;
   sharing: SharingService;
+  /**
+   * [ADR-0131 D2] Where DECLARED rules are read — the registry
+   * (`createDeclaredSharingRuleSource`). Absent, the rule set is the
+   * `sys_sharing_rule` rows alone.
+   */
+  declaredRules?: DeclaredSharingRuleSource;
   logger?: {
     info?: (msg: any, ...rest: any[]) => void;
     /**
@@ -261,10 +329,62 @@ export class SharingRuleService implements ISharingRuleService {
    */
   private readonly fieldRuleWarned = new Set<string>();
 
+  /** [ADR-0131 D2] Where declared rules are read. */
+  private readonly declaredSource?: DeclaredSharingRuleSource;
+  /**
+   * [ADR-0131 D2] The scopes a declared rule is served in: `[null]` under
+   * `single` (one organization-less projection, the platform-global class),
+   * every organization under a wall. Set by the plugin from the posture
+   * ({@link setDeclaredRuleScopes}).
+   *
+   * `null` is UNKNOWN — the organizations could not be read
+   * ({@link setDeclaredRuleScopesUnknown}). It is a state of its own, never an
+   * empty list: an empty list would read as "no organization serves this
+   * rule", and the orphaned-grant sweep would revoke every declared rule's
+   * grants on that reading. Unknown serves no declared rule and revokes none.
+   */
+  private declaredScopes: ReadonlyArray<string | null> | null = [null];
+  /** [ADR-0131 D2] The held-back sweep under unknown scopes says so once per process. */
+  private unknownScopesSweepWarned = false;
+
   constructor(opts: SharingRuleServiceOptions) {
     this.engine = opts.engine;
     this.sharing = opts.sharing;
     this.logger = opts.logger;
+    this.declaredSource = opts.declaredRules;
+  }
+
+  /**
+   * [ADR-0131 D2] Serve declared rules in these scopes — `[null]` under
+   * `single`, the organizations under a wall. The same passes the retired
+   * seeder made, as reads instead of rows: one organization-less pass under
+   * `single`, one per organization under a wall (#10103).
+   */
+  setDeclaredRuleScopes(scopes: ReadonlyArray<string | null>): void {
+    this.declaredScopes = [...new Set(scopes)];
+  }
+
+  /**
+   * [ADR-0131 D2] The scopes are UNKNOWN — the organizations could not be
+   * enumerated. No declared rule is served anywhere (an incomplete scope set
+   * would grant in some organizations and not others), and
+   * {@link sweepOrphanedRuleGrants} revokes no declared rule's grant: a read
+   * that failed is never a revocation. The next boot that reads the
+   * organizations serves them again.
+   */
+  setDeclaredRuleScopesUnknown(): void {
+    this.declaredScopes = null;
+  }
+
+  /**
+   * [ADR-0131 D2] An organization created after boot is served from its
+   * creation on. Under unknown scopes it stays unknown: one organization known
+   * is not the set.
+   */
+  addDeclaredRuleScope(organizationId: string): void {
+    const scopes = this.declaredScopes;
+    if (!organizationId || scopes === null || scopes.includes(null) || scopes.includes(organizationId)) return;
+    this.declaredScopes = [...scopes, organizationId];
   }
 
   /**
@@ -589,8 +709,10 @@ export class SharingRuleService implements ISharingRuleService {
       context: SYSTEM_CTX,
     });
     // [#2909 P0/T1] Seed mode: a package/platform managedBy marks this call
-    // as the boot seeder (bootstrapDeclaredSharingRules) rather than an
-    // admin/programmatic authoring path. sys_sharing_rule is
+    // as a seed rather than an admin/programmatic authoring path. Its one
+    // caller here was the boot seeder, retired by ADR-0131 D2 — declared rules
+    // are read from the registry now ({@link declaredRules}); the contract's
+    // `managedBy` input keeps its meaning for any other caller. sys_sharing_rule is
     // RECORD-AUTHORITATIVE (ADR-0094 addendum): the declared metadata is a
     // seed, not a live override, so the seeder must never clobber a row the
     // admin owns or has customized — most importantly an admin's
@@ -657,9 +779,11 @@ export class SharingRuleService implements ISharingRuleService {
    * platform-global".
    *
    * `organization_id = null` on `sys_sharing_rule` means "owned by no
-   * organization" — a row written by the package/app seeder
-   * (`bootstrapDeclaredSharingRules`, which defines under `SYSTEM_CTX` and so
-   * stamps `organization_id: null`) before any org id exists. A strict
+   * organization" — a row the package/app seeder wrote
+   * (`bootstrapDeclaredSharingRules`, which defined under `SYSTEM_CTX` and so
+   * stamped `organization_id: null`) before any org id existed, or, since that
+   * seeder retired (ADR-0131 D2), a declared rule's `single`-posture
+   * projection ({@link projectDeclaredRule}). A strict
    * `organization_id = <request org>` equality made every such row invisible to
    * the admin API while enforcement kept reading them under `SYSTEM_CTX`: on a
    * stock boot `GET /api/v1/sharing/rules` answered `{data: []}` over four
@@ -717,12 +841,101 @@ export class SharingRuleService implements ISharingRuleService {
       limit: 1000,
       context: SYSTEM_CTX,
     });
-    return Array.isArray(rows) ? rows.map(rowFromRule) : [];
+    const stored = Array.isArray(rows) ? rows.map(rowFromRule) : [];
+    // [ADR-0131 D2] The declared rules, read from the registry — every
+    // enforcement path (the record hooks, the object and boot reconciles, the
+    // business-unit recompute, the rebind) lists through here.
+    const declared = await this.declaredRules(context, filter);
+    return declared.length === 0 ? stored : [...stored, ...declared].sort(byName);
+  }
+
+  /**
+   * [ADR-0131 D2] The declared rules this caller's scope serves, projected
+   * ({@link projectDeclaredRule}) — the retired seeder's passes, read instead
+   * of written.
+   *
+   * A declaration is NOT served in a scope where a `sys_sharing_rule` row
+   * holds its name — the row the seeder's upsert would have found there: under
+   * `single` a row of that name in any organization, under a wall that
+   * organization's row of that name. Such a row is an organization's own rule
+   * of that name, a seeded copy an administrator customized, or a seeded copy
+   * the ownership ceremony has not deleted yet; it answers for the name, as it
+   * did while the seeder ran (an admin-authored or customized row was never
+   * overwritten), and the declaration does not ALSO grant beside it.
+   */
+  private async declaredRules(
+    context: ExecutionContext,
+    filter: { object?: string; activeOnly?: boolean; name?: string },
+  ): Promise<SharingRuleRow[]> {
+    if (!this.declaredSource) return [];
+    let rules = await this.declaredSource.list();
+    if (filter.object) rules = rules.filter((r) => r.object === filter.object);
+    if (filter.activeOnly) rules = rules.filter((r) => r.active);
+    if (filter.name !== undefined) rules = rules.filter((r) => r.name === filter.name);
+    const scopes = this.declaredScopesFor(context);
+    if (rules.length === 0 || scopes.length === 0) return [];
+
+    const single = this.declaredScopes?.includes(null) === true;
+    const holders = await this.engine.find('sys_sharing_rule', {
+      where: { name: { $in: rules.map((r) => r.name) } },
+      fields: ['name', 'organization_id'],
+      limit: 100000,
+      context: SYSTEM_CTX,
+    });
+    const held = new Set<string>();
+    for (const row of (Array.isArray(holders) ? holders : []) as any[]) {
+      held.add(single ? String(row.name) : `${String(row.name)}::${String(row.organization_id ?? '')}`);
+    }
+    const out: SharingRuleRow[] = [];
+    for (const scope of scopes) {
+      for (const rule of rules) {
+        if (held.has(single ? rule.name : `${rule.name}::${scope}`)) continue;
+        out.push(projectDeclaredRule(rule, scope));
+      }
+    }
+    return out;
+  }
+
+  /**
+   * [ADR-0131 D2] Which scopes a caller reads declared rules in: the one
+   * organization-less scope under `single` (platform-global, every
+   * organization reads it — the {@link adminOrgScope} reasoning); under a wall,
+   * the caller's own organization, or every organization for a system context
+   * or a platform operator.
+   */
+  private declaredScopesFor(context: ExecutionContext): ReadonlyArray<string | null> {
+    const scopes = this.declaredScopes;
+    if (scopes === null) return []; // unknown: served nowhere
+    if (scopes.includes(null)) return [null];
+    const orgId = this.callerOrgId(context);
+    if (!orgId) return scopes;
+    return scopes.includes(orgId) ? [orgId] : [];
   }
 
   async getRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleRow | null> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
     if (!idOrName) return null;
+    const row = await this.findRuleRow(idOrName, context);
+    if (row) return row;
+    // [ADR-0131 D2] A declared rule: its id is its name.
+    return (await this.declaredRules(context, { name: idOrName }))[0] ?? null;
+  }
+
+  /**
+   * Every rule `idOrName` addresses for this caller: the one row, or the
+   * declared rule's projections — one per scope the caller reads, so a system
+   * context evaluating a declared rule under a wall reaches every
+   * organization's projection of it.
+   */
+  private async resolveRules(idOrName: string, context: ExecutionContext): Promise<SharingRuleRow[]> {
+    if (!idOrName) return [];
+    const row = await this.findRuleRow(idOrName, context);
+    if (row) return [row];
+    return this.declaredRules(context, { name: idOrName });
+  }
+
+  /** The `sys_sharing_rule` row `idOrName` addresses for this caller — by id, then by name. */
+  private async findRuleRow(idOrName: string, context: ExecutionContext): Promise<SharingRuleRow | null> {
     // [#7761] The by-id branch carries the SAME tenant scope as the by-name
     // path — it used to be a bare `{id: idOrName}`, resolved under SYSTEM_CTX
     // so nothing downstream re-scoped it. An org-scoped sharing admin holding
@@ -779,8 +992,20 @@ export class SharingRuleService implements ISharingRuleService {
 
   async deleteRule(idOrName: string, context: ExecutionContext): Promise<void> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
-    const row = await this.getRule(idOrName, context);
-    if (!row) return;
+    if (!idOrName) return;
+    const row = await this.findRuleRow(idOrName, context);
+    if (!row) {
+      // [ADR-0131 D2] A declared rule is code: there is no row to delete, and
+      // its grants follow the declaration. 403, never a silent no-op that
+      // reads as success while the rule keeps granting.
+      if ((await this.declaredRules(context, { name: idOrName })).length > 0) {
+        throw new Error(
+          `PERMISSION_DENIED: sharing rule '${idOrName}' is declared in the application's code, not stored — ` +
+            'it is changed or removed in that declaration, and its grants follow it.',
+        );
+      }
+      return;
+    }
     // [#7795] A platform-global row is visible to an org admin by design
     // (#7760) but is NOT theirs to destroy — 403, never 404.
     this.assertCanDeletePlatformGlobalRule(row, context);
@@ -795,7 +1020,7 @@ export class SharingRuleService implements ISharingRuleService {
     // an over-granting rule unrecoverable from the API surface once #4433 had
     // also closed the deactivation path.
     //
-    // The fix routes through {@link purgeRuleGrants} rather than adding
+    // The fix routes through {@link purgeGrants} rather than adding
     // `multi: true` to the bulk call: it is the same revoke path every other
     // withdrawal already uses (`evaluateRule` on an inactive rule,
     // `revokeRuleGrants` after a data-API delete), so a rule's grants are
@@ -803,7 +1028,7 @@ export class SharingRuleService implements ISharingRuleService {
     // time by scalar id — instead of two divergent ones. Adding `multi` here
     // would have fixed the 500 while keeping delete as the only withdrawal
     // that bypasses the sharing service (AGENTS.md PD #5).
-    await this.purgeRuleGrants(row.id);
+    await this.purgeGrants(ruleGrantScope(row));
     await this.engine.delete('sys_sharing_rule', {
       where: { id: row.id },
       context: SYSTEM_CTX,
@@ -812,11 +1037,32 @@ export class SharingRuleService implements ISharingRuleService {
 
   async evaluateRule(idOrName: string, context: ExecutionContext): Promise<SharingRuleReconcilePassResult> {
     this.assertCanManageRules(context); // [ADR-0111 D6]
-    const rule = await this.getRule(idOrName, context);
-    if (!rule) throw new Error('RULE_NOT_FOUND');
+    const rules = await this.resolveRules(idOrName, context);
+    if (rules.length === 0) throw new Error('RULE_NOT_FOUND');
+    if (rules.length === 1) return this.evaluateResolvedRule(rules[0]);
+    // [ADR-0131 D2] A declared rule under a wall: one pass per organization's
+    // projection, reported as the one rule it is.
+    const total: SharingRuleReconcilePassResult = {
+      ruleId: rules[0].id, matchedRecords: 0, expandedUsers: 0,
+      grantsCreated: 0, grantsUpdated: 0, grantsRevoked: 0, grantsRefused: 0,
+    };
+    for (const rule of rules) {
+      const pass = await this.evaluateResolvedRule(rule);
+      total.matchedRecords += pass.matchedRecords;
+      total.expandedUsers += pass.expandedUsers;
+      total.grantsCreated += pass.grantsCreated;
+      total.grantsUpdated += pass.grantsUpdated;
+      total.grantsRevoked += pass.grantsRevoked;
+      total.grantsRefused += pass.grantsRefused;
+    }
+    return total;
+  }
+
+  /** One rule's whole pass, the rule already resolved. */
+  private async evaluateResolvedRule(rule: SharingRuleRow): Promise<SharingRuleReconcilePassResult> {
     if (!rule.active) {
       // Inactive — purge any leftover grants and report revoke count.
-      const revoked = await this.purgeRuleGrants(rule.id);
+      const revoked = await this.purgeGrants(ruleGrantScope(rule));
       // [#14754] An inactive rule attempts no grant, so it can refuse none.
       return { ruleId: rule.id, matchedRecords: 0, expandedUsers: 0, grantsCreated: 0, grantsUpdated: 0, grantsRevoked: revoked, grantsRefused: 0 };
     }
@@ -838,7 +1084,7 @@ export class SharingRuleService implements ISharingRuleService {
    * leave its grants behind forever (objectstack#3821).
    */
   async revokeRuleGrants(ruleId: string): Promise<number> {
-    return this.purgeRuleGrants(ruleId);
+    return this.purgeGrants({ source: 'rule', source_id: ruleId });
   }
 
   /**
@@ -867,10 +1113,37 @@ export class SharingRuleService implements ISharingRuleService {
     });
     const live = new Set<string>();
     for (const r of (ruleRows ?? [])) live.add(String((r as any).id));
+    // [ADR-0131 D2] A declared rule's grants carry its NAME, and they are live
+    // exactly where it is served: organization-less (every organization's
+    // records) under `single`, its organization's own grants under a wall. A
+    // declaration removed from the code, or answered in an organization by a
+    // row of its name, leaves grants no projection claims — swept here.
+    const liveDeclared = new Set<string>();
+    for (const rule of await this.declaredRules(SYSTEM_CTX, {})) {
+      if (rule.organization_id == null) live.add(rule.id);
+      else liveDeclared.add(`${rule.id}::${rule.organization_id}`);
+    }
+    // Unknown scopes: where a declared rule is served is not known, so none of
+    // its name-keyed grants can be judged orphaned — every declared name is
+    // held live. A grant revoked on a failed read is lost access; one held back
+    // is re-judged by the next boot that reads the organizations.
+    if (this.declaredScopes === null && this.declaredSource) {
+      const declaredNames = (await this.declaredSource.list()).map((r) => r.name);
+      for (const name of declaredNames) live.add(name);
+      if (declaredNames.length > 0 && !this.unknownScopesSweepWarned) {
+        this.unknownScopesSweepWarned = true;
+        this.logger?.warn?.(
+          '[sharing-rule] the organizations could not be enumerated, so no declared sharing rule is served and ' +
+            'none of their grants is revoked by the orphaned-grant sweep; the standing grants keep answering. ' +
+            'Remedy: restore read access to sys_organization and restart.',
+          { declaredRules: declaredNames.length },
+        );
+      }
+    }
 
     const grants = await this.engine.find('sys_record_share', {
       where: { source: 'rule' },
-      fields: ['id', 'source_id'],
+      fields: ['id', 'source_id', 'organization_id'],
       limit: 100000,
       context: SYSTEM_CTX,
     });
@@ -880,6 +1153,7 @@ export class SharingRuleService implements ISharingRuleService {
       // A `source: 'rule'` row with no `source_id` names no rule that could
       // ever re-grant it — equally unreachable, equally void.
       if (sourceId != null && live.has(String(sourceId))) continue;
+      if (sourceId != null && liveDeclared.has(`${String(sourceId)}::${String((g as any).organization_id ?? '')}`)) continue;
       await this.sharing.revoke(String((g as any).id), SYSTEM_CTX);
       revoked += 1;
     }
@@ -952,7 +1226,9 @@ export class SharingRuleService implements ISharingRuleService {
     let reconciled = 0;
     for (const rule of rules) {
       try {
-        await this.evaluateRule(rule.id, SYSTEM_CTX);
+        // The listed rule itself, not its id: a declared rule under a wall is
+        // one projection per organization, all carrying one id.
+        await this.evaluateResolvedRule(rule);
         reconciled += 1;
       } catch (err: any) {
         this.logger?.warn?.('[sharing-rule] object reconcile failed for rule', {
@@ -1078,7 +1354,7 @@ export class SharingRuleService implements ISharingRuleService {
     // than a coincidence, and `field-recipient.test.ts` pins both halves.
     if (rule.recipient_type === 'field') return 0;
     const existing = await this.engine.find('sys_record_share', {
-      where: { source: 'rule', source_id: rule.id },
+      where: ruleGrantScope(rule),
       fields: ['id', 'recipient_id'],
       limit: 100000,
       context: SYSTEM_CTX,
@@ -1098,8 +1374,7 @@ export class SharingRuleService implements ISharingRuleService {
     for (let i = 0; i < stale.length; i += CHUNK) {
       await this.engine.delete('sys_record_share', {
         where: {
-          source: 'rule',
-          source_id: rule.id,
+          ...ruleGrantScope(rule),
           recipient_id: { $in: stale.slice(i, i + CHUNK) },
         },
         multi: true,
@@ -1710,7 +1985,7 @@ export class SharingRuleService implements ISharingRuleService {
    */
   private async reconcile(rule: SharingRuleRow, desiredSet: DesiredGrantSet): Promise<SharingRuleReconcilePassResult> {
     const existing = await this.engine.find('sys_record_share', {
-      where: { source: 'rule', source_id: rule.id },
+      where: ruleGrantScope(rule),
       fields: ['id', 'record_id', 'recipient_id', 'access_level'],
       limit: 100000,
       context: SYSTEM_CTX,
@@ -1772,7 +2047,7 @@ export class SharingRuleService implements ISharingRuleService {
     users: string[],
   ): Promise<SharingRuleReconcilePassResult> {
     const existing = await this.engine.find('sys_record_share', {
-      where: { source: 'rule', source_id: rule.id, record_id: recordId },
+      where: { ...ruleGrantScope(rule), record_id: recordId },
       fields: ['id', 'record_id', 'recipient_id', 'access_level'],
       limit: 1000,
       context: SYSTEM_CTX,
@@ -1828,9 +2103,10 @@ export class SharingRuleService implements ISharingRuleService {
     };
   }
 
-  private async purgeRuleGrants(ruleId: string): Promise<number> {
+  /** Revoke every grant `scope` names ({@link ruleGrantScope}), one row at a time through the sharing service. */
+  private async purgeGrants(scope: Record<string, unknown>): Promise<number> {
     const existing = await this.engine.find('sys_record_share', {
-      where: { source: 'rule', source_id: ruleId },
+      where: scope,
       fields: ['id'],
       limit: 100000,
       context: SYSTEM_CTX,

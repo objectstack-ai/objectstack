@@ -9,8 +9,9 @@ import type { SemanticMigration } from '../../types.js';
 // 3, letter B) a page-block section shape of its own — the form view's section
 // keys plus the three entry arms the form reads, canonical spellings only — and
 // the stored form view is unchanged. D3 only: page-component `properties` is
-// not parsed on the metadata save or load path, so a stored page is never
-// refused; and the authored census, with every inline option list evaluated,
+// not parsed on the metadata load path, so a stored page is never refused at
+// load (its next save meets the component-props gate at the metadata save
+// door); and the authored census, with every inline option list evaluated,
 // found no working section to respell — the refused values are the two probes
 // in objectui's `formSectionGroupReference-7051.test.tsx` (a section declaring
 // neither `fields` nor `group`, and a group-owned `label` / `collapsible`
@@ -35,9 +36,7 @@ export const entry: SemanticMigration = {
     + 'canonical spellings only, a label a plain string because the form draws it as it stands, and the form '
     + 'view\'s group-reference rule. It is read where every page component\'s props are: the component-props '
     + 'gate reports a refused value as a `component-props-invalid` / `component-props-unknown-key` '
-    + 'error on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still '
-    + 'saves and loads, because a page component\'s `properties` is not parsed on the metadata save or load '
-    + 'path. No conversion is registered: nothing on the load path refuses the shape, and the authored census, '
+    + 'error on `objectstack validate`, `objectstack build` and `objectstack lint`, and a stored page still loads, because a page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is registered: nothing on the load path refuses the shape, and the authored census, '
     + 'with every inline option list evaluated, found no working section to respell. Deployed metadata NOT '
     + 'MEASURED.',
   acceptanceCriteria: 'Every `object-form` and `object-master-detail-form` node validates: `objectstack '

@@ -1,5 +1,411 @@
 # @objectstack/service-automation
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [f3174ef]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [ec749fb]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [41c7405]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [1827571]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/metadata-protocol@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Minor Changes
+
+- f901746: feat(spec)!: the retired callout node types `http_request`, `http_call` and `webhook` are reserved inside the open flow-node namespace; `flow-node-http-callout-rename` leaves the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** ADR-0018 unified the three outbound callout node types `http_request`, `http_call` and `webhook` into the one `http` node, and through 17 the loader rewrote an authored node typed with one of them to `http` with a notice. A flow node's `type` is an open namespace (a plugin registers its own node types), so nothing refused the old names. At 18 they are reserved: the flow parse refuses each as a node's `type` by name, the automation engine refuses to register a node executor under one, and the ADR-0087 D2 conversion `flow-node-http-callout-rename` (protocol 11) is retired from the load path (`retiredAfter: '17.7.0'`). A wait node's `waitEventConfig.eventType: 'webhook'` is a different field and is not affected.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | a flow node `type: 'http_request'` | `type: 'http'` |
+  | a flow node `type: 'http_call'` | `type: 'http'` |
+  | a flow node `type: 'webhook'` | `type: 'http'` |
+  | a plugin's `engine.registerNodeExecutor({ type: 'webhook', … })` (or either other name) | a type of your own, e.g. `'acme_webhook'` |
+  
+  **The one-line fix:** change the node's `type` to `'http'`; the node's `id`, `label` and `config` stay as they are (the conversion never touched `config`, so the `http` contract judges it as written).
+  
+  **What an author who still writes it sees.** The parse refuses the node at its own `type` path — a top-level node and a node inside a `loop`, `parallel` or `try_catch` region alike. `defineStack` throws `STACK_SCHEMA_INVALID` (422), `os validate`, `os build` and `os lint` (whose config calls `defineStack`) print the issue, and the metadata save door answers a NEW flow with `422 INVALID_METADATA` at the node's `type`, with or without an automation service, and stores nothing:
+  
+  > Flow node `type: 'http_request'` was removed in @objectstack/spec 18 (ADR-0087 D2) — it is one of the three callout node types ADR-0018 unified into `http`, the loader rewrote it to `http` until this release, and the name stays reserved inside the open node namespace so no plugin can claim it (ADR-0018). Use `type: 'http'`. Change the value; the conversion never touched the node's `config`, so the `http` contract judges it as written.
+  
+  The refusal is a `pattern` on `FlowNodeSchema.type`, so the published JSON Schema carries it too.
+  
+  **`@objectstack/service-automation`:** `AutomationEngine.registerNodeExecutor` (and `registerNodeAlias`, which calls it) throws when the executor's `type` or its descriptor's `type` is one of the three names, and registers nothing. No node could ever reach such an executor: an authored node with the name is refused at parse, and a stored one is rewritten to `http` before it parses. A plugin that registered its own executor under one of these names fails at that call and needs a type of its own.
+  
+  **No tool makes the rename.** The conversion belongs to protocol 11, below the migration floor, so `objectstack migrate meta` applies no edit for it and `--write` writes none: it prints each such node among the refusals the migrated stack still has, at `flows.N.nodes.M.type`, and lists the D3 entry `flow-node-http-callout-types-reserved` as the hand edit.
+  
+  **Stored metadata needs no edit.** Stored-row rehydration, the automation engine's flow rehydration and the artifact-ingestion door inside its window still replay the conversion, so a `sys_metadata` flow row written with an old name keeps loading as an `http` node. The rewrite there is now unconditional: until 18 it skipped a node whose old name a live executor owned and reported a conflict, and the engine no longer lets such an executor exist.
+  
+  ## The retirement kit
+  
+  - **The reserved-name table** `FLOW_RESERVED_NODE_TYPES` and its refusal `reservedFlowNodeTypeRefusal` (`@objectstack/spec/automation`), read by the flow parse, the engine's registration refusal and the conversion itself.
+  - **The conversion** is `retiredFromLoadPath: true`, `retiredAfter: '17.7.0'`; its ADR-0078 conflict guard is gone.
+  - **The D3 entry `flow-node-http-callout-types-reserved`.**
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` and `@objectstack/service-automation` are published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered flow-node-http-callout-types-reserved -->
+- cf07168: feat(metadata-protocol)!: the metadata save door refuses a retired flow spelling on a NEW flow, and a stored flow keeps re-saving
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (API save door):** a flow saved through `saveMetaItem` (`PUT /api/v1/meta/flow/:name`, the runtime dispatcher, and every caller of the protocol) with no stored row of that name at the save's address is now judged as authored input. It is canonicalized without the ADR-0087 D2 conversions retired from the authoring funnel, so a spelling the loader stopped lifting at 18 is no longer rewritten and stored: it meets the flow parse's refusal, `422 INVALID_METADATA`, with an issue located at the key and the same prescription `os validate` and `os build` print. Draft and publish mode alike. Before, the door lifted the old spelling, stored the new one and said nothing, so the client that wrote it (an AI writing flows through MCP or REST above all) was never told and wrote it again.
+  
+  What counts as a stored row: the row the save overwrites, at its state and package, and for a draft save with no draft yet the active row the draft overlays, so Studio's first draft edit of a stored flow is a re-save.
+  
+  Not changed:
+  
+  - A re-save of a stored flow keeps replaying the full chain, retired entries included, so a legacy row stays editable and is healed by the save, exactly as before.
+  - The server's own writes of bodies at rest keep the full chain: the stored-metadata migration (`os migrate meta --stored`), a package duplicate and an unmanaged package import.
+  - The automation engine's flow rehydration (`registerFlow`) and the read path, which still serves a stored flow verbatim.
+  
+  Migration, for a client that creates flows through the API:
+  
+  - `wait` node loose `config.duration` / `config.timerDuration` → `waitEventConfig.timerDuration`; `config.signal` / `config.signalName` → `waitEventConfig.signalName`; `config.eventType` → `waitEventConfig.eventType`. On the block itself, `timeoutMs` → `timerDuration` and `onTimeout` is removed.
+  - `connector_action` node loose `config.connectorId` / `config.actionId` / `config.input` → its `connectorConfig` block.
+  - CRUD node `config.filters` → `config.filter`; `config.object` → `config.objectName`.
+  - `map` and `subflow` node `config.flow` → `config.flowName`.
+  - `notify` node `config.to` → `recipients`, `subject` → `title`, `body` → `message`, `url` → `actionUrl`, `source: { object, id }` → `sourceObject` / `sourceId`.
+  - `script` node `config.functionName` → `function`, `input` → `inputs`; `actionType` / `template` / `recipients` / `variables` / `script` are removed.
+  - `errorHandling.retryDelayMs` and a `try_catch` node's `retry.retryDelayMs` → `backoffMs`; the flow keys `active` / `template`, a node's `outputSchema` and `errorHandling.fallbackNodeId` are removed.
+  
+  Each refusal names the key to write. `os migrate meta --from 16` lists the same edits for source files. Rows already stored need nothing.
+  
+  `@objectstack/service-automation`: `AutomationEngine.canonicalizeStoredFlow(name, definition, options?)` takes `{ includeRetired?: boolean }`. Omitted, it is `true` (the full chain, as every caller holding a body at rest wants). `false` is the authoring posture the save door asks for. `registerFlow` does not take the option.
+  
+  <!-- adr-0087: not-required (already-registered flow-node-crud-filter-alias, flow-node-crud-object-alias, flow-node-notify-config-aliases, flow-node-wait-event-config-lift, flow-node-map-flow-alias, flow-node-subflow-flow-alias, flow-node-connector-config-lift, flow-node-script-config-aliases, flow-inert-keys-removed, flow-node-wait-timeout-keys-removed, flow-node-script-branch-keys-removed, retry-policy-converged) these D2 entries already record every spelling the save door now refuses on a new flow; this change only stops the door replaying them for authored input, and their own migrations are the ones above -->
+- 6422da5: feat(automation): `getFlowRuntimeStates()` stamps `unboundCause` beside `reason`
+  
+  Clause-②: yes (widening)
+  
+  Each branch that decides why an enabled, triggered flow is not armed now answers its closed `FlowUnboundCause` together with its sentence: `deployment_policy`, `disabled_subflow`, `missing_trigger` or `binding_failure`. `GET /automation/_status` passes the rows through unchanged, so the field reaches the console with no route change. Bound, disabled and trigger-less rows carry neither `reason` nor `unboundCause`. The sentences and `getTriggerBindingAudit()` are unchanged.
+- a65a59b: feat(spec)!: the ADR-0078 conversion-conflict channel is retired — `CONVERSION_CONFLICT_CODE`, `ConversionConflictNotice`, `ConversionConflictDetail`, the `onConflict` / `reservedNodeTypes` conversion options, the `conflicts` arrays and the `FLOW_CONVERSION_CONFLICT` 409
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (published API):** the ADR-0087 conversion API carried a channel for a rename REFUSED because its old token was a live name in the environment: a conversion reported it through `ConversionContext.reportConflict`, `applyConversions` handed it to an `onConflict` sink as a `ConversionConflictNotice` (code `OS_METADATA_CONVERSION_CONFLICT`), the automation engine collected it in `canonicalizeStoredFlow`'s `conflicts` array, and the metadata protocol answered it with `409 FLOW_CONVERSION_CONFLICT`. Its only producer was the live-executor guard inside the flow-node HTTP callout rename. Protocol 18 reserved those three names (`FLOW_RESERVED_NODE_TYPES`), so the engine refuses an executor under one, no live owner can exist, and the guard went. Nothing can raise a conversion conflict any more, so the channel leaves the published surface rather than staying as a live-looking failure mode nothing triggers.
+  
+  ## FROM → TO
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `import { CONVERSION_CONFLICT_CODE, type ConversionConflictNotice, type ConversionConflictDetail } from '@objectstack/spec'` | delete the import — no replacement |
+  | `applyConversions(stack, { onConflict, reservedNodeTypes, … })` (likewise `applyConversionsToFlow`, `applyConversionsToStoredItem`, `collectConversionNotices`) | delete both options; keep `onNotice` / `onTodo` |
+  | a conversion's `apply` reading `context.reservedNodeTypes` or calling `context.reportConflict` | a rename over an open namespace reserves its old names instead (the `FLOW_RESERVED_NODE_TYPES` pattern), so the refusal happens at registration; a site with no lossless rewrite goes to `context.reportTodo` |
+  | an `IAutomationService.canonicalizeStoredFlow` implementation returning `conflicts: […]` (or a `StoredFlowCanonicalization` from `@objectstack/metadata-protocol` carrying one) | drop the member; return `parsed`, `storable`, `notices` and optionally `todos` |
+  | a client branch on `error.code === 'FLOW_CONVERSION_CONFLICT'` / HTTP 409 from a flow save, a package duplication or an unmanaged package import | delete the branch — no request can produce it |
+  
+  **The one-line fix:** delete every reference; the branch it guarded was already dead, so deleting it changes no behaviour.
+  
+  **What an upgrader sees.** Importing a removed name is `TS2305`; passing a removed option, or returning a `conflicts` member from a typed canonicalizer, is an excess-property `tsc` error. `ErrorCode` no longer parses `FLOW_CONVERSION_CONFLICT`.
+  
+  **Runtime behaviour is unchanged.** The removed branches could not fire: a stored flow carrying a reserved callout name still loads as `http` (the rewrite has been unconditional since the names were reserved), and `saveMetaItem`, `duplicatePackage`, `importUnmanagedPackage` and `os migrate meta --stored` answer exactly as before. No metadata document needs editing.
+  
+  ## The retirement kit
+  
+  - **`@objectstack/spec`:** the three exports leave the root; `ApplyConversionsOptions` loses `onConflict` and `reservedNodeTypes`, `ConversionContext` loses `reservedNodeTypes` and `reportConflict`, the `IAutomationService.canonicalizeStoredFlow` result loses `conflicts`; the error-code ledger drops `FLOW_CONVERSION_CONFLICT` by its own "Retiring a code" rule (a row comes out with its last emitter).
+  - **`@objectstack/service-automation`:** `AutomationEngine.canonicalizeStoredFlow` no longer returns `conflicts`, and the engine no longer builds a live-name set for the conversion pass.
+  - **`@objectstack/metadata-protocol`:** `StoredFlowCanonicalization` loses `conflicts`; the flow save door's 409, the stored-migration pass's `failed` row for a refused rename, `duplicatePackage`'s failed item and `importUnmanagedPackage`'s 409 are gone with it.
+  - **The D3 entry `conversion-conflict-channel-removed`.** No D2 conversion and no tombstone: no metadata document ever carried any of it.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** The three packages are published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered conversion-conflict-channel-removed -->
+
+### Patch Changes
+
+- 099cc9d: Clause-②: no
+  
+  The approval, security, automation and sharing objects describe their records in plain admin
+  sentences. Approval Delegations now reads "While someone is away, approvals assigned to them
+  personally go to their delegate.", Record Shares "Records shared beyond their owner, one row per
+  grant.", User Positions "Which positions each user holds, one row per assignment.", Audience
+  Binding Suggestions "A package's suggestion to give one of its permission sets to everyone who
+  signs in, and the decision taken on it." and Automation Runs "Paused automation runs waiting to
+  resume, and the recent history of finished runs." Field help on Approval Requests, Approval
+  Delegations, User Positions, User Permission Sets and Audience Binding Suggestions, the
+  descriptions of the `organization_admin_no_bypass`, `mcp_agent_data_read` and
+  `mcp_agent_data_write` permission sets, the flow-dispatch ledger's description and the
+  reserved-position refusal no longer carry design-record numbers or runtime vocabulary; those
+  references stay in the code comments. The zh-CN, ja-JP and es-ES translations follow. Wording
+  only: no field, permission or behaviour changes.
+- 2054a08: Clause-②: no
+  
+  A failed `parallel` run now shows what its branches did. Under the block's own `failure` step, the run's step log lists every branch's steps, each tagged with `parentNodeId`, `regionKind: 'parallel-branch'` and its `branch` index: a branch that completed, with its `success` step, and the failing branch's steps up to and including the one that failed, with its error. The run summary counts what those steps did. A fan-out whose notify branch delivered and whose http branch failed now reports `acted: 1` and `failed: 2` (the http step and the block), the way a failed `loop` already does. Before, the log held only the block's failure step and the summary read `acted: 0`. That reads as "nothing happened, safe to re-run" over a notification that had already been sent.
+  
+  The block now reports its failure once every branch has settled, not at the first branch to fail, so a branch that finishes later keeps its step and its effect is counted. Routing is unchanged. The failure is still the block's returned failure, so a `fault` edge on the `parallel` routes it with the same step code, error text and `$error`. A durable pause refused inside a branch still fails the run.
+- 19955fb: Clause-②: no
+  
+  fix(service-automation): a resume refused because the run's flow or parked node is gone now settles the run's `sys_automation_run` row
+  
+  - **What changed.** A resume refused with `RUN_NOT_FOUND` because the run's flow is no longer registered, or because the node it parked on was edited away, now settles the run in the same call. The paused row is consumed and a `failed` history row records the refusal's own text in `error`. Before, the row kept `status: 'paused'` through every later resume, an uninstall and a cold restart. Run lists and paused-run counts kept showing a run the engine already knew could never continue, and retention never aged the row out, because it prunes terminal statuses only.
+  - **Unchanged:** the answer. It has the same code and the same text, and a transport still answers 404. A second resume answers `RUN_NOT_FOUND` again (`No suspended run`) and writes nothing. Retention is unchanged: `failed` was already in its scope, and paused rows are still never pruned.
+  - **When nothing is recorded.** Before the host seals the boot, a missing flow may be one that is not registered yet. `AutomationServicePlugin` re-arms overdue wait timers in `start()`, before flows bound at `kernel:ready` arrive. So before the seal the refusal records nothing, as before. The host seals with `sealNodeTypeVocabulary()`, which the plugin calls at `kernel:bootstrapped`. An embedded host that never calls it keeps the previous behaviour.
+  - **Concurrency.** The settle consumes the row through the same compare-and-set a resume takes. If a concurrent resume or cancel consumed the row first, the call writes nothing. If the store cannot answer the compare-and-set, the resume answers `STORE_UNAVAILABLE` (503), and a retry settles the run.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [14aff67]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [6e18016]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [d6bd98a]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/metadata-protocol@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- dd29bbe: feat(metadata-core,metadata-protocol)!: the `sys_metadata` family declares no organization column — `sys_metadata`, `sys_metadata_audit`, `sys_metadata_commit` and `sys_metadata_history` (ADR-0131 D6/D7)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: registered sys-metadata-organization-column-retired, sys-metadata-audit-organization-column-retired, sys-metadata-commit-organization-column-retired, sys-metadata-history-organization-column-retired -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  Metadata is the environment's (ADR-0131 D6). The four tables of the metadata family no longer declare `organization_id`, and each sets `systemFields.tenant: false`, so the engine injects none back. The engine refuses an undeclared field, so nothing reads or writes the column any more.
+  
+  FROM → TO:
+  
+  - An authored filter, list-view column, report grouping, formula or seed key naming `organization_id` on one of the four tables → delete it; no organization owns a row. The field resolver answers it as an unknown field.
+  - `new SysMetadataRepository({ engine, organizationId, orgLabel })` → `new SysMetadataRepository({ engine, orgLabel })`. The `organizationId` option is gone: every repository reads and writes the environment's rows.
+  - `DatabaseLoader`'s `organizationId` option (and so `MetadataManager.setDatabaseDriver` / `setDataEngine`'s `organizationId` argument) → accepted and ignored, like `environmentId`: no write stamps it and no read filters on it. Drop the argument.
+  - `@objectstack/spec`: the published `ApiError.code` / `ErrorCode` enum widens by `LEGACY_ORGANIZATION_ROWS_UNREADABLE`, registered under `@objectstack/metadata-core`.
+  - `isLegacyOrganizationRow(row)` (`@objectstack/metadata-core`) → `readLegacyOrganizationRows(driver, table?)`. The row-value test read a key the engine no longer returns, so it is removed. The new read answers from the physical column, through the table's driver (`engine.getDriverForObject`): id → organization, empty on a migrated or fresh database. A seam that cannot answer is refused (`LegacyOrganizationRowsUnreadable`), never read as "none".
+  - An existing database → run `os migrate organization-ownership` (review its plan), then `os migrate organization-ownership --apply --plan-file FILE` with that plan file. The ceremony promotes or reports the legacy organization rows, then drops the physical column. Until it has run, the v18 runtime refuses to start against the database.
+  
+  The indexes are re-keyed with the column:
+  
+  - The overlay unique key is (`type`, `name`, `package_id`, `bundle_member`): the declared `idx_sys_metadata_overlay_active` and the runtime partial indexes of the same names. Removing the organization TIGHTENS uniqueness. On a database the ceremony has not cleared, two legacy organizations' rows, or an organization's row and the environment's, can share a key. There the runtime index migration keeps the previous index and names the duplicates (ADR-0120 D4); it never drops a row. `os migrate duplicates` and the boot report group by the same key.
+  - `sys_metadata_history` is unique on (`event_seq`) and on (`type`, `name`, `version`). Its other indexes, and those of `sys_metadata_audit` and `sys_metadata_commit`, lose their organization prefix.
+  - `idx_sys_metadata_org_type` is gone.
+  
+  What else changes:
+  
+  - The boot line `[metadata_org_scoped_unserved]` is gone with the column it read. A database still holding legacy organization rows is refused at boot instead, until the ceremony has run.
+  - The package uninstall no longer removes a legacy organization's row of the package's name: no row carries an organization.
+  - Who reads the family through the generic data door (`/data/sys_metadata_*`), before → after:
+    - `sys_metadata_audit`, `sys_metadata_history`, `sys_metadata_commit`, **under a wall** (`isolated` / `group`): before, the tenant wall filtered each caller to its own organization's rows, and an `organization_admin` read its organization's. With the column gone the wall has nothing to filter on, so without a gate that admin would read every organization's trail, history bodies and commit ranges. After: each requires `studio.access` (`requiredPermissions`, the #22107 precedent). The capability is platform-scoped, so an `organization_admin` holding it by role does not exist, and that admin is refused.
+    - The same three, **under `single`**: before, any caller whose grant covered the table (a read wildcard) read it. After: `studio.access` is required there too. A Studio author (the platform admin among them) reads as before; a plain member is refused.
+    - Every `/meta` door serving these rows admits `studio.access`: `/meta/:type/:name/history`, `/audit` and `/diff` admit `studio.access` or `manage_metadata`, and `/packages/:id/commits` admits `studio.access` alone; `setup.access` alone is refused at all four. `requiredPermissions` is an AND-gate and cannot name an any-of set, and `setup.access` is held by organization admins, so it could not be the gate. A caller holding only `manage_metadata` therefore still reads the history and audit rows through `/meta`, but not the commit rows, and none of them through the data door.
+    - `sys_metadata` stays ungated, before and after: its rows are what `/meta` already serves to every organization.
+  - On a database the ceremony has not migrated (which `os serve` refuses, but every `os migrate` boot opens, the ceremony's own among them), the legacy organization rows are still told apart, off the physical column:
+    - every read the metadata protocol makes of the family goes through one seam that leaves them out. That covers boot hydration; the `/meta` list, by-name, layered and draft-preview reads; the item lock (`_lock`) the reads report and the save and delete gates enforce; the package-less write and read address; and the package, commit, audit, history and diff reads. Two reads keep them on purpose and read the column themselves: `os migrate meta --stored` reports such a row, and the commit revert refuses a legacy commit by name. The authored hook and action binders leave them out too;
+    - the metadata repository's write never resolves to one: before, a save of an address that only a legacy organization's row held rewrote that row in place (measured on the ceremony's template promotion). Now the write targets the environment's row, and with none it creates one, which the re-keyed unique index refuses beside the organization's row until the ceremony settles it;
+    - `os migrate meta --stored` reports such a row `skipped` and never re-saves it;
+    - `os migrate security-catalog-overlays` neither lists nor deletes it;
+    - a commit recorded in a legacy organization's layer is still refused by the revert;
+    - the runtime-datasource reads, the packaged permission-set overlay reading, the kernel:ready security-catalog echo, the stored flow-credential move and a `DatabaseLoader` (engine- or driver-backed) leave them out.
+  - `SqlDriver.listPhysicalColumns(object, options?)` (new, read-only): a table's physical column names, from the catalog, joining `options.transaction`. `TursoDriver`'s remote face answers it from the remote catalog. Every boot asks whether the family still carries the retired column, and it asks this way, not through `execute()`. So `os migrate plan` keeps its "a plan writes nothing" line on a migrated or fresh database. The legacy rows themselves are read with a raw statement only where the column exists.
+  - `GET /forms/:slug` and `POST /forms/:slug/submit` no longer read the Default Organization's legacy layer. Every metadata read is now environment → code. The doors judge each candidate against the environment's view list, which holds one item per package of a view name. So a withdrawal in one package still closes that name's form in every package. On a deployment with no organization this closes more than before, which is the fail-closed direction. A withdrawal saved only at the organization layer is carried onto the environment by the ceremony's `metadata-promotion` step, which the runtime requires before it starts.
+  - The protocol's `getMetaItems` drops its undocumented `legacyFormOrganizationId` request key. It was never in the spec's `GetMetaItemsRequest`, and only those doors passed it. A caller that still passes it now gets the environment's list.
+
+### Patch Changes
+
+- d176b0a: feat(spec)!: the loose `config` keys of a `wait` or `connector_action` flow node are refused, naming the `waitEventConfig` / `connectorConfig` key they belong on, and `flow-node-wait-event-config-lift` and `flow-node-connector-config-lift` leave the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** neither node type has a `config` contract: the `wait` executor reads only `waitEventConfig` and the `connector_action` executor only `connectorConfig`. Through 17 the loader lifted settings written under the node's `config` into that block with a notice. At 18 both ADR-0087 D2 conversions are retired from the load path (`retiredAfter: '17.7.0'`), and the flow parse refuses each such key where it is written, at every door that judges a flow (`defineStack`, `os validate`, `os build`, and `os lint` when the config calls it), a node inside a loop / parallel / try-catch region body included: "A `wait` node's `config.duration` was removed in @objectstack/spec 18 (ADR-0087 D2) … Move it to `waitEventConfig.timerDuration` …". The refused keys are exactly the ones the lifts moved: `eventType`, `timerDuration`, `duration`, `signalName`, `signal` and `timeoutMs` on `wait`; `connectorId`, `actionId` and `input` on `connector_action`. Any other `config` key on these node types is judged as before.
+  
+  Migration:
+  
+  - `wait` node `config.eventType` / `config.timerDuration` / `config.signalName` → the same key under `waitEventConfig`.
+  - `wait` node `config.duration` → `waitEventConfig.timerDuration`, and `config.signal` → `waitEventConfig.signalName`.
+  - `wait` node `config.timeoutMs` → `waitEventConfig.timerDuration`, as a string (`60000` → `'60000'`, or `'PT1M'`): it was only ever read as the timer duration.
+  - `connector_action` node `config.connectorId` / `config.actionId` / `config.input` → the same key under `connectorConfig`.
+  - If the block already sets the same key, the block's value is the one the node always ran with: delete the loose key.
+  
+  Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand. The D3 entry `flow-sibling-block-loose-config-keys-refused` states the edit for upgraders.
+  
+  Stored metadata needs no edit. The automation engine's flow rehydration (`registerFlow`), stored-row rehydration and the metadata save door's flow verdict still replay both conversions, and each now DELETES a loose key its block already shadows (and a loose key holding `null`) instead of leaving it in place, so a `sys_metadata` flow carrying either shape keeps loading with the block alone. A `connector_action` node whose `connectorId` / `actionId` pair is complete in neither place is refused as before: no conversion can complete it.
+  
+  `@objectstack/service-automation`: comment-only changes in the `wait` and `connector_action` executors, which already read only their declared blocks.
+  
+  <!-- adr-0087: registered flow-sibling-block-loose-config-keys-refused -->
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [47d569e]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [3b28905]
+- Updated dependencies [1baf976]
+- Updated dependencies [222293f]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [7cb33cf]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [56147a8]
+- Updated dependencies [23e689d]
+- Updated dependencies [a869ea6]
+- Updated dependencies [7b64a3d]
+- Updated dependencies [8226755]
+- Updated dependencies [cdc42eb]
+- Updated dependencies [7ffc578]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [7dc7d22]
+- Updated dependencies [954bf72]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cad343e]
+- Updated dependencies [cbe7712]
+- Updated dependencies [c03077e]
+- Updated dependencies [9bb9370]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/metadata-protocol@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Major Changes

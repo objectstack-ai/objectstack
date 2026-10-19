@@ -60,6 +60,7 @@ import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 // `.js` on purpose — NodeNext resolution requires the extension.
 import { RestServer } from './rest-server.js';
+import { REST_SERVER_REGISTRAR_FILES } from './rest-server-registrar-files.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE_FILE = 'rest-server.ts';
@@ -68,11 +69,12 @@ const SOURCE = readFileSync(resolve(HERE, SOURCE_FILE), 'utf8');
 // own module, carrying the export door and its `page` exemption with it. The
 // census reads both files as one population — a site's key is its route or
 // function, never its file, so the ledger below did not change a row.
-const MOVED_FILES = ['data-action-routes.ts'] as const;
-const SOURCES: ReadonlyArray<readonly [string, string]> = [
-    [SOURCE_FILE, SOURCE],
-    ...MOVED_FILES.map((file) => [file, readFileSync(resolve(HERE, file), 'utf8')] as const),
-];
+// [#23050 slice 3] …and now every file on THE list of the files `RestServer`'s
+// registrars live in, imported rather than spelt here, so a registrar body the
+// split moves next stays inside this census. §2's last case pins the list's
+// length and the census's sum over it.
+const SOURCES: ReadonlyArray<readonly [string, string]> = REST_SERVER_REGISTRAR_FILES.map((file) =>
+    [file, file === SOURCE_FILE ? SOURCE : readFileSync(resolve(HERE, file), 'utf8')] as const);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // The walker
@@ -309,6 +311,59 @@ describe('#20139 census — every numeric coercion in rest-server.ts is classifi
         for (const row of LEDGER.filter((r) => r.disposition !== 'not-a-query-value')) {
             expect(keys.has(row.site), row.site).toBe(true);
         }
+    });
+
+    it('[#23050 slice 3] reads every file on the registrar list — its length and this sum are pinned', () => {
+        // A module added to the list makes this re-read its number rather than
+        // widening unnoticed. 9 sites = 8 in `rest-server.ts` + 1 in
+        // `data-action-routes.ts` (the export door's `page`); the batch and
+        // approval bodies carry none. [#23050 slice 4] Nor do the two
+        // record-sharing bodies (`sharing-routes.ts`): 9 = 8 + 1 + 0 + 0 + 0,
+        // length 4 → 5. [#23050 slice 5] Nor does the analytics dataset body
+        // (`analytics-routes.ts`): 9 = 8 + 1 + 0 + 0 + 0 + 0, length 5 → 6.
+        // [#23050 slice 6] Nor do the two security bodies (`security-routes.ts`):
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0, length 6 → 7. [#23050 slice 7] Nor do
+        // the discovery and OpenAPI bodies (`discovery-routes.ts`):
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0, length 7 → 8. [#23050 slice 8] Nor
+        // does the email send body (`email-routes.ts`):
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 8 → 9. [#23050 slice 9]
+        // Nor does the global search body (`search-routes.ts`): it READS its two
+        // caps through `readDeclaredQueryNumber`, never coerces one:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 9 → 10.
+        // [#23050 slice 10] Nor does the UI view body (`ui-routes.ts`): it reads
+        // only the two path parameters, as strings:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 10 → 11.
+        // [#23050 slice 11] Nor do the public form doors (`form-routes.ts`): they
+        // read only the slug path parameter, as a string:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 11 → 12.
+        // [#23050 slice 12] Nor do the six CRUD doors (`crud-routes.ts`): they
+        // hand the query to the protocol whole and coerce no number of it:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 12 → 13.
+        // [#23050 slice 13a] Nor do the first three `/meta` groups
+        // (`meta-collection-routes.ts`): the type list, the whole-store family and
+        // the per-type list coerce no number of the query:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 13 → 14.
+        // [#23050 slice 13b] Nor do the per-item reads (`meta-item-read-routes.ts`):
+        // the reference sweep, the layered read, the book tree and the item read
+        // coerce no number of the query:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 14 → 15.
+        // [#23050 slice 13c] Nor do the per-item writes (`meta-item-write-routes.ts`):
+        // the item save and the reset read their switches as strings and coerce no
+        // number of the query:
+        // 9 = 8 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0, length 15 → 16.
+        // [#23050 slice 13d] The history family (`meta-item-history-routes.ts`) moved
+        // with the one coercion of the query `rest-server.ts` held inside the `/meta`
+        // block: the rollback's `Number(toVersionRaw)`, an exemption row. Its key names
+        // the route, never the file, so no ledger row changed:
+        // 9 = 7 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1, length 16 → 17.
+        // [#23050 slice 13e] Nor do the object state-machine read
+        // (`meta-object-state-routes.ts`) and the published read (now in
+        // `meta-item-history-routes.ts`): both read their query as strings and coerce
+        // no number of it:
+        // 9 = 7 + 1 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 0 + 1 + 0, length 17 → 18.
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+        expect(SOURCES.map(([file]) => file)).toEqual([...REST_SERVER_REGISTRAR_FILES]);
+        expect(sites).toHaveLength(9);
     });
 });
 

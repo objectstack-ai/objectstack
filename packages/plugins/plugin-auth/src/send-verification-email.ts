@@ -31,6 +31,7 @@
 
 import type { AuthRequestHandler } from './register-sso-provider.js';
 import { inProcessRedispatchUrl } from './in-process-redispatch.js';
+import { readJsonRequestBody } from './request-json-body.js';
 
 export interface ResendVerificationEmailResult {
   /** HTTP status to return to the caller. */
@@ -89,12 +90,15 @@ export async function runResendVerificationEmail(
   handle: AuthRequestHandler,
   request: Request,
 ): Promise<ResendVerificationEmailResult> {
-  let body: any;
-  try {
-    body = await request.json();
-  } catch {
-    body = {};
+  // [#24032] A declared-JSON body that does not parse is refused before the
+  // session is read. Read as `{}`, it was the one-click resend: a truncated
+  // body naming another address mailed the CALLER's own. An empty body is
+  // still that resend (see request-json-body.ts).
+  const reading = await readJsonRequestBody(request);
+  if (!reading.ok) {
+    return { status: 400, body: { success: false, error: { code: 'INVALID_REQUEST', message: reading.message } } };
   }
+  const body: any = reading.body;
 
   let email = trimStr(body?.email);
   const callbackURL = trimStr(body?.callbackURL);

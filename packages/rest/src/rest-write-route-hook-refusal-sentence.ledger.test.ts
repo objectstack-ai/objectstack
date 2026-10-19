@@ -298,8 +298,9 @@ const ANSWERS_THE_SENTENCE: Record<string, Driver> = {
     },
     // The job lookup is what reaches these two answers: the cancel's own status
     // write swallows its failure (the in-memory flag still stops the worker),
-    // and the undo's writes run under `skipAutomations`, which the engine reads
-    // to skip every metadata-bound hook, and count their failures into `failed`.
+    // and a refusal of one of the undo's reversal writes is that row's entry in
+    // the answer's `failures`, in the hook's own sentence, never the route's
+    // answer (`import-undo-controls.test.ts` pins it per row).
     'POST /api/v1/data/import/jobs/:jobId/cancel': {
         called: 'protocol.findData',
         protocol: (error) => ({ findData: async () => { throw error(); } }),

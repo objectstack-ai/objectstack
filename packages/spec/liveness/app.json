@@ -53,14 +53,15 @@
           "note": "the tab icon while the app is active."
         },
         "logo": {
-          "status": "planned",
-          "verifiedAt": "2026-09-27",
+          "status": "live",
+          "verifiedAt": "2026-10-16",
           "evidenceScope": "cross-repo",
-          "producer": "objectui @f8a9d0fb: packages/plugin-designer/src/AppCreationWizard.tsx#AppCreationWizard (writes `branding.logo`, with a preview); objectui @f8a9d0fb: packages/plugin-designer/src/BrandingEditor.tsx#BrandingEditor (writes it, with a preview); objectui @f8a9d0fb: packages/plugin-designer/src/pages/EditAppPage.tsx#EditAppPage (pre-fills the editor from it)",
-          "note": "PLANNED, carrier objectui#10827 (a mounted component renders `branding.logo`: the `UnifiedSidebar` header or `AppShell`'s branding). AUTHORED, RENDERED BY NOTHING THAT SHIPS, measured at the `.objectui-sha` pin f8a9d0fb and again at objectui main fb91ac9b0. The designer writes it (`producer`), and the published `@object-ui/app-shell` CHANGELOG tells authors to set it. The one component that ever read it was AppSidebar, which was never mounted; the console's branding handoff (`ConsoleLayout` into `AppShell`) passes `primaryColor`, `accentColor` and `favicon` and never `logo`, and `AppShellBranding` has no logo field. The nearest thing to a read: objectui's `wizardDraftToAppSchema` (packages/types) copies a wizard draft's `branding.logo` into a TOP-LEVEL `logo`, and `AppSchemaRenderer`'s `InternalSidebar` renders that top-level `logo`. So a wizard-authored logo can surface in an `AppSchemaRenderer` host while this key itself has no runtime reader. ONE SPELLING: `AppSchema` declares only `branding.logo`. An app-level `logo` is REFUSED by the strict app shape (`unrecognized_keys`), and the refusal suggests `branding` through the alias table; it is not folded or rewritten, and no ADR-0087 conversion carries it. Not `authorWarn`'d, on the `field.useGrouping` precedent and README rule 1: a logo URL is display metadata, an author who sets it today loses nothing and is not misled about behaviour, and the value takes effect the moment the carrier lands with no re-authoring. Flip to `live` citing that reader at the pin that carries it. The triage direction on #20146 is ENFORCE (a declared key with measured producers is an implementation gap), not retire."
+          "evidence": "objectui @daeb77fc: packages/app-shell/src/layout/AppMark.tsx#AppMark (reads `branding.logo` and draws it as an `object-contain` image at the surface's size, falling back to the `icon` tile when it is absent or fails to load); objectui @daeb77fc: packages/app-shell/src/layout/AppSwitcher.tsx#AppSwitcher (`AppMark` at 22 px on the top-bar app pill and on every switcher row; the switcher is mounted in `AppHeader`); objectui @daeb77fc: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`AppMark` at 26 px in the phone drawer header)",
+          "producer": "objectui @daeb77fc: packages/plugin-designer/src/AppCreationWizard.tsx#AppCreationWizard (writes `branding.logo`, with a preview); objectui @daeb77fc: packages/plugin-designer/src/BrandingEditor.tsx#BrandingEditor (writes it, with a preview); objectui @daeb77fc: packages/plugin-designer/src/pages/EditAppPage.tsx#EditAppPage (pre-fills the editor from it)",
+          "note": "the app's one square (1:1) icon, an image URL: objectui's `AppMark` renders it on the top-bar app pill, on each App Switcher row and in the phone drawer header, each at its own size, and an app without it gets its `icon` on a tile. Read at the `.objectui-sha` pin daeb77fc. 2026-10-16: FLIPPED from `planned` — the reader shipped under objectui#12201, after the 2026-09-27 drill found `branding.logo` authored by the designer (`producer`) and rendered by nothing mounted. ONE SPELLING: `AppSchema` declares only `branding.logo`. An app-level `logo` is REFUSED by the strict app shape (`unrecognized_keys`), and the refusal suggests `branding` through the alias table; it is not folded or rewritten, and no ADR-0087 conversion carries it."
         }
       },
-      "note": "Drilled 2026-09-27 (#20146), because `logo` diverged from its siblings once the evidence was re-read: `primaryColor`, `accentColor` and `favicon` reach the console through `ConsoleLayout` into `AppShell`, and `logo` reaches nothing mounted. Until then this row carried one `live` verdict over all four children, citing `AppSidebar.tsx` (never mounted) for `logo` and `primaryColor`, and it was recorded in `undrilled-containers.baseline.json`; that baseline row is deleted with this drill."
+      "note": "Drilled 2026-09-27 (#20146), because `logo` diverged from its siblings once the evidence was re-read: `primaryColor`, `accentColor` and `favicon` reach the console through `ConsoleLayout` into `AppShell`, and `logo` then reached nothing mounted; it has since gone `live` through objectui's `AppMark` (see that row). Until then this row carried one `live` verdict over all four children, citing `AppSidebar.tsx` (never mounted) for `logo` and `primaryColor`, and it was recorded in `undrilled-containers.baseline.json`; that baseline row is deleted with this drill."
     },
     "active": {
       "status": "live",
@@ -127,6 +128,43 @@
           "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:891 (item gate); objectui @f8a9d0fb: packages/app-shell/src/layout/UnifiedSidebar.tsx#UnifiedSidebar (`evalVis`, the CEL evaluation through the ExpressionProvider's `evaluateVisibility`, handed to `NavigationRenderer` and to `hasVisibleNavigationItems`); objectui @f8a9d0fb: packages/app-shell/src/views/nav-menu-renderer.tsx#NavMenuRenderer (the same `evalVis`, and each row returns nothing when `evalVis(item.visible)` is false)",
           "note": "the CEL visibility gate — enforced per item. This is the layer the retired `areas[].visible` (#4651) prescribes moving to: same CEL dialect, one level down, and actually evaluated. CLIENT-side only, at both levels, and deliberately so: #4722 made the server enforce `requiredPermissions` / `requiresService` inside `areas[]` but left CEL where it was, because evaluating it server-side needs a bound `user` context the REST read layer does not have. Anything that must never reach the browser belongs in `requiredPermissions`, not `visible` — the asymmetry is pinned in packages/rest/src/rest.test.ts. 2026-09-27 (#20146): REPOINTED off objectui's `AppSidebar.tsx` — deprecated, never mounted (the console renders `UnifiedSidebar`), and removed from objectui main by objectui PR #10617 — to the mounted reader(s) above, each re-read at the `.objectui-sha` pin f8a9d0fb and unchanged at objectui main fb91ac9b0. The `NavigationRenderer` item-gate leg is unchanged by this re-point."
         },
+        "dataSource": {
+          "status": "planned",
+          "verifiedAt": "2026-10-19",
+          "evidenceScope": "cross-repo",
+          "authorWarn": true,
+          "authorHint": "Keep it, but nothing reads it yet: no console renders a navigation entry's `dataSource`, so a `visible` that reads `data` has no value to read until the navigation renderer ships.",
+          "note": "PLANNED RECORD (#24332, 2026-10-19, shape 1 by the domain:spec seat's claim 6257260075; the spec half of the objectstack-ai/cloud#3002 letter A sidebar row): one API data source on a navigation entry, the page element's `ElementApiDataSourceSchema` BY REFERENCE (`{ provider: 'api', read: { url, method? }, path? }`, `read.url` a same-origin API path refused at parse otherwise, no credential key), declared on the shared nav base so the nine branches that spread it carry it (a separator refuses it). Its one declared reader is the same entry's `visible`, which reads the selected value as `data`; `label` and the target keys take no `data` read, and the binding is not published to `children`. PLANNED, not live: measured at the `.objectui-sha` pin 0707b4ae37 and unchanged at objectui main 749ed76, the shell evaluates every entry's `visible` through one shared evaluator built from the ambient scope (objectui: packages/app-shell/src/hooks/useNavMemberGates.ts#useNavMemberGates, which hands `evaluateNavigationVisibility(expr, evaluator)` to the item guard; objectui: packages/layout/src/NavigationRenderer.tsx#passesNavItemGuards, which calls `evaluateVisibility(item.visible)` with no per-entry scope), and objectui's own nav mirror (objectui: packages/types/src/zod/app.zod.ts) strips the key. No objectui source reads it. Carrier: the objectui renderer half, filed by the seat when this lands (read points `useNavMemberGates`, and `resolveNavItemLabel` / `resolveHref` in `NavigationRenderer.tsx` if the label and target forks are ruled). `authorWarn` is set because an entry authored with this key and a `data.*` gate today has no value to read; the lint fans `navigation.dataSource` over the top-level entries only (it reads a row and its direct children, no deeper), so an entry nested under a group is not warned. Flip to `live` on the commit that cites the console reader at the `.objectui-sha` pin, and drop `authorWarn` / `authorHint` in that same edit.",
+          "children": {
+            "provider": {
+              "status": "planned",
+              "verifiedAt": "2026-10-19",
+              "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. `provider: 'api'` is the binding's discriminator; it is the only provider a navigation entry admits."
+            },
+            "read": {
+              "status": "planned",
+              "verifiedAt": "2026-10-19",
+              "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. The read request: the one same-origin endpoint the entry binds.",
+              "children": {
+                "url": {
+                  "status": "planned",
+                  "verifiedAt": "2026-10-19",
+                  "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. Its same-origin refusal is live at parse, on this door as on the page element's (pinned in packages/spec/src/ui/app-nav-item-api-data-source.test.ts); what is planned is the READ."
+                },
+                "method": {
+                  "status": "planned",
+                  "verifiedAt": "2026-10-19",
+                  "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. `GET` alone, refused otherwise at parse."
+                }
+              }
+            },
+            "path": {
+              "status": "planned",
+              "verifiedAt": "2026-10-19",
+              "note": "Planned with its container `navigation.dataSource` (see that row): the page element binding's own key, reused by reference, and read by no console on a navigation entry yet. The dotted path selecting the value the entry's `visible` reads as `data`."
+            }
+          }
+        },
         "requiredPermissions": {
           "status": "live",
           "verifiedAt": "2026-09-27",
@@ -160,7 +198,7 @@
           "status": "live",
           "verifiedAt": "2026-08-01",
           "evidence": "objectui @940ba24: packages/layout/src/NavigationRenderer.tsx:294-296, :418",
-          "note": "target precedence recordId → filters → viewName; also keys the view-label i18n lookup."
+          "note": "target precedence recordId → filters → viewName; also keys the view-label i18n lookup. With no `viewName` (packages/spec/src/ui/app.zod.ts, ObjectNavItemSchema; moved out of spec source, #23434): the entry links to the bare object route, where objectui @b9814b334 packages/app-shell/src/views/ObjectView.tsx#activeViewId opens `defaultViewId || views[0]`, the view objectui @b9814b334 packages/app-shell/src/views/ObjectView.tsx#buildViewTabs marks default, and the `all` tab that function adds only for an object with no list view (#21973); first read at objectui @0abd4f9f8769 (the same two symbols), re-read 2026-10-15."
         },
         "recordId": {
           "status": "live",

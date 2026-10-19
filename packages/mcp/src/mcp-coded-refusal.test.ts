@@ -24,9 +24,12 @@
  *    `{ error: { code, message, status } }` with `isError`. The table is held
  *    equal to the registered tool list, so a tool added later needs a row.
  *  - The same catches render a code-less throw as its bare message,
- *    byte-identical to `errorResult(messageOf(err))`. That includes the value
- *    the HTTP bridge's exposure gate throws today, `{ statusCode, message }`
- *    with no `code`. Nothing is invented for it.
+ *    byte-identical to `errorResult(messageOf(err))`. Nothing is invented for it.
+ *  - [#23528] The HTTP bridge's exposure gate (`@objectstack/runtime`'s
+ *    `refuseUnexposedDataAction`, which `callData` asks first) used to be such
+ *    a throw, `{ statusCode, message }` with no `code`. It now throws the data
+ *    door's coded refusal, and renders as one. The producer side is pinned in
+ *    runtime's `action-execution-addressed-exposure-refusal.test.ts`.
  *  - The data tools and `list_actions` WITHHOLD `details`. Measured on `/mcp`,
  *    a `PERMISSION_DENIED` carries the caller's `positions` and
  *    `permissionSets` there, which the runtime dispatcher drops from the wire.
@@ -195,11 +198,36 @@ describe('MCP tools over HTTP /mcp: a coded refusal carries its code (#23509)', 
   // One site is enough below: every catch renders through the one reader.
   const query = SITES.find((s) => s.tool === 'query_records')!;
 
-  it('the HTTP bridge exposure gate\'s `{ statusCode, message }` (no `code`) answers its bare message: nothing is invented', async () => {
-    const thrown = { statusCode: 404, message: "Object 'task' is not exposed via the API" };
-    expect(await callTool(query, thrown)).toEqual({
-      content: [{ type: 'text', text: "Object 'task' is not exposed via the API" }],
-      isError: true,
+  // [#23528] Moved to the coded rendering. This row pinned the gate's old
+  // `{ statusCode: 404, message }` as its bare message. The gate now throws
+  // an `Error` carrying the data door's `code` and `status`, the addressed
+  // object as `object`, and `allowed` on a 405; the thrown values below are
+  // that shape, with the gate's own messages.
+  it('the HTTP bridge exposure gate\'s 404 answers OBJECT_API_DISABLED with its status', async () => {
+    const thrown = Object.assign(new Error('object is not exposed via the API'), {
+      code: 'OBJECT_API_DISABLED',
+      status: 404,
+      object: 'task',
+    });
+    const result = await callTool(query, thrown);
+    expect(result.isError).toBe(true);
+    expect(result.content).toHaveLength(1);
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      error: { code: 'OBJECT_API_DISABLED', message: 'object is not exposed via the API', status: 404 },
+    });
+  });
+
+  it('the HTTP bridge exposure gate\'s 405 answers OBJECT_API_METHOD_NOT_ALLOWED with its status', async () => {
+    const thrown = Object.assign(new Error("API operation 'list' is not allowed for this object"), {
+      code: 'OBJECT_API_METHOD_NOT_ALLOWED',
+      status: 405,
+      object: 'task',
+      allowed: ['get'],
+    });
+    const result = await callTool(query, thrown);
+    expect(result.isError).toBe(true);
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      error: { code: 'OBJECT_API_METHOD_NOT_ALLOWED', message: "API operation 'list' is not allowed for this object", status: 405 },
     });
   });
 

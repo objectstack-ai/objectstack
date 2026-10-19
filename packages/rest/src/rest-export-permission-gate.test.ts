@@ -172,9 +172,12 @@ describe('export route — user-level export axis (#3544)', () => {
     // export (405), this axis decides whether the CALLER may use it (403). An
     // object that exposes no export must answer 405 whatever the user holds.
     const findData = vi.fn().mockResolvedValue({ object: 'task', records: ROWS });
+    // [#24031] The gate reads its one object BY NAME; the by-name read answers
+    // the object the list holds, as the real protocol's two reads agree.
+    const exposedForGetOnly = { ...TASK, enable: { apiMethods: ['get'] } };
     const protocol: any = {
-      getMetaItems: vi.fn().mockResolvedValue({ items: [{ ...TASK, enable: { apiMethods: ['get'] } }] }),
-      getMetaItem: vi.fn().mockResolvedValue({ type: 'object', name: 'task', item: TASK }),
+      getMetaItems: vi.fn().mockResolvedValue({ items: [exposedForGetOnly] }),
+      getMetaItem: vi.fn().mockResolvedValue({ type: 'object', name: 'task', item: exposedForGetOnly }),
       findData,
     };
     const rest = new RestServer(

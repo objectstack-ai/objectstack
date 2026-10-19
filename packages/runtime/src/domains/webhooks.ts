@@ -117,7 +117,7 @@ export async function handleWebhooksRedeliverRequest(
         return {
             handled: true,
             response: deps.error(
-                'Webhook redelivery is not available: no webhooks service is registered for this environment. '
+                'Webhook redelivery is not available: no webhooks service is registered. '
                 + '@objectstack/plugin-webhooks registers it once its redelivery veto is installed, which needs '
                 + 'the data engine and @objectstack/service-messaging; the boot log names the one that is missing.',
                 501,
@@ -128,7 +128,7 @@ export async function handleWebhooksRedeliverRequest(
         return {
             handled: true,
             response: deps.error(
-                'Webhook redelivery is not available: the webhooks service registered for this environment '
+                'Webhook redelivery is not available: the registered webhooks service '
                 + 'does not implement handleRedeliver.',
                 501,
             ),

@@ -37,7 +37,7 @@ stated once here and the script's own header is the authority on detail.
 
 ```bash
 pnpm install          # deps
-pnpm setup            # first-time: install + build spec
+pnpm run setup        # first-time: install + build spec (bare `pnpm setup` is pnpm's own built-in)
 pnpm build            # turbo build (excludes docs)
 pnpm test             # turbo test
 pnpm typecheck        # turbo typecheck — per-package `tsc --noEmit`; tsup/vitest never type-check
@@ -126,7 +126,8 @@ pays its first load at module top; `pnpm check:test-source-alias` gates it. A ga
 duration reports and ⛔ never reds a required job, judges only on the run profile it measured,
 and when new soaks report-only a week before it grades; any seat flips a gate that reds untouched
 packages twice in an hour to report-only before any ruling. A suite-weight ceiling rises only by
-ruling (`RULED_CEILING_RAISES`); a test file over 10 s of wall is its lane's card, fixed and ⛔
+ruling (`RULED_CEILING_RAISES`); a test file over 10 s of wall, unless the file declares a
+measured budget with its class (ruling record 6181973363), is its lane's card, fixed and ⛔
 never deleted; a test is deleted only when its PR names a duplicate pinning that assertion at a
 layer at least as close to the code (ruling record 6120820653).
 

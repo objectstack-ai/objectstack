@@ -48,11 +48,10 @@ import {
   CLI,
   TSX,
   E2E_SECRET_KEY,
-  boundPortFromBanner,
+  KERNEL_ASSIGNED_PORT,
   childEnv,
-  portContentionError,
   probeThroughChild,
-  reservePort,
+  readKernelAssignedPort,
 } from './helpers/serve-process.js';
 
 type ServeChild = ChildProcessByStdio<null, Readable, Readable>;
@@ -149,8 +148,7 @@ async function bootAndFetchLogo(layout: 'no-assets' | 'cwd-assets' | 'env-assets
   // only for the `assets/` control, that directory — nothing else.
   expect(readdirSync(cwd).sort()).toEqual(layout === 'cwd-assets' ? ['assets', 'objectstack.json'] : ['objectstack.json']);
 
-  const port = reservePort();
-  const child = spawn(TSX, [CLI, 'serve', '-p', String(port)], {
+  const child = spawn(TSX, [CLI, 'serve', '-p', KERNEL_ASSIGNED_PORT], {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     // `childEnv`, never a bare `...process.env` (`check:cli-test-child-env`).
@@ -186,19 +184,15 @@ async function bootAndFetchLogo(layout: 'no-assets' | 'cwd-assets' | 'env-assets
     child.stderr.on('data', onData);
     child.on('exit', (code) => {
       clearTimeout(timer);
-      failed(
-        portContentionError(output, 'os serve (bin/run-dev.js, artifact boot)', port)
-          ?? new Error(`serve exited ${code} before its ready banner\n--- output ---\n${output}`),
-      );
+      failed(new Error(`serve exited ${code} before its ready banner\n--- output ---\n${output}`));
     });
   });
 
-  // `bin/run-dev.js` pins NODE_ENV=development, where a taken port is a hop,
-  // not an error — so the port is read back off the child's own banner.
-  const readback = boundPortFromBanner(output);
-  if (readback.state !== 'bound') {
+  // The child took a kernel-assigned port (#24342), so it is read back off its own banner.
+  const port = readKernelAssignedPort(output, 'os serve (bin/run-dev.js, artifact boot)');
+  if (port instanceof Error) {
     await stop(child);
-    throw new Error(`cannot read the bound port back (${readback.state})\n--- output ---\n${output}`);
+    throw port;
   }
 
   try {
@@ -207,10 +201,10 @@ async function bootAndFetchLogo(layout: 'no-assets' | 'cwd-assets' | 'env-assets
         child,
         transcript: () => `\n--- child output ---\n${output}`,
         label: 'serve-runtime-assets-branding-warning',
-        what: `GET ${LOGO_URL} on port ${readback.port}`,
+        what: `GET ${LOGO_URL} on port ${port}`,
       },
       async () => {
-        const res = await fetch(`http://localhost:${readback.port}${LOGO_URL}`);
+        const res = await fetch(`http://localhost:${port}${LOGO_URL}`);
         return { status: res.status, contentType: res.headers.get('content-type'), body: await res.text() };
       },
     );

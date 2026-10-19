@@ -447,6 +447,9 @@ function budgetRefusal(): Error {
 // names the object and states the consequence. That is a declared, in-file
 // disposition and it is already the right one. `claim-seed-ownership.ts` is not
 // touched by this PR; these three cases are kept verbatim as the proof.
+/** [#23354] The seed's report: it landed on d1, the row each case below plants. */
+const SEEDED_D1 = (object: string): readonly string[] => (object === 'probe_deal' ? ['d1'] : []);
+
 describe('[#15840] reading 3 — claim-seed-ownership idsFrom', () => {
   it('a control: the paging fallback DOES re-own the row when the page read answers', async () => {
     const engine = await boot();
@@ -462,7 +465,8 @@ describe('[#15840] reading 3 — claim-seed-ownership idsFrom', () => {
           return engine.update(o, d, opt);
         },
       }),
-      ADMIN, { logger: logger as any },
+      // [#23354] The seed reports d1, so the refused write is the NULL arm's.
+      ADMIN, { logger: logger as any, seededRecordIds: SEEDED_D1 },
     );
 
     expect(res).toEqual([{ object: 'probe_deal', count: 1 }]);
@@ -487,7 +491,8 @@ describe('[#15840] reading 3 — claim-seed-ownership idsFrom', () => {
           return engine.update(o, d, opt);
         },
       }),
-      ADMIN, { logger: logger as any },
+      // [#23354] The seed reports d1, so the refused write is the NULL arm's.
+      ADMIN, { logger: logger as any, seededRecordIds: SEEDED_D1 },
     );
 
     // `idsFrom` is never reached: the throw leaves `readPage` and is caught by
@@ -524,7 +529,8 @@ describe('[#15840] reading 3 — claim-seed-ownership idsFrom', () => {
           return engine.update(o, d, opt);
         },
       }),
-      ADMIN, { logger: logger as any },
+      // [#23354] The seed reports d1, so the refused write is the NULL arm's.
+      ADMIN, { logger: logger as any, seededRecordIds: SEEDED_D1 },
     );
 
     expect(res).toEqual([]);

@@ -141,7 +141,7 @@ async function makeProtocol() {
     // The base every draft here is bound to is INSTALLED: a flow may be saved
     // only into a package the registry holds (#20863). Its manifest declares
     // no namespace, so the ADR-0028 prefix pre-flight is unchanged.
-    engine.registry.installPackage({ id: PKG, name: 'Edu', version: '1.0.0' } as never);
+    engine.registry.installPackage({ id: PKG, name: 'Edu', version: '1.0.0' } as never, 'code');
     return new ObjectStackProtocolImplementation(engine);
 }
 
@@ -294,6 +294,25 @@ describe('publishPackageDrafts response conforms to PublishPackageDraftsResponse
         expect(parsed.materializeApplied?.success).toBe(false);
         expect(parsed.materializeApplied?.failures).toHaveLength(1);
         expect(parsed.materializeApplied?.failures[0]).toMatchObject({ type: 'view', name: 'cases' });
+    });
+
+    it('a requested backfill: backfillApplied is carried through parse unstripped (#24253)', async () => {
+        const p = await makeProtocol();
+        await stageDrafts(p, [{ type: 'object', name: 'case_item', item: {
+            name: 'case_item', label: 'Case Item', sharingModel: 'public_read_write',
+            fields: { done: { name: 'done', label: 'Done', type: 'boolean', defaultValue: false } },
+        } }]);
+
+        const raw: any = await p.publishPackageDrafts({
+            packageId: PKG, backfill: [{ object: 'case_item', field: 'done' }], context: { userId: 'u1' },
+        });
+
+        expect(raw.outcome).toBe('published');
+        expect(Object.keys(raw)).toContain('backfillApplied');
+        expect(strippedKeys(raw)).toEqual([]);
+        const parsed = PublishPackageDraftsResponseSchema.parse(raw);
+        expect(parsed.backfillApplied).toEqual(raw.backfillApplied);
+        expect(parsed.backfillApplied?.fields.map((f) => [f.object, f.field])).toEqual([['case_item', 'done']]);
     });
 
     it('advisories ride their published[] element and survive the declared parse (#9343)', async () => {

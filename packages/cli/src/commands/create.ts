@@ -129,11 +129,13 @@ import { Args, Command, Flags } from '@oclif/core';
 import chalk from 'chalk';
 import fs from 'fs';
 import path from 'path';
+import { makeDirectorySync } from '../utils/make-directory.js';
 import {
   getCliVersion,
   NPM_PACKAGE_NAME_MAX_LENGTH,
   renderPnpmWorkspaceYaml,
   renderScaffoldTsconfig,
+  SCAFFOLD_NPM_OVERRIDES,
   SCAFFOLD_PNPM_RANGE,
   SCAFFOLD_TSCONFIG_INCLUDE_SRC_ONLY,
   SCAFFOLD_TYPES_NODE_RANGE,
@@ -408,6 +410,13 @@ export const templates: Record<string, CreateTemplate> = {
             typescript: SCAFFOLD_TYPESCRIPT_RANGE,
             vitest: SCAFFOLD_VITEST_RANGE,
           },
+          // The same npm override `os init` emits, from the same constant, so
+          // it always equals `devDependencies.vitest` above (npm refuses one
+          // that differs: `EOVERRIDE`) — see SCAFFOLD_NPM_OVERRIDES for the
+          // npm 10 crash it prevents. Standalone only: npm reads `overrides`
+          // from the ROOT manifest alone and pnpm never reads it, so inside
+          // this monorepo's workspace the block would be inert.
+          ...(standalone ? { overrides: { ...SCAFFOLD_NPM_OVERRIDES } } : {}),
         }),
         'tsconfig.json': (name: string) =>
           standalone
@@ -718,8 +727,9 @@ export default class Create extends Command {
     console.log('');
     
     try {
-      // Create directory
-      fs.mkdirSync(targetDir, { recursive: true });
+      // Create directory. Bounded (#23858): a `--dir` that can never be made
+      // is refused at once with the OS's code and the path, never a loop.
+      makeDirectorySync(targetDir);
       
       // Create files from template
       for (const [filePath, contentFn] of Object.entries(template.filesFor(placement))) {

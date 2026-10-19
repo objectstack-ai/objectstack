@@ -359,6 +359,9 @@ function arrayOf(element: Scrub): Scrub {
  */
 const ruleEntries: Scrub = arrayOf((entry, denied) => (mentionsDenied(entry, denied, 'include', 'classified') ? REMOVE : entry));
 
+/** ONE rule entry outside an array, dropped whole on the same test {@link ruleEntries} applies per entry. */
+const ruleEntry: Scrub = (entry, denied) => (mentionsDenied(entry, denied, 'include', 'classified') ? REMOVE : entry);
+
 /** An object block scrubbed key by key; an unclassified key goes the {@link unclassified} way. */
 function block(table: Readonly<Record<string, Scrub>>): Scrub {
     return (value, denied, scope) => {
@@ -575,6 +578,18 @@ export const DEPENDS_ON_ENTRY_POSITIONS: Readonly<Record<string, Scrub>> = {
 };
 
 /**
+ * [ADR-0106 D1] A field's `referenceDeletedWhen: { field, value }` (#23735).
+ * `field` names a sibling `select` of THIS object; `value` is one of that
+ * field's option values, never a field name. The predicate is deleted whole
+ * when `field` names a denied field — a bare `value` would read nothing.
+ */
+const deletedWhen: Scrub = (value, denied) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return unclassified(value, denied);
+    const { field } = value as { field?: unknown };
+    return typeof field === 'string' && namesDeniedField(field, denied) ? REMOVE : value;
+};
+
+/**
  * [ADR-0106 D1] Every `FieldSchema` key, classified. Pinned against the live
  * schema shape by `object-schema-fls-references.test.ts`.
  */
@@ -608,6 +623,11 @@ export const FIELD_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     // child's `master_detail` field and its columns ARE the child's own fields —
     // this object, not the parent the field points at.
     referenceVia: pointer,
+    // The pointer's platform-deleted predicate (#23735): its `field` names a
+    // sibling `select` of this object (its `value` is that field's option, not
+    // a field). Deleted when the sibling is denied: the caller is not served
+    // the column the predicate reads, so it can never hold for them.
+    referenceDeletedWhen: deletedWhen,
     inlineAmountField: pointer,
     inlineColumns: arrayOf(inlineColumn),
     relatedListColumns: names,
@@ -728,6 +748,11 @@ export const OBJECT_REFERENCE_POSITIONS: Readonly<Record<string, Scrub>> = {
     validations: ruleEntries,
     indexes: ruleEntries,
     activityMilestones: ruleEntries,
+    // [#24338] The object's default row scope: ONE row-level security policy whose
+    // `using` / `check` are CEL over this object's record, so a rule entry in all
+    // but arity, dropped whole when it mentions a denied field. It is server
+    // policy the caller cannot evaluate, and its text describes the field.
+    defaultRowScope: ruleEntry,
     // Blocks.
     userActions: block({ create: crudFlag, import: crudFlag, edit: crudFlag, delete: crudFlag, exportCsv: keep }),
     external: block({

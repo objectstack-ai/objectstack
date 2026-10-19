@@ -116,7 +116,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_delivery: {
     label: "Notification Delivery",
     pluralLabel: "Notification Deliveries",
-    description: "Durable per-recipient × channel delivery outbox (ADR-0030 Layer 4).",
+    description: "Durable per-recipient × channel delivery outbox.",
     fields: {
       id: {
         label: "Delivery ID"
@@ -190,7 +190,7 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
   sys_notification_preference: {
     label: "Notification Preference",
     pluralLabel: "Notification Preferences",
-    description: "Per-user × topic × channel notification toggle (mute/allow), with admin-global defaults.",
+    description: "Which topics and channels each user receives; admins set the defaults.",
     fields: {
       id: {
         label: "Preference ID"
@@ -234,6 +234,15 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "Updated At"
       }
+    },
+    _views: {
+      all: {
+        label: "すべて",
+        emptyState: {
+          title: "まだ通知設定がありません",
+          message: "設定を追加するまで、ミュートされる通知はありません。設定を追加すると、1 人のユーザー向けに、または全員の既定として、チャネルごとにトピックをミュートまたは許可できます。"
+        }
+      }
     }
   },
   sys_notification_subscription: {
@@ -263,12 +272,21 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       created_at: {
         label: "Created At"
       }
+    },
+    _views: {
+      all: {
+        label: "すべて",
+        emptyState: {
+          title: "まだ通知の購読がありません",
+          message: "購読は、ロール、チーム、またはユーザーが通知トピックをフォローしていることを記録します。"
+        }
+      }
     }
   },
   sys_notification_template: {
     label: "Notification Template",
     pluralLabel: "Notification Templates",
-    description: "Per (topic × channel × locale) render template for notifications.",
+    description: "The subject and body each notification topic sends, per channel and language.",
     fields: {
       id: {
         label: "Template ID"
@@ -314,12 +332,21 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       updated_at: {
         label: "Updated At"
       }
+    },
+    _views: {
+      all: {
+        label: "すべて",
+        emptyState: {
+          title: "まだ通知テンプレートがありません",
+          message: "トピック、チャネル、ロケールごとにテンプレートを追加します。追加するまでは、送信元が指定したタイトルと本文で通知が送信されます。"
+        }
+      }
     }
   },
   sys_http_delivery: {
     label: "HTTP Delivery",
     pluralLabel: "HTTP Deliveries",
-    description: "Durable outbox row for one outbound-HTTP attempt (ADR-0018). Managed by @objectstack/service-messaging; do not write directly.",
+    description: "Outgoing HTTP calls made by webhooks and flows, one row per call, with its delivery status.",
     fields: {
       id: {
         label: "Delivery ID",

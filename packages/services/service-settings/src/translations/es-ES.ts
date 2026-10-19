@@ -20,7 +20,7 @@ export const esES: PlatformTranslationData = {
       title: 'Envío de correo',
       description: 'Configuración de SMTP y del proveedor de correo transaccional.',
       groups: {
-        provider: { title: 'Proveedor', description: 'Elige cómo envía correo saliente este espacio de trabajo.' },
+        provider: { title: 'Proveedor', description: 'Elige cómo envía correo saliente este sistema.' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'Clave de API' },
         from_address: { title: 'Dirección de remitente' },
@@ -60,13 +60,13 @@ export const esES: PlatformTranslationData = {
 
     branding: {
       title: 'Marca',
-      description: 'Nombre del espacio de trabajo, logotipo y color de acento.',
+      description: 'Nombre de la organización, logotipo y color de acento.',
       groups: {
         identity: { title: 'Identidad' },
         appearance: { title: 'Apariencia' },
       },
       keys: {
-        workspace_name: { label: 'Nombre del espacio de trabajo' },
+        workspace_name: { label: 'Nombre de la organización' },
         support_email: { label: 'Correo de soporte', help: 'Ejemplo: support@example.com' },
         theme_mode: {
           label: 'Tema predeterminado',
@@ -91,7 +91,7 @@ export const esES: PlatformTranslationData = {
         },
         audience: {
           title: 'Audiencia',
-          description: 'Quién puede convertirse en usuario de las aplicaciones de este entorno. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que el despliegue la desactive; un valor guardado en esta consola no puede hacerlo. Las invitaciones, los usuarios creados por administradores, el aprovisionamiento SCIM y el SSO empresarial se admiten bajo cualquier postura.',
+          description: 'Quién puede convertirse en usuario de las aplicaciones de este sistema. «Dominios de correo» siempre fuerza la verificación de correo. «Abierto» también la fuerza, salvo que el despliegue la desactive; un valor guardado en esta consola no puede hacerlo. Las invitaciones, los usuarios creados por administradores, el aprovisionamiento SCIM y el SSO empresarial se admiten bajo cualquier postura.',
         },
         password_policy: {
           title: 'Política de contraseñas',
@@ -129,7 +129,7 @@ export const esES: PlatformTranslationData = {
         require_email_verification: { label: 'Requerir verificación de correo' },
         membership_policy: {
           label: 'Pertenencia de los usuarios nuevos',
-          help: 'La opción automática vincula cada usuario nuevo a la organización predeterminada del despliegue. «Solo por invitación» concede la pertenencia únicamente mediante un acto explícito: crear un espacio de trabajo, aceptar una invitación, que un administrador lo añada o el aprovisionamiento just-in-time por SSO.',
+          help: 'La opción automática vincula cada usuario nuevo a la organización predeterminada del despliegue. «Solo por invitación» concede la pertenencia únicamente mediante un acto explícito: crear una organización, aceptar una invitación, que un administrador lo añada o el aprovisionamiento just-in-time por SSO.',
           options: {
             auto: 'Unirse automáticamente a la organización predeterminada',
             'invite-only': 'Solo por invitación: nunca se une automáticamente',
@@ -251,7 +251,7 @@ export const esES: PlatformTranslationData = {
       title: 'Envío de SMS',
       description: 'Configuración del proveedor de SMS para inicio de sesión con OTP, invitaciones y notificaciones.',
       groups: {
-        provider: { title: 'Proveedor', description: 'Elige cómo envía este espacio de trabajo los SMS salientes.' },
+        provider: { title: 'Proveedor', description: 'Elige cómo envía este sistema los SMS salientes.' },
         aliyun: { title: 'Aliyun SMS' },
         twilio: { title: 'Twilio' },
         limits: { title: 'Límites de gasto', description: 'Limita el volumen de SMS salientes del despliegue. El SMS es un canal de pago y cada envío cuesta dinero real.' },
@@ -292,7 +292,7 @@ export const esES: PlatformTranslationData = {
         contact: { title: 'Contacto' },
       },
       keys: {
-        legal_name: { label: 'Razón social', help: 'Nombre legal registrado de la organización (puede diferir del nombre del espacio de trabajo).' },
+        legal_name: { label: 'Razón social', help: 'Nombre legal registrado de la organización (puede diferir del nombre de la organización indicado en Marca).' },
         registration_number: { label: 'Número de registro', help: 'Número de registro / constitución de la empresa (p. ej. EIN, n.º de sociedad).' },
         tax_id: { label: 'ID fiscal / IVA', help: 'Identificador fiscal que aparece en las facturas (p. ej. IVA, GST, ABN).' },
         address_line1: { label: 'Dirección línea 1' },
@@ -326,7 +326,7 @@ export const esES: PlatformTranslationData = {
 
     feature_flags: {
       title: 'Indicadores de función',
-      description: 'Activa funciones experimentales y en beta para este espacio de trabajo.',
+      description: 'Activa funciones experimentales y en beta para esta organización.',
       groups: {
         productivity: { title: 'Productividad' },
         collaboration: { title: 'Colaboración' },
@@ -340,15 +340,15 @@ export const esES: PlatformTranslationData = {
         realtime_cursors: { label: 'Cursores en tiempo real' },
         inline_comments: { label: 'Comentarios en línea' },
       },
+      banners: {
+        beta_notice: { title: 'Atención',
+          text: 'Las funciones beta pueden cambiar sin previo aviso. Fíjalas con variables de entorno (p. ej., `OS_FEATURE_FLAGS_AI_ENABLED=true`) para bloquearlas en todo el despliegue.' },
+      },
     },
 
     storage: {
       title: 'Almacenamiento de archivos',
-      description:
-        'Backend usado para adjuntos, exportaciones y subidas de usuarios. ' +
-        '⚠ Cambiar de adaptador no migra los archivos existentes: los archivos ' +
-        'subidos con el adaptador anterior dejan de ser accesibles a través ' +
-        'del nuevo.',
+      description: 'Backend usado para adjuntos, exportaciones y subidas de usuarios.',
       groups: {
         adapter: { title: 'Backend', description: 'Elige dónde se almacenan los archivos subidos.' },
         local: { title: 'Local' },
@@ -378,6 +378,11 @@ export const esES: PlatformTranslationData = {
       },
       actions: {
         test: { label: 'Probar conexión' },
+      },
+      banners: {
+        adapter_switch_warning: { title: 'Los archivos existentes no se migran',
+          text: 'Cambiar de adaptador no migra los archivos existentes: los archivos '
+            + 'subidos con el adaptador anterior dejan de ser accesibles a través del nuevo.' },
       },
     },
 
@@ -462,7 +467,7 @@ export const esES: PlatformTranslationData = {
         trace_enabled: { label: 'Registrar trazas',
           help: 'Persiste las trazas de prompt/respuesta en sys_ai_trace para depuración y reproducción.' },
         log_prompts: { label: 'Registrar prompts completos',
-          help: 'Incluye los prompts renderizados (no solo metadatos) en las filas de traza. ⚠ Puede filtrar PII: desactívalo en entornos regulados.' },
+          help: 'Incluye los prompts renderizados (no solo metadatos) en las filas de traza.' },
         embedder_provider: {
           label: 'Proveedor',
           options: {
@@ -493,13 +498,15 @@ export const esES: PlatformTranslationData = {
         test: { label: 'Probar conexión' },
         test_embedder: { label: 'Probar embedder' },
       },
+      banners: {
+        log_prompts_warning: { title: 'Los prompts pueden contener PII',
+          text: 'Puede filtrar PII: desactívalo en entornos regulados.' },
+      },
     },
 
     knowledge: {
       title: 'Conocimiento',
-      description:
-        'Backend de almacén de vectores para RAG / fuentes de conocimiento. ' +
-        '⚠ Cambiar de adaptador NO migra los índices existentes.',
+      description: 'Backend de almacén de vectores para RAG / fuentes de conocimiento.',
       groups: {
         adapter: { title: 'Backend',
           description: 'Elige dónde se almacenan los fragmentos de documento y sus vectores.' },
@@ -535,10 +542,16 @@ export const esES: PlatformTranslationData = {
         over_fetch: { label: 'Multiplicador de sobre-obtención',
           help: 'Se obtienen topK × overFetch candidatos internos para que el filtrado de metadatos en JS siga teniendo filas.' },
         enforce_rls: { label: 'Aplicar RLS en la búsqueda',
-          help: 'Vuelve a comprobar cada resultado contra los permisos a nivel de registro del solicitante. ⚠ Desactivarlo omite la salvaguarda exclusiva de la plataforma.' },
+          help: 'Vuelve a comprobar cada resultado contra los permisos a nivel de registro del solicitante.' },
       },
       actions: {
         test: { label: 'Probar conexión' },
+      },
+      banners: {
+        adapter_switch_warning: { title: 'Los índices existentes no se migran',
+          text: 'Cambiar de adaptador NO migra los índices existentes.' },
+        enforce_rls_warning: { title: 'Mantenlo activado en producción',
+          text: 'Desactivarlo omite la salvaguarda exclusiva de la plataforma.' },
       },
     },
   },

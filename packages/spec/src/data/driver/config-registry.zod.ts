@@ -2,6 +2,7 @@
 
 import type { z } from 'zod';
 
+import type { RetiredValueGuidance } from '../../shared/retired-key';
 import { getMemoryConfigJsonSchema, MemoryConfigSchema } from './memory.zod';
 import { getMongoConfigJsonSchema, MongoConfigSchema } from './mongo.zod';
 import { getMysqlConfigJsonSchema, MysqlConfigSchema } from './mysql.zod';
@@ -115,8 +116,26 @@ import { getTursoConfigJsonSchema, TursoConfigSchema } from './turso.zod';
  * `contractId` column, because after the rename it would have been `undefined`
  * on every row, and a column that is always empty is the inert declaration this
  * repo removes rather than ships. Stored `datasource.driver: 'mongo'` is
- * converged by the ADR-0087 conversion `datasource-driver-mongo-to-mongodb`;
- * `mongo` also stays an alias, so nothing that skipped the conversion breaks.
+ * converged by the ADR-0087 conversion `datasource-driver-mongo-to-mongodb`.
+ *
+ * ## `mongo` retired as a value at 18 (#23543, ruling F1 A)
+ *
+ * Through 17, `mongo` stayed a selection alias and the loader rewrote an
+ * authored one with a notice. At 18 it is retired: it left the selection face
+ * (no boot host accepts `OS_DATABASE_DRIVER=mongo`), and an authored
+ * `datasource.driver: 'mongo'` is refused at parse with the prescription naming
+ * `mongodb` ({@link RETIRED_DRIVER_ID_GUIDANCE}, read by `DriverType`). It lives on
+ * as a {@link DriverVocabularyEntry.retiredAliases} key, which keeps it on the
+ * CONTRACT face only — and that half is load-bearing, not a second spelling.
+ * Data at rest never meets the refusal: a stored row is replayed through the
+ * whole conversion chain before anything parses it. But some readers judge a
+ * stored body RAW, by design: the read-path credential redactor runs on the
+ * stored `metadata` column as written (`redactStoredMetadataBody`), and it
+ * keys its mongodb passthrough-secret table by canonical id. Measured with the
+ * alias deleted outright: a stored legacy `driver: 'mongo'` row served all ten
+ * of those secrets (`options.proxyPassword`, `options.key`, the KMS provider
+ * secrets, …) in cleartext through that exit. So the spelling still resolves
+ * the mongodb contract, and nothing an author or an operator writes accepts it.
  *
  * `turso`/libSQL was the mirror image: both hosts dispatched it, and spec shipped
  * no contract, so it resolved to `undefined` and its `config` was the one
@@ -141,7 +160,8 @@ export interface DriverVocabularyEntry {
    * engine — has none, and keeps its spellings on
    * {@link contractOnlyAliases}. This is the face both boot hosts accept, and
    * the ruling fixes it as the union of what they accepted before commit
-   * e2798fab7 — never widened by accident.
+   * e2798fab7 — never widened by accident, and narrowed only by a ruling:
+   * `mongo` left it at 18 for {@link retiredAliases}.
    */
   readonly aliases: readonly string[];
   /**
@@ -156,6 +176,29 @@ export interface DriverVocabularyEntry {
    */
   readonly contractOnlyAliases?: readonly string[];
   /**
+   * Spellings RETIRED as authored values, each mapped to the prescription an
+   * author meets instead (`mongo` on the `mongodb` row, retired at 18).
+   *
+   * Three faces, each a deliberate answer:
+   *
+   *  - **authoring** — refused by name: `DriverType` (`datasource.zod.ts`)
+   *    raises the prescription for an authored `datasource.driver`, through
+   *    {@link RETIRED_DRIVER_ID_GUIDANCE}. `driver` is an open namespace (a plugin
+   *    ships `com.vendor.snowflake`), so the field is `z.string()` and
+   *    `enumWithRetiredValues` cannot carry this; the prescription type and
+   *    its writing conventions are that helper's ({@link RetiredValueGuidance}).
+   *  - **selection** — absent: no boot host accepts it, because it is not in
+   *    {@link aliases}.
+   *  - **contract** — kept: {@link resolveDriverId} still answers this row's
+   *    id, so a stored legacy row is judged, redacted and converged exactly as
+   *    a canonical one. The module docblock records what deleting it measured.
+   *
+   * A key here must be no row's {@link id} and appear in no row's
+   * {@link aliases} — a refusal of a legal selection could never be obeyed
+   * (`config-registry.test.ts`).
+   */
+  readonly retiredAliases?: RetiredValueGuidance;
+  /**
    * Can this driver be selected with no database URL at all?
    *
    * `true` for the three local engines (memory has no target to name — a
@@ -169,6 +212,21 @@ export interface DriverVocabularyEntry {
 }
 
 /**
+ * The prescription for an authored `datasource.driver: 'mongo'` — the
+ * `mongodb` row's one {@link DriverVocabularyEntry.retiredAliases} entry.
+ * Written to `enumWithRetiredValues`' conventions: the value first, the release
+ * and ADR that removed it, why, the one-line fix, and the house `os migrate
+ * meta` sentence (`datasource-driver-mongo-to-mongodb` is a `toMajor: 17`
+ * entry, so its step is reached by `--from 16`).
+ */
+const MONGO_DRIVER_ID_RETIRED =
+  "Datasource `driver: 'mongo'` was removed in @objectstack/spec 18 (ADR-0087 D2) — the MongoDB driver's "
+  + 'id has been `mongodb` since 17, the spelling both boot hosts, the `@objectstack/driver-mongodb` package '
+  + "and every connection URL scheme use, and the loader rewrote `mongo` to it until this release. Use `driver: 'mongodb'`. "
+  + 'Change the value; the driver it builds and the `config` contract it is judged against are unchanged. '
+  + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+/**
  * THE table. Everything else in this module is a projection of it.
  *
  * Row order is the order {@link BUILTIN_DRIVER_IDS} publishes, which is the
@@ -180,7 +238,7 @@ const DRIVER_VOCABULARY = [
   { id: 'sqlite-wasm', aliases: ['sqlite-wasm', 'wasm-sqlite', 'wasm'], hasLocalDefault: true },
   { id: 'postgres', aliases: ['postgres', 'postgresql', 'pg'], hasLocalDefault: false },
   { id: 'mysql', aliases: ['mysql', 'mysql2'], contractOnlyAliases: ['mariadb'], hasLocalDefault: false },
-  { id: 'mongodb', aliases: ['mongodb', 'mongo'], hasLocalDefault: false },
+  { id: 'mongodb', aliases: ['mongodb'], retiredAliases: { mongo: MONGO_DRIVER_ID_RETIRED }, hasLocalDefault: false },
   { id: 'turso', aliases: ['turso', 'libsql'], hasLocalDefault: false },
 ] as const satisfies readonly DriverVocabularyEntry[];
 
@@ -220,17 +278,38 @@ export type BuiltinDriverId = (typeof DRIVER_VOCABULARY)[number]['id'];
  * config contract. (Unknown-key tolerance inside `config` is a different
  * question, and the answer there is a rejection with a rename hint.)
  *
- * Covers BOTH faces — selection aliases and contract-only ones — because its job
- * is "which contract judges this datasource's config", and a stored
- * `driver: 'sqlite3'` has a sqlite config whether or not a boot flag would
- * accept that spelling today.
+ * Covers EVERY face — selection aliases, contract-only ones and retired ones —
+ * because its job is "which contract judges this datasource's config", and a
+ * stored `driver: 'sqlite3'` has a sqlite config whether or not a boot flag
+ * would accept that spelling today. A retired spelling (`mongo`) is here for
+ * the same reason: the authoring parse refuses it by name, but a stored legacy
+ * row keeps its contract, its credential redaction and its conversions.
  */
 export const DRIVER_ID_ALIASES: Readonly<Record<string, BuiltinDriverId>> = Object.freeze(
   Object.fromEntries(
     VOCABULARY_ROWS.flatMap((entry) =>
-      [...entry.aliases, ...(entry.contractOnlyAliases ?? [])].map((alias) => [alias, entry.id] as const),
+      [
+        ...entry.aliases,
+        ...(entry.contractOnlyAliases ?? []),
+        ...Object.keys(entry.retiredAliases ?? {}),
+      ].map((alias) => [alias, entry.id] as const),
     ),
   ) as Record<string, BuiltinDriverId>,
+);
+
+/**
+ * Retired spelling → its prescription, across every row's
+ * {@link DriverVocabularyEntry.retiredAliases}. Keys are lower-case, the way
+ * {@link resolveDriverId} reads a spelling.
+ *
+ * Exported for `DriverType` (`datasource.zod.ts`), which refuses each key in a
+ * form the JSON Schema projection keeps (a `pattern`), so a document validated
+ * against the published schema meets the refusal too. Iterate it by own
+ * entries; a bare index by an arbitrary spelling reaches `Object.prototype`
+ * (see {@link lookupDriverId}).
+ */
+export const RETIRED_DRIVER_ID_GUIDANCE: Readonly<Record<string, string>> = Object.freeze(
+  Object.fromEntries(VOCABULARY_ROWS.flatMap((entry) => Object.entries(entry.retiredAliases ?? {}))),
 );
 
 /**
@@ -355,7 +434,7 @@ export function resolveDatabaseDriverId(driver: unknown): BuiltinDriverId | unde
  *
  * Built by filtering {@link DATABASE_DRIVER_SELECTION_ALIASES} — the
  * {@link DriverVocabularyEntry.aliases} face — down to the spellings that resolve
- * to THEMSELVES. Eight of its fourteen entries are dropped by that filter (`pg`,
+ * to THEMSELVES. Seven of its thirteen entries are dropped by that filter (`pg`,
  * `sql`, `wasm`, `libsql`, …): they select a driver, but under another driver's
  * canonical name, and an allowlist that offered both would be advertising one
  * driver twice.

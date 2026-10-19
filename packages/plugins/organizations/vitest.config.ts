@@ -112,6 +112,10 @@ export default defineConfig({
         find: /^@objectstack\/spec\/data$/,
         replacement: path.resolve(__dirname, '../../spec/src/data/index.ts'),
       },
+      {
+        find: /^@objectstack\/spec\/contracts$/,
+        replacement: path.resolve(__dirname, '../../spec/src/contracts/index.ts'),
+      },
     ],
   },
   test: {

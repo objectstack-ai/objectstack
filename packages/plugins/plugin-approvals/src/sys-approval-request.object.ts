@@ -45,16 +45,30 @@ export const SysApprovalRequest = ObjectSchema.create({
   isSystem: true,
   managedBy: 'engine-owned',
   description: 'Live approval instance tracked per submission',
-  // [ADR-0079] The record title is `display_title`, a text formula over the
-  // same two columns `titleFormat` names. The pointer used to be `id`: once a
-  // renderer honours ADR-0079's order (an explicit `nameField` wins over
-  // `titleFormat`), that made the record page's H1 the raw id. `titleFormat`
-  // stays for renderers that still read it first;
-  // `sys-approval-display-title.test.ts` holds the two to the same text.
+  // [ADR-0079] The record title is `display_title`, a text formula. The
+  // pointer used to be `id`: once a renderer honours ADR-0079's order (an
+  // explicit `nameField` wins over `titleFormat`), that made the record page's
+  // H1 the raw id. The formula reads the flow's label (`process_label`) and
+  // falls back to the machine source (`process_name`) where no label is
+  // stored. `titleFormat` stays for renderers that still read it first — the
+  // global search palette (`searchAll` in `@objectstack/metadata-protocol`)
+  // ranks it above `nameField` — and keeps `{process_name}`: a placeholder
+  // template cannot say "else", and `process_label` can be null after the boot
+  // fill (a row the fill could not label, or a failed fill run), where a
+  // `{process_label}` template draws a title with no source at all.
+  // `sys-approval-display-title.test.ts` holds the two to the same text where
+  // no label is stored, and pins where they differ.
   displayNameField: 'display_title',
   nameField: 'display_title', // [ADR-0079] canonical primary-title pointer (mirrors deprecated displayNameField)
   titleFormat: '{process_name} · {record_id}',
-  highlightFields: ['process_name', 'object_name', 'record_id', 'status', 'current_step', 'submitter_id', 'updated_at'],
+  // [ADR-0085] The flow is named by its label, `process_label`, never by the
+  // machine source `process_name` (`flow:NAME`), and the step by its label,
+  // `current_step_label`, never by the node id `current_step`, as the request
+  // lists name them. The record page's highlights strip is this list minus
+  // `record_id`, and the page's bare `record:details` node draws this list
+  // minus the strip, so the two move together (`sys-approval-request.page.ts`
+  // says why).
+  highlightFields: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
 
   // Curated built-in list views — render as segmented tabs in the console.
   // Filters use {current_user_id} substitution wired by the console.
@@ -68,13 +82,20 @@ export const SysApprovalRequest = ObjectSchema.create({
   // the caller's own rows. A caller-scoped list view is never an object's
   // first; an entry that wants one names it. The order decides which view
   // opens, never which rows a caller may read.
+  //
+  // The display columns (`process_label`, `current_step_label`,
+  // `pending_approver_labels`) are ENGINE-WRITTEN snapshots, set by
+  // `ApprovalService` on the writes that change the facts they describe. A list
+  // reads them as stored and never re-derives a label from flow metadata or
+  // resolves an approver address itself; `process_name`, `current_step` and
+  // `pending_approvers` keep the machine values every query and decision reads.
   listViews: {
     all_requests: {
       type: 'grid',
       name: 'all_requests',
       label: 'All',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_name', 'object_name', 'record_id', 'status', 'current_step', 'submitter_id', 'updated_at'],
+      columns: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -83,7 +104,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'my_pending',
       label: 'My Pending',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_name', 'object_name', 'record_id', 'current_step', 'submitter_id', 'updated_at'],
+      columns: ['process_label', 'object_name', 'record_id', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
       filter: [
         { field: 'status', operator: 'equals', value: 'pending' },
         { field: 'pending_approvers', operator: 'contains', value: '{current_user_id}' },
@@ -97,7 +118,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'submitted_by_me',
       label: 'I Submitted',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_name', 'object_name', 'record_id', 'status', 'current_step', 'updated_at'],
+      columns: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'updated_at'],
       filter: [{ field: 'submitter_id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 25 },
@@ -107,7 +128,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'completed',
       label: 'Completed',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_name', 'object_name', 'record_id', 'status', 'submitter_id', 'completed_at'],
+      columns: ['process_label', 'object_name', 'record_id', 'status', 'submitter_id', 'completed_at'],
       // Every terminal state, `cancelled` included (#13568) — a platform-voided
       // request is kept as audit evidence, and a terminal state absent from the
       // only curated terminal view is evidence nobody can find.
@@ -121,12 +142,15 @@ export const SysApprovalRequest = ObjectSchema.create({
     id: Field.text({ label: 'Request ID', required: true, readonly: true, group: 'System' }),
 
     // [ADR-0079] The record title (`nameField` above). A formula is computed on
-    // read and has no stored column. Both source columns are required, so the
-    // expression needs no null guard.
+    // read and has no stored column. Its flow half is the flow's label,
+    // `process_label`, the same column the request lists show. That column is
+    // nullable — a row the boot fill could not label, or one written before
+    // the fill ran — so the expression guards it and falls back to
+    // `process_name`, which is required, as is `record_id`.
     display_title: Field.formula({
       label: 'Title',
       returnType: 'text',
-      expression: F`record.process_name + ' · ' + record.record_id`,
+      expression: F`record.process_label != null ? record.process_label + ' · ' + record.record_id : record.process_name + ' · ' + record.record_id`,
       description: 'Record title: the request source and the record it is about (computed on read)',
       group: 'Target',
     }),
@@ -175,6 +199,23 @@ export const SysApprovalRequest = ObjectSchema.create({
       group: 'Target',
     }),
 
+    // The flow's authored label when the request was opened — a snapshot the
+    // engine writes once, in `openNodeRequest`, from the label the flow engine
+    // seeds as `$flowLabel` (`FlowSchema.label`, required). A rename of the flow
+    // later does not rewrite it: the row records what the approver was asked
+    // under. An empty or absent authored label falls through to the humanized
+    // machine name (`display-labels.ts`, the chain the approvals door serves).
+    // Rows opened before this column are filled by the boot backfill
+    // (`display-label-backfill.ts`) by the same chain.
+    process_label: Field.text({
+      label: 'Flow',
+      required: false,
+      maxLength: 255,
+      readonly: true,
+      description: 'Label of the flow that opened this request, as it stood when the request was opened',
+      group: 'Target',
+    }),
+
     object_name: Field.text({
       label: 'Object',
       required: true,
@@ -218,6 +259,9 @@ export const SysApprovalRequest = ObjectSchema.create({
       // dropped-deferral error, and `success: false` — and since commit 1cba33f16 the
       // loader also WARNS at load time, before the engine rejects the row.
       referenceVia: 'object_name',
+      // A `cancelled` request whose `cancel_reason` is `record_deleted` names a
+      // record the platform deleted: a renderer draws that option's label, not a link.
+      referenceDeletedWhen: { field: 'cancel_reason', value: 'record_deleted' },
     }),
 
     submitter_id: Field.lookup('sys_user', {
@@ -281,6 +325,19 @@ export const SysApprovalRequest = ObjectSchema.create({
       group: 'State',
     }),
 
+    // The Approval node's authored label (`FlowNodeSchema.label`, required),
+    // written with `current_step` when the request opens. The engine's fact at
+    // that moment: the console shows it as stored and never reads the flow to
+    // re-derive it. Same chain and same boot backfill as `process_label`.
+    current_step_label: Field.text({
+      label: 'Approval Step',
+      required: false,
+      maxLength: 255,
+      readonly: true,
+      description: 'Label of the step awaiting approval, as it stood when the request reached it',
+      group: 'State',
+    }),
+
     current_step_index: Field.number({
       label: 'Current Step Index',
       required: false,
@@ -292,6 +349,31 @@ export const SysApprovalRequest = ObjectSchema.create({
       label: 'Pending Approvers',
       required: false,
       description: 'Comma-separated user ids who can act on the current step',
+      group: 'State',
+    }),
+
+    // Whom a pending request waits on, for display: one label per slot of
+    // `pending_approvers`, in slate order, joined with ", ". The engine writes
+    // it on every write that sets the slate (open, a partial tally, reassign,
+    // SLA reassign) and clears it with the slate on every terminal write, so it
+    // never outlives the slate it describes. A slot that names a person (a user
+    // id, or an email an account carries) is labelled with that account's name
+    // by `resolveUserNames`, the resolver the approvals door serves
+    // `pending_approver_names` with; any other slot (a `position:` / `team:`
+    // literal, an address no account answers to) shows as its stored address.
+    //
+    // A snapshot, not a live read: a user renamed while the request is pending
+    // keeps the old name here until the slate is next written. Display only —
+    // no decision, filter or index reads it; `pending_approvers` stays the
+    // authority. Null on a non-pending row, and while a person slot's name
+    // could not be read (never a raw address in its place); the boot backfill
+    // (`display-label-backfill.ts`) fills pending rows written before this
+    // column, and retries a failed read.
+    pending_approver_labels: Field.textarea({
+      label: 'Waiting On',
+      required: false,
+      readonly: true,
+      description: 'Who the request is waiting on: the name of each pending approver, or the slot address when it names no person',
       group: 'State',
     }),
 
@@ -327,7 +409,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       required: false,
       maxLength: 100,
       readonly: true,
-      description: 'Suspended automation run id this request gates (ADR-0019). The decision resumes it.',
+      description: 'Suspended automation run id this request gates. The decision resumes it.',
       group: 'State',
     }),
 
@@ -336,7 +418,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       required: false,
       maxLength: 100,
       readonly: true,
-      description: 'Approval node id within the flow that opened this request (ADR-0019).',
+      description: 'Approval node id within the flow that opened this request.',
       group: 'State',
     }),
 
@@ -344,7 +426,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       label: 'Node Config',
       required: false,
       readonly: true,
-      description: 'Snapshot of the Approval node config (approvers/behavior) for node-driven requests (ADR-0019).',
+      description: 'Snapshot of the Approval node config (approvers/behavior) for node-driven requests.',
       group: 'State',
     }),
 

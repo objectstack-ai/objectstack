@@ -3891,6 +3891,15 @@ describe('RestServer — object API exposure (apiEnabled / apiMethods)', () => {
         ? [{ name: 'widget' }]
         : [{ name: 'widget', enable }],
     );
+    // [#24031] The gate reads its one object BY NAME. This double's by-name
+    // read answers the object its own list holds — whatever `getMetaItems`
+    // answers at call time, so a test that makes the list throw makes this
+    // throw too — as the real protocol's two reads agree.
+    protocol.getMetaItem = vi.fn(async (req: any) => {
+      const listed: any = await protocol.getMetaItems({ type: req?.type });
+      const items: any[] = Array.isArray(listed) ? listed : (listed?.items ?? []);
+      return { type: req?.type, name: req?.name, item: items.find((o: any) => o?.name === req?.name) };
+    });
     const rest = new RestServer(server as any, protocol as any, { api: { requireAuth: false } } as any);
     (rest as any).resolveExecCtx = async () => ({ userId: 'test-user' });
   rest.registerRoutes();

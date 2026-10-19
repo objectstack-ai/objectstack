@@ -159,6 +159,10 @@ aggregation's own `filter`), a sort, a `groupBy`, an `aggregations[].field`, a
 `searchFields` entry, or an `expand` entry's own filter or sort at any depth. Such a
 field is never returned on a generic read, so it cannot be queried by either — the
 refusal names the object that declares it. Query by another field.
+A non-blank `search` is refused (`param: 'search'`), not answered with every row,
+when the object's resolved search set is empty: no `searchableFields` entry names a
+stored field, and the default search scans none (`internal: true` fields never
+count). Declare one that does, or mirror a composed title onto a stored text field.
 Off the request path the same code answers `backfillSummaryNulls`'s
 `recomputeUndefinedOnEmpty` (`os migrate summary-nulls
 --recompute-undefined-on-empty object.field`) when an entry is not a roll-up
@@ -445,8 +449,8 @@ result set — a response indistinguishable from a successful query.
 **Retry:** `no_retry`
 
 ### `API_KEY_REVOKED`
-**Cause:** The API key was revoked by its owner or an administrator.  
-**Fix:** Create a new key and replace this one wherever it is configured. A revoked key never works again.  
+**Cause:** The API key was revoked by its owner or an administrator, or by an administrator's forced password reset (the message says which).  
+**Fix:** Ask the key's owner or a platform administrator to restore it (the Restore API Key action on the API Keys list); the same key then works again at once. A key a forced password reset revoked is restored by a platform administrator only: its owner is refused `403 PERMISSION_DENIED`. Otherwise create a new key and replace this one wherever it is configured.  
 **Retry:** `no_retry`
 
 These three are answered on every endpoint that accepts an API key: the endpoints the runtime serves (the MCP HTTP endpoint among them), the REST data API, the settings, file-download, datasource admin and share-link routes, the marketplace install routes and the MCP stdio transport. An unknown key is always the generic 401.
@@ -505,9 +509,10 @@ These three are answered on every endpoint that accepts an API key: the endpoint
 **Retry:** `no_retry`
 
 The engine throws `DuplicateRecordError`, whose in-process `code` is
-`DUPLICATE_RECORD`; the REST door translates that envelope at the boundary, so
-every route answers the wire code `UNIQUE_VIOLATION` and the in-process spelling
-never crosses HTTP.
+`DUPLICATE_RECORD`; the REST door and the
+[Hono doors](/docs/protocol/kernel/error-handling#hono-doors) translate that envelope at
+the boundary, so every route answers the wire code `UNIQUE_VIOLATION` and the in-process
+spelling never crosses HTTP.
 
 ### `LOCK_CONFLICT`
 **Cause:** The record is locked by another process or user.  

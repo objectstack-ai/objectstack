@@ -114,8 +114,21 @@
  * declares, and {@link backfillOverlayBundleMembers} gives each its body's
  * member before a read can take it for the canonical one.
  *
- * The bare, NULL-distinct `organization_id` part is still a separate question
- * with its own ADR-0120 D4 ceremony and is deliberately not decided here.
+ * ## The second re-keying: the organization leaves the key (ADR-0131 C7b)
+ *
+ * The bare, NULL-distinct `organization_id` part is gone: an overlay is the
+ * environment's (ADR-0131 D6), and the column is retired from all four
+ * `sys_metadata*` objects. The key is now `(type, name, COALESCE(package_id,
+ * ''), COALESCE(bundle_member, ''))`. Unlike the member part this TIGHTENS
+ * uniqueness: two legacy organizations' rows, or an organization's row and
+ * the environment's, can share it. So on a database the v18 ceremony
+ * (`os migrate organization-ownership --apply`, its metadata-promotion step)
+ * has not yet cleared, the probe meets duplicates and the `conflict` arm keeps
+ * the previous index and names them — ADR-0120 D4, never a dropped row. The
+ * duplicate probe below groups by the same key, so `os migrate duplicates`,
+ * the boot report and the index cannot disagree; before this re-key the probe
+ * folded NULL organizations into one group the NULL-distinct index did not,
+ * and reported "blocked" for rows the index accepted.
  */
 
 import { ITEM_KEY_DISCRIMINATORS, itemDiscriminator } from '@objectstack/metadata-core';
@@ -166,7 +179,7 @@ export const OVERLAY_PROBE_INDEX_NAMES: Readonly<Record<OverlayIndexState, strin
 export const OVERLAY_MEMBER_COLUMN = 'bundle_member';
 
 /** The key COLUMNS — see the module header for the member part. */
-export const OVERLAY_INDEX_COLUMNS = ['type', 'name', 'organization_id', 'package_id', OVERLAY_MEMBER_COLUMN] as const;
+export const OVERLAY_INDEX_COLUMNS = ['type', 'name', 'package_id', OVERLAY_MEMBER_COLUMN] as const;
 
 /**
  * The nullable key columns that fold their NULLs into ONE bucket, and the
@@ -183,9 +196,8 @@ export const OVERLAY_INDEX_COLUMNS = ['type', 'name', 'organization_id', 'packag
  * member is never the empty string ({@link overlayMemberValue} answers NULL for
  * it), so `''` cannot collide with a real member either.
  *
- * ⚠️ `organization_id` is deliberately NOT listed. It is bare in the index that
- * shipped, and #6418 is an ordering fix — folding it too is a re-keying with
- * its own ADR-0120 D4 ceremony, not a rider on this one.
+ * `organization_id` is no longer a key part at all (ADR-0131 C7b, see the
+ * module header).
  */
 export const OVERLAY_NULL_SENTINELS: Readonly<Record<string, string>> = {
     package_id: '',

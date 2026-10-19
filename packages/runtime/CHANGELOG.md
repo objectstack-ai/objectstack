@@ -1,5 +1,1207 @@
 # @objectstack/runtime
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- a06f0d4: fix(runtime)!: the dispatcher's `GET /meta/object/:name` answers an object of a disabled package with the protocol's `404 OBJECT_PACKAGE_DISABLED`, never the registry's copy
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of a runtime read door on the dispatcher transport: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the read -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The dispatcher's object read had two registry reads. On an unscoped kernel it read `registry.getObject(name)` before the protocol. On a scoped kernel it fell back to `registry.getObject(name)` when the protocol read threw. The registry keeps a disabled package's objects on purpose, so both reads served such an object.
+  
+  - **Refused now:** `GET /meta/object/:name` on the dispatcher transport, for an object whose owning package is disabled. It answers the protocol's `404 OBJECT_PACKAGE_DISABLED`, on scoped and unscoped kernels alike.
+  - **Unchanged:** every other object read, including the registry fallback for an object the protocol misses for any other reason.
+  
+  What changes for you: re-enable the package to read the object again.
+- 58a2faa: fix(runtime)!: the dispatcher's `/meta/:type/:name/layers` and `?layers=true` answer a disabled package's non-object item as a missing name
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of two runtime read doors for an item whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the reads -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **Absent now, `404 RESOURCE_NOT_FOUND` "Not found", byte for byte the missing name's answer:** `GET /meta/:type/:name/layers` and `GET /meta/:type/:name?layers=true` (with its `Deprecation` header) for an item of every type but `object` and `package` whose owning package is disabled, to every caller. The owner is the one the by-name read's protection envelope names (`packageId`) under the request's `?package=` scope, as `RestServer` asks it. Objects already answered `404 OBJECT_PACKAGE_DISABLED` here.
+  - **Unchanged:** items of enabled packages, and a name with nothing behind it.
+  
+  What changes for you: re-enable the package to read its items' layered views again.
+- 2bcd406: fix(runtime)!: the dispatcher's `/meta` doors that read past the protocol answer a disabled package's object or item as the protocol's by-name read does
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of runtime read doors on the dispatcher transport: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the read -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The registry keeps a disabled package's objects on purpose, and the metadata service knows nothing of a disable. Four dispatcher doors read one of them for a disabled package's object or item and served it.
+  
+  - **Refused now, `404 OBJECT_PACKAGE_DISABLED`:** `GET /meta/object/:name/state/:field`, and the legacy one-segment `GET /meta/:name` exit, for an object whose owning package is disabled. Both read `registry.getObject`; they now answer the protocol's refusal, the answer `GET /meta/object/:name` gives.
+  - **Refused now, `404 OBJECT_PACKAGE_DISABLED`:** `GET /meta/object/:name/published`. When the layered read refused the object, this door fell through to the published snapshot and served it. The refusal is now the answer, as on `RestServer`'s `/published`.
+  - **Absent now, `404 RESOURCE_NOT_FOUND`:** `GET /meta/:type/:name` for a non-object item of a disabled package. The protocol answers it as absent, and the door no longer serves the metadata service's copy in its place. The body is byte for byte the answer for a missing name.
+  - **Unchanged:** objects and items of enabled packages, and every other fall-through.
+  
+  What changes for you: re-enable the package to read the object or item again.
+- e74ec56: fix(runtime)!: the dispatcher's `/meta/:type/:name/published` answers a disabled package's non-object item as a missing name
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of one runtime read door for an item whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the read -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **Absent now, `404 RESOURCE_NOT_FOUND` "Not found", byte for byte the missing name's answer:** `GET /meta/:type/:name/published` for an item of every type but `object` and `package` whose owning package is disabled, on the stored published row and the code/package snapshot alike. The owner is the one the by-name read's protection envelope names (`packageId`), as `RestServer`'s `/published` asks it. Objects already answered `404 OBJECT_PACKAGE_DISABLED` here.
+  - **Unchanged:** items of enabled packages, and a name with nothing behind it.
+  
+  What changes for you: re-enable the package to read its items' published versions again.
+- 1e001c7: feat(runtime): `POST /packages/:id/publish-drafts` accepts a `backfill` body key and passes it to the protocol with the caller's execution context
+  
+  Clause-②: yes (widening)
+  
+  - The body's `backfill` (`[{ object, field }]`) reaches `publishPackageDrafts` as sent, together with the request's own execution context, so the backfill writes run as the signed-in caller, never as the system. A body without the key sends neither.
+  - The protocol's request refusal answers `400 VALIDATION_ERROR` with its `issues[]`, before anything is published, flipped or announced. The `backfillApplied` receipt rides the `200` body.
+- d79dc48: fix(runtime)!: an `operation: 'update'` action that declares no `params` refuses every undeclared wire param at both action doors, instead of writing it to the row
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes, and no stored shape, is added, removed, renamed or converted: the change is which wire params the two action doors accept for one declared action shape. No spec schema changes, so nothing exists for `objectstack migrate meta` to rewrite. A request is not metadata, and whether a value the client sends should become a declared param is a decision only the action's author can make. -->
+  
+  **BREAKING** (the REST `/actions` door and the MCP `run_action` door now refuse, with a 400 `VALIDATION_ERROR`, a wire param that a declarative update action without `params` does not declare; measured consumers: objectstack-ai/hotcrm's `complete_task` called with such params; any console vendored before objectui `fb501bc894`, which posts the action's `patch` keys as `params`; and page action rows (`action:button` / `action:icon` with `operation: 'update'`) whose static object `params` the console forwards to a param-less declarative update action, none of which exist in this repo, with the row surface tracked in #24394), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A declarative update (`operation: 'update'` + `patch`) has no handler: the route merges the request's `params` over `patch` and writes the result to the current record. An action that declared no `params` skipped the ADR-0104 D2 param check altogether, so any key the caller sent was written too. An action declaring `patch: { status: 'completed' }` could rewrite any other field the caller may write, which is not what its author declared.
+  
+  Now an empty or absent `params` list on a declarative update is an empty accept set. Every key that is neither a declared param nor a dispatcher built-in (`recordId`, `objectName`, `_selectedIds`) is refused before anything is read or written, through the same D2 path a declared-params action already takes: the same `Invalid action params: Unknown action param "KEY"` message, the same 400, and the same `OS_ALLOW_LAX_ACTION_PARAMS=1` escape hatch. The action still writes its `patch` when the request carries no `params` or an empty bag, and a declared param still writes and still wins over `patch`.
+  
+  Unchanged: an action with a handler (`target`, `body`, or a flow) that declares no `params` keeps its pass-through.
+  
+  Also at the MCP `run_action` door: every ADR-0104 D2 param refusal, and the declarative update's own refusals (no `recordId`, or nothing to write), now carry `code: 'VALIDATION_ERROR'` and `status: 400`, so the tool error renders the coded envelope the REST door already answers with, rather than the message alone.
+  
+  What to do: declare the param on the action if the request's value should be written, or stop sending it, because the route applies `patch` from the declaration and never needs it on the wire.
+
+### Patch Changes
+
+- 6e43b7b: fix(runtime): the `keys` and `actions` dispatcher domains answer their `405 METHOD_NOT_ALLOWED` with an `Allow: POST` header
+  
+  Clause-②: no
+  
+  RFC 9110 requires a `405` to carry an `Allow` header naming the methods the target resource supports. The `mcp`, `meta` and `ai` dispatcher domains already send one. The `keys` and `actions` domains answered their `405` without it, so a client could see that its verb was refused but not which verb the route takes.
+  
+  Both domains serve one method, `POST`, on every path they claim, and their `405` now carries `Allow: POST`:
+  
+  - **`/api/v1/keys`.** A signed-in `GET`, `PUT`, `PATCH` or `DELETE` is answered `405` with `Allow: POST`, on the standalone server (`os dev`, `os serve`) and on a host built with `@objectstack/hono`'s `createHonoApp`.
+  - **`/api/v1/actions/...`.** A signed-in non-`POST` request that reaches the `actions` domain is answered `405` with `Allow: POST`. That is every such request on a `createHonoApp` host. The standalone server mounts these paths for `POST` only, so its HTTP adapter answers other verbs itself, and that answer already carried `Allow: POST`.
+  
+  The status, the body and its `error.code` are unchanged: `{ success: false, error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed', httpStatus: 405 } }`. Each domain still decides an anonymous caller before it looks at the method, so an anonymous `GET` (or any other verb the anonymous decision refuses) that reaches either domain is answered `401 UNAUTHENTICATED`, with no `Allow` header.
+- 727091c: fix(runtime): every PUT and PATCH route the dispatcher mounts answers with an `X-Request-Id` and reports its 5xx to the error reporter, as its GET, POST and DELETE routes always did
+  
+  Clause-②: no
+  
+  The dispatcher wraps each route it mounts in its observability instrumentation. That wrapper echoes a valid inbound `X-Request-Id` (and mints a `req_`-prefixed hex id otherwise), sets `req.requestId`, hands a 5xx to the configured `observability.errorReporter`, and gives the `[5xx]` log line its method, route and request id. It wrapped routes registered through `get`, `post` and `delete` only, so every route mounted through `put` or `patch` answered without any of that: `PUT` and `PATCH /api/v1/keys`, the `PUT` and `PATCH` mounts of the three `/notifications` paths, `PATCH /packages/:id` (and its `/enable` and `/disable`), `PUT /automation/:name`, the `PUT` and `PATCH /ai/*` wildcards, and PATCH routes a service emits on `ai:routes`. It now wraps all five verbs.
+  
+  - **On the wire:** a `PUT` or `PATCH` answer from these routes now carries the `X-Request-Id` header (or the header `observability.requestIdHeader` names), as "Debugging with Request IDs" in the error-handling guide describes.
+  - **For an operator:** a 5xx on one of these routes now reaches `observability.errorReporter`, and its `[5xx]` log line now carries the method, route and request id.
+  - **Metrics:** on the standalone Hono server nothing changes. The transport already counted and timed these requests through `afterResponse`, and it still does, once per request. On a transport without `afterResponse`, `PUT` and `PATCH` requests on these routes are now counted in `http_requests_total` and timed in `http_request_duration_ms`, as the other three verbs were.
+  
+  What changes for you: nothing to rewrite.
+- eda6f14: feat(spec)!: an install through `POST /api/v1/packages` may declare `manifest.scope` `project` only; `cloud` and `system` are refused, so an authored install can no longer lock itself
+  
+  `cloud` and `system` are the scopes of packages the platform ships, and the ADR-0070 D2 read-only rule (`isWritablePackage`) judges a registered package by its stored `manifest.scope`. An install through `POST /api/v1/packages` authors the package, yet the install declaration admitted all three scopes. So a manifest that copied `scope: 'cloud'` or `'system'` from a shipped package answered `201` and produced an authored package that `DELETE /packages/:id`, `PATCH /packages/:id/disable` and `POST /packages?overwrite=true` then refused with `422 WRITABLE_PACKAGE_REQUIRED`, and the stored row came back on every restart. The install declaration now narrows the install manifest's `scope` to `project` (new export `PackageInstallManifestSchema`, `ManifestSchema` with that one key narrowed), on both body forms of `PackageInstallBodySchema` and on `PackageInstallRequestSchema.manifest`. `ManifestSchema` itself is unchanged: platform packages still declare all three scopes, and they reach the registry by code boot, not over this door. The door already parses its body through that declaration, so it answers the refusal with no rule of its own; its bare-form refusal sentence now re-reads the union's own bare branch, so it carries the prescription too.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No stored metadata moves and nothing is converted: the refused value is one a caller sends in a request body, and the only conversion that could exist for it (rewrite `cloud` / `system` to `project`) is the silent rewrite this change refuses on purpose, so there is nothing for `objectstack migrate meta` to rewrite. Stored `sys_packages` rows are untouched. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); the narrowed declaration is a Zod schema in packages/spec (not runtime-interface-only or type-surface-only); and nothing exported is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (a published request declaration's accept set narrows), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM:** `POST /api/v1/packages` with a manifest declaring `scope: 'cloud'` or `scope: 'system'`, in the wrapped body `{ manifest }` or as a bare manifest, with or without `overwrite`, answered `201`; `PackageInstallBodySchema` and `PackageInstallRequestSchema` parsed it green.
+  - **TO:** the same request answers `400` with `error.code: 'VALIDATION_ERROR'`, names `scope` and the value sent, and installs nothing; both schemas refuse it with an `invalid_value` issue at `manifest.scope` (wrapped) or `scope` (bare).
+  - **Unchanged:** a manifest with `scope: 'project'` or no `scope` installs as before (`201`), and the door still stores the manifest as sent, so an absent `scope` stays absent. `ManifestSchema` and every other producer of it keep `cloud` / `system`.
+  - **The fix for an integrator:** remove `scope` from the manifest you install (it defaults to `project`), or write `scope: 'project'`.
+  - **A package that already locked itself this way** (an authored `sys_packages` row whose manifest declares `cloud` or `system`) stays read-only after this change, because the read-only rule reads the stored scope. No API door removes it; an operator deletes its row from the environment's database (`DELETE FROM sys_packages WHERE id = 'PACKAGE_ID'`) and restarts the server.
+- d702b18: fix(cli,runtime): a dangling symlink standing as the SQLite database's directory is refused at once by `os dev` and `os serve`, naming the database file and the directory, instead of failing the boot later in a plugin's start
+  
+  Clause-②: no
+  
+  **What was wrong.** `os dev` (for its default database under `OS_HOME/data`) and the standalone host behind `os serve` and `os start` (for a `file:` or `wasm-sqlite://` database URL) make the database file's directory before the driver opens it. Both accepted any `EEXIST` answer while making a missing level. A symbolic link that points nowhere answers `EEXIST` to `mkdir`, so it was taken for a directory, and the boot went on until the driver could not open the file. `os dev` then exited 1 with `Plugin com.objectstack.auth failed to start - rollback complete: The database refused to run this query for object 'sys_organization'`, and `os serve` with `Plugin package-service failed to start - rollback complete: The database refused to run a raw statement`. Neither message named the file, the directory or the link.
+  
+  **What an operator sees now.** Both make the directory with the same bounded walk as the other `OS_HOME` paths, which accepts `EEXIST` only when a directory stands there. A dangling link as the directory is refused before the boot starts: `os dev` prints `The default database '…/data/objectstack.db' cannot be created: its directory '…/data' could not be made: EEXIST: …` and exits 1, and `os serve` prints `[StandaloneStack] SQLite database file '…' cannot be created: its directory '…' could not be made: EEXIST: …` and exits 1. Remove the link, or point it at a directory that exists. A dangling link higher up the path was already refused at once, with `ENOENT` at the level below the link; it is now refused with `EEXIST` at the link itself.
+  
+  Nothing else changes. A directory that can be made is still made, every missing level of it; a directory that exists, or a symbolic link to one, is used as it stands; and a path the operating system refuses for any other reason (`ENOENT`, `ENOTDIR`, a regular file holding the directory's name) is refused with the same code and text as before.
+- 5a9a80b: fix(runtime): an OAuth MCP agent acts in the organization the user's consent bound, so the user's organization-scoped grants count for it
+  
+  Clause-②: no
+  
+  - **What was wrong.** On the `/mcp` door, `resolveExecutionContext` built a verified OAuth access token's principal with no organization. The agent's delegator (the user it acts for, ADR-0090 D10) was then resolved with no active organization and held only its global grants. Every grant an administrator assigns is scoped to an organization, so an ordinary user's agent was refused every object operation: `on-behalf-of principal may not 'find' … the delegator lacks that grant (ADR-0090 D10 intersection)`.
+  - **What changed.** The principal is resolved in the organization the consent bound: the `organizationId` that `IAuthService.verifyMcpAccessToken` returns from the token's `organization_id` claim. It is handed to the shared resolver where a session carries its active organization, so it is vetted on every request by the rule a browser session's organization gets (`vetOrganizationClaim`, `@objectstack/core`). The user's grants scoped to that organization count for the agent; grants scoped to the user's other organizations do not. It is never the union of the user's organizations, never the organization the user's browser session has selected now, and never a widened global grant.
+  - **A membership that is gone.** Under a walled tenancy posture (`isolated`, `group`), a token whose organization the user no longer belongs to resolves with no organization, so only global grants apply. Under `isolated`, a former member's agent gets an empty `200` read and a refused tenant write. The same holds for an organization the user never belonged to, whatever put it on the token. Under `single`, or with no `tenancy` service, the organization stands as claimed, exactly as a browser session's does there.
+  - **Unchanged.** A token with no `organization_id` (minted before consents bound one, or by a user with no active organization at consent) resolves with no organization, as before: global grants only, until the user re-confirms the consent once. A platform admin's global grant applies as before. The API-key and session tracks are untouched.
+- 8eccf51: fix(runtime): on the standalone server, an anonymous request whose JSON body cannot be parsed gets the domain's `401`, not the transport's `400`
+  
+  Clause-②: no
+  
+  On the standalone server (`os dev`, `os serve`: `HonoServerPlugin` with the dispatcher plugin), the routes the dispatcher mounts read the request body before handing the request to `dispatch()`. The transport refuses a body it cannot parse when the body is read, so the refusal answered first: an anonymous `POST /api/v1/keys` with `{"name": "probe"` (the closing brace missing) got `400 INVALID_REQUEST`, while the same request with a well-formed body got the promised `401 UNAUTHENTICATED`. The anonymous answer depended on whether the body parsed.
+  
+  The mounts now hand the body on unread, and each domain reads it once its anonymous decision has admitted the caller. An anonymous caller gets the same answer whatever its body, on every mounted route that reads one, unscoped and `/environments/:environmentId`-scoped:
+  
+  - `401 UNAUTHENTICATED` on `POST /analytics/query` and `/analytics/sql`; `/keys` (every verb); `POST /notifications/read` and `/notifications/read/all`; `POST /automation`, `PUT /automation/:name` and the two `trigger` doors, `toggle`, `clone`, `resume`, `cancel` and `restore-suspension`; the three `POST /actions/...` shapes; the `/ai/*` routes; the `/packages` routes; `POST /security/_activation/:type/:name` and `POST /security/permission-sets/:name/clone`.
+  - `/mcp` answers its own `401`, or, ahead of it, its `404` when MCP is switched off and its `501` when no MCP service is installed. None of the three reads the body, so a signed-in caller gets the `404` or `501` too.
+  - `/mcp/skill` is public and reads no body: a `POST` or `DELETE` gets its own `405` + `Allow: GET`, signed in or not.
+  
+  Otherwise a signed-in caller with an unparseable body still gets the transport's `400 INVALID_REQUEST`: the body is read after the anonymous decision, not dropped. A `createHonoApp` host (`@objectstack/hono`) is unchanged; it already raised the refusal only when a domain read the body.
+- 1bf5f6e: fix(runtime): `ctx.title()` in a hook body answers a title formula that reads through a lookup, as a read of the record shows it
+  
+  A junction object's composed title, `record.book.title + ' · ' + record.reader.name`, is shown by every read of the record, but a hook body's `ctx.title()` answered `null` for it, and `ctx.title('<lookup field>')` answered `null` for a related record whose own title reads through a lookup.
+  
+  - **`ctx.title()`** now reads the one hop the title formula reads, through the body's own `ctx.api` channel: one read per lookup the title reads through, with the caller's permissions, on the transaction the body has open. It follows the lookup's value in this write, so a `beforeInsert` names the payload's book and a `beforeUpdate` that changes `book` names the new book. A title over the record's own columns still costs no read.
+  - **`ctx.title('<lookup field>')`** returns the title its `findOne` served, the related record's own one-hop title included, instead of re-computing it without the hop.
+  - A related record the caller may not read leaves the title `null`, as the read of the same record shows no title to that caller. It is never a partial title and never the hidden name. A title that would need a second hop is `null`, as it is on a read.
+  
+  What to do. Nothing. A hook that composed a junction object's title by hand can call `ctx.title()` instead.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- cbfa5e4: fix(runtime): on the standalone server, every verb on `/api/v1/actions/...` reaches the `actions` domain, so an anonymous caller is answered `401`; and an `Allow` header no longer lists verbs a route mounts only to refuse
+  
+  Clause-②: no
+  
+  On the standalone server (`os dev`, `os serve`: `HonoServerPlugin` with the dispatcher plugin), a request that matched no route under its verb was answered by the HTTP adapter: `405 METHOD_NOT_ALLOWED` with an `Allow` header built from the verbs registered on the path. Two answers were wrong.
+  
+  - **`/api/v1/actions/...` (all three path shapes, unscoped and `/environments/:environmentId`-scoped).** Only `POST` is mounted, so an anonymous `GET`, `HEAD`, `PUT`, `PATCH`, `DELETE` or `TRACE` was answered `405` + `Allow: POST` instead of the published `401 UNAUTHENTICATED`. Every such request now reaches the `actions` domain, as it does on a `createHonoApp` host: an anonymous caller gets `401 UNAUTHENTICATED` with no `Allow`, and a signed-in caller gets the domain's `405` + `Allow: POST`. An anonymous `OPTIONS` (only reachable with CORS off) gets the domain's `405` + `Allow: POST` on both hosts, because the shared anonymous decision lets a CORS preflight through.
+  - **`Allow` on `/api/v1/keys`, the three `/api/v1/notifications` faces and `/api/v1/mcp/skill`.** These paths mount verbs that exist only so the domain can refuse them. A verb that cannot be mounted (`OPTIONS` with CORS off, `TRACE`, an extension method), and `PUT`/`PATCH` on `/mcp/skill`, got the adapter's `405` with those refusal-only verbs listed as supported (`/keys`: `Allow: DELETE, GET, HEAD, PATCH, POST, PUT`). They now reach the domain too: `/keys` answers `401` anonymous and `405` + `Allow: POST` signed in, `/notifications` answers `401` anonymous and `404 ROUTE_NOT_FOUND` signed in, and `/mcp/skill` answers `405` + `Allow: GET`.
+  
+  Every request that was served is served as before, and no route is added: the dispatcher's existing fallback seam hands these requests to the domain. A transport that implements `setFallbackHandler` but not `resolveMountedRoute` keeps the adapter's answer, and the dispatcher says so once at boot, at `warn`.
+- 9822b05: fix(hono): on a `createHonoApp` host a `HEAD` is answered as its `GET` (no body), as the standalone server answers it; `HEAD /api/v1/mcp/skill` no longer answers `405` with `Allow: GET`
+  
+  Clause-②: no
+  
+  `createHonoApp`'s `${prefix}/*` catch-all handed the dispatcher the request's raw verb. Hono answers a `HEAD` from the `GET` route, but the verb still read `HEAD`, and the dispatcher's domains decide by comparing it with `GET`, so a `HEAD` was not answered as its `GET` on this host. Measured: `HEAD /api/v1/mcp/skill` answered `405 METHOD_NOT_ALLOWED` with `Allow: GET`; `/health`, `/ready` and the scoped root `/environments/:id` answered `404 ROUTE_NOT_FOUND`; signed in, `/analytics/meta` answered `404` and `/ai/agents` `501`; anonymous, the public `/share-links/:token/resolve` answered `401` where `GET` answers `501`. With an auth service, `HEAD /auth/config` answered `404` (it was forwarded to better-auth instead of answered as the `GET`).
+  
+  - **`@objectstack/hono`.** The catch-all now dispatches a `HEAD` as `GET`, and the `/auth/config` branch answers a `HEAD` as its `GET`. Every dispatcher route answers `HEAD` with its `GET` answer's status and headers, and Hono drops the body. A path that serves no `GET` keeps its `GET` answer for `HEAD` (its `405` and `Allow`, or `401` to an anonymous caller). The standalone server (`HonoServerPlugin` with the dispatcher plugin) already answered `HEAD` this way. Only the verb changes: a domain that forwards the request (the `/mcp` transport, the `/approvals/act` page) is still handed the client's `HEAD` request.
+  - **`@objectstack/runtime`.** The `/approvals/act` domain decides whether a request is a `HEAD` from the forwarded request's own method, not from the dispatcher's verb. So a `HEAD` still reaches the approvals member as a `GET` and is answered with no body.
+- 889bf12: fix(runtime): an anonymous caller of `/api/v1/mcp` is answered `401 UNAUTHENTICATED` whatever `OS_MCP_SERVER_ENABLED` or the `mcp` service says
+  
+  Clause-②: no
+  
+  ADR-0138 D2 takes the anonymous decision once per domain, as the domain's first statement. The `/mcp` domain checked the `OS_MCP_SERVER_ENABLED` switch and the `mcp` service before it, so an anonymous caller was answered `404 RESOURCE_NOT_FOUND` with the switch off and `501 NOT_IMPLEMENTED` with no MCP service installed, and learned whether the deployment runs MCP before it was refused. Measured on both hosts, the standalone server (`HonoServerPlugin` with the dispatcher plugin) and a `createHonoApp` host.
+  
+  - An anonymous request on `/api/v1/mcp` (any verb) is now refused `401 UNAUTHENTICATED` first, in every composition. Only the order of the refusals moves: no request that was refused before is accepted.
+  - A signed-in caller, or a system principal, keeps the switch's `404` and the service's `501`, in that order.
+  - The `401` advertises RFC 9728 resource metadata (`WWW-Authenticate: Bearer … resource_metadata="…"`) only where the resource is served: the switch on, an `mcp` service that can take the request, and an auth service that answers a metadata URL. With the switch off or no service the `401` is the plain API-key one, so it never points a client at a protected resource the deployment does not serve.
+- 7a8733f: fix(runtime): a request to a declarative `apis:` endpoint path gets its `404` or `401` whatever its JSON body, not the transport's `400`
+  
+  Clause-②: no
+  
+  Only the order of refusals moves: the `404` and the `401` now answer ahead of the body's `400`. No request that was refused before is accepted, and no export changes.
+  
+  On the standalone server (`os dev`, `os serve`: `HonoServerPlugin` with the dispatcher plugin), the fallback that serves metadata-declared `apis:` endpoints (`/api/v1/apps/NAMESPACE/...` under the default prefix) read the request body before it matched an endpoint or applied `authRequired`. The transport refuses a body it cannot parse when the body is read, so that refusal answered first:
+  
+  - a `POST /api/v1/apps/ns/x` that no declaration owns, with `{"params": {"days": 30}` (the closing brace missing), got `400 INVALID_REQUEST`, while the same request with a well-formed body got `404 ENDPOINT_NOT_FOUND`, signed in or not;
+  - an anonymous `POST` to an `authRequired: true` endpoint with that body got `400 INVALID_REQUEST`, while a well-formed body got `401 UNAUTHENTICATED`.
+  
+  The fallback now hands the endpoint step the body unread, and the step reads it once the endpoint is matched and its policies (`rateLimit`, `authRequired`) have admitted the caller, just before `inputMapping`. A path no declaration owns answers `404`, and an anonymous caller of an `authRequired: true` endpoint answers `401`, whatever the body. A caller the endpoint admits still gets the transport's `400 INVALID_REQUEST` for an unparseable body, and a readable body reaches the target as before.
+- 51ad8e4: Clause-②: yes (widening)
+  
+  fix(cli,runtime): the 17 → 18 organization-ownership upgrade of a single-posture database that holds no organization leaves no row without one, the boot the ceremony prescribes writes nothing before it is refused, and a ceremony that did not verify is never served (ADR-0131 D3, D10)
+  
+  A 17.x single-posture install whose seed ran before any organization existed holds rows of organization-owned objects with `organization_id` NULL and an empty `sys_organization`. Upgrading it took this path: the ceremony's attribution checkpointed itself done at zero rows; the boot its rewrite step asks for created the Default Organization and let the inline seed stamp some rows before it refused; the second `--apply` did not run attribution again, dropped the columns and recorded discrepancies with `verified_at` NULL; and `os start` then served that database.
+  
+  - **The ceremony creates the Default Organization (`@objectstack/cli`).** Under the `single` posture, on a database that holds no organization and rows no anchor names, `os migrate organization-ownership` plans those rows as the Default Organization's and says so in a plan warning (`defaultOrganizationCreatedByApply: true` in the plan file). `--apply` creates it before its first write, through plugin-auth's boot invariant (the row a single-posture boot creates), and gives it every such row. A run that cannot create it — a boot without the auth family that declares `sys_organization` — blocks at attribution, naming why, instead of attributing nothing and certifying. Nothing is created under a walled posture, or when the database holds organizations.
+  - **The ceremony names the Default Organization as the boot does (`@objectstack/cli`).** Under `single` it is the organization with `slug = 'default'`, else the sole organization whatever its slug — the boot invariant's and the tenancy service's definition (ADR-0093 D3). Before, the plan required `slug = 'default'`, so a database whose only organization had another slug kept its unanchored rows NULL through the ceremony while v18 derives every owner from that organization. Several organizations, none of them `default`, still name none, and their rows are reported. In the plan file (the command's own output, not a published schema) `defaultOrganization.slug` is now that organization's own slug, no longer always `'default'`.
+  - **A checkpointed attribution runs again (`@objectstack/cli`)** whenever the plan derives an owner for rows still NULL: a row the operator made attributable since, or one an earlier run found no Default Organization for. It writes only where `organization_id` is NULL, so no owner already written is derived again. A database left by an earlier release's ceremony in that state is completed by re-running `--apply`.
+  - **The boot guard judges before any plugin writes (`@objectstack/runtime`, `@objectstack/plugin-auth`).** `OrganizationOwnershipBootGuardPlugin` judges in its own `start()`, after the engine's schema sync (the column the rewrite step waits for is still added) and before every plugin that writes rows at start: `AppPlugin` (the inline seed), `AuthPlugin` and the identity-objects plugin (the Default Organization) name it (`com.objectstack.organization-ownership-boot-guard`) in `optionalDependencies`. A refused boot leaves every row as it found it.
+  - **A ceremony that did not verify is refused (`@objectstack/runtime`).** With no table left in the v17 shape, a boot whose `adr-0131-organization-ownership` marker exists and is not verified — the post-check found rows the ceremony has not carried — is refused with `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`, naming the re-run. A database with no marker (a fresh one) boots as before.
+  - **The refusal now arrives as a `cause` (`@objectstack/runtime`).** A failed `start()` is reported by the kernel as its own error ("Plugin … failed to start"), with the plugin's error as its `cause`. A host that composes the guard and inspects the boot error asks `isOrganizationOwnershipBootRefusal` of each `cause` down the chain: asked of the kernel's own error it now answers `false`. `assertOrganizationOwnershipMigrated(engine)` still throws the refusal itself. `os serve` and `os dev` read it from the chain.
+  - **One new export (`@objectstack/plugin-auth`, `minor`).** `ensureDefaultOrganizationExists(ql, options?)` — the Default Organization's boot invariant, find-or-create under `single` — for the ceremony, so the organization it creates is the row a single-posture boot creates, from one producer. A host composing a kernel still never calls it: `AuthPlugin` and the identity-objects plugin keep the invariant on every boot. No other package entry changes.
+  
+  Unchanged: the ceremony's steps, fates and refusals otherwise; a walled posture's unattributable rows (reported, never assigned); the boot of a fresh or verified database; and every plugin's order on a kernel that does not compose the guard. Repairing a database whose organization-scoped seed load already inserted twins of NULL-organization rows is an operator's data repair.
+- c4526a7: fix(runtime): a hook's inline `handler` function is handed the same `ctx.title(field?)` a hook `body` gets, so a source boot (`@objectstack/verify`'s `bootStack(config)`, `os serve` over an `objectstack.config.ts`) answers it as `objectstack dev` does (#24289)
+  
+  Clause-②: no
+  
+  A source boot runs a hook's inline `handler` in-process, and the accessor existed only in the sandbox a `body` runs in. So a hook calling `await ctx.title()` or `await ctx.title('account_id')` (a lookup column) answered on `objectstack dev` and an artifact boot, and under `bootStack(config)` refused every write with `TypeError: ctx.title is not a function`. `bindAppArtifactHandlers` now hands each inline handler function a view of the engine's hook context that answers `title` through the same accessor the sandbox installs: the same two forms, the same served formula title and related-record read on the context's own `ctx.api`, and `null`, never the record's id, when there is no title. Every other read and every write goes to the engine's context unchanged, and that context gains no key. A `handler` that names a function (the deprecated string form) is not covered by this change.
+- 6868514: Clause-②: no
+  
+  Ten user-facing strings the runtime's HTTP doors answer no longer call the system the caller is in
+  "this environment". The permission-set clone door's success notice (`PERMISSION_SET_CLONE_NOTICE`, the
+  `notice` beside the copy) now says the copy is "a new permission set authored in this system", the
+  wording the console's clone hint uses. The other nine drop the noun: `/mcp` and `/mcp/skill` on a
+  deployment that opts out answer `404` "MCP server is not enabled"; a share-link request with no
+  share-link service answers `501` "Sharing is not configured"; and the webhook-redelivery, approval
+  action-page and inbound automation-hook doors answer `501` "… no webhooks service is registered." (or
+  approvals, or trigger-api) when the service is missing, and "… the registered webhooks service does not
+  implement handleRedeliver." (or `handleActionPage`, or `handleInboundHook`) when it lacks its member.
+  Only the human-readable text moves: every HTTP status, error code and response shape is what it was.
+- Updated dependencies [b2e7870]
+- Updated dependencies [6a49efb]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [03ac4ec]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [f3174ef]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [8a88901]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8259ea0]
+- Updated dependencies [9040945]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [2bcd406]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [83dfbc0]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [ec749fb]
+- Updated dependencies [ec749fb]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [41c7405]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [d65826f]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [44a5011]
+- Updated dependencies [1827571]
+- Updated dependencies [f573976]
+- Updated dependencies [e22defb]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/metadata-protocol@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/driver-memory@18.0.0-next.4
+  - @objectstack/driver-sql@18.0.0-next.4
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.4
+  - @objectstack/driver-turso@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/service-cluster@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-i18n@18.0.0-next.4
+  - @objectstack/observability@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Minor Changes
+
+- 34b740f: fix(runtime,cli): an upper-case `FILE:` database URL opens the file its lower-case spelling opens, `file://NAME` opens `NAME` on both hosts, and the URL-to-filename rule is exported as `sqliteFilenameFromUrl`
+  
+  Clause-②: yes (widening)
+  
+  - **`FILE:` is stripped case-insensitively.** The standalone host classified `FILE:./app.db` as SQLite case-insensitively but stripped the prefix case-sensitively, so the prefix stayed in the file name: `OS_DATABASE_URL=FILE:./app.db` created a directory literally named `FILE:.` and put the database inside it, and `File:///tmp/app.db` was refused as an unsupported `File://` scheme. Both now open the file the lower-case spelling opens (`./app.db`, `/tmp/app.db`), as the `sqlite-wasm` path already did. Lower-case `file:` URLs and bare paths are unchanged.
+  - **New export: `sqliteFilenameFromUrl(url, kind)`** from `@objectstack/runtime`, `kind` being `'sqlite'` or `'sqlite-wasm'`. It is the one rule that turns a SQLite database URL (after `normalizeDatabaseUrl`) into a file name: `file:` / `file://` stripped case-insensitively, plus `wasm-sqlite:` for the WASM kind. For `'sqlite'` it throws a plain `Error` on a URL that is not a file path, naming the URL's scheme and never the URL. Nothing is removed.
+  - **`os serve`'s legacy storage path (`OS_MODE=off`, `bootMode: 'off'`, or a host config) turns a SQLite URL into a file by that same rule**, so both hosts open one file per URL. It used to strip only a lower-case `file:`: `OS_DATABASE_URL=file://NAME` opened `//NAME` at the filesystem root, where the standalone host opens `./NAME`, and `FILE:./app.db` made a `FILE:.` directory there too. `file:///abs/app.db` opens `/abs/app.db`; `sqlite:` / `sqlite://` URLs are unchanged.
+  - **What that rule refuses, the legacy path now refuses too, and fatally**, with the standalone host's own sentence (it names the URL's scheme, never the URL): an explicit `OS_DATABASE_DRIVER=sqlite` over a server URL such as `postgres://user:password@host/db`, which used to create directories named after the URL, credentials included, and a `file:` URL that names no file, which used to declare a database with an empty file name. Fix: point `OS_DATABASE_URL` at a file (`file:./app.db`), or select the driver the URL is for. The undocumented `sql://` prefix that path also stripped under an explicit `sqlite` selection is refused the same way; write `file:` instead. A blank `OS_DATABASE_URL` under an explicit `sqlite` selection is read as absent (`:memory:`), as an absent one always was.
+- ae4dfaf: feat(driver-turso,cli): the v18 organization-ownership ceremony runs on a Turso remote database
+  
+  Clause-②: yes (widening)
+  
+  `os migrate organization-ownership`, the plan and `--apply --backup-taken`, now completes against a Turso database reached over the remote transport (`libsql://…`), the transport hosted environments use. Before, the plan stopped at its boot with `Deferred schema DDL is not supported by the Turso REMOTE transport`, and the apply's column drops had no remote path either.
+  
+  - **`@objectstack/driver-turso`**, remote face:
+    - `detectManagedDrift()` answers instead of refusing with `NOT_IMPLEMENTED` / 501. The verdict is the shared differ's, the one the local face runs; the physical schema it diffs is read from the remote catalog (`pragma_table_info`, `sqlite_master`, `pragma_index_list` / `pragma_index_info`, and the ADR-0120 D4 duplicate probe). The declarations it diffs against are recorded by every remote schema door and by the DDL-free `registerObjectMetadata`, so a boot that skipped schema sync is covered too.
+    - `applyMigrationEntries()` applies `drop_index`, `create_index`, `recreate_index`, `replace_unique_index` and `drop_column` instead of refusing. Each entry runs as one libSQL `write` batch, so it lands whole or not at all: a `drop_column` drops the column's indexes with it in the same transaction, and a re-created index that fails to build leaves the old one in place. An entry is reported `applied` only once a read-back shows its target state. Every other column entry (nullability, width, a dropped DEFAULT) needs the SQLite table rebuild, which this transport does not run, so it is reported `skipped` and logged, as the in-place dialects report an op they cannot perform.
+    - The remote face declares `driftReportCaveat`: a sentence saying its drift report is for reading only and naming the reason. The OS_ARTIFACT_URL boot gate reads it (below). The local and embedded-replica faces declare `null`.
+    - The remote driver's `config` now carries its `url`, so the CLI labels a remote database by its URL (credential-free) instead of `better-sqlite3`. The ceremony writes that label into its plan and refuses an apply whose plan names another database; that refusal can now tell two remote databases apart.
+  - **`@objectstack/cli`**: the ceremony's plan and apply boots skip schema sync, instead of arming deferred DDL, when the primary datasource is a Turso remote one. No DDL is attempted, so the plan stays read-only, and every other datasource the boot connects is still deferred. The environment's own boot has already run the additive sync the ceremony reads. Every other `os migrate` command keeps refusing on that transport: their dry runs list held-back schema work, which a boot that holds nothing back cannot list.
+  - **`@objectstack/runtime`**: `createStandaloneStack` takes `skipSchemaSync`, passed to `ObjectQLPlugin` as the option `OS_SKIP_SCHEMA_SYNC=1` names. Unset, the plugin reads the variable as before.
+  
+  On a Turso remote primary, the `OS_ARTIFACT_URL` boot migration gate on `os serve` keeps its earlier answer: cannot judge, warn and boot. It applies no drift and refuses no boot. Only its warning's wording changes, from `Could not check the physical schema` to `Did not check the physical schema against the artifact: …`, followed by the driver's reason. The gate now decides this from a capability the driver declares (`driftReportCaveat`, a string on the remote face and `null` on the local and embedded-replica faces), not from a refusal it catches. Two follow-ups, filed separately and not closed by this change, have to land before that gate may act on a remote report:
+  - #23847: the remote transport's schema sync honours `storage.notNull` on create and add column, so the report stops naming a tightening its own sync produced;
+  - #23848: `os migrate apply` works on a Turso remote database, so the destructive drift the gate would refuse on has a remedy there.
+- 62f959d: fix(runtime)!: `POST /api/v1/packages` with `overwrite` refuses a read-only package with `422 WRITABLE_PACKAGE_REQUIRED`, as disable, publish, revert and delete already do
+  
+  ADR-0070 D2 makes a package the deployment ships read-only: one booted by code, one installed from the marketplace, and one whose manifest `scope` is `system` or `cloud`. `isWritablePackage` is that rule, and the four lifecycle doors that change a package (`PATCH /packages/:id/disable`, `POST /packages/:id/publish`, `POST /packages/:id/revert`, `DELETE /packages/:id`) refuse such a package with `422 WRITABLE_PACKAGE_REQUIRED`. The install door's `overwrite` option only bypassed the `409 … already exists` answer and never asked the rule. So an overwrite over a read-only package answered `201` and replaced its registry row with an authored one, and with a `protocol` service composed it also wrote that package's `sys_packages` row, while the server went on treating the package as read-only. The install door now asks the same rule, for the manifest's id, before either install path writes anything.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What changes is the answer one runtime REST door gives a caller who asks it to overwrite a package the deployment ships; the remedy is to install under an id the caller owns or to customise beside the shipped package, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (a REST door's accept set narrows), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM:** `POST /api/v1/packages` with `overwrite: true` in the wrapped body, or `?overwrite=true`, and a manifest whose `id` names a read-only package, answered `201` and replaced that package's registry row.
+  - **TO:** the same request answers `422` with `error.code: 'WRITABLE_PACKAGE_REQUIRED'` and `error.details.packageId`, and writes nothing: no registry row, no `sys_packages` row. It is the refusal the four lifecycle doors give.
+  - **Unchanged:** an install of a new id, with or without `overwrite`, and an overwrite of a package an organization authored answer `201` as before. An install over an existing id without `overwrite` still answers `409`.
+  - **The fix for an integrator:** a package the deployment ships is managed by the deployment (its code release, or a new marketplace version), not over this API. Install the manifest under an id you own, or customise what the shipped package provides beside it as environment-level state (ADR-0131 D6).
+- cdf3777: The v18 organization-ownership ceremony now completes on a long-lived 17.x database, and `os dev` runs it for you on a local development database (ADR-0131, amendment 2026-10-16).
+  
+  **`os dev` upgrades a v17-shape development database in place.** When the boot refuses a local SQLite development database that is still in the v17 organization-ownership shape, `os dev` first copies the database and its `telemetry` sibling (with `-wal` / `-shm`) into `<data dir>/backups/organization-ownership-<timestamp>/`. It then runs `os migrate organization-ownership --dev` (the plan), applies that plan, and starts the server again. The plan, the apply report and the ceremony's log are kept beside the copy. If a step blocks, `os dev` stops and prints the blocker, where the copy is, and how to resume. `os serve` / `os start`, and any database that is not a local SQLite file, keep the manual ceremony and the boot refusal unchanged.
+  
+  **What the ceremony decides for you is printed as a warning before it writes anything.** The plan carries a `warnings` list. The plan prints it, `--apply` prints it again before its first write, and the apply report keeps it.
+  
+  **The `telemetry` sibling is covered.** A development boot (or an `OS_TELEMETRY_DB` deployment) keeps `sys_audit_log`, `sys_job_run`, `sys_notification` and the other lifecycle objects in a sibling database. The ceremony now plans, attributes and drops columns for each object in the database it lives in, reading anchors across databases. Before, the boot refusal read those tables in the sibling while the ceremony only read the primary, so an upgraded database could still never boot. A copy of such a table that an older boot left in the primary is listed under `staleCopies`, warned about, and left untouched; it no longer blocks the column drops.
+  
+  **The shipped permission sets an install seeded before 2026-08-15 are adopted.** Those installs store the eight shipped sets (`organization_admin`, `member_default`, …) as `managed_by: 'admin'` rows. The authored-conversion step used to refuse them with "rename the authored row". The ceremony now re-owns them as the platform seeds they are and deletes them as mirrors once every grant names its set, so the shipped definitions apply. The warning names each row; a Setup edit to one of them is not carried over, and the pre-upgrade backup keeps it.
+  
+  **`os migrate organization-ownership --dev`** composes the stack as `os serve --dev` does: the development auth secret's fallback (so the security and audit plugins), the development `.env*` files, and the `telemetry` sibling. A development boot's refusal now names the command with `--dev`, and every refusal now names an apply the ceremony accepts: `--out PLAN` first, then `--apply --plan-file PLAN --backup-taken`. A bare `--apply` is refused without a reviewed plan file. Before, running the ceremony from a shell without `NODE_ENV=development` composed neither plugin, and its apply blocked on the shipped permission sets and on `sys_audit_log`.
+  
+  `OrganizationOwnershipBootGuardPlugin` (`@objectstack/runtime`) takes `{ dev }`; `organizationOwnershipRefusalMessage` and `assertOrganizationOwnershipMigrated` take the same option.
+
+### Patch Changes
+
+- 9fcea20: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  fix(runtime): `callData`'s exposure refusal for the object a request addresses carries the data door's code, `OBJECT_API_DISABLED` (404) or `OBJECT_API_METHOD_NOT_ALLOWED` (405), on the dispatcher's `/data` routes, the `/mcp` data tools and declared endpoints (#23528)
+  
+  Clause-②: no
+  
+  **What was wrong.** An object can declare `apiEnabled: false` or an `apiMethods` whitelist. The runtime dispatcher's exposure check for the object a request addresses (`refuseUnexposedDataAction`, which every `callData` asks first) refused with a status and a message but no `code`. So:
+  
+  - the dispatcher's `/data` routes derived a code from the status: `404 RESOURCE_NOT_FOUND` / `405 METHOD_NOT_ALLOWED`;
+  - the `/mcp` data tools rendered the message alone;
+  - a declared endpoint whose target is an object answered the derived code too.
+  
+  `RestServer` and the MCP stdio tools answer the same declaration `OBJECT_API_DISABLED` / `OBJECT_API_METHOD_NOT_ALLOWED`, and so did the dispatcher's own refusal of a nested-relation filter on an unexposed object.
+  
+  **What a caller reads now.** Every one of these doors answers the data door's code with the same status as before:
+  
+  | door | declaration | FROM | TO |
+  |:--|:--|:--|:--|
+  | dispatcher `/data` (and declared endpoints) | `apiEnabled: false` | `404`, `error.code` `RESOURCE_NOT_FOUND` | `404`, `error.code` `OBJECT_API_DISABLED` |
+  | dispatcher `/data` (and declared endpoints) | verb outside `apiMethods` | `405`, `error.code` `METHOD_NOT_ALLOWED` | `405`, `error.code` `OBJECT_API_METHOD_NOT_ALLOWED` |
+  | `/mcp` data tools | either | `isError: true`; the text is the message | `isError: true`; the text is `{ "error": { "code", "message", "status" } }` |
+  
+  The status and the message do not change. The thrown value is now an `Error` carrying `code`, `status`, the addressed object as `object`, and the effective operation set as `allowed` on a 405. A caller that branched on `RESOURCE_NOT_FOUND` / `METHOD_NOT_ALLOWED` for an exposure refusal on these doors should branch on the two `OBJECT_API_*` codes, as it already does for `RestServer`.
+- ee0e115: docs: the default-record-page remedies name the other package's page, not the whole package
+  
+  Clause-②: no
+  
+  A second `isDefault: true` record page for one object is refused with `DEFAULT_RECORD_PAGE_CONFLICT`. The package registry's refusal already told the author to keep one default or "compose the deployment without the other package's page". Three sibling texts still told them to drop the whole package, though a deployment can keep a package and leave out the one page it ships:
+  
+  - `@objectstack/metadata-protocol`: the metadata save door's refusal now reads "a page a package ships stays the default unless the deployment is composed without that package's page." Only the remedy clause changed; `code`, `status`, `object` and `holders` are unchanged.
+  - `@objectstack/spec`: `PageSchema.isDefault`'s TSDoc and the error-code ledger's comment on `DEFAULT_RECORD_PAGE_CONFLICT` say the same.
+  - `@objectstack/runtime`: `AppPlugin`'s private `bundle` field now documents the three readers outside the class that read it structurally, so a rename is not made blind.
+  
+  No behaviour changes; nothing to migrate.
+- 7428da0: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  refactor(plugin-hono-server,runtime): the Hono doors and the HTTP dispatcher read the duplicate-record wire code off the shared error classification instead of spelling it themselves (#23714)
+  
+  **No behaviour change.** A repeated unique value still answers `409 UNIQUE_VIOLATION` at both Hono doors (a `HonoHttpServer` route or raw mount, and `createHonoApp`'s catch arms through `declaredEnvelopeForThrow`) and at the dispatcher's doors (`HttpDispatcher`'s thrown-error envelope), with the same `message`, the same `details` (`developerMessage`, `object`, and `field` when the driver named the column) and the same envelope keys. The answers were compared byte for byte at those doors before and after. A client or an app author has nothing to change.
+  
+  **What changed.** Both translations used to spell the wire code as a string literal. They now read it off the classification the REST server answers with (`structuredCodeAnswer` in `@objectstack/types`), as `@objectstack/mcp` already does. So the code has one source, and neither package stamps a code that the error-code ledger does not list under it. The engine's in-process code is unchanged: `DuplicateRecordError.code` is still `DUPLICATE_RECORD`.
+  
+  Clause-②: no
+- b55be42: **Shipped in 18.0.0-next.2**, whose CHANGELOG missed this entry (#23818); listed here one prerelease late.
+  
+  fix(runtime): a sandboxed body that throws a value no read can flatten (`throw ''`, a null-prototype object, an object whose `message` getter throws) now ends its run at once with the sentence `the script threw a value that could not be read`, instead of waiting for the wall-clock ceiling (#23723)
+  
+  **Latency and answer change, for these values only.** The QuickJS runner's reject handler records a body's rejection as a flattened string, and the run ends only once that string is non-empty. For these values the read threw or gave `''`, so nothing was recorded: the run waited for the sandbox's wall-clock ceiling (30 s by default) and ended as a budget error with no business message, which the doors answer as a crash. The handler now records the fixed sentence above for any value it cannot read, and the run ends on the same path as any other rejection. The sentence names nothing the value carried and no stack.
+  
+  Measured at `POST /api/v1/actions/:object/:action` on a `type: 'script'` action:
+  
+  - `throw { code: 'EMAIL_TAKEN', get message() { throw new Error('boom') } }`
+    - FROM, after the 30 s ceiling: `500 {"success":false,"error":{"code":"INTERNAL_ERROR","message":"Internal server error","httpStatus":500}}`
+    - TO, in about 0.1 s: `400 {"success":false,"error":{"code":"VALIDATION_ERROR","message":"the script threw a value that could not be read","httpStatus":400,"declaredCode":"EMAIL_TAKEN"}}`
+  - `throw ''` and `throw Object.create(null)`
+    - FROM, after the 30 s ceiling: the same `500 INTERNAL_ERROR`
+    - TO, in about 0.1 s: `400 {"success":false,"error":{"code":"VALIDATION_ERROR","message":"the script threw a value that could not be read","httpStatus":400}}`
+  
+  The status and envelope are the ones the door already gives a body that threw; no door changed. A `code` the value carries is kept, as for any other thrown value. Two more values that could not be read move the same way: an `Error` whose `name` and `message` are both empty, and an `Error` whose `message` getter throws. To give the caller words, throw a readable `message` (or an `Error`).
+  
+  Control, unchanged byte for byte: every value the handler could already read (a thrown `Error` or subclass, a plain `{ code, message }` object and the other plain-object shapes, primitives, the engine's relayed duplicate refusal, a nested hook refusal's sentence, the `code` / `fields` / `status` / `userMessage` fields, and a capability denial). A body that never settles still ends at the wall-clock ceiling.
+  
+  In-process: the `SandboxError` a caller catches for such a throw now reads `KIND 'NAME' threw: Error: the script threw a value that could not be read`, with that sentence as `innerMessage`, instead of the wall-clock budget error.
+  
+  Clause-②: no
+- f7a5ebe: fix(runtime,cli): `os start` and `os dev` refuse a SQLite database whose directory cannot be made, at once, instead of hanging
+  
+  Clause-②: no
+  
+  **What was wrong.** The standalone host (`createStandaloneStack`, which `os start`, `os dev`'s standalone boot and every embedder run) prepared the directory of a file-backed SQLite database with Node's recursive `mkdirSync`. Node's recursive mkdir never returns when a level answers `ENOENT` although its parent exists: for `OS_DATABASE_URL=file:/proc/os-x/ctl.db` it looped `mkdir("/proc/os-x")` and `mkdir("/proc")` without end, holding the event loop. `os start` printed `→ Starting server...` and hung with no timeout and no message. The `sqlite-wasm` arm (`wasm-sqlite://…`, or `OS_DATABASE_DRIVER=sqlite-wasm`) did the same. `os dev` hung the same way in its own process when its default database lived under a state directory that cannot be made (for example `OS_HOME=/proc/os-x`).
+  
+  **What an operator sees now.** The boot exits non-zero within its normal start-up time, naming the database file, the directory and the operating system's error:
+  
+  ```text
+  ✗ [StandaloneStack] SQLite database file '/proc/os-x/ctl.db' cannot be created: its directory '/proc/os-x' could not be made: ENOENT: no such file or directory, mkdir '/proc/os-x'
+  ```
+  
+  `os dev` with an unusable state directory prints `✗ The default database '…/data/objectstack.db' cannot be created: its directory '…/data' could not be made: …`, followed by the remedy: point `OS_HOME` at a directory that can be created, or choose the database with `--database`.
+  
+  Nothing else changes. A creatable path is still made, every missing level of it. The read-only boot (`os migrate plan` over an absent database file) still creates no directory. The refusal names the path, never the database URL.
+- 9d4fb3c: fix(runtime): the standalone host's database-URL refusals name the URL's scheme and never print the URL, so a password or token in `OS_DATABASE_URL` no longer reaches the console or the boot log
+  
+  Clause-②: no
+  
+  The standalone host is what `os dev`, `os start` and `os serve` boot over a plain config, and what `os migrate` boots. Its URL refusals interpolated the whole database URL, and the CLI prints that message as it exits. A URL is where postgres / mysql / mongodb credentials ride, so whenever such a URL was refused, the password and any token in its query string were printed. Each refusal now names only the scheme (the letters before `://`), which cannot hold a username, a password, a host, a path or a query.
+  
+  - **An unsupported scheme.** With `OS_DATABASE_URL=redis://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:6399/0?authToken=PLACEHOLDER-TOKEN`:
+    - FROM: `[StandaloneStack] Unsupported database URL scheme: redis://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:6399/0?authToken=PLACEHOLDER-TOKEN. Supported schemes: …`
+    - TO: `[StandaloneStack] Unsupported database URL scheme "redis://". Supported schemes: …`. The list of supported schemes is unchanged. `os migrate … --json` carries the same text in its `error` field.
+  - **A `memory://` or `mingo://` URL (the retired in-memory engine).**
+    - FROM: `The database URL "memory://…"` (or `OS_DATABASE_URL "memory://…"`) followed by the full URL.
+    - TO: `A database URL with the "memory://" scheme` (or `An OS_DATABASE_URL with the "memory://" scheme`). A declared default datasource reads `(driver: memory, URL scheme "memory://")`. The rest of the sentence, which names the SQLite replacements, is unchanged.
+  - **An explicit `sqlite` driver over a URL that is not a file path** (for example `OS_DATABASE_DRIVER=sqlite` beside a `postgres://…` URL).
+    - FROM: `sqlite driver was selected but the URL does not look like a file path: "postgres://PLACEHOLDER-USER:PLACEHOLDER-SECRET@…"`
+    - TO: `sqlite driver was selected but the URL does not look like a file path (its scheme is "postgres://")`. A bare `file:` now reads `(it names no file after "file:")`.
+  
+  What does not change: which URLs resolve, and to which driver; the URL handed to the driver, which keeps its credentials; and where each refusal is raised, with the same error class. Each message keeps the phrase that identifies it: `Unsupported database URL scheme`, `selects the in-memory (mingo) engine`, `does not look like a file path`.
+- c5cf546: fix(runtime): the standalone host refuses an `OS_DATABASE_URL` with an opaque scheme (`jdbc:postgresql://…`, `redis:h`), and a `.wasm.db` ending no longer turns an unrecognised scheme into a SQLite file
+  
+  Clause-②: no
+  
+  This is the runtime's standalone host: `os dev`, `os start` and `os serve` over a plain config or an artifact, every `os migrate` subcommand, and every embedder of `createStandaloneStack`.
+  
+  - **Before, an opaque scheme (two or more characters and a `:` with no `//`).** `OS_DATABASE_URL=jdbc:postgresql://127.0.0.1:5999/db os serve --dev` printed `✓ Server is ready` and opened a SQLite file at a path made of the URL, creating the directories `./jdbc:postgresql:/127.0.0.1:5999/`. An operator who believed they were on Postgres wrote to that local file. This broke the host's own rule that an unknown URL scheme is refused and never falls back to SQLite.
+  - **Before, a `.wasm.db` ending.** It was tested ahead of every scheme check, so `OS_DATABASE_URL=redis://h/x.wasm.db` booted on a WASM SQLite file written under `./redis:/h/`.
+  - **After.** Both shapes get the refusal an unrecognised `<scheme>://` already got, unchanged: `[StandaloneStack] Unsupported database URL scheme "jdbc:". Supported schemes: …`. The boot stops before any plugin starts and creates nothing on disk. The message names only the scheme, never the URL, so credentials in the URL are not printed. A `*.wasm.db` name still selects the WASM engine for a `file:` URL or a path with no scheme. The CLI's legacy `os serve` path already refuses these values, so the two hosts now give the same answer.
+  - **A one-letter drive is a path, not a scheme** (`C:\data\app.db`, `C:/data/app.db`). A file name whose first segment contains a colon now reads as a scheme, as it does on the CLI path: `backup:2026.db` was a SQLite file and is now refused. Write `./backup:2026.db` or `file:backup:2026.db` for that file.
+  
+  `postgres://`, `pg://`, `mysql://`, `mongodb://`, `libsql://`, `wasm-sqlite://`, `file:`, `sqlite:`, `:memory:` and paths with no scheme resolve as before. An explicit `OS_DATABASE_DRIVER` still wins over the URL, which is then not classified.
+- 2e15620: fix(cli,runtime): a state, output or cache directory that can never be made is refused at once, naming the path and the operating system's code, instead of hanging
+  
+  Clause-②: no
+  
+  **What was wrong.** These commands and runtime paths created their directories with Node's recursive `mkdir`. Node's recursive mkdir never returns when a level answers `ENOENT` although its parent exists — what `/proc` and `/sys` answer for a name they do not have. It looped `mkdir("/proc/x")` and `mkdir("/proc")` without end, holding the event loop, so the command printed nothing more and no timeout could fire:
+  
+  - `os start` with `--home` / `OS_HOME` on such a path hung after its header.
+  - `os serve` hung the same way on the empty-boot artifact stub under `OS_HOME`, and on the cache of an `http(s):` `OS_ARTIFACT_URL` under `OS_HOME`.
+  - `os create --dir`, `os init <name>`, `os compile --output`, `os generate` (`--dir`, and `--output` for types, client and migration), `os i18n extract --out` and `os plugin build --out` hung on an output path there.
+  - `os login` and `os cloud login` never finished writing credentials under a `HOME` there, and the package enable / disable state the packages routes write under `OS_HOME` held the event loop of the host serving them.
+  
+  **What an operator sees now.** The command exits non-zero at once with the operating system's own error, which names the level that cannot be made:
+  
+  ```text
+  ✗ Cannot create home directory at /proc/os-x: ENOENT: no such file or directory, mkdir '/proc/os-x'
+  ```
+  
+  Not covered yet: the runtime state file `os serve` writes into `OS_HOME` once it is listening.
+  
+  Nothing else changes. Every directory these paths made before is still made, every missing level of it; every path that was refused before is still refused, with the operating system's code. The one difference is the path that was never answered at all.
+- 0cb45e9: fix(runtime): an explicit `sqlite` or `sqlite-wasm` driver selection refuses a database URL that is not a file path, instead of opening a SQLite file at a path made of the URL
+  
+  Clause-②: no
+  
+  An explicit selection (`OS_DATABASE_DRIVER`, `--database-driver`, or the `databaseDriver` option) skips the URL classification, so the only check its URL meets is the SQLite file-name rule, `sqliteFilenameFromUrl`. Both hosts call that rule: the runtime's standalone host (`os dev`, `os start` and `os serve` over a plain config or an artifact, every `os migrate` subcommand, every embedder of `createStandaloneStack`) and the CLI's legacy `os serve` path, which re-raises its refusal as the fatal `UnsupportedDriverError`.
+  
+  - **Before, an opaque scheme (two or more characters and a `:` with no `//`).** `OS_DATABASE_DRIVER=sqlite OS_DATABASE_URL=jdbc:postgresql://127.0.0.1:5999/db os serve --dev` printed `✓ Server is ready` and created the directories `./jdbc:postgresql:/127.0.0.1:5999/`. `redis:h` opened a file named `redis:h`. This happened under both kinds.
+  - **Before, a server URL under `sqlite-wasm`.** The WASM kind refused nothing: `OS_DATABASE_DRIVER=sqlite-wasm` beside `OS_DATABASE_URL=postgres://USER:PASSWORD@127.0.0.1:5999/db` booted ready and created `./postgres:/USER:PASSWORD@127.0.0.1:5999/`, which put the credentials in a directory name. `redis://h/x.db` opened a file too.
+  - **After.** Under either kind, all of these get the refusal the `sqlite` kind already gave a `postgres://` URL. The kind is named in the sentence: `[StandaloneStack] sqlite-wasm driver was selected but the URL does not look like a file path (its scheme is "postgres://"). Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.` The message names the scheme only, never the URL, so credentials in the URL are not printed. The boot stops before it creates anything on disk.
+  - **One file name changes answer.** Under an explicit selection a first path segment that holds a colon now reads as a scheme, as it already does when the URL selects the driver: `backup:2026.db` was a SQLite file and is now refused as the scheme `backup:`. Write `./backup:2026.db` or `file:backup:2026.db` for that file. A one-letter drive is a path, not a scheme (`C:\data\app.db`, `C:/data/app.db`).
+  - **A `sqlite:` alias on a rung that does not normalize it.** `sqlite:` and `sqlite://` are aliases of `file:` in `OS_DATABASE_URL`, `--database` and the `databaseUrl` option. A declared default datasource's `url` and `TURSO_DATABASE_URL` reach the rule as written. There, under an explicit selection, `sqlite:./x.db` is now refused as the scheme `sqlite:`, where it used to open a file named `sqlite:./x.db`. `sqlite:///…` was already refused there under `sqlite` and is now refused under `sqlite-wasm` as well.
+  
+  `file:./x.db`, `./x.db`, `:memory:`, `wasm-sqlite:///path` (under `sqlite-wasm`), `sqlite:./x.db` in `OS_DATABASE_URL`, and paths with no scheme resolve to the same file as before. An empty name under `sqlite-wasm` is still `:memory:`.
+- 605aa01: fix(runtime): the SQLite "does not look like a file path" refusal names what the operator can change, instead of telling an operator who set `OS_DATABASE_DRIVER` to set it explicitly
+  
+  Clause-②: no
+  
+  `sqliteFilenameFromUrl` raises this refusal, and both hosts print it: the runtime's standalone host with its `[StandaloneStack]` tag, and the CLI's legacy `os serve` path, untagged, as the fatal `UnsupportedDriverError`. The first clause is unchanged and only the advice after it changes. The same URLs are refused, with the same error class and the same exit, and the message still names the URL's scheme and never the URL. Nothing that resolved before resolves differently.
+  
+  - **A URL with a scheme.** This is how an explicit `sqlite` or `sqlite-wasm` selection (`OS_DATABASE_DRIVER`, `--database-driver`, or the `databaseDriver` option) meets a server URL, an opaque scheme such as `jdbc:`, or a `<scheme>://` nothing recognises.
+    - FROM: `… (its scheme is "jdbc:"). Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.` The operator who reads this has already set the driver explicitly: that selection is what led here.
+    - TO: `… (its scheme is "jdbc:"). Use file:/path/to/db.sqlite to keep the sqlite driver, or use a driver that matches the URL: unset the driver selection (OS_DATABASE_DRIVER, --database-driver or the databaseDriver option) so the URL selects it, or set the selection to the URL's driver.` With the selection unset, a scheme no driver claims, such as `jdbc:`, gets the unsupported-scheme refusal, which lists the supported schemes.
+  - **A `file:` that names no file** (`OS_DATABASE_URL=file:`, whether the URL or an explicit `sqlite` selection chose the driver).
+    - FROM: `… (it names no file after "file:"). Use file:/path/to/db.sqlite, or set OS_DATABASE_DRIVER explicitly.`
+    - TO: `… (it names no file after "file:"). Name the file after "file:", as in file:/path/to/db.sqlite.` A `file:` URL is a SQLite URL whichever way the driver was chosen, so changing the driver never fixed it.
+- 9e797a8: fix(runtime): the standalone server hands every `/api/v1/keys` verb to the `keys` domain, so an anonymous caller is answered `401 UNAUTHENTICATED` whatever the verb
+  
+  Clause-②: no
+  
+  The v18 text for this door reads "`/keys`: `401 UNAUTHENTICATED` for every verb". The `keys` domain takes that decision first, but the standalone server (the one `os dev` and `os serve` run) mounted `/api/v1/keys` for `POST` only. Any other verb never reached the domain: the HTTP adapter answered it itself, with a `405` that named `POST` as the allowed method.
+  
+  What a `GET`, `PUT`, `PATCH` or `DELETE` call to `/api/v1/keys` is answered on the standalone server:
+  
+  - **Anonymous caller.** Before: `405 METHOD_NOT_ALLOWED` with `Allow: POST`, from the adapter. Now: `401 UNAUTHENTICATED` in the dispatcher's standard envelope, `{ success: false, error: { code: 'UNAUTHENTICATED', message, httpStatus: 401 } }`.
+  - **Signed-in caller.** Before: `405 METHOD_NOT_ALLOWED` with `Allow: POST`, from the adapter. Now: still `405 METHOD_NOT_ALLOWED`, answered by the `keys` domain in the same standard envelope (`error.httpStatus: 405`, no `error.details`), and without an `Allow` header.
+  
+  `POST /api/v1/keys` is unchanged, and so is every answer on a host that reaches the dispatcher through `@objectstack/hono`'s catch-all, which already answered this way. A `HEAD` request follows `GET`: `401` anonymous, `405` signed in. A sub-path such as `/api/v1/keys/<anything>` is still not mounted on the standalone server and is answered `404`.
+- 66d2757: feat(spec)!: every installed-package row declares where it came from, a closed `source: 'code' | 'marketplace' | 'authored'`, and the `GET /packages` rows declare the `writable` verdict they already served (#23972)
+  
+  Clause-②: yes (narrowing — the served row gains two declared keys, and the record schema, the served-row union and the registry's installPackage signature each refuse what they accepted before)
+  
+  **BREAKING** — three published accept sets narrow. `InstalledPackageSchema` refuses a row without `source`, or with a value outside `code` / `marketplace` / `authored`. The served-row union `InstalledPackageAtEitherStageSchema` refuses a row without a boolean `writable`. `SchemaRegistry.installPackage` and `EngineSchemaRegistryView.installPackage` take `source` as their second argument and refuse a call without it. The migration is below. None of it is mechanically convertible, because only the door that registers a package knows where it came from.
+  
+  **What is new on the wire.** `GET /api/v1/packages` and `GET /api/v1/packages/:id` serve two declared keys on every row:
+  
+  - `source` names the package's origin. `code` means the deployment's own code registered it (a `defineStack()` host, a plugin's bundled manifest, a platform package). `marketplace` means the marketplace install-local plugin installed it, and that holds after a restart too, when the plugin rehydrates it from its ledger. `authored` means it is a database-authored package (a Studio base, a duplicate, an HTTP install), including after the restart that rehydrates it from `sys_packages`. The door that registers the package stamps the value. No reader derives it.
+  - `writable` is the server's own writability verdict (ADR-0070 D2), served on these rows since #14375 and now declared. It is computed per read and never stored, so it is declared on the served row (`InstalledPackageAtEitherStageSchema`) and not on the registry record.
+  
+  FROM → TO for a reader of these rows:
+  
+  | you did | do instead |
+  | --- | --- |
+  | treated `writable: true` as authored, and looked up each non-writable row in the marketplace's installed list (the control plane's, else install-local's) to tell marketplace from code | read `row.source` |
+  | read the undeclared `writable` | read the declared `writable` (unchanged value) |
+  
+  The two keys are separate statements: `source` says where the package came from, and `writable` says what this server lets an org do to it.
+  
+  **`InstalledPackageSchema` requires `source`.** It is `InstalledPackageSourceSchema`, exported from `@objectstack/spec/kernel`. A row without it, or with a value outside the closed set, is refused at the `source` key.
+  
+  **API change for code that registers packages (`@objectstack/objectql`).** The registry records the origin and never infers it:
+  
+  | you wrote | write instead |
+  | --- | --- |
+  | `registry.installPackage(manifest)` | `registry.installPackage(manifest, 'code')` (or `'marketplace'` / `'authored'`, whichever is where the package came from) |
+  | `registry.installPackage(manifest, settings, scope)` | `registry.installPackage(manifest, source, settings, scope)` |
+  | `ctx.getService('manifest').register(artifact)` for a marketplace install | `ctx.getService('manifest').register(artifact, { source: 'marketplace' })` |
+  
+  `SchemaRegistry.installPackage` throws a `TypeError` naming the closed set when `source` is missing or unknown, before anything is recorded. `ObjectQL.registerApp(body, scope?, source?)` and the `manifest` service record `'code'` when no source is given. They accept `'code'` or `'marketplace'` and refuse `'authored'`. The `IObjectQLEngine` registry contract (`@objectstack/spec/contracts`) declares the same `installPackage(manifest, source, settings?)`.
+  
+  **The one-line fix:** pass the package's origin as `installPackage`'s second argument.
+  
+  Readers: objectui's Setup → Packages Source column and its `?source=` filter (it switches from the two-read join to `source` in its own follow-up), and the client SDK's `packages.list()` / `packages.get()` row types.
+  
+  <!-- adr-0087: registered installed-package-row-source-required, registry-install-package-source-argument -->
+- 6dede7a: fix(runtime, plugin-sharing): on the standalone server, an anonymous caller of any `/api/v1/notifications` verb or any `/api/v1/share-links` path off the two token faces is answered `401 UNAUTHENTICATED` in the dispatcher's standard envelope
+  
+  Clause-②: no
+  
+  The v18 text for these two doors reads "`/notifications`: `401 UNAUTHENTICATED` on every face" and "`/share-links`: `401 UNAUTHENTICATED` on the create, list and revoke faces and on every path the domain does not serve", in "the dispatcher's standard envelope … with the shared message every other dispatcher domain answers with". A host that reaches the dispatcher through `@objectstack/hono`'s catch-all already answered that way. The standalone server (the one `os dev` and `os serve` run) did not:
+  
+  - `/api/v1/notifications`, `/api/v1/notifications/read` and `/api/v1/notifications/read/all` were each mounted for the one verb they serve, so any other verb never reached the `notifications` domain and the HTTP adapter answered `405`, naming the allowed methods, to an anonymous caller as well.
+  - `/api/v1/share-links` is served there by `@objectstack/plugin-sharing`'s routes, not by the dispatcher. They registered five routes and nothing else, so another verb or path got the adapter's `405` or `404`, and the create, list and revoke faces answered `401` with a sentence of their own ("Sign in to list share links") and no `error.httpStatus`.
+  
+  What the standalone server answers now:
+  
+  - **Anonymous caller.** `401 UNAUTHENTICATED`, `{ success: false, error: { code: 'UNAUTHENTICATED', message: 'Authentication is required to access this endpoint.', httpStatus: 401 } }`, on every verb of the three notifications paths, and on every verb and path under `/api/v1/share-links` except `GET /share-links/:token/resolve` and `GET /share-links/:token/messages`, which the capability token still admits. A body the server cannot parse does not outrank this answer anywhere under `/api/v1/share-links`, nor on the notifications verbs no face serves.
+  - **Signed-in caller of a verb or path that is not served.** Still refused. On the notifications paths the domain answers it: `404 ROUTE_NOT_FOUND` from the dispatcher (or the `501` capability answer on a deployment with no inbox), where the adapter used to answer `405`. Under `/api/v1/share-links` the share-link routes answer it themselves: `404 ENDPOINT_NOT_FOUND`, naming the request, where the adapter used to answer `405` or `404`. No `Allow` header is sent on either.
+  
+  Every request that was served is served as before. A notifications sub-path no face names, such as `/api/v1/notifications/<anything>`, is still not mounted on the standalone server and is answered `404`.
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [b9dbc3d]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [1eac7ad]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [14aff67]
+- Updated dependencies [abb6df0]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [cf07168]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [0cfd0c4]
+- Updated dependencies [ae4dfaf]
+- Updated dependencies [099cc9d]
+- Updated dependencies [6422da5]
+- Updated dependencies [2034975]
+- Updated dependencies [61e5ee9]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [6e18016]
+- Updated dependencies [d050a8f]
+- Updated dependencies [b25d98a]
+- Updated dependencies [5fb8d15]
+- Updated dependencies [c4111c6]
+- Updated dependencies [5c2ac83]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [aefab7c]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [c1c0a90]
+- Updated dependencies [ab3ba2c]
+- Updated dependencies [d6bd98a]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/plugin-security@18.0.0-next.3
+  - @objectstack/rest@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/metadata-protocol@18.0.0-next.3
+  - @objectstack/metadata@18.0.0-next.3
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/driver-sql@18.0.0-next.3
+  - @objectstack/plugin-auth@18.0.0-next.3
+  - @objectstack/driver-turso@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/driver-memory@18.0.0-next.3
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/observability@18.0.0-next.3
+  - @objectstack/service-cluster@18.0.0-next.3
+  - @objectstack/service-datasource@18.0.0-next.3
+  - @objectstack/service-i18n@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- cb9841a: fix(hono,runtime)!: `createHonoApp` hands the dispatcher a repeated query name as an array, so the dispatcher's arity rules refuse it instead of answering its last value; `/packages` refuses a repeated `keepData` or `overwrite`
+  
+  `@objectstack/hono`'s `createHonoApp` catch-all built the dispatcher's query by copying `URLSearchParams` into an object, so a name sent twice reached `HttpDispatcher.dispatch()` as its LAST value and the first was dropped without a word. Every arity rule the dispatcher declares was therefore unreachable on a `createHonoApp` host: `GET /meta/app/crm?package=a&package=b` was answered `200` for package `b`, where the same request through `@objectstack/plugin-hono-server` is refused. The catch-all now reads the query the way `@objectstack/plugin-hono-server` does: a name sent once is the string it always was, a repeated name is the array of its values, and the object is built without dynamic property writes, so a `__proto__` name is an ordinary own key.
+  
+  Two `/packages` write flags read a repeat as absent, and are now refused before the registry or the protocol is touched, as `enabled` and `version` already are. `DELETE /packages/:id?keepData=true&keepData=true` dropped the package's object tables, because the protocol keeps storage only for `keepData === true`, and was answered `200`. `POST /packages?overwrite=true&overwrite=true` answered `409` "already exists" for a package one `overwrite=true` replaces. Both doors were reached that way through `@objectstack/plugin-hono-server`, whose adapter already keeps repeats, and would have been through `createHonoApp` from this change.
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling or stored shape is added, removed, renamed or re-shaped, and no exported declaration is added, removed or narrowed (the adapter's query reader and the domain's flag guard are both module-private). No stored row or package source changes, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a query accept set: on a `createHonoApp` host every dispatcher read point that refuses a repeated single-valued name now sees the repeat and refuses it, and on every host `DELETE /packages/:id` and `POST /packages` refuse a repeated `keepData` and `overwrite`. One malformed input widens: on a `createHonoApp` host, a query pair with an empty name is no longer refused, matching `@objectstack/plugin-hono-server`. The remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you: send each single-valued query name once. On a `createHonoApp` host, a request that repeats one is now refused `400` in the dispatcher's envelope, `{ success: false, error: { code, message } }`, with the code and sentence the same request gets through `@objectstack/plugin-hono-server` (`VALIDATION_ERROR`, "The "NAME" query parameter was supplied N times…"; `INVALID_FILTER` on the `/data` filter slot), where it used to be answered with the last value. On every host, `DELETE /packages/:id` refuses a repeated `keepData` and `POST /packages` a repeated `overwrite`, with that same `VALIDATION_ERROR` and sentence. A name sent once is answered as before; genuinely multi-valued names such as `select` and `expand` now reach the dispatcher as the array they are. One malformed input moves the other way, to match `@objectstack/plugin-hono-server`: a query pair with an EMPTY name (`?=x`) is no longer handed to the dispatcher, so a door with a closed parameter set reads it as absent where it used to refuse it as an unknown parameter `""`. The `@objectstack/client` SDK sends each single-valued name once, and the Console's package delete sends `keepData` once.
+- 584e737: A hook can now tell a child delete that a parent's cascade issues from a hand delete: `HookContext.referentialCascadeDelete`, the delete twin of `referentialFieldClear`
+  
+  Clause-②: yes
+  
+  When a record is deleted and a relation whose `deleteBehavior` resolves to `cascade` (a `master_detail` unless it declares `restrict`, or a `lookup` / `tree` that declares `cascade`) removes its children, the engine deletes each child as the calling user. The child's `beforeDelete` and `afterDelete` hooks therefore saw the same `ctx.user`, `ctx.session` and `ctx.input` as a user deleting that one child by hand. A guard that freezes settled records, such as a quote's lines once the quote is accepted, could refuse both deletes or neither, and refusing both made the parent, and every record whose cascade reaches it, undeletable.
+  
+  - **What the key means.** `ctx.referentialCascadeDelete === true` exactly on a delete the engine's cascade issued: the child delete, in both phases, at any depth (a grandchild that the child's own cascade removes is marked too). It is absent, never `false`, on every other delete: the delete the caller asked for, a user's hand delete of the same child, and any write a hook issues through `ctx.api` during a cascade, deletes included. The `set_null` cleanup update keeps `referentialFieldClear` and never carries this key, and a cascade child delete never carries `referentialFieldClear`.
+  - **The guard idiom.** Refuse a hand delete of a frozen line and yield to the cascade:
+  
+    ```ts
+    if (ctx.referentialCascadeDelete !== true && ctx.previous?.locked === true) {
+      throw new Error('This line belongs to a settled quote and cannot be deleted.');
+    }
+    ```
+  
+  - **Only the declared key is the contract.** There is no operation-private (`__`-prefixed) spelling of this fact on the execution context. The engine recognises the delete its cascade issued through an engine-private record keyed on that child's object and id, so nothing on `ctx.api`, `ctx.transaction` or any `__` key can stand in for it. Read `ctx.referentialCascadeDelete`.
+  - **In a sandboxed hook body.** The key is carried across the QuickJS boundary by contract, so a lowered `*.hook.ts` body reads `ctx.referentialCascadeDelete` exactly as an in-process handler does.
+  - **spec (minor):** `HookContextSchema` declares `referentialCascadeDelete` (boolean, optional). One optional engine-produced key on the non-strict runtime hook context; nothing previously valid changes meaning.
+  - **objectql (minor):** `delete()`'s hook-context assembly sets the key on the delete the cascade walk issues. The walk still hands the child the caller's context unchanged, so no other hook-context member moves.
+  - **runtime (minor):** `buildSandboxContext` and `installCtx` carry the key into the VM.
+- 3d231ba: fix(runtime)!: the runtime dispatcher's `DELETE /data/:object/:id` honours `?expectedVersion` and `If-Match` as its `RestServer` twin does, so a delete carrying a stale version is refused instead of applied
+  
+  `RestServer`'s `DELETE /data/:object/:id` reads an optimistic-concurrency token from `?expectedVersion`, else from the `If-Match` header, refuses the query name supplied more than once, and hands the token to the protocol's `deleteData`, which refuses a delete whose record has moved past it. The runtime dispatcher's `/data` domain read neither, and its shared `callData` delete arm forwarded only the object and the id. So on a host whose `/data` routes the dispatcher serves (a `createHonoApp` host), a delete carrying a stale token deleted the record and answered `200`, the same answer a delete carrying no token gets. The domain now reads the token the way `RestServer` does and `callData` forwards it to `deleteData`.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of one runtime dispatcher route: a delete whose version token is stale, repeated, or sent to a host that cannot judge it is now refused where it was applied, and the remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you, wherever the runtime dispatcher serves `DELETE /data/:object/:id`. Where `@objectstack/rest` is mounted it serves this route itself and already answered each of these, so the standalone server's answers do not move.
+  
+  - FROM a delete with a stale `?expectedVersion` or `If-Match` that deleted the record and answered `200`, TO a refusal with the record kept: the protocol's `409 CONCURRENT_UPDATE`, thrown out of `dispatch()` for the host's exit to render, as every other refusal `deleteData` throws is. A `@objectstack/hono` `createHonoApp` host still renders that refusal as `500` (the record is kept): its catch-all reads only an error's `statusCode`, and rendering the declared `409` is a separate fix.
+  - FROM a repeated `?expectedVersion` that was ignored (the record deleted, `200`), TO `400 VALIDATION_ERROR` in the dispatcher's envelope with the sentence `RestServer` answers ("The "expectedVersion" query parameter was supplied N times…"), before the protocol is asked. A one-element array is read as the one token it encodes. On a host whose adapter hands the dispatcher only the last value of a repeated query name (the `@objectstack/hono` `createHonoApp` catch-all, until that adapter keeps repeats), the last `?expectedVersion` is judged as the token.
+  - FROM a delete carrying a token on a host whose protocol has no `deleteData` (the ObjectQL fallback), which deleted unguarded, TO `501 NOT_IMPLEMENTED`, before anything is read or deleted. A delete with no token reaches the fallback as before.
+  
+  To delete over a version you read, send that version (the record's `updated_at`) once, as `?expectedVersion` or `If-Match`; `?expectedVersion` is judged when both are sent. A delete with no token is unchanged. The `@objectstack/client` SDK's `data.delete(object, id, { ifMatch })` sends `If-Match`, so an SDK caller that passes `ifMatch` now gets, through the dispatcher, the guard it asked for.
+- 0f05907: feat(spec,core,plugin-auth)!: an API key answers as its owner's session does when the ADR-0069 policy holds the account, the forced reset gets its own code and an explicit revocation switch
+  
+  Clause-②: yes (narrowing) — the published contract widens (the posture codes become a closed vocabulary with a declared scope, a new `PASSWORD_RESET_REQUIRED` code, a per-user posture member on the auth service contract, new `@objectstack/core` exports) and the API-key door narrows (a key whose owner holds an account-scope posture is refused where it was served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key admission seam plus one new error code, not a metadata change. No authorable spec key, stored shape or metadata surface is removed or renamed, so `objectstack migrate meta` has nothing to rewrite. `ExecutionContext.authGate.code` narrows from a bare string to the closed posture vocabulary, but that field is server-constructed only and never authored; its one producer already wrote only members of it. What narrows is which API keys are served (a key whose owner owes MFA enrolment is refused with 403 MFA_REQUIRED), and the administrator-forced password change answers its own code. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key door, and a changed code for the administrator-forced password change), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287: posture codes are a closed vocabulary, and each code declares what it holds.
+  
+  - **The vocabulary and its scope (`@objectstack/spec/kernel`).** `AuthGateCodeSchema` is the closed set of codes an `authGate` may carry: `PASSWORD_EXPIRED`, `PASSWORD_RESET_REQUIRED` and `MFA_REQUIRED`. `AUTH_GATE_SCOPES` declares each code's scope once: `MFA_REQUIRED` holds the **account** (every credential of the user); `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` hold the **credential** (password sign-in alone). `ExecutionContext.authGate.code` is typed against the vocabulary, and `PASSWORD_RESET_REQUIRED` is registered for `@objectstack/plugin-auth` in the error-code ledger.
+  - **One per-user posture computation (`@objectstack/plugin-auth`, `IAuthService.resolveUserAuthGates`).** It answers every posture a user holds, most urgent first, keyed by user id and the organization the credential operates in. The session gate shows its first entry, as before.
+  - **One judgment at the shared key-admission seam (`@objectstack/core`).** `resolveApiKeyAdmission` asks that computation for the key's owner and holds the key on an account-scope posture (a new `held` outcome). `resolveAuthzContext` resolves a held key as a held principal: the owner, `credential: 'api_key'`, and the posture on `authGate`. Both new inputs are optional (`userAuthGates`), and `userAuthGateSourceOf(authService)` binds one from an auth service.
+  - **REST and the runtime dispatcher** judge a key-admitted request by the key's answer, and re-read the session cookie for the gate only when a session admitted the caller. The declared-endpoint fallback does the same.
+  - **The raw-host families** take the same answer through the shared seam: datasource admin, share links, settings, and the storage family's door. The webhook-redeliver door admits no API key at all, and still does not.
+  - **The forced reset (`POST /api/v1/auth/admin/set-user-password`, the `set_user_password` action).** `must_change_password` now answers `PASSWORD_RESET_REQUIRED` instead of reusing `PASSWORD_EXPIRED`. The act carries `revokeSessionsAndKeys`, **on by default**: it ends every live session of the user and revokes every API key they own, and the response reports what landed (`revoked: { sessions, apiKeys, failed, complete }`).
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED`, with the message the session gets, on every face that admits keys. It works again the moment the owner enrols, with nothing reissued: the refusal is not a revocation.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working. A session sent beside an API key no longer answers for the key.
+  - **A forced password change answers `PASSWORD_RESET_REQUIRED`.** A client that recognises `PASSWORD_EXPIRED` to show its change-password flow should recognise `PASSWORD_RESET_REQUIRED` the same way.
+  - **An administrator's password reset now signs the user out everywhere and revokes their API keys by default.** For a routine reset, pass `revokeSessionsAndKeys: false` (or clear the switch in the Set Password dialog). Revoked keys stay revoked after the password change; an administrator can restore a key a routine reset revoked with the Restore API Key action, or the owner mints a replacement.
+  - **Hosts calling `resolveAuthzContext` or `resolveApiKeyAdmission` directly** pass `userAuthGates: userAuthGateSourceOf(authService)` to have the key's owner asked. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `held` outcome.
+- b1e9280: feat(spec): the seed loader reports the rows each dataset landed on, and the seed-settlement contract hands them to readers
+  
+  - **`SeedLoadResult.landedIds`** (`@objectstack/spec/data`, default `[]`): the ids of the stored rows a dataset's records landed on — a row a record inserted, a row it updated, and a row its key matched on a replay and left as it was. Each id appears once, in record order. A dry run reports none. A replay therefore reports the rows an earlier load wrote, so the answer holds across boots. The loader's own key and reference resolution is behind it: a dataset keyed on a reference reports the matched row, whose stored key is the resolved id, never the dataset's value.
+  - **`ISeedSettlementService.seededRecordIds?(object, organizationId?)`** (`@objectstack/spec/contracts`, optional): "which rows of this object did this process's seed write?". Without `organizationId` it answers for the boot-time seed sources (the inline seed `app:seeded` announces); a source publishes its rows before it settles, so a reader inside `app:seeded` already sees them. With `organizationId` it answers for that organization's per-organization replay; the host keeps the most recent replay only, so a process that creates many organizations does not hold every replay's rows. A host that does not implement it publishes no reading, and a reader treats every unowned row as one it cannot place.
+  - **`@objectstack/metadata-protocol`**: `SeedLoaderService.load()` fills `landedIds` on every per-dataset result.
+  - **`@objectstack/runtime`**: the `seed-settlement` service implements `seededRecordIds`. `AppPlugin` publishes the inline seed's rows before the source settles (the loader path and the basic-insert fallback alike), and its per-organization `seed-replayer` records each replay's rows under that organization. `SeedSourceHandle` gains `publishLanded(report)`.
+  
+  Nothing is removed or renamed. The reader this exists for is the seed-ownership claim, which now hands over only the seed's rows (see the `@objectstack/plugin-security` and `@objectstack/organizations` entries).
+- 1d79556: feat(spec,core,runtime,plugin-auth)!: API keys get a lifecycle: a 90-day default expiry, a one-year ceiling, a 90-day inactivity expiry, a one-year grace for keys created with none, and distinct refusal codes
+  
+  Clause-②: yes (narrowing) — the published contract widens (four `auth` settings keys, the `IAuthService.resolveApiKeyLifecyclePolicy` member and its `ApiKeyLifecyclePolicy` type, four registered error codes, new `@objectstack/core` exports) and the API-key doors narrow (a signing past the ceiling is refused; an inactive key, a key past its grace, and a revoked or expired key sent beside a session are refused where they were served).
+  
+  <!-- adr-0087: not-required (no-migration-prescription) An authentication-policy change at the API-key signing door and the shared key-admission seam, not a metadata change. No authorable spec key, stored shape or metadata surface is removed, renamed or re-shaped, so `objectstack migrate meta` has nothing to rewrite: the four new `auth` settings keys are additive and defaulted, `sys_api_key` gains no column (its existing `expires_at` and `last_used_at` are written by the platform), and `ResolveAuthzInput.apiKeyLifecycle` / the sixth parameter of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal` are server-side wiring no author writes. What narrows is which API keys are served and which signings are accepted; the remedy is a new key or a nearer date, never a rewrite of a package source or a stored row. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at the API-key doors), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling A on #23367: the key store stays `sys_api_key`, and the policy is auth configuration.
+  
+  - **The policy (`@objectstack/plugin-auth`, `IAuthService.resolveApiKeyLifecyclePolicy`).** Three `auth` settings keys, bound by `bindAuthSettings`: `api_key_default_expiry_days` (90), `api_key_max_expiry_days` (365) and `api_key_inactivity_days` (90; `0` turns it off). A fourth, `api_key_policy_started_at`, is recorded once — on the first boot that runs the policy, at `kernel:bootstrapped` — and anchors the two clocks below; it survives restarts and is never overwritten by the platform.
+  - **The signing door (`POST /api/v1/keys`).** A signing that names no `expires_at` gets the default life and the response echoes it. An `expires_at` further away than the ceiling is refused `400 API_KEY_EXPIRY_TOO_LONG`, naming the latest date allowed; exactly the ceiling is accepted. A kernel with no auth service signs as before.
+  - **The key-admission seam (`resolveApiKeyAdmission`, `@objectstack/core`).** A real key its own state refuses is a new outcome, `lifecycle`, with one of three distinct codes: `API_KEY_REVOKED`, `API_KEY_EXPIRED` (past `expires_at`, or past the grace of a key created with none) or `API_KEY_INACTIVE` (no recorded use for longer than the window). `resolveAuthzContext` raises it as the branded `ApiKeyLifecycleRefusalError` (`403`, a located message naming the key's prefix, the date and the remedy). An unknown key is still `none`.
+  - **`last_used_at` is written.** Its description promised "Automatically updated on each API call", and nothing wrote it. The seam now stamps it on an admitted (or held) call, at most once an hour per key, and the inactivity judgment reads the value as it was BEFORE that call's stamp, so a key's own use cannot revive it. A stamp that fails never fails the request; it is said once, at `error`.
+  - **Keys created before the policy.** A key with no expiry gets one year from `api_key_policy_started_at`; the date is stamped onto its `expires_at` the first time it is admitted, so the keys page shows it, and the refusal after it names it. A key with no recorded use counts its inactivity from the same anchor (or from its own creation, when later) — never from an earlier `created_at`, since no use was ever recorded before the policy.
+  - **Every face that admits keys** passes the policy source (`apiKeyLifecyclePolicySourceOf(authService)`, a required input beside `userAuthGates`). Every one of them answers the refusal's `403` and code: the runtime dispatcher (the MCP HTTP endpoint among its routes), the REST data API, the settings routes, the storage download routes, the datasource admin routes, the share-link routes, the marketplace install-local routes and the MCP stdio transport. Each relays the refusal by its brand, so every other identity fault at those doors keeps its existing answer.
+  - **`OS_CLOUD_API_KEY` is untouched.** It is the runtime's outbound credential to the control plane, never admitted by this seam.
+  
+  What changes for you:
+  
+  - **A key created without an expiry now expires.** It used to live until revoked; it now lives 90 days (or the configured default). Pass `expires_at` to choose, and create a new key before it ends.
+  - **A signing asking for more than a year is refused** `400 API_KEY_EXPIRY_TOO_LONG`, where it used to be accepted. Ask for the date the message names, or an earlier one.
+  - **A key unused for 90 days is refused** `403 API_KEY_INACTIVE`, where it used to be served. It is not revoked; the remedy is a new key.
+  - **A key that already existed with no expiry keeps working for one year** from the date the policy took effect on your deployment (`auth.api_key_policy_started_at`), then answers `403 API_KEY_EXPIRED` naming that date. Replace such keys within the year.
+  - **A revoked or expired key answers its own code** (`403 API_KEY_REVOKED` / `API_KEY_EXPIRED`) on every face that accepts a key, where it used to answer the generic `401`; and a session cookie sent beside such a key no longer answers for it.
+  - **Hosts calling `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** pass `apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authService)` (or the sixth argument), or an explicit `undefined` where no auth service exists. A caller of `resolveAuthzContext` that wants the located answer re-raises `ApiKeyLifecycleRefusalError` (`isApiKeyLifecycleRefusalError`) the way it re-raises the store outage. Code switching exhaustively over `ApiKeyAdmission['outcome']` handles the new `lifecycle` outcome.
+- dd29bbe: feat(runtime,cli)!: `os serve` refuses to start against a database still in the v17 organization-ownership shape, and `os migrate apply` refuses to drop its `organization_id` columns, until `os migrate organization-ownership` has verified it (ADR-0131 D10 item 5)
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered sys-audit-log-organization-column-retired, sys-flow-dispatch-organization-column-retired, sys-job-organization-column-retired, sys-job-queue-organization-column-retired, sys-job-run-organization-column-retired, sys-migration-journal-organization-column-retired, sys-migration-organization-column-retired, sys-presence-organization-column-retired) The step-18 D3 entries named here, registered before this change, record the retirement of each organization column this refusal reads, with the remedy that clears it; the metadata family's four entries land with its schema change, which this refusal ships beside. This change adds no authorable surface, moves no spec key and rewrites no stored row: it refuses to boot while a retired column is still physically present, and the remedy is the operator's own migration: the ceremony, whose column-drops step drops what those entries prescribe dropping. No new D3 entry and no D2 conversion. -->
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  A v18 runtime no longer serves a database it was never migrated for. At `kernel:ready`, `os serve` (and so `os dev`) checks every table whose object declares no organization column (`systemFields.tenant: false`). If one still carries a physical `organization_id`, the boot is refused unless the `sys_migration` row `adr-0131-organization-ownership` is verified. The refusal names the tables and the command. It is thrown before `kernel:listening`, so no request is served. Its code is `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`.
+  
+  FROM → TO:
+  
+  - A 17.x database started by an 18.x `os serve` → run `os migrate organization-ownership`, review its plan, then `os migrate organization-ownership --apply --plan-file FILE` with that plan file, and start again. To keep 17.x semantics on an unmigrated database, run a 17.x runtime.
+  - `os migrate apply --allow-destructive` on such a database (`@objectstack/cli`, BREAKING `minor`: the command narrows) → it now refuses to drop `organization_id` from any table (the D7 tables and the `sys_metadata` family among them) while the ceremony's marker is not verified. Before, the drift report offered each such column as an unmapped destructive column, and the apply dropped it. Dropped ahead of the ceremony, that column takes the ceremony's promotion and report steps with it, turns every legacy organization row into an environment row, and leaves the boot refusal no column to find. The refusal names `os migrate organization-ownership`, exits 1, and under `--json` answers `message: 'refused_organization_ownership_unmigrated'` with the `tables`, as the `sys_account.issuer` (#17440) and `sys_comment.reactions` (#23281) refusals do. The refusal holds the WHOLE `--allow-destructive` run, as those two do: nothing in it is created, applied or dropped, every other destructive drop and the additive work included. A run without `--allow-destructive` is unchanged. The ceremony drops these columns itself, in its column-drops step, before it records the run verified.
+  - There is no escape hatch: no `OS_ALLOW_*` or `OS_SKIP_*` variable and no flag skips either check.
+  
+  What does not change:
+  
+  - A fresh database boots: no table it creates carries a retired column, so no marker is needed.
+  - A database whose ceremony verified boots, whatever its columns.
+  - The `os migrate` commands boot as before, the ceremony's own among them: the boot guard is composed by `os serve` only, never by the shared standalone stack (`createStandaloneStack`, which `bootSchemaStack` and every other CLI data and schema boot build on). Only an `os migrate apply --allow-destructive` run that would drop an `organization_id` column is refused, as above.
+  - A driver with no physical columns to read (memory, MongoDB) is not checked.
+  - A host that composes its own kernel can add the guard itself: `OrganizationOwnershipBootGuardPlugin`, or `assertOrganizationOwnershipMigrated(engine)` from `@objectstack/runtime`. `ORGANIZATION_OWNERSHIP_MIGRATION_ID` is now exported from `@objectstack/spec/system`.
+- daafae6: fix(core,cloud-connection,mcp)!: every API-key admission names its owner-posture source, so a held owner's key is refused at the marketplace install-local doors and on every MCP stdio call
+  
+  Clause-②: no (narrowing) — no published accept-set widens; two more seams refuse a key whose owner holds an account-scope posture, the owner-posture input of the shared key-admission seam becomes required, and `resolveApiKeyPrincipal` no longer answers a held owner's key with a principal.
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/core/src/security/resolve-authz-context.ts#ResolveAuthzInput) An authentication-policy change at runtime TypeScript call sites, not a metadata change. No authorable spec key, stored shape or metadata surface moves, so `objectstack migrate meta` has nothing to rewrite. The input that becomes required lives on a runtime interface and on two runtime functions of `@objectstack/core` (`resolveApiKeyAdmission`, `resolveApiKeyPrincipal`), none of them a metadata surface; the affected party is a TypeScript caller, and the compiler names its call site. The packages publish (not unpublished), no ADR-0087 id covers this and none is added (not registered or already-registered). -->
+  
+  **BREAKING** (an accept-set narrowing at two API-key doors, and a required input on the shared key-admission seam), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Ruling C′ on #23287, item 1: "a held user's API key is refused at every seam with the same code". Item 4: "The refusal is not a revocation: the key resumes the moment the user enrols (or the account posture clears)". `AUTH_GATE_SCOPES` decides which posture holds a key: `MFA_REQUIRED` (scope `account`) holds it; `PASSWORD_EXPIRED` and `PASSWORD_RESET_REQUIRED` (scope `credential`) do not.
+  
+  - **The marketplace install-local doors (`@objectstack/cloud-connection`).** The resolver behind all five doors now hands the shared resolver the auth service's per-user posture computation and refuses on the posture it decided for whichever credential admitted the caller. A key whose owner holds `MFA_REQUIRED` gets `403 MFA_REQUIRED` with the session's message, before any effect. It used to be served there.
+  - **The MCP stdio transport (`@objectstack/mcp`).** `OS_MCP_STDIO_API_KEY` is resolved with the owner's posture on every call of a live session, and a held owner's call is refused before any read or write with the envelope REST answers (`code` `MFA_REQUIRED`, `status` 403, the session's remediation message). A data tool's error and the record resource carry that message, as they carry every other refusal on this transport. A held key still starts the transport and says so once in a warning: the key is valid, and the next call after the owner enrols is served with no restart.
+  - **The owner-posture input is required (`@objectstack/core`).** `ResolveAuthzInput.userAuthGates`, and the `tenancyPosture` and `userAuthGates` parameters of `resolveApiKeyAdmission` and `resolveApiKeyPrincipal`, are now required; `undefined` is a value passed on purpose. A seam that forgets the source no longer compiles, which is how the two seams above were missed. `@objectstack/runtime` re-exports these, so its importers see the same change.
+  - **`resolveApiKeyPrincipal` collapses a held owner's key to no principal.** A principal-or-nothing answer cannot carry the posture's code, so a host that answers requests should read `resolveApiKeyAdmission` and refuse its `held` outcome with `gate.code`.
+  - **The storage download authorizer (`@objectstack/service-storage`)** names the same source. The storage family's door already refused a held owner's key on the same request, so nothing changes on the wire.
+  
+  What changes for you:
+  
+  - **Refused now:** an API key whose owner owes MFA enrolment past the grace window gets `403 MFA_REQUIRED` at the install-local doors, and every principal-bound MCP stdio call it makes is refused with the same code and message. It works again the moment the owner enrols, with nothing reissued.
+  - **Unchanged:** a key whose owner's password expired, or whose administrator forced a password change, keeps working on both.
+  - **Code that calls `resolveAuthzContext`, `resolveApiKeyAdmission` or `resolveApiKeyPrincipal` directly** now passes the owner-posture source explicitly: `userAuthGates: userAuthGateSourceOf(authService)` wherever the kernel's `auth` service is reachable, or `undefined` on a kernel composed without `plugin-auth`. The two positional functions also take `tenancyPosture` explicitly (`undefined` when no `tenancy` service is registered).
+- 650933e: fix(runtime)!: the runtime dispatcher's `PATCH /data/:object/:id` honours a body `expectedVersion` and `If-Match` as its `RestServer` twin does, so an update carrying a stale version is refused instead of applied
+  
+  `RestServer`'s `PATCH /data/:object/:id` reads an optimistic-concurrency token from the body's `expectedVersion`, else from the `If-Match` header. It strips `expectedVersion` out of the patch and hands the token to the protocol's `updateData`, which refuses an update whose record has moved past it. The runtime dispatcher's `/data` domain read neither and handed the whole body over as the patch, and its shared `callData` update arm forwarded no token. So on a host whose `/data` routes the dispatcher serves (a `createHonoApp` host), an update carrying a stale `If-Match` wrote the record and answered `200`, the same answer an update carrying no token gets. A body `expectedVersion` reached the engine as a field and was refused as an unknown one. The domain now reads the token the way `RestServer` does, and `callData` forwards it to `updateData`.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of one runtime dispatcher route: an update whose version token is stale, or sent to a host that cannot judge it, is now refused where it was applied, and the remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you, wherever the runtime dispatcher serves `PATCH /data/:object/:id`. Where `@objectstack/rest` is mounted it serves this route itself and already answered each of these, so the standalone server's answers do not move.
+  
+  - FROM an update with a stale `If-Match` that wrote the record and answered `200`, TO a refusal with the record unchanged: the protocol's `409 CONCURRENT_UPDATE`, thrown out of `dispatch()` for the host's exit to render, as every other refusal `updateData` throws is. A `@objectstack/hono` `createHonoApp` host still renders that refusal as `500` (the record is unchanged): its catch-all reads only an error's `statusCode`, and rendering the declared `409` is a separate fix.
+  - FROM a body `expectedVersion` that reached the engine as a field and was refused as unknown (`Unknown field 'expectedVersion'`, nothing written), TO the update's version token. It is stripped from the patch and never written as a field. The update is applied when the token names the current version and refused as above when it is stale. A body `expectedVersion` is read before `If-Match`, in `RestServer`'s order.
+  - FROM an update carrying a token on a host whose protocol has no `updateData` (the ObjectQL fallback), which updated unguarded, TO `501 NOT_IMPLEMENTED`, before anything is read or written. An update with no token reaches the fallback as before.
+  
+  To update over a version you read, send that version (the record's `updated_at`) as the body's `expectedVersion` or as `If-Match`. An update with no token is unchanged. The `@objectstack/client` SDK's `data.update(object, id, data)` sends `data` as the body, so an SDK caller whose `data` carries `expectedVersion` now gets, through the dispatcher, the guard it asked for.
+- cac0be8: fix(rest,runtime)!: both `/data` write doors validate the request as the caller sent it: a `PATCH` or `POST` create whose body is not a record, and a `PATCH` whose `expectedVersion` is a number, are refused `400 VALIDATION_FAILED` on both doors before the engine is asked
+  
+  `RestServer` validates `PATCH /data/:object/:id` against `UpdateDataRequestSchema` and `POST /data/:object` against `CreateDataRequestSchema`. The runtime dispatcher's `/data` domain, the only answer on a host that mounts just the `@objectstack/hono` catch-all, validated neither, so a body that is not a record reached the engine. On a `PATCH` it answered `500` with the engine's own error. On a `POST`, an array created one row per element and a number created an empty row, both answered `201`. `RestServer`'s own `PATCH` gate parsed a coerced copy of the request: it read a JSON `null` body as `{}`, and it read a numeric `expectedVersion` as its string. Both doors now validate the assembled request as the caller sent it, and they answer each case alike.
+  
+  Clause-②: no
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of two HTTP routes on two doors: a write whose body is not the record the request schema declares, or whose body version token is a number where the schema declares a string, is now refused where it was applied or judged, and the remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you, wherever `@objectstack/rest` or the runtime dispatcher serves these routes:
+  
+  - `RestServer`, `PATCH /data/:object/:id` with a JSON `null` body: FROM `200`, an update that changed no field and still moved the record's `updated_at` (so every other holder of the old version saw a conflict on its next guarded save), TO `400 VALIDATION_FAILED` naming `data`, the record unchanged. The runtime dispatcher answers the same.
+  - The runtime dispatcher, `PATCH /data/:object/:id` with an array, a string, a number or `null` as the body: FROM `500` carrying the engine's own error text, nothing written, TO `400 VALIDATION_FAILED` naming `data`, before the engine is asked. `RestServer` already answered `400` for the first three.
+  - The runtime dispatcher, `POST /data/:object` with an array, a string or a number as the body: FROM `201` with one row created per array element, `201` with an empty row for a number, and the engine's own `400 INVALID_FIELD` for a string, TO `400 VALIDATION_FAILED` naming `data`, with no row created. `RestServer` already answered this.
+  - Both doors, `PATCH /data/:object/:id` with a body `expectedVersion` that is a number (`5`, `0`): FROM judged as its string (`'5'`) and answered `409 CONCURRENT_UPDATE`, TO `400 VALIDATION_FAILED` before the protocol is asked, whatever `If-Match` is sent beside it. The request schema declares the token a string, and a number is now one of the token shapes that can never carry a version.
+  
+  How it renders: `RestServer` answers `{ error, code: 'VALIDATION_FAILED', fields, object }`, the envelope its request gate already used. The runtime dispatcher returns its own `400 VALIDATION_FAILED` envelope, `fields` under `error.details`, instead of throwing, so a `@objectstack/hono` `createHonoApp` host renders it as `400`.
+  
+  Unchanged: a record body, `{}` included; a string `expectedVersion` (judged; `409` on a mismatch); and `If-Match` and the `DELETE`'s `?expectedVersion`, which are strings by transport. A JSON `null` body on a `POST` create is refused too, on both doors, in the companion entry for the `/data` create and query requests.
+  
+  To send a patch or a row, send the fields as a JSON object. To guard a write, send the version you read (the record's `updated_at`) as a string. The `@objectstack/client` SDK's `data.update` sends the version as an `If-Match` header string, so an SDK caller is affected only when the `data` it passes is not an object, or carries a number `expectedVersion`.
+- 1f3ac4f: fix(rest,runtime)!: a `/data` `PATCH` or `DELETE` whose version token can never carry a version (`expectedVersion: ''` or `false`, `?expectedVersion=`, an empty `If-Match`) is refused `400 VALIDATION_FAILED` on both doors, instead of being applied unguarded beside a stale `If-Match`
+  
+  Both doors of `PATCH /data/:object/:id` and `DELETE /data/:object/:id`, `RestServer` and the runtime dispatcher's `/data` domain, read an optimistic-concurrency token from the body's `expectedVersion` (`PATCH`) or `?expectedVersion` (`DELETE`), else from `If-Match`. They forwarded it to the protocol only when it was truthy. `''` and `false` are not nullish, so a stale `If-Match` beside them was never read, and they are not truthy, so no token was forwarded: the write ran unguarded and answered `200`. The protocol already refuses the quoted-empty tag `""` with `400 VALIDATION_FAILED`, under the ruling that a token shape that can never carry a version is refused, neither read as "no token" nor answered `409`. It never saw these tokens, because the door dropped them first, and it reads a blank string as no token. Both doors now judge every token a caller sends, or refuse it before the protocol is asked, and they answer each token alike.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is added, removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of two HTTP routes on two doors: a write whose version token can never carry a version is now refused where it was applied or judged, and the remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you, on both doors, wherever `@objectstack/rest` or the runtime dispatcher serves these routes:
+  
+  - FROM a `PATCH` whose body `expectedVersion` is `''`, a blank string, `false` or an empty array, or a `DELETE` whose `?expectedVersion` is empty or blank, which wrote or deleted the record unguarded and answered `200` even beside a stale `If-Match`, TO `400 VALIDATION_FAILED` with the record unchanged, before the protocol is asked.
+  - FROM an empty `If-Match` sent with no body or query token, which wrote or deleted unguarded and answered `200`, TO the same `400 VALIDATION_FAILED`. An `If-Match` that is sent asks for a guard, and an empty one carries nothing to judge. A request that sends no `If-Match` at all is unchanged.
+  - FROM a body `expectedVersion` of `true`, an object or a non-empty array, which was judged as its string (`'true'`, `'[object Object]'`, the comma-joined elements), TO the same `400 VALIDATION_FAILED`.
+  - FROM a body `expectedVersion` of `0`, which was dropped like `''` and so wrote unguarded, TO a token judged as `'0'`, as every other number already was. On a real record that is `409 CONCURRENT_UPDATE`.
+  
+  How it renders: `RestServer` answers `{ error, code: 'VALIDATION_FAILED', fields: [], object }`, the envelope it already gives the protocol's `""` refusal. The dispatcher returns its own `400 VALIDATION_FAILED` envelope instead of throwing, so a `@objectstack/hono` `createHonoApp` host renders it as `400`. That is unlike the refusals the protocol throws out of `dispatch()`, `409 CONCURRENT_UPDATE` and the `400` for `""`, which that host still renders as `500` (the record is unchanged), because its catch-all reads only an error's `statusCode`. Rendering their declared status is a separate fix.
+  
+  Unchanged: a request with no token, a body `expectedVersion: null` (it is no token, so `If-Match` is read), a non-empty string or a non-zero number token (judged; `409` on a mismatch), and `""` (the protocol's own `400`). The body key is still stripped from the patch whatever its value.
+  
+  To write over a version you read, send that version (the record's `updated_at`) as the token. To write unguarded, omit both `expectedVersion` and `If-Match` rather than sending either one empty. The `@objectstack/client` SDK's `data.update` and `data.delete` already omit `If-Match` when `ifMatch` is empty, so an SDK caller is affected only when its `data` carries an `expectedVersion` that can never carry a version.
+- c263588: fix(rest,runtime)!: the authoring-trail doors (`/meta` history, audit and diff, and package commits) stop admitting `setup.access`, so an organization admin is refused the environment's authoring trail
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) A runtime admission narrowing at four read doors, not a metadata change. No spec key, option, config field, response field, error code or stored shape is removed, renamed or re-shaped, and no export is added or retired: the new predicate and gate are module-private. A caller these doors still admit receives the same answer as before, so there is no tombstone and nothing for `objectstack migrate meta` to rewrite. What narrows is which callers these doors serve: a caller holding `setup.access` and neither `studio.access` nor `manage_metadata` is now refused with 403 at all four doors, and at the commits door so is a caller holding `setup.access` and `manage_metadata` without `studio.access`. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id covers these doors and this diff adds none (not registered, not already-registered); nothing published is retired or re-typed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  Organization admins hold `setup.access`. Under a wall (the `isolated` and `group` postures), these four doors handed every organization's admin the environment-wide authoring trail of items no organization authors (ADR-0131 C5): who saved each item and when, its superseded bodies, and every package's commit timeline. The data door on the same three tables (`sys_metadata_history`, `sys_metadata_audit`, `sys_metadata_commit`) refuses them (`requiredPermissions: ['studio.access']`, ADR-0131 D7), and the doors now follow the same rule. The narrowing applies in every posture, `single` included.
+  
+  Each door, and the callers it now refuses:
+  
+  - **BREAKING** `GET /meta/:type/:name/history` (`@objectstack/rest`), for a caller holding `setup.access` and neither `studio.access` nor `manage_metadata`: was 200 with the item's version history; now `403 FORBIDDEN`.
+  - **BREAKING** `GET /meta/:type/:name/audit` (`@objectstack/rest`), for the same caller: was 200 with the item's audit rows; now `403 FORBIDDEN`.
+  - **BREAKING** `GET /meta/:type/:name/diff` (`@objectstack/rest`), for the same caller: was 200 with a diff of the item's stored versions; now `403 FORBIDDEN`.
+  - **BREAKING** `GET /packages/:id/commits` (`@objectstack/runtime`), for a caller holding `setup.access` without `studio.access`, **with or without `manage_metadata`**: was 200 with the package's commit timeline; now `403 PERMISSION_DENIED`.
+    - `manage_metadata` never admitted this door. A caller holding it alone was refused before and still is; a caller holding it beside `setup.access` was admitted only through `setup.access`.
+    - One such caller is a walled organization owner granted `manage_metadata` inside its own organization. It keeps history, audit and diff, and loses commits.
+  
+  Who is still admitted:
+  
+  - History, audit and diff admit a system caller, `studio.access` or `manage_metadata`, through their own predicate.
+  - The commits door admits a system caller or `studio.access`.
+  - Both capabilities are platform-scoped. Platform operators are not affected, and neither are metadata authors who hold `studio.access` (all four doors) or `manage_metadata` (history, audit and diff; commits never admitted it).
+  
+  Unchanged:
+  
+  - The draft switches keep their admission, `setup.access` included: `GET /meta/_drafts`, `?state=draft` and `?preview=draft`.
+  - `GET /packages`, `GET /packages/:id` and `GET /packages/:id/export` keep their read cohort (`studio.access` or `setup.access`).
+  - The refusal keeps its envelope and code at each door. Only the message changes: it now names the capabilities that admit the door.
+  
+  What changes for you. If an organization admin needs a metadata item's history, audit trail or package commits, grant `studio.access`. A `manage_metadata` holder without `studio.access` who read package commits through `setup.access` needs `studio.access` for them too. A client that offers History or Audit to a caller holding only `setup.access` should hide them for that caller. The Setup app's item editors do this in objectstack-ai/objectui#12475.
+- 7c6b7f4: fix(rest,runtime)!: a JSON `null` body on a `/data` create or query is refused `400 VALIDATION_FAILED` on both doors; the runtime dispatcher's `POST /data/:object/query` validates `FindDataRequestSchema`; and the dispatcher asks an object's API exposure before any request gate
+  
+  `RestServer` read a JSON `null` body on `POST /data/:object` as an empty record and created an empty row, and on `POST /data/:object/query` as no query and answered the full record set. The runtime dispatcher's `/data` domain, the only answer on a host that mounts just the `@objectstack/hono` catch-all, did the same for the create, and validated no query at all: a mistyped clause or a retired key reached the engine, which dropped it and answered the full record set. `CreateDataRequestSchema.data` declares a record and `FindDataRequestSchema.query` declares a QueryAST or nothing, never `null`. Both doors now validate the assembled request as the caller sent it, forward that same request, and answer each case alike. On an object whose API exposure denies the verb, the dispatcher used to answer a `PATCH` body that is not a record, or a create body that is an array, a string or a number, with its request gate's `400`, where `RestServer` answered the exposure refusal; it now asks the exposure gate before each request gate, as `RestServer` does.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, object definition or stored shape is added, removed, renamed or re-shaped, and no exported declaration is removed or narrowed, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the accept set of two HTTP routes on two doors: a create or query whose body is a JSON `null`, and on the dispatcher a query the request schema does not declare, is now refused by the request schema where it was applied (or, for a string or array query body, refused by the engine under another code), and the remedy is in the request a caller sends, never a rewrite of a package source or a stored row. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  What changes for you, wherever `@objectstack/rest` or the runtime dispatcher serves these routes:
+  
+  - Both doors, `POST /data/:object` with a JSON `null` body: FROM `201` and an empty row created, TO `400 VALIDATION_FAILED` naming `data`, with no row created.
+  - Both doors, `POST /data/:object/query` with a JSON `null` body: FROM `200` with the full record set, TO `400 VALIDATION_FAILED` naming `query`, the engine never asked.
+  - The runtime dispatcher, `POST /data/:object/query` with a mistyped clause (`{ "limit": "ten" }`), the retired `joins` key, or a number as the body: FROM `200` with the full record set, the clause dropped, TO `400 VALIDATION_FAILED` naming the member (`query.limit`, `query.joins`, `query`). `RestServer` already answered this.
+  - The runtime dispatcher, `POST /data/:object/query` with a string or an array as the body: FROM the engine's `400 INVALID_FIELD` for numbered field names, TO `400 VALIDATION_FAILED` naming `query`. `RestServer` already answered this.
+  - The runtime dispatcher, `POST /data/:object/query` with a body that nests the query under a `query` key (`{ "query": { "where": … } }`): FROM read as the nested query (`200`), TO read as `RestServer` reads it, the body itself being the query, so `query` is a field the object does not have: `400 INVALID_FIELD`.
+  - The runtime dispatcher, `PATCH /data/:object/:id` with a body that is not a record (an array, a string, a number or `null`), and `POST /data/:object` with an array, a string or a number as the body, on an object whose API exposure denies the verb: FROM `400 VALIDATION_FAILED`, TO the exposure refusal `RestServer` answers (`404` when the object sets `apiEnabled: false`, `405` when its `apiMethods` leaves the verb out). The request was refused before and is refused now; only the answer changes. A JSON `null` create on such an object already answered the exposure refusal (the old gate read it as `{}`), and so did every query on it: the query route had no request gate, and its new one runs after the exposure gate, as `RestServer` orders it.
+  
+  How it renders: `RestServer` answers `{ error, code: 'VALIDATION_FAILED', fields, object }`, the envelope its request gates already use. The runtime dispatcher returns its own `400 VALIDATION_FAILED` envelope, `fields` under `error.details`, instead of throwing, so a `@objectstack/hono` `createHonoApp` host renders it as `400`.
+  
+  Unchanged: an empty request body, which every host hands over as `{}` (an empty record creates a row; an empty query answers every record); a record body; a conforming query; and a body `object` key on a query, which the path object still overrides.
+  
+  To create a row, send its fields as a JSON object, `{}` for all defaults. To query, send the QueryAST itself as the body, `{}` for every record. The `@objectstack/client` SDK's `data.create` and `data.query` send exactly these, so an SDK caller is affected only when the value it passes is `null`, or not the shape the request declares.
+
+### Patch Changes
+
+- c980d11: fix(plugin-sharing, runtime): a shared conversation's messages open for exactly the callers its share link opens for, on both mounts
+  
+  Clause-②: no — `/messages` now reaches the answer `/resolve` already gives the same caller for the same link, on the same mount; who can open a share link is unchanged.
+  
+  A share link to an AI conversation has two public routes: `/resolve` returns the conversation, and `/messages` returns its messages. Both check the link through the same service call. `/resolve` passed it every input an audience is judged by. `/messages` passed fewer, so it refused callers `/resolve` served:
+  
+  - **A `signed_in` link, a signed-in caller:** plugin-sharing's share-link routes answered `/messages` with `404 NOT_FOUND`, so the console's shared-conversation page showed the conversation with no messages. It now returns the messages, as the runtime dispatcher's share-links domain already did.
+  - **An `email` link, an allowlisted `?email=`:** both mounts answered `/messages` with `404 NOT_FOUND`. Both now read `?email=` on `/messages` exactly as on `/resolve`, and return the messages.
+  - **Unchanged:** every caller `/resolve` refuses is still refused on `/messages` with `404 NOT_FOUND`: an anonymous caller of a `signed_in` link, and a caller of an `email` link with no email or an off-list email, signed in or not. A password-protected link still needs its password on both routes. `/resolve` is unchanged.
+- 0ecac96: fix(plugin-sharing, runtime): a share link limited to an email allowlist answers every caller it does not open for with `404 INVALID_OR_EXPIRED`, whatever email and password were sent
+  
+  Clause-②: no — every request refused before is still refused, and every request served before is still served; only which refusal code a caller reads changes.
+  
+  A share link can carry a password and the `email` audience together. For such a link, the share-link resolve door answered a caller it did not open for from the password, never the audience: `401 NEEDS_PASSWORD` with no password, and `401 WRONG_PASSWORD` with any password, the correct one included, when the email sent was missing or not on the allowlist. A caller with the right password read "Incorrect password".
+  
+  - **An `email` link, any caller it does not open for:** `404 INVALID_OR_EXPIRED`, with or without an email, with no password, a wrong one or the correct one, signed in or not. It is the answer a password-less `email` link already gave and an unknown token gives, so it tells the caller neither whether the email is on the allowlist, nor whether the password is right, nor whether the link has a password. The door does not read the email to choose its answer.
+  - **Served, unchanged:** an allowlisted email with the correct password (or, on a link without a password, an allowlisted email alone) still opens the record. An API or SDK caller sends both together; the door no longer prompts for the password first.
+  - **Unchanged:** links with any other audience, including the `signed_in` order (`401 SIGN_IN_REQUIRED` before sign-in, the password arms after), a `public` link's `NEEDS_PASSWORD` / `WRONG_PASSWORD`, and the expired-or-revoked `410 EXPIRED_OR_REVOKED`.
+  - Both mounts of the resolve door answer alike: plugin-sharing's share-link routes and the runtime dispatcher's share-links domain.
+- 70d4c06: fix(runtime): a flow name two packages hold is refused at `/api/v1/automation` with a remedy that works from there: the metadata door's `?package=` route, not the `?package=` this door does not read
+  
+  Clause-②: no
+  
+  A flow name that two or more packages hold is refused `409 RESOURCE_CONFLICT` by the `/automation` definition doors, because they save and delete without naming a package. The refusal is unchanged. Its remedy is not: the doors used to relay the metadata store's sentence, "on the REST door add ?package= with the package id", and `/automation` reads no `?package=`. A caller who followed it got the same `409` again.
+  
+  The answer is still `409 RESOURCE_CONFLICT`. Its text now names a route that takes the package, and still states what was refused and which packages hold the name:
+  
+  - **`PUT /api/v1/automation/NAME` and `POST /api/v1/automation`** name `PUT /api/v1/meta/flow/NAME?package=` with one of the listed packages and the flow definition as the body.
+  - **`DELETE /api/v1/automation/NAME`** names `DELETE /api/v1/meta/flow/NAME?package=`, which removes that package's row and keeps the others. That route is the REST server's `/meta` door, the one `os serve` mounts. A host that sends every request to the runtime dispatcher (the `@objectstack/hono` catch-all) serves no `DELETE` on `/meta` and answers it `405`.
+  - **`POST /api/v1/automation/SOURCE/clone`** onto such a name answers the clone door's own taken-name refusal: a clone takes a new machine name, and the refusal suggests one.
+  
+  The door recognises this refusal by its envelope (`RESOURCE_CONFLICT` / 409), then reads the packages from the served flow list. When that list does not show the name held by two or more packages, the store's refusal is relayed as before.
+- 4feb2d0: fix(metadata-protocol): every write over a sealed, package-held name reads one sentence that states what the door knows; the inferred create remedy retires
+  
+  Clause-②: no
+  
+  <!-- adr-0087: not-required (runtime-interface-only packages/metadata-protocol/src/protocol.ts#ObjectStackProtocolImplementation) No metadata moves: no spec key, authorable spelling, stored row or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is the TypeScript signature of two public methods of the exported runtime class: `packagedBaseRefusal`'s `operation` loses its `'create'` member, and `tenantAuthoredWriteRefusal` loses its optional `operation` parameter. The channel that reaches every affected consumer is the compiler, which refuses the retired argument where it is written. -->
+  
+  **BREAKING** (a public method-signature narrowing in `@objectstack/metadata-protocol`), shipped as `minor` under the launch-window convention for breaking changes. The `'create'` member of `ObjectStackProtocolImplementation.packagedBaseRefusal`'s `operation` (now `'save' | 'delete'`) and the optional `operation` parameter of `tenantAuthoredWriteRefusal` retire. A caller that passed `operation: 'create'` passes `'save'` (or omits `operation` on `tenantAuthoredWriteRefusal`): the verdict, the code and the status were always the same.
+  
+  **What was wrong.** A save over a name a managed package holds, on a type with no environment overlay, is refused `403 NOT_OVERRIDABLE`. The sentence guessed what the save meant from `If-None-Match: *`. A publish-mode `*` was told "… so its name is taken. To author your own TYPE, choose a name no package or built-in holds …", and every other save, the console's generic create (`?mode=draft` with `If-None-Match: *`) included, was told "… Edit the source artifact and redeploy." Neither request declares a create or an edit, so each remedy was wrong for one of its callers. An editor who followed the first authored a second item. A creator who followed the second, and every administrator of an installed package, was sent to an artifact they cannot edit.
+  
+  **What changed.**
+  
+  - `@objectstack/metadata-protocol`: every write over such a name, on a type with no regime row, reads one sentence, whatever its mode or pin: "'TYPE/NAME' is provided by a managed package and is sealed: it cannot be written here. GET /api/v1/meta/TYPE lists the names in use." The same sentence comes from the repository's type door (draft promotion, restore, revert). It gives no create advice and no source-artifact advice. It names no holding package, because neither door has the package at hand. A type with a regime row (`flow`, `action`, `permission`, `datasource`) keeps its regime sentence, and every removal keeps its sentence.
+  - `@objectstack/metadata-protocol` (retired, no producer remains): the two signature members named under **BREAKING** above, and the `create` arm of the internal `SealedItemOperation`.
+  - `@objectstack/spec`: the `GetMetaItemResponseSchema.version` and `MetadataConflictErrorSchema.currentVersion` descriptions say that a `null` beside `editable: false` takes no save, and prescribe no `If-None-Match: *` pin for it.
+  - `@objectstack/runtime`: a permission-set clone (`POST /api/v1/security/permission-sets/:name/clone`) whose save loses the race for the target name now answers the door's own `409` name-taken refusal ("Permission set 'NAME' already exists — a clone must take a NEW machine name. …", code `RESOURCE_CONFLICT`, where it used to answer code `METADATA_CONFLICT`), the same refusal a name the catalog already held reads. It used to relay the `/meta` door's conflict sentence, which told the caller to send `If-Match`, and this door takes no `If-Match`.
+  
+  **Unchanged.** Which requests are accepted or refused. The `NOT_OVERRIDABLE` code and `403` status. The named read-only base's `ITEM_LOCKED` sentence. The `/meta` door's conflict sentence for its own callers.
+- cd86e41: fix(objectql,runtime): a stack's `datasourceMapping` is installed before the engine's first schema sync, and the datasources it routes platform objects to are connected then, so a served boot keeps every object in the store its rule names (#23649)
+  
+  Clause-②: yes
+  
+  A mapping rule is routing, not a hint (ADR-0062, the `datasourceMapping` half of D2): every object it matches resolves to the datasource it names. `AppPlugin.start()` installed the rules late. By then `ObjectQLPlugin.start()` had schema-synced every registered object onto the host's default store, and the auth plugin had written the Default Organization there. A host config declaring `datasourceMapping: [{ default: true, datasource: 'primary' }]` over a declared `primary` reached `Server is ready` with `OS_DATABASE_URL` set (or under `--dev`), and every platform read then failed with `no such table`, because the platform tables and the organization were in the URL store and `primary` had neither. `os start` with `OS_DATABASE_URL` set to a different database than the rule names behaved the same way. A rule that routes platform objects only (`objectPattern: 'sys_*'`) also left its datasource unconnected, because the connect gate counted the app's own objects only. Every platform read then failed with "mapped for object … is not registered".
+  
+  **What changes**
+  
+  The public surface widens by one export and one event: `@objectstack/objectql` now exports `OBJECTQL_DRIVERS_READY_HOOK`, and `ObjectQLPlugin.start()` triggers the kernel event it names, `objectql:drivers-ready`, which any plugin can subscribe to.
+  
+  - **`@objectstack/objectql`.** `ObjectQLPlugin.start()` triggers the kernel event `objectql:drivers-ready` (exported as `OBJECTQL_DRIVERS_READY_HOOK`), with the engine as its argument. It fires once per boot, after the boot drivers are adopted and connected and before the first schema sync, the `sys_metadata` hydration or any read or write. A handler that throws fails the boot.
+  - **`@objectstack/runtime`.** `AppPlugin` handles that event. It installs the stack's `datasourceMapping`, then connects every declared datasource the rules route an already-registered object to, platform objects included. The connect is the same `connectDeclared` `start()` uses, with the same fail-fast verdict. The first DDL, the hydration and the Default Organization then land on the mapped datasource. On a composition whose engine never fires the event, `start()` installs the rules as before.
+  
+  **Unchanged**
+  
+  - A config with no `datasourceMapping`, and a rule naming the host's `default`.
+  - The engine's default driver. The mapped datasource connects after the engine has adopted its `driver.*` services, so it never takes the default slot from a stack plugin's driver.
+  - Where an object's rows live after boot. The rules were already in force once `start()` had run.
+  - `os start` on the config-declared default (`datasourceMapping` `{ default: true }` and no URL). The resolver points the host default at the same database, so everything was already in one file, and still is.
+  - A rule routing only the app's own objects. Their rows were already written to the mapped datasource. The only difference is that the first sync no longer creates an empty copy of their tables in the default store.
+  
+  **Refused at boot, as documented.** The docs already say a rule that routes objects to a datasource that cannot be connected fails the boot. A rule that routed only platform objects to such a datasource used to reach `Server is ready` with every platform read failing. It now fails the boot with the connect error and the objects routed to the datasource. The remedy is to make the datasource reachable, or to remove the rule.
+  
+  **Still on the default store:** the package registry's own `sys_packages` table. It is not an object, so no rule routes it, and the package service creates and reads it on the engine's default driver.
+- 395ca21: fix(runtime): the HTTP dispatcher answers the engine's `DuplicateRecordError` with the wire code `UNIQUE_VIOLATION`, not the engine's in-process `DUPLICATE_RECORD`, with `developerMessage`, `object` and `field` in `error.details` (#23686)
+  
+  **Wire change at the dispatcher's doors: `409 DUPLICATE_RECORD` becomes `409 UNIQUE_VIOLATION`.** It applies wherever a dispatcher domain hands a caught engine throw to its shared error writer (`HttpDispatcher`'s thrown-error envelope). Measured: `POST /actions/:object/:action`, for a handler or a declarative `operation: 'update'` action whose write repeats a unique value, and the activation doors `POST /actions/_activation/:object/:action` and `POST /security/_activation/:type/:name`, for a flip that loses a race on the activation ledger's unique key. A client of these doors (`@objectstack/hono`'s `createHonoApp`, or any host serving the dispatcher) that matched `code === 'DUPLICATE_RECORD'` on that refusal must match `code === 'UNIQUE_VIOLATION'` instead. That is what the REST server and both Hono doors already answer for the same refusal.
+  
+  Why: the maintainer ruled one wire spelling for a unique-constraint refusal on every route, `UNIQUE_VIOLATION` (recorded in commit 65846bc46). The REST server, the batch and import rows and the Hono doors already reported it. The dispatcher's own writer reported the engine's spelling.
+  
+  - FROM `{"success":false,"error":{"code":"DUPLICATE_RECORD","message":"Duplicate record refused on 'udoc': …","httpStatus":409}}`
+  - TO `{"success":false,"error":{"code":"UNIQUE_VIOLATION","message":"Duplicate record refused on 'udoc': …","httpStatus":409,"details":{"developerMessage":"Duplicate record refused on 'udoc': …","object":"udoc"}}}`
+  
+  `details` carries what the REST server's answer carries beside its code, each field only when the producer stated it: `developerMessage`, `object`, and `field` when the driver named the conflicting column. The status stays `409` and the `message` is unchanged. Only the engine's `DuplicateRecordError` is translated, recognised by its registered code and its class name together. A handler or hook that throws the registered `DUPLICATE_RECORD` without being that class keeps its own code. Inside the engine, `DuplicateRecordError.code` is still `DUPLICATE_RECORD`, so an in-process caller (a hook, a flow node) is unaffected. Other `409` answers at these doors (`DELETE_RESTRICTED`, `CONCURRENT_UPDATE`) are unchanged.
+  
+  Clause-②: no
+- 9e0945c: fix(runtime): a sandboxed body that lets the engine's `DuplicateRecordError` leave unchanged is answered `409 UNIQUE_VIOLATION`, not `409 DUPLICATE_RECORD`; a body that throws `DUPLICATE_RECORD` itself keeps it (#23702)
+  
+  **Wire change at the action door: `409 DUPLICATE_RECORD` becomes `409 UNIQUE_VIOLATION`.** It applies to `POST /api/v1/actions/:object/:action` on a `type: 'script'` action whose sandboxed body writes through `ctx.api` with a value a unique key already holds and does not catch the refusal, or catches it and re-throws it unchanged. The same holds when the refusal comes from a sandboxed hook body's own write, fired by the action's write. A client that matched `code === 'DUPLICATE_RECORD'` on that refusal must match `code === 'UNIQUE_VIOLATION'` instead, which is what the dispatcher already answers when a host-code handler's write is refused.
+  
+  Why: the maintainer ruled one wire spelling for a unique-constraint refusal on every route, `UNIQUE_VIOLATION` (recorded in commit 65846bc46). Every door translates the engine's class, recognised by its registered code and its class name together. The QuickJS runner rebuilt the escaping refusal as a `SandboxError` carrying the code without the class, so no door recognised it.
+  
+  - FROM `{"success":false,"error":{"code":"DUPLICATE_RECORD","message":"DuplicateRecordError: Duplicate record refused on 'udoc': …","httpStatus":409}}`
+  - TO `{"success":false,"error":{"code":"UNIQUE_VIOLATION","message":"Duplicate record refused on 'udoc': …","httpStatus":409,"details":{"developerMessage":"Duplicate record refused on 'udoc': …","object":"udoc"}}}`
+  
+  The fix is in the runner, so no door changed: when the error leaving the body is the very object the engine's refusal became inside the VM, with nothing that crosses the VM rewritten on it, the runner throws the engine's own `DuplicateRecordError`. `message` loses the `DuplicateRecordError: ` class-name prefix, and `details.object` names the object the engine refused.
+  
+  Control, unchanged: a body that throws its own error carrying `DUPLICATE_RECORD` keeps `409 DUPLICATE_RECORD` and its own sentence, whatever `name` it gives that error. A body that rewrote the engine's error (its `name`, `message`, `code`, `status`, `fields` or `userMessage`) before throwing it is speaking for itself and is answered exactly as before. Every other host error leaves the runner as a `SandboxError`, exactly as before.
+  
+  In-process: a caller of a write whose sandboxed hook body lets the refusal leave, or of a script action whose body does, now catches the engine's `DuplicateRecordError` (`code` `DUPLICATE_RECORD`, `status` `409`, `object` the refused object) rather than a `SandboxError`. `code` and `status` are unchanged, and the error no longer carries `innerMessage` or the `hook 'NAME' threw:` wrapper in `message`.
+  
+  Clause-②: no
+- 6ee483c: fix(runtime): a sandboxed body that throws a plain `{ code, message }` object is answered with its own `message` as the client sentence, never `undefined: MESSAGE` or `[object Object]`; its code is kept (#23718)
+  
+  **Client sentence change, status and code unchanged.** It applies to `POST /api/v1/actions/:object/:action` on a `type: 'script'` action whose sandboxed body throws a value that is not an `Error`, and to a sandboxed hook body that does the same (its refusal at the action door behind a write, and in the `/data` error classification). The QuickJS runner flattened every thrown value as `NAME: MESSAGE`, else `String(value)`. A plain object has no class name and no `toString` of its own, so the doors served `undefined: MESSAGE`, or `[object Object]` when it had no `message`.
+  
+  - `throw { code: 'EMAIL_TAKEN', message: 'That address is already on file' }`
+    - FROM `{"success":false,"error":{"code":"VALIDATION_ERROR","message":"undefined: That address is already on file","httpStatus":400,"declaredCode":"EMAIL_TAKEN"}}`
+    - TO `{"success":false,"error":{"code":"VALIDATION_ERROR","message":"That address is already on file","httpStatus":400,"declaredCode":"EMAIL_TAKEN"}}`
+  - `throw { code: 'DUPLICATE_RECORD' }`
+    - FROM `{"success":false,"error":{"code":"DUPLICATE_RECORD","message":"[object Object]","httpStatus":400}}`
+    - TO `{"success":false,"error":{"code":"DUPLICATE_RECORD","message":"Internal server error","httpStatus":400}}`
+  
+  A value with no usable `message` and no `toString` of its own is answered with `Internal server error`, the sentence every door already answers for a fault with no business message. To give the caller words, throw a `message` (or an `Error`).
+  
+  Two outcomes move with it, both for a thrown plain object only:
+  
+  - A `name` on a plain object is a field, not a class: `throw { name: 'TypeError', message: 'forged' }` was read as a crash (`500 INTERNAL_ERROR`); it is now a refusal, `400` with `forged`.
+  - A plain object whose `String()` is empty (`throw []`) recorded no rejection, so the request waited for the sandbox's wall-clock ceiling and answered `500`; it now answers at once with the no-message sentence.
+  
+  Control, unchanged: a thrown `Error` (or subclass) keeps `NAME: MESSAGE` in the server log and the client sentence it got before. A thrown string is its own sentence, and an object with a `toString` of its own keeps it.
+  
+  In-process: the `SandboxError` a caller catches for such a throw carries the value's `message` as `innerMessage`, and its log-only `message` reads `KIND 'NAME' threw: Error: MESSAGE`.
+  
+  Clause-②: no
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [47d569e]
+- Updated dependencies [086fa46]
+- Updated dependencies [0be162c]
+- Updated dependencies [fc1a55a]
+- Updated dependencies [249130f]
+- Updated dependencies [b1e9280]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [0d784da]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [3b28905]
+- Updated dependencies [1baf976]
+- Updated dependencies [222293f]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [7cb33cf]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [cac0be8]
+- Updated dependencies [1f3ac4f]
+- Updated dependencies [57994c3]
+- Updated dependencies [989aa48]
+- Updated dependencies [56147a8]
+- Updated dependencies [23e689d]
+- Updated dependencies [a869ea6]
+- Updated dependencies [7b64a3d]
+- Updated dependencies [8226755]
+- Updated dependencies [cdc42eb]
+- Updated dependencies [7ffc578]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c263588]
+- Updated dependencies [c2bb302]
+- Updated dependencies [7c6b7f4]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [7dc7d22]
+- Updated dependencies [e611e2b]
+- Updated dependencies [954bf72]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [c7dd48a]
+- Updated dependencies [30c33e3]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cad343e]
+- Updated dependencies [cbe7712]
+- Updated dependencies [cd86e41]
+- Updated dependencies [c03077e]
+- Updated dependencies [3bc407d]
+- Updated dependencies [f77ba41]
+- Updated dependencies [76560a1]
+- Updated dependencies [9bb9370]
+- Updated dependencies [53646fc]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/plugin-security@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/metadata-protocol@18.0.0-next.2
+  - @objectstack/rest@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/plugin-auth@18.0.0-next.2
+  - @objectstack/service-datasource@18.0.0-next.2
+  - @objectstack/service-i18n@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/metadata@18.0.0-next.2
+  - @objectstack/driver-sql@18.0.0-next.2
+  - @objectstack/driver-turso@18.0.0-next.2
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.2
+  - @objectstack/driver-memory@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/observability@18.0.0-next.2
+  - @objectstack/service-cluster@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

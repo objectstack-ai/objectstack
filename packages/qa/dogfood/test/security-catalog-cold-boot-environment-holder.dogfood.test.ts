@@ -207,7 +207,7 @@ describe('ADR-0048 N.3: a package-held position or permission-set name the envir
       ['position', position, { name: position, label: 'Saved before the lock' }],
     ] as const) {
       await ql.insert('sys_metadata', {
-        type, name, organization_id: null, package_id: null, state: 'active', version: 1, checksum: null,
+        type, name, package_id: null, state: 'active', version: 1, checksum: null,
         created_at: now, updated_at: now, metadata: JSON.stringify(body),
       }, SYS);
     }
@@ -239,7 +239,7 @@ describe('ADR-0048 N.3: a package-held position or permission-set name the envir
     const now = new Date().toISOString();
     for (const name of ['org_admin', 'everyone']) {
       await ql.insert('sys_metadata', {
-        type: 'position', name, organization_id: null, package_id: null, state: 'active', version: 1, checksum: null,
+        type: 'position', name, package_id: null, state: 'active', version: 1, checksum: null,
         created_at: now, updated_at: now, metadata: JSON.stringify({ name, label: `Repurposed ${name}` }),
       }, SYS);
     }

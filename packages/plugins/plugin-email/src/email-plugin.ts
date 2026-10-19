@@ -250,16 +250,29 @@ function assertSendableDefaultFrom(from: EmailAddress | undefined): void {
 }
 
 /**
+ * The data engine this plugin persists through and reads templates beside:
+ * `objectql`, else `data`, else `null`. Read, never recorded — a `null` here
+ * is not a verdict (see {@link EmailServicePlugin.init}).
+ */
+function resolveDataEngine(ctx: PluginContext): IDataEngine | null {
+  try { return ctx.getService<IDataEngine>('objectql') ?? null; }
+  catch {
+    try { return ctx.getService<IDataEngine>('data') ?? null; } catch { return null; }
+  }
+}
+
+/**
  * EmailServicePlugin — registers the `email` service.
  *
  * Lifecycle:
  *   - `init`: register sys_email + sys_email_template and the built-in auth
  *     templates (code-declared `email_template` items) via manifest;
  *     build transport (config → provider+apiKey → LogTransport fallback);
- *     register a transport-only EmailService so dependents can resolve it.
- *   - `start` (kernel:ready): wire ObjectQL-backed sys_email persistence
- *     + the registry TemplateLoader, and close the `sys_email_template`
- *     organization door.
+ *     wire ObjectQL-backed sys_email persistence + the registry
+ *     TemplateLoader; register the EmailService so dependents can resolve it.
+ *   - `start` (kernel:ready): bind the `mail` settings namespace, the
+ *     delivery mode, the outbox drain, the queue subscribers and the boot
+ *     sweep, and close the `sys_email_template` organization door.
  */
 export class EmailServicePlugin implements Plugin {
   name = 'com.objectstack.service.email';
@@ -301,6 +314,8 @@ export class EmailServicePlugin implements Plugin {
 
   private readonly options: EmailServicePluginOptions;
   private service?: EmailService;
+  /** The engine {@link wireEngine} installed persistence + the template loader over, and what it built. */
+  private engineWiring?: { engine: IDataEngine; persistence: EmailPersistence | undefined };
   /** Engine carrying the closed `sys_email_template` door — unbound in destroy(). */
   private boundEngine?: IDataEngine;
   /** SMTP transport currently in use, if any — closed in dispose(). */
@@ -383,9 +398,6 @@ export class EmailServicePlugin implements Plugin {
       );
     }
 
-    // Persistence + templateLoader are wired in `start` once the
-    // ObjectQL engine is available; here we register the service
-    // synchronously so dependents can resolve it.
     this.service = new EmailService({
       transport,
       defaultFrom: this.options.defaultFrom,
@@ -393,15 +405,98 @@ export class EmailServicePlugin implements Plugin {
       defaultTemplateContext: this.options.defaultTemplateContext,
       logger: ctx.logger,
     });
+
+    // [#23946] Persistence + the template loader are wired HERE, before the
+    // service is handed out, and not at this plugin's `kernel:ready`. A
+    // plugin that STARTS before this one runs its own `kernel:ready` hooks
+    // first, and those can send mail: plugin-auth's dev admin seed signs its
+    // account up from one, and with verification armed better-auth awaits
+    // `sendVerificationEmail` → `sendTemplate` inside that hook. Wired at
+    // `kernel:ready`, that send met a service with no loader and threw
+    // `TEMPLATE_NOT_FOUND` into better-auth's background-task log, with no
+    // `sys_email` row. Holding the send until `kernel:ready` cannot work: the
+    // kernel runs `kernel:ready` handlers one after another, so this plugin's
+    // handler waits behind the very hook that is waiting on the send.
+    //
+    // Everything the two read is already there: ObjectQL is this plugin's
+    // hard dependency and registers `objectql` in its own `init`, the
+    // engine's registry is fixed at construction, and the loader resolves
+    // `protocol` at every load. An engine registered only later is wired at
+    // `kernel:ready` instead, so absence here records nothing.
+    const engine = resolveDataEngine(ctx);
+    if (engine) this.wireEngine(ctx, engine);
+
     ctx.registerService('email', this.service);
     ctx.logger.info('EmailServicePlugin: email service registered');
   }
 
+  /**
+   * Install ObjectQL-backed `sys_email` persistence and the registry
+   * {@link TemplateLoader} on the service, once per engine. Returns the
+   * persistence it installed (`undefined` under `persist: false`).
+   */
+  private wireEngine(ctx: PluginContext, engine: IDataEngine): EmailPersistence | undefined {
+    if (!this.service) return undefined;
+    if (this.engineWiring?.engine === engine) return this.engineWiring.persistence;
+
+    const persistence: EmailPersistence | undefined = this.options.persist === false
+      ? undefined
+      : {
+        async insert(row) {
+          const created = await (engine as any).insert('sys_email', row, {
+            context: SYSTEM_CTX,
+          });
+          // The engine's OWN answer is forwarded, not laundered into
+          // `row.id`. ObjectQL honours the id it is handed, so this confirms
+          // `row.id` — and on the day some driver re-keys the row instead,
+          // `EmailPersistence`'s insert contract (#5523) says so loudly here
+          // rather than letting the outbox drain hook double-send the
+          // message. `created` without a usable id means the engine reported
+          // no identity at all, which is not a disagreement: confirm the row
+          // we asked for.
+          return created?.id ? { id: String(created.id) } : { id: String(row.id) };
+        },
+        async update(id, patch) {
+          await (engine as any).update('sys_email', { id, ...patch }, {
+            context: SYSTEM_CTX,
+          });
+        },
+        // [#8149] The privileged readback for the `internal: true`
+        // `headers_json` column. Taken off the RAW engine on purpose: the
+        // dereference is a separately-named privileged verb (#8118)
+        // precisely so it cannot be reached from a query string, and the
+        // delivery paths above re-read rows through `find`, which omits the
+        // column for every caller including `SYSTEM_CTX`. Inert — and never
+        // calls the accessor — when the column is not flagged.
+        async readHeadersJson(rowIds) {
+          return readInternalHeadersJson(engine as any, rowIds);
+        },
+      };
+
+    // [ADR-0131 D6/D10] Templates resolve from the registry: the protocol's
+    // layered `email_template` list (environment over code) when a metadata
+    // door is mounted, the ObjectQL registry otherwise. Both are looked up
+    // at each load — resolve where it is used — so a Studio save is live on
+    // the next send, with no row, no projector and no restart.
+    const registry = (engine as { registry?: unknown }).registry;
+    const templateLoader: TemplateLoader = createRegistryEmailTemplateLoader(() => {
+      let protocol: unknown;
+      try { protocol = ctx.getService('protocol'); } catch { /* no metadata door on this host */ }
+      return { protocol, registry } as never;
+    });
+
+    // Mutate the existing service instance so consumers that already
+    // captured a reference (e.g. AuthManager) see the upgrade.
+    if (persistence) this.service.setPersistence(persistence);
+    this.service.setTemplateLoader(templateLoader);
+    this.engineWiring = { engine, persistence };
+    ctx.logger.info('EmailServicePlugin: sys_email persistence + template loader enabled');
+    return persistence;
+  }
+
   async start(ctx: PluginContext): Promise<void> {
     ctx.hook('kernel:ready', async () => {
-      let engine: IDataEngine | null = null;
-      try { engine = ctx.getService<IDataEngine>('objectql'); }
-      catch { try { engine = ctx.getService<IDataEngine>('data'); } catch { /* ignore */ } }
+      const engine = resolveDataEngine(ctx);
       if (!engine || !this.service) return;
 
       // ── Bind to the `mail` settings namespace (Phase 1) ──────────────
@@ -586,57 +681,11 @@ export class EmailServicePlugin implements Plugin {
         // settings service not registered — env/constructor opts remain authoritative.
       }
 
-      const persistence: EmailPersistence | undefined = this.options.persist === false
-        ? undefined
-        : {
-          async insert(row) {
-            const created = await (engine as any).insert('sys_email', row, {
-              context: SYSTEM_CTX,
-            });
-            // The engine's OWN answer is forwarded, not laundered into
-            // `row.id`. ObjectQL honours the id it is handed, so this confirms
-            // `row.id` — and on the day some driver re-keys the row instead,
-            // `EmailPersistence`'s insert contract (#5523) says so loudly here
-            // rather than letting the outbox drain hook double-send the
-            // message. `created` without a usable id means the engine reported
-            // no identity at all, which is not a disagreement: confirm the row
-            // we asked for.
-            return created?.id ? { id: String(created.id) } : { id: String(row.id) };
-          },
-          async update(id, patch) {
-            await (engine as any).update('sys_email', { id, ...patch }, {
-              context: SYSTEM_CTX,
-            });
-          },
-          // [#8149] The privileged readback for the `internal: true`
-          // `headers_json` column. Taken off the RAW engine on purpose: the
-          // dereference is a separately-named privileged verb (#8118)
-          // precisely so it cannot be reached from a query string, and the
-          // delivery paths above re-read rows through `find`, which omits the
-          // column for every caller including `SYSTEM_CTX`. Inert — and never
-          // calls the accessor — when the column is not flagged.
-          async readHeadersJson(rowIds) {
-            return readInternalHeadersJson(engine as any, rowIds);
-          },
-        };
-
-      // [ADR-0131 D6/D10] Templates resolve from the registry: the protocol's
-      // layered `email_template` list (environment over code) when a metadata
-      // door is mounted, the ObjectQL registry otherwise. Both are looked up
-      // at each load — resolve where it is used — so a Studio save is live on
-      // the next send, with no row, no projector and no restart.
-      const registry = (engine as { registry?: unknown }).registry;
-      const templateLoader: TemplateLoader = createRegistryEmailTemplateLoader(() => {
-        let protocol: unknown;
-        try { protocol = ctx.getService('protocol'); } catch { /* no metadata door on this host */ }
-        return { protocol, registry } as never;
-      });
-
-      // Mutate the existing service instance so consumers that already
-      // captured a reference (e.g. AuthManager) see the upgrade.
-      if (persistence) this.service.setPersistence(persistence);
-      this.service.setTemplateLoader(templateLoader);
-      ctx.logger.info('EmailServicePlugin: sys_email persistence + template loader enabled');
+      // Persistence + the template loader were wired in `init` (see there) on
+      // every boot whose engine was registered by then; this wires them only
+      // for a host that registered its engine later, and otherwise answers
+      // what `init` installed.
+      const persistence = this.wireEngine(ctx, engine);
 
       // Out-of-row attachment content (#5172). A thunk for the same reason the
       // queue is one: `storage` is a SwappableStorageService whose

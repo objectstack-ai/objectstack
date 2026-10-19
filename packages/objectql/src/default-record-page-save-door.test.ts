@@ -85,6 +85,11 @@ function makeMemoryDriver() {
             }
             if (k.startsWith('$')) continue;
             const rowVal = row[k];
+            // [#24371] The by-name read's both-spellings `type: { $in: [...] }`.
+            if (v && typeof v === 'object' && Array.isArray((v as any).$in)) {
+                if (!(v as any).$in.includes(rowVal === undefined ? null : rowVal)) return false;
+                continue;
+            }
             const expected = (v && typeof v === 'object' && '$eq' in (v as any)) ? (v as any).$eq : v;
             const a = rowVal === undefined ? null : rowVal;
             const b = expected === undefined ? null : expected;
@@ -166,7 +171,13 @@ async function boot(topology: Topology) {
             (result: any) => ({ ok: true as const, result }),
             (error: any) => ({ ok: false as const, error }),
         );
-    return { engine, protocol, storedPages, save };
+    /** A stored ACTIVE environment page row, laid in the store directly — no write door in front of it. */
+    const storeRow = (name: string, body: Record<string, unknown>) =>
+        driver.create('sys_metadata', {
+            type: 'page', name, organization_id: null, package_id: null,
+            metadata: JSON.stringify(body), state: 'active', version: 1,
+        });
+    return { engine, protocol, storedPages, save, storeRow };
 }
 
 /** The envelope, the object and both pages of one refusal, by its first sentence. */
@@ -188,7 +199,7 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         expectRefusal(outcome, 'env_org_detail', 'acme_org', `page 'acme_org_detail' of package '${PKG}'`);
         expect(String((outcome as { error?: any }).error?.message)).toContain(
             "Save 'env_org_detail' with `isDefault: false`: a page a package ships stays the default unless the deployment "
-            + 'is composed without that package.',
+            + "is composed without that package's page.",
         );
         expect(storedPages()).toEqual([]);
     });
@@ -197,7 +208,7 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         const { save, storedPages } = await boot(topology);
         expect((await save('env_task_a', recordPage('env_task_a', 'acme_task'))).ok).toBe(true);
         const outcome = await save('env_task_b', recordPage('env_task_b', 'acme_task'));
-        expectRefusal(outcome, 'env_task_b', 'acme_task', "page 'env_task_a', authored in this environment");
+        expectRefusal(outcome, 'env_task_b', 'acme_task', "page 'env_task_a', authored in this system");
         expect(String((outcome as { error?: any }).error?.message)).toContain(
             "Save 'env_task_b' with `isDefault: false`, or first save 'env_task_a' with `isDefault: false` to make "
             + "'env_task_b' the default instead.",
@@ -221,7 +232,7 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         expect({ code: err?.code, status: err?.status }).toEqual({ code: 'DEFAULT_RECORD_PAGE_CONFLICT', status: 422 });
         expect(String(err.message).split('. ')[0]).toBe(
             "Default record page conflict: page 'env_task_a' cannot be published as the default record page of object "
-            + "'acme_task': page 'env_task_b', authored in this environment already is",
+            + "'acme_task': page 'env_task_b', authored in this system already is",
         );
     });
 
@@ -261,9 +272,19 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         expect(outcome.ok, String((outcome as any).error?.message)).toBe(true);
     });
 
-    it('control: an isDefault page that is not a record page is outside the rule', async () => {
-        const { save } = await boot(topology);
+    it('an isDefault page that is not a record page holds no default — the page parse refuses its flag (#23610), and nothing is stored', async () => {
+        const { save, storedPages } = await boot(topology);
         const outcome = await save('env_home', { name: 'env_home', label: 'Home', type: 'home', isDefault: true, regions: [] });
+        expect(outcome.ok, 'the save was refused').toBe(false);
+        const err = (outcome as { error: any }).error;
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(String(err.message)).toContain("`isDefault: true` is refused on a `type: 'home'` page");
+        expect(storedPages()).toEqual([]);
+    });
+
+    it('control: the same home page without the flag saves', async () => {
+        const { save } = await boot(topology);
+        const outcome = await save('env_home', { name: 'env_home', label: 'Home', type: 'home', regions: [] });
         expect(outcome.ok, String((outcome as any).error?.message)).toBe(true);
     });
 
@@ -274,5 +295,48 @@ describe.each(TOPOLOGIES)('%s kernel — a page saved as a second default record
         const promoted = await save('env_task_b', recordPage('env_task_b', 'acme_task'));
         expect(promoted.ok, String((promoted as any).error?.message)).toBe(true);
         expect(storedPages()).toEqual(['env_task_a', 'env_task_b']);
+    });
+});
+
+// #23610 (maintainer ruling A on Q1 and Q2, record 6190536588) — the save door
+// is the page parse's: a non-record page's `isDefault: true`, the retired
+// `full-width` template and a region the template does not place are each
+// refused 422 `INVALID_METADATA` at save. A row ALREADY stored in one of those
+// shapes is read back through the stored-row conversion chain (the read path
+// never refuses it): the two shapes with a lossless rewrite come back
+// CONVERTED — the retired D2 entries `page-is-default-off-record-page-removed`
+// and `page-template-full-width-to-default` delete the flag and re-spell the
+// template — while the unplaced region, which has no lossless rewrite, is
+// served as stored. Saving the row as it was stored is refused until it is
+// fixed, whichever way it reads back. `served` is what the read answers for
+// the keys the shape varies.
+const PLACEMENT_SHAPES: ReadonlyArray<[label: string, body: Record<string, unknown>, says: string, served: Record<string, unknown>]> = [
+    ['a home page with `isDefault: true`', { name: 'env_shape', label: 'Shape', type: 'home', isDefault: true, regions: [] }, '`isDefault: true` is refused', { isDefault: undefined, regions: [] }],
+    ['the retired `full-width` template', { name: 'env_shape', label: 'Shape', type: 'record', object: 'acme_task', template: 'full-width', regions: [{ name: 'main', components: [] }] }, "`template: 'full-width'` was removed", { template: 'default', regions: [{ name: 'main', components: [] }] }],
+    ['a `left_sidebar` region on `three-column`', { name: 'env_shape', label: 'Shape', type: 'home', template: 'three-column', regions: [{ name: 'left_sidebar', components: [] }, { name: 'main', components: [] }] }, 'Region `left_sidebar` is refused', { template: 'three-column', regions: [{ name: 'left_sidebar', components: [] }, { name: 'main', components: [] }] }],
+];
+
+describe.each(TOPOLOGIES)('%s kernel — the page parse at the save door, and rows stored before it (#23610)', (topology) => {
+    it.each(PLACEMENT_SHAPES)('%s: the save is refused 422 INVALID_METADATA, and nothing is stored', async (_label, body, says) => {
+        const { save, storedPages } = await boot(topology);
+        const outcome = await save('env_shape', body);
+        expect(outcome.ok, 'the save was refused').toBe(false);
+        const err = (outcome as { error: any }).error;
+        expect({ code: err?.code, status: err?.status }).toEqual({ code: 'INVALID_METADATA', status: 422 });
+        expect(String(err.message)).toContain(says);
+        expect(storedPages()).toEqual([]);
+    });
+
+    it.each(PLACEMENT_SHAPES)('%s, ALREADY stored: the read serves the row through the stored-row conversion chain, and saving it as stored is refused', async (_label, body, _says, served) => {
+        const { protocol, save, storeRow } = await boot(topology);
+        await storeRow('env_shape', body);
+        const read: any = await protocol.getMetaItem({ type: 'page', name: 'env_shape' });
+        expect(read?.item?.name).toBe('env_shape');
+        for (const [key, value] of Object.entries(served)) {
+            expect(read.item[key], key).toEqual(value);
+        }
+        const again = await save('env_shape', body);
+        expect(again.ok, 'the re-save was refused').toBe(false);
+        expect((again as { error: any }).error?.status).toBe(422);
     });
 });

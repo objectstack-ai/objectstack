@@ -105,7 +105,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | `pm:dispatched` | 已派发(派发评论记轮次),恒带 assignee;与摘 `pm:queue` 同一次标签写入成对落地 |
 | `needs-user-decision` | 决定待做:永不派发、除代裁通道外永不代答;维护者的收件箱 |
 | `pm:on-hold` | 决定已做且答案是暂不做:不派发不催;仅当带机器可读 `Restart-when:` 行才合法 |
-| `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游:选择期跳过,#N 关闭时由解锁扫描放回;工已完、PR 被外部门禁卡住的同用本态;正文或线程行首 `Blocked-by:` 指向无 `Ruled:` 的 open `needs-user-decision` 卡 ⇒ ⛔ 不派发,挂本态直至其 `Ruled:` |
+| `pm:blocked` + 正文行 `Blocked-by: #N` | 等上游:选择期跳过,#N 关闭时由解锁扫描或 `scheduled-full-run-card.yml` 刷新放回;工已完、PR 被外部门禁卡住的同用本态;正文或线程行首 `Blocked-by:` 指向无 `Ruled:` 的 open `needs-user-decision` 卡 ⇒ ⛔ 不派发,挂本态直至其 `Ruled:` |
 | `pm:awaiting-maintainer` | 决定已做,只剩一次 GitHub 之外的人工动作:不派发不催;与其它 pm 状态标签互斥;入态恒带行首 `Maintainer-action:` 行(细则见 `references/state-machine.md`),无行即半态 |
 | `pm:blocking` | 有 open 下游依赖者(自 `Blocked-by:` 索引推导的缓存,⛔ 不手工挂);进选择全序 |
 | `pm:retriage` | 向分诊提问(改判、跨域 PR 指定车道、改路由、拆卡、裁 dev 报告留下的分叉),定车道与改路由限未派发卡,异议评论写明所求;与现行 `pm:*` 并存、⛔ 不摘原标;带本标签的 `pm:queue` 卡跳过派发 |
@@ -123,7 +123,6 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - `pm:queue` 卡逾三天欠一次显式转换(派发/转箱/停放/撤单/改前提),⛔ 不是排期。
 - hold/blocked 的行契约、双通道与 `Restart-touch:` 触发文件细则见 `references/state-machine.md`。
 - hold 放行须双查:只放最近一次转换评论的条件,其后卡上有更新的 merged PR 即拒。
-- `Unlock-action:` 只认 `re-check PR #M` 与 `re-check #N when label <标签> <absent|present>`,余者静默回落。
 - `needs-user-decision` 是决定待做,`pm:on-hold` 是决定已做;`manual — <理由>` ⛔ 不是合法出口。
 - 无机制可唤醒的卡 ⛔ 不 hold:关 not planned,理由/出处载关单评论;重开免费,维护者可否决。
 - 缺陷卡 ⛔ 不藏进 hold 也不自行关闭:可复现且用户可达 ⇒ 回 `pm:queue`。
@@ -169,7 +168,8 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 | (无固定归属,按落点分诊) | `packages/apps/*`、`packages/console`(dist 由脚本生成 ⛔ 不手改;UI 缺陷走 `repo:objectui`)、`examples/*`(归它演练的子系统)、`docs/audits/**` |
 
 - 表未覆盖的包首次分诊时归类并走 PR 更新本表;新增或退役 `domain:*` 必须同批改本表。
-- `domain:*` 只由分诊席产出,例外仅在飞卡衍生 sub-issue 承父卡域;无标签的卡 ⛔ 不得认领。
+- `domain:*` 只由分诊席产出,例外一:在飞卡衍生 sub-issue 承父卡域;无标签的卡 ⛔ 不得认领。
+- 例外二:立卡人自贴而车道合上表、正文齐立卡门三件 ⇒ 执行席直接认领,分诊事后抽查。
 - 跨域例外路径:拆不动的跨域单 PR 由分诊席指定一个车道 PM 认领,认领评论申报文件面。
 - 派发前在飞检查:读 `pm:dispatched` 卡认领评论申报的文件面,本地求交、不另发查询。
 - 跨域例外路径的范围加上该单文件面触及各域的在飞单;相交 ⇒ 排该 PR 之后串行或让行。
@@ -265,7 +265,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 - 长远合理性权重恒 ≥50%:推荐以长远的读数领起,四轴冲突时其余各轴合起来投不翻它。
 - 权重只排推荐不授权:读缩小特例与契约增生,⛔ 不背书投机扩张、不放行人工地板事。
 - 四维分析从业务角度写;四棱是四轴的卡面序列化,一一对应,也是分诊代裁置信门的输入。
-- 卡先于弹窗:需裁决先落 `needs-user-decision` 卡;收件箱由维护者定期消化,⛔ 不 assign 推送。
+- 卡先于弹窗:需裁决先落 `needs-user-decision` 卡;列选项等答的聊天即弹窗;⛔ 不 assign 推送。
 - 决策卡带选项、推荐、证据、四棱块与工作量列;受阻执行卡同笔挂 `pm:blocked`+`Blocked-by:`。
 - `AskUserQuestion` 只是在场加速器:仅当维护者在本会话 ~30 分钟内有过人类输入才可发。
 - 每问必带推荐项,被 Skip 或长挂即转卡通道,⛔ 不重弹。
@@ -288,7 +288,7 @@ PM 的工作是循环:选卡 → 认领 → 派发 → 收集 → 复核 → 报
 
 | 守卫 | 一句话 |
 |:--|:--|
-| `scripts/pm/check-skill-line-ratchet.mjs` | 本文件行数只降不升(`pnpm check:pm-skill-ratchet`);抬上限需维护者裁决引用在 PR 正文;⛔ re-wrap 不得用作筹行,新增以删减付账;不买内容的密度修复允许 |
+| `scripts/pm/check-skill-line-ratchet.mjs` | 本文件行数只降不升(`pnpm check:pm-skill-ratchet`);抬上限凭下令写入的裁决记录:其评论 id 与实测行数增量引在 PR 正文,同 PR 移上限行至多增量;无裁决 id 即红;⛔ re-wrap 不得用作筹行,新增以删减付账;不买内容的密度修复允许 |
 | `scripts/pm/check-skill-id-lint.mjs` | 本技能与 os-dev 定义的操作文本 ⛔ 不引用 issue 编号(`pnpm check:pm-skill-id-lint`) |
 | `scripts/pm/check-half-states.mjs` | label/assignee/PR 半状态的 report-only 巡查(含已复核就绪却无人落地的孤儿 PR 检测) |
 | `scripts/pm/check-governed-merges.mjs` | governed 面合并清单的 report-only 审计(事后防线;本地枚举零 API,仅归因走查询) |

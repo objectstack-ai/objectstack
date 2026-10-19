@@ -46,7 +46,7 @@ insert — never author it.
 ⚠️ **`permission_set` takes the set's `name`, never a record id** — a name the
 security catalog does not hold is refused `400 VALIDATION_FAILED`
 (`reference_not_found`), and a row with no name is refused `required`.
-`permission_set_id` is a legacy column: do not write it.
+One grant per user, set and organization: enforced by the `unique: 'organization'` index.
 
 Assignment is one call: `POST /api/v1/data/sys_user_permission_set` with
 `{ user_id, permission_set: '<name>', organization_id }`. Only a tenant admin —

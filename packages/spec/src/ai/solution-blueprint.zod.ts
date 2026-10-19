@@ -2,8 +2,10 @@
 
 import { z } from 'zod';
 import { lazySchema } from '../shared/lazy-schema';
-import { FieldType } from '../data/field.zod';
+import { FieldType, SelectOptionSchema } from '../data/field.zod';
 import { FilterConditionSchema } from '../data/filter.zod';
+import { SortDirectionEnum, SortItemSchema } from '../shared/enums.zod';
+import { VIEW_FILTER_OPERATORS, ViewFilterRuleSchema } from '../ui/view.zod';
 
 /**
  * Solution Blueprint Schema (ADR-0033 §4 — plan-first authoring)
@@ -23,6 +25,32 @@ import { FilterConditionSchema } from '../data/filter.zod';
 
 /** Machine-name pattern every object, field and option name in a blueprint must match. */
 const SNAKE_CASE = /^[a-z_][a-z0-9_]*$/;
+
+/**
+ * The lifecycle category a blueprint option declares: `SelectOption.kind`'s own
+ * enum (`open` / `won` / `lost`), taken from that schema's shape and never
+ * re-spelled here, so a blueprint can offer no kind the object field's option
+ * refuses and miss none it accepts. Both option shapes below wrap it in their
+ * own spelling of "optional" (`.optional()` lenient, `.nullable()` strict).
+ *
+ * A function rather than a constant: the lenient shapes build lazily
+ * ({@link lazySchema}), and a module-level read would force
+ * `SelectOptionSchema` at import for every consumer of this module.
+ */
+const optionKindEnum = () => SelectOptionSchema.shape.kind.unwrap();
+
+/**
+ * What the object schema refuses about the field a blueprint object's
+ * `stageField` names (`refuseStageFieldWithoutKinds`, `data/object.zod.ts`):
+ * one sentence both object shapes and both option shapes state, so the two
+ * halves of the rule (the pointer and the kinds) read the same on every side.
+ */
+const STAGE_FIELD_RULE =
+  'The object schema refuses the object unless the field `stageField` names is a single-value `select` or `radio` '
+  + 'whose inline options EACH declare `kind`: "open" for a step on the way, "won" for the successful end (a deal\'s '
+  + 'Closed Won, a task\'s Done, a case\'s Resolved), "lost" for the unsuccessful end (Closed Lost, Cancelled, '
+  + 'Unqualified). Naming a multiselect / checkboxes / tags field that carries options is refused too: a record '
+  + 'stands at one stage.';
 
 /**
  * One `field op value` comparison in a blueprint predicate.
@@ -88,11 +116,13 @@ export const BlueprintFieldSchema = lazySchema(() => z.object({
   options: z.array(z.object({
     label: z.string(),
     value: z.string().regex(SNAKE_CASE),
+    kind: optionKindEnum().optional()
+      .describe(`The option's lifecycle category, REQUIRED on EVERY option of the field the object's \`stageField\` names. ${STAGE_FIELD_RULE} Only a single-value \`select\` / \`radio\` field's options take it: omit it on a multiselect / checkboxes / tags field's options, where the field schema refuses it. Absent on any other select option reads as "open".`),
   })).optional().describe('Choices for select / multiselect / radio fields'),
   summaryOperations: BlueprintSummaryOperationsSchema.optional()
     .describe('REQUIRED when `type` is "summary" (a roll-up of child records: 任务总数 / 报名人数 / 合计金额 / 已完成任务数). Names the child object, the aggregation, and — for a qualified count/sum — the condition. A "summary" field without it materializes runtime-dead.'),
   expression: z.string().optional()
-    .describe('REQUIRED when `type` is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer" for a composed title. A "formula" field without it materializes runtime-dead: the engine builds its formula plan only from fields that HAVE an expression, so the field reads null everywhere, forever. Same failure shape as a "summary" with no `summaryOperations`. Note `nameField` on the object recommends a formula for numbered entities (invoice/ticket) — that formula needs THIS key, or the record title is blank on every card, lookup chip and breadcrumb.'),
+    .describe('REQUIRED when `type` is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer.name" for a composed title. A formula reads a lookup / master_detail field\'s related record ONE hop through it — `record.<lookup>.<field>`, as `record.customer.name` above; the bare `record.customer` is the stored id, and a second hop (`record.customer.owner.name`) is refused at build. A "formula" field without it materializes runtime-dead: the engine builds its formula plan only from fields that HAVE an expression, so the field reads null everywhere, forever. Same failure shape as a "summary" with no `summaryOperations`. Note `nameField` on the object recommends a formula for numbered entities (invoice/ticket) — that formula needs THIS key, or the record title is blank on every card, lookup chip and breadcrumb.'),
 }));
 export type BlueprintField = z.input<typeof BlueprintFieldSchema>;
 
@@ -105,11 +135,31 @@ export const BlueprintObjectSchema = lazySchema(() => z.object({
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).optional()
     .describe('Org-Wide Default record visibility (OWD) for INTERNAL users — the deliberate sharing choice for this object (ADR-0090). Canonical four only: private (owner-only) | public_read (everyone reads, owner writes) | public_read_write (everyone reads+writes) | controlled_by_parent (derived from the master record — ONLY for an object whose fields include a master_detail reference). SET it when the user\'s description implies a visibility intent — personal/private data (HR, 绩效, salary, 个人隐私) → "private"; shared reference data everyone edits → "public_read_write". Omit to accept the platform\'s deterministic default (business object → public_read_write; master-detail child → controlled_by_parent) — omitting on privacy-sensitive data silently over-shares it.'),
   nameField: z.string().regex(SNAKE_CASE).optional()
-    .describe('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object\'s text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "{order_no} · {customer}"). Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred.'),
+    .describe('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079). Set it to the object\'s text label field (e.g. "product_name"). For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. a formula "record.order_no + \' · \' + record.customer.name" — a lookup\'s name is read one hop through it, `record.<lookup>.<name field>`). A formula title is computed on read and stored nowhere: it is shown everywhere, but a list cannot sort by it and search does not scan it. Omitting it lets the platform auto-pick a text field, but declaring it is strongly preferred.'),
+  // `ObjectSchema.stageField` (ADR-0085), and the ONLY trigger of the object
+  // schema's mandatory-kind rule: without this key the option `kind` above is
+  // never required of an AI-built object. The string arm only — the object
+  // schema's `false` ("no linear lifecycle") has no blueprint spelling.
+  stageField: z.string().regex(SNAKE_CASE).optional()
+    .describe(`The lifecycle stage field (ADR-0085) — which \`select\` (or \`radio\`) field of THIS object holds the ordered steps a record moves through (a deal's stage, a ticket's status), drawn as the record path. snake_case, naming one of this object's own fields. ${STAGE_FIELD_RULE} SET it whenever the object has such a status/stage field, and give every one of that field's options its \`kind\`. Omitting it leaves stage detection to a guess from field names (status / stage / state / phase).`),
 }));
 export type BlueprintObject = z.input<typeof BlueprintObjectSchema>;
 
-/** A proposed list/form/kanban/calendar/gallery/gantt view over an object. */
+/**
+ * A proposed list/form/kanban/calendar/gallery/gantt view over an object.
+ *
+ * `filters` and `sort` are what let a view keep the promise its name makes
+ * (ruling A on cloud#2932). Without them a plan could say 「overdue only」 in a
+ * view's name and nowhere else: the applier shipped an unfiltered grid under
+ * that name, and build verification passed it, because nothing on this shape
+ * could carry the condition (cloud#2922 — 12 rows shown where the plan
+ * promised 3). Neither key invents a format: `filters` IS
+ * {@link ViewFilterRuleSchema}, the rule `ListView.filter` declares, and `sort`
+ * is the shared {@link SortItemSchema} whose `{ field, order }` keys and
+ * `asc` / `desc` vocabulary the `ListView.sort` entry declares (that entry is an
+ * inline shape, not an export). The strict mirror below carries both keys in
+ * the model-facing shape; the key-parity tests fail if either side drops one.
+ */
 export const BlueprintViewSchema = lazySchema(() => z.object({
   object: z.string().regex(SNAKE_CASE).describe('Object this view displays (snake_case)'),
   name: z.string().regex(SNAKE_CASE).describe('View machine name (snake_case)'),
@@ -120,6 +170,10 @@ export const BlueprintViewSchema = lazySchema(() => z.object({
     .describe('Field names shown as columns (in order). For a gallery, INCLUDE the image/avatar/file field (it becomes the card cover); for a gantt, INCLUDE the start date column before the end date column.'),
   groupBy: z.string().regex(SNAKE_CASE).optional()
     .describe('REQUIRED for kanban views: the select/status field whose options become the board columns (e.g. "stage", "status"). Without it a kanban renders as a plain list. Optional for gantt (groups leaf tasks into summary rows).'),
+  filters: z.array(ViewFilterRuleSchema).optional()
+    .describe('Which records this view shows: the list-view filter rules [{ field, operator, value }] the built view carries, ANDed. REQUIRED whenever the view\'s name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [{ field: "due_date", operator: "less_than", value: "{today}" }, { field: "status", operator: "not_equals", value: "completed" }]; my open → [{ field: "owner", operator: "equals", value: "{current_user_id}" }, { field: "status", operator: "equals", value: "open" }]. WITHOUT it the view shows EVERY record under a name that promises a subset. For a select field compare its option VALUE, never its label. Omit for a view that genuinely spans every record.'),
+  sort: z.array(SortItemSchema).optional()
+    .describe('Default record order: [{ field, order }] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [{ field: "due_date", order: "asc" }]). Omit for the platform default order.'),
 }));
 export type BlueprintView = z.input<typeof BlueprintViewSchema>;
 /** Post-parse shape of {@link BlueprintView} — defaults applied, transforms run (ADR-0122). */
@@ -320,12 +374,18 @@ const StrictField = z.object({
   options: z.array(z.object({
     label: z.string().describe('What the user reads on the dropdown — free text in the user\'s own language (「1-49人」, 「已完成」).'),
     value: strictIdent('The STORED machine value: snake_case, and it may NEVER start with a digit — give it a word prefix instead (「1-49人」 → "size_1_49", 「2024年」 → "year_2024"). The label carries the human wording; this key only has to be a legal identifier.'),
+    // ⛔ Must stay in lockstep with the lenient `BlueprintFieldSchema.options[].kind`.
+    // THIS describe is the one the design model reads, and strict mode makes
+    // the key required, so the model decides on every option. The option
+    // key-parity pin fails if either side drops it.
+    kind: optionKindEnum().nullable()
+      .describe(`The option's lifecycle category, or null. REQUIRED (never null) on EVERY option of the field the object's \`stageField\` names. ${STAGE_FIELD_RULE} Only a single-value \`select\` / \`radio\` field's options take it: null on a multiselect / checkboxes / tags field's options, where the field schema refuses it. Null on any other select option reads as "open".`),
   })).nullable()
     .describe('Choices for select-family fields, or null'),
   summaryOperations: StrictSummaryOperations.nullable()
     .describe('REQUIRED when type is "summary" (a roll-up of child records onto this parent: 任务总数 / 报名人数 / 合计金额 / 已完成任务数); null for every other field type. A "summary" field without it is runtime-dead — it reads 0/empty everywhere.'),
   expression: z.string().nullable()
-    .describe('REQUIRED when type is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer" for a composed record title; null for every other field type. A "formula" field without it is runtime-dead — it reads null everywhere, forever. This is the formula analogue of summaryOperations: name the type and you must supply the body.'),
+    .describe('REQUIRED when type is "formula" — the CEL body the field computes, e.g. "record.quantity * record.unit_price", or "record.order_no + \' · \' + record.customer.name" for a composed record title; null for every other field type. A formula reads a lookup / master_detail field\'s related record ONE hop through it — `record.<lookup>.<field>`, as `record.customer.name` above; the bare `record.customer` is the stored id, and a second hop (`record.customer.owner.name`) is refused at build. A "formula" field without it is runtime-dead — it reads null everywhere, forever. This is the formula analogue of summaryOperations: name the type and you must supply the body.'),
 });
 
 const StrictObject = z.object({
@@ -335,7 +395,41 @@ const StrictObject = z.object({
   fields: z.array(StrictField).describe('Fields to create on the object'),
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).nullable()
     .describe('Org-Wide Default record visibility (OWD) for INTERNAL users (ADR-0090), or null to accept the platform default (business object → public_read_write; master-detail child → controlled_by_parent). SET it when the user\'s description implies a visibility intent: personal/private data (HR, 绩效, salary, 个人隐私) → "private" (owner-only); "public_read" = everyone reads, owner writes; "public_read_write" = everyone reads+writes; "controlled_by_parent" ONLY for an object with a master_detail reference field. Null on privacy-sensitive data silently over-shares it.'),
-  nameField: strictIdentOrNull('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079), or null to let the platform auto-pick a text field. Set it to the object\'s text label field (e.g. "product_name") — snake_case. For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. "{order_no} · {customer}"). Declaring it is strongly preferred over null.'),
+  nameField: strictIdentOrNull('The record title field — which field holds the human-readable name shown on cards, lookup chips, breadcrumbs and search (ADR-0079), or null to let the platform auto-pick a text field. Set it to the object\'s text label field (e.g. "product_name") — snake_case. For a numbered entity (invoice/ticket), set it to a formula field that composes number + name (e.g. a formula "record.order_no + \' · \' + record.customer.name" — a lookup\'s name is read one hop through it, `record.<lookup>.<name field>`). A formula title is computed on read and stored nowhere: it is shown everywhere, but a list cannot sort by it and search does not scan it. Declaring it is strongly preferred over null.'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintObjectSchema.stageField`:
+  // a key present only there is one no proposal can ever contain, and the
+  // option `kind` above would then never be required of an AI-built object.
+  // The object key-parity pin fails if either side drops it.
+  stageField: strictIdentOrNull(`The lifecycle stage field (ADR-0085) — which \`select\` (or \`radio\`) field of THIS object holds the ordered steps a record moves through (a deal's stage, a ticket's status), drawn as the record path — or null. snake_case, naming one of this object's own fields. ${STAGE_FIELD_RULE} SET it whenever the object has such a status/stage field, and give every one of that field's options a non-null \`kind\`. Null leaves stage detection to a guess from field names (status / stage / state / phase).`),
+});
+
+// One list-view filter rule, strict-shaped. The lenient side reuses
+// `ViewFilterRuleSchema` itself; this mirror carries its SAME three keys and
+// differs only where strict structured output cannot express the original:
+//  - `value` is nullable and present, not optional — strict mode needs every
+//    key in `required`, and null is the unary operators' spelling. The blueprint
+//    tools strip it to an absent `value`, which is what the lenient rule reads.
+//  - `operator` is the plain canonical enum. The lenient `z.preprocess` that
+//    folds legacy spellings (`eq`, `gt`, …) is a parse-time transform with no
+//    JSON-Schema form, and a new producer emits the canonical vocabulary anyway.
+//  - the operator ↔ value-shape refinement (`in` takes an array, `between` a
+//    pair, `icontains` a non-empty string) has no JSON-Schema form either; the
+//    lenient rule `apply_blueprint` parses against refuses those, by name.
+// The key-parity test pins this key set to `ViewFilterRuleSchema`'s.
+const StrictViewFilterRule = z.object({
+  field: z.string().describe('Field on the view\'s object to filter by (snake_case, e.g. "due_date", "status", "owner")'),
+  operator: z.enum(VIEW_FILTER_OPERATORS).describe('Filter operator — the canonical vocabulary only'),
+  value: z.union([z.string(), z.number(), z.boolean(), z.array(z.union([z.string(), z.number()]))]).nullable()
+    .describe('Comparison value, or null for the unary operators (is_empty / is_not_empty / is_null / is_not_null), which take their direction from the operator name. "in" / "not_in" take an ARRAY (any length); "between" takes exactly [min, max]; every other operator takes a scalar. For a select field use its option VALUE, never its label. Today\'s date is the platform token "{today}" and the signed-in user is "{current_user_id}".'),
+});
+
+// One sort entry, strict-shaped: the lenient side reuses the shared
+// `SortItemSchema`; both of its keys are already required, so the mirror needs
+// no nullable — it is inlined only because this mirror declares every shape it
+// sends, as the other nested shapes here do.
+const StrictSortItem = z.object({
+  field: z.string().describe('Field on the view\'s object to sort by (snake_case)'),
+  order: SortDirectionEnum.describe('Sort direction: "asc" or "desc"'),
 });
 
 const StrictView = z.object({
@@ -345,6 +439,14 @@ const StrictView = z.object({
   type: z.enum(['list', 'form', 'kanban', 'calendar', 'gallery', 'gantt']).nullable().describe('View kind, or null for list. "gallery" = visual card/cover browse (画廊/相册/卡片墙/封面/海报, or an object with an image/avatar/file field); "gantt" = timeline/schedule (甘特图/时间线/排期, object with BOTH a start and an end date field); "kanban" = board grouped by a status/select field; "calendar" = single-date schedule; "form" = record editor.'),
   columns: z.array(z.string().regex(SNAKE_CASE)).nullable().describe('Field names shown as columns, or null. For a gallery, INCLUDE the image/avatar/file field (becomes the card cover); for a gantt, INCLUDE the start date column before the end date column.'),
   groupBy: strictIdentOrNull('REQUIRED for kanban: the select/status field whose options become the board columns (e.g. "stage"). Optional for gantt (groups leaf tasks). Null for list/form/calendar/gallery.'),
+  // ⛔ Must stay in lockstep with the lenient `BlueprintViewSchema.filters`.
+  // THIS describe is the one the design model reads, and strict mode makes the
+  // key required, so the model decides on every view: state the filter its
+  // name promises, or say null. The view key-parity pin fails if it goes.
+  filters: z.array(StrictViewFilterRule).nullable()
+    .describe('Which records this view shows: list-view filter rules [{field, operator, value}], ANDed, or null for a view over EVERY record. REQUIRED whenever the view\'s name or label states a condition — an 「overdue / 逾期」, 「my open / 我的未完成」, 「待审批」 or 「本月」 view MUST carry the rules that make its name true, e.g. overdue → [{field:"due_date",operator:"less_than",value:"{today}"},{field:"status",operator:"not_equals",value:"completed"}]; my open → [{field:"owner",operator:"equals",value:"{current_user_id}"},{field:"status",operator:"equals",value:"open"}]. Null under such a name ships a view that shows every record while its name promises a subset.'),
+  sort: z.array(StrictSortItem).nullable()
+    .describe('Default record order: [{field, order}] with order "asc" or "desc"; the first entry sorts first (e.g. an overdue list → [{field:"due_date",order:"asc"}]), or null for the platform default order.'),
 });
 
 const StrictDashboard = z.object({

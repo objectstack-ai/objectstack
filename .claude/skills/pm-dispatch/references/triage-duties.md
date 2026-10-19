@@ -14,6 +14,7 @@
 - 析取 ②:有 `pm:queue` 无 `domain:*`(仅多车道仓);析取 ③:有 `domain:*` 无 pm-state。
 - 析取 ④:有 `pm:queue` 与 `domain:*` 而无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2 分钟。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
+- 自贴卡抽查:窗内新派发且 `domain:*` 事件与建卡同分钟者,逐张核车道、三件;⛔ 不凭 actor。
 - 半状态治愈积压 ②③④ 最老优先、P0 嫌疑先行,⛔ 优先最新不适用。
 - 首触定级与三析取 sweep 每 fire 跑到清空:⛔ 无每轮总量预算,清得动就多清。
 - 窗口耗尽未跑完的,下一 fire 从标签状态断点续跑。
@@ -26,6 +27,8 @@
 - objectui pin 落后且其队列已空 ⇒ 在本仓立/刷新 console bump 单。
 - 见新 tag 族发布 ⇒ 在 cloud 立 `.objectstack-sha` bump 单。
 - bump 单单张封顶:先查同题 open 单,已有就追评刷新;工具链新形态只提请不扩面。
+- bump 单的等待卡清单读自 hold 索引,查询式与命中数落正文;⛔ 凭记忆写的不是该清单。
+- hold 索引 = `Restart-when:` 或 `Blocked-by:` 行点名该发布、版本或上游 commit 的全部 open 卡。
 - 分类动作每张三选一,外加一个修复通道。
 - 裁定写方向、给六态之一。
 - 方向在 ADR/本卡裁决/不可重裁规则:贴 `check-prior-rulings.mjs` 的 `Prior rulings read:` 行,或不点。
@@ -35,8 +38,7 @@
 - `pm:queue` 也收恢复不变量的 finding、test-only pin,与实现未被裁错的说明书脱节(修文档)。
 - `needs-user-decision` = 设计卡、feature/契约形状提案、需要 appetite 的多周程序。
 - 碰迁移形状或删已发布能力也进决策箱;说明书脱节不进:有裁定出处才是 (b),否则改文档。
-- 决策卡落卡必带四棱卡面块与其上的「维护者速读」,⛔ 不留待有人接手再补。
-- 决策卡的速读同题,用业务语言先讲事情与选项,末句只问一字:A/B/C 或是否。
+- 决策卡速读居四棱块之上、同题,用业务语言先讲事情与选项,末句只问一字:A/B/C 或是否。
 - 首行写立卡门类别 ①–④;四类定义、⛔ 清单、三答与配额见 `references/filing-gate.md`。
 - `finding` = 三类内待定级:(a) 可复现缺陷(复现或失败探针);(b) 违背已声明契约(引契约文);
 - (c) AI 写元数据会被运行时拒收或静默丢弃的陷阱;其余进 PR `## Acceptance notes`,⛔ 不立卡。
@@ -51,9 +53,8 @@
 - 决策箱勤务:入箱校验/补全四棱块、速读与 `Prior rulings on this card:` 行;存量卡低频回填。
 - 入决策箱那一笔连「前提今天还成立吗」一起现读;改状态只需现读卡。
 - 线程有 `Ruling:`/RULED 的卡再入箱,该行逐 id 各一句变化;缺行 ⇒ 拒入,`pm:retriage` 回立卡者。
-- `type`(Bug/Feature/Task)是分诊固定产出,分诊席唯一权威生产;立单者可预填,分诊校正。
+- `type`(Bug/Feature/Task)立单者可预填、分诊校正;新卡即时打,存量卡 ⛔ 不回填、下次碰到补。
 - 判据:违背已声明契约 ⇒ `Bug`,扩大接受集/公开面越出已声明 ⇒ `Feature`,其余 ⇒ `Task`。
-- ⛔ 不回填存量 backlog 的 type;新卡即时打、存量卡下次碰到补。
 - 定级按北极星「优先级」1–3 条;首行 `Path: <定义项> | <清单项 id/缺项> | P<路步> | none`。
 - 定义项取北极星「做出来的是什么」或仪器卡的车队决定;无则关;`none` 非分诊缺口。
 - 清单项三态定级(会 fail / 步骤够不到 / 无项断言)与定级判据见 `references/filing-gate.md`。
@@ -85,7 +86,6 @@
 - 车道席可附证据/前提重验,⛔ 不定级不改标;skills 车道 finding 由该席自分诊,全仓轮跳过。
 - 域分批与 sweep 打包晋级五条照用;每批约定与积压告警见 `references/dispatch-runbook.md`。
 - `pm:retriage` 每 fire 先答异议评论所求,答后同笔摘标;须维护者答的进收件箱,标照摘。
-- retriage 维持或改判皆由分诊席同笔摘标;挂标归异议席。
 - retriage 的异议判据认内容(有评论写明所求)⛔ 不认形状(有一条异议评论)。
 - 发版板 `target:<major>`:判据二元,⛔ 不做优先级渐变:不修它,当前 RC 能不能发。
 - 判阻塞四类:① 用户今天就撞的已发布面缺陷;② 公开契约 declared≠enforced。

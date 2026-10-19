@@ -18,7 +18,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_record_share: {
     label: "Record Share",
     pluralLabel: "Record Shares",
-    description: "Per-record sharing grant — extends OWD with explicit access",
+    description: "Records shared beyond their owner, one row per grant.",
     fields: {
       id: {
         label: "Share ID"

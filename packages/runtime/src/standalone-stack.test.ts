@@ -15,7 +15,7 @@
 // owner-only `member_default`.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createStandaloneStack } from './standalone-stack.js';
@@ -357,9 +357,30 @@ describe('createStandaloneStack — default datasource declared, built via the s
       (e: unknown) => e as Error,
     );
     expect(err, 'createStandaloneStack accepted memory://').toBeInstanceOf(Error);
-    expect(err!.message).toContain('"memory://default-driver"');
+    // The scheme, never the URL: what follows `//` is where a credential rides
+    // (standalone-stack-url-refusal-credentials.test.ts holds that per door).
+    expect(err!.message).toContain('"memory://" scheme');
+    expect(err!.message).not.toContain('default-driver');
     expect(err!.message).toContain('--fresh');
     expect(err!.message).toContain(':memory:');
+  }, BOOT_TIMEOUT);
+
+  // The boot's own door to the unsupported-scheme refusal: refused before a
+  // definition exists, naming the scheme, and no credential in the URL reaches
+  // the error the CLI prints.
+  it('an unsupported scheme → refused before any definition is declared, naming the scheme and never the URL', async () => {
+    const err = await createStandaloneStack({
+      databaseUrl: 'redis://PLACEHOLDER-USER:PLACEHOLDER-SECRET@127.0.0.1:6399/0?authToken=PLACEHOLDER-TOKEN',
+    }).then(
+      () => null,
+      (e: unknown) => e as Error,
+    );
+    expect(err, 'createStandaloneStack accepted redis://').toBeInstanceOf(Error);
+    expect(err!.message).toContain('Unsupported database URL scheme "redis://"');
+    const everything = JSON.stringify(err, Object.getOwnPropertyNames(err));
+    for (const placeholder of ['PLACEHOLDER-USER', 'PLACEHOLDER-SECRET', 'PLACEHOLDER-TOKEN']) {
+      expect(everything).not.toContain(placeholder);
+    }
   }, BOOT_TIMEOUT);
 
   it(':memory: → declares driver "sqlite" on SQLite\'s in-memory database; factory builds SqlDriver that round-trips', async () => {
@@ -374,6 +395,27 @@ describe('createStandaloneStack — default datasource declared, built via the s
     expect(r.driverId).toBe('sqlite');
     expect(r.kind).toMatch(/SqlDriver$/);
     expect(r.titles).toContain('hello-driver');
+  }, BOOT_TIMEOUT);
+
+  // An upper-case `FILE:` is the same file as `file:`, and the boot's directory
+  // preparation creates no `FILE:` directory on the way. Run from an empty cwd:
+  // the prefix used to survive into the relative filename, so the directory it
+  // made landed beside the process.
+  it('FILE: → declares the same file as file: and creates no FILE: directory', async () => {
+    const cwd = process.cwd();
+    const work = mkdtempSync(join(tmpdir(), 'os-file-url-case-'));
+    process.chdir(work);
+    try {
+      const upper = defaultDefOf(await createStandaloneStack({ databaseUrl: 'FILE:./upper/x.db' })).def;
+      const lower = defaultDefOf(await createStandaloneStack({ databaseUrl: 'file:./upper/x.db' })).def;
+      expect(upper.driver).toBe('sqlite');
+      expect(upper.config?.filename).toBe('./upper/x.db');
+      expect(upper.config?.filename).toBe(lower.config?.filename);
+      expect(readdirSync(work).filter((name) => /^file:/i.test(name))).toEqual([]);
+    } finally {
+      process.chdir(cwd);
+      rmSync(work, { recursive: true, force: true });
+    }
   }, BOOT_TIMEOUT);
 
   it('databaseDriver:sqlite-wasm → declares driver "sqlite-wasm"; factory builds SqliteWasmDriver that round-trips', async () => {

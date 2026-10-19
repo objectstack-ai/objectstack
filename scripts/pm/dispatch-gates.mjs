@@ -446,7 +446,7 @@ import {
 // this constant, so a repo that ever renumbered the class would move this tool
 // with it instead of leaving a stale 3 behind in a second copy (#17204).
 import { EXIT_PREREQUISITE_NOT_MET } from '../import-prerequisite.mjs';
-import { blank, maskComments, scanSource } from '../js-comment-mask.mjs';
+import { blank, maskComments, maskCommentsAndLiterals, scanSource } from '../js-comment-mask.mjs';
 import { invokedAs, isEntrypoint } from '../invoked-as.mjs';
 // The human-merge line threshold is declared ONCE, in the landing gate; this
 // tool prints the same reading at dispatch time and never carries a second copy.
@@ -1187,6 +1187,15 @@ export function extractTriggerPaths(workflowText) {
  * of it before the red lands on `main`. Refusing it would drop the console and
  * dogfood leads this function exists to give. Any other event term, a reordered
  * clause or one event alone is still refused whole.
+ *
+ * ⛔ Stripped is not FORGOTTEN (#24073). The clause decides nothing about paths,
+ * but it decides WHEN: such a job never runs on the PR or in the merge queue.
+ * `jobIfReading` below returns that fact beside the refs, and every row a
+ * path-scheduled job renders carries it to the line the reader reads. Measured
+ * before it did: a `packages/runtime/src/route-ledger.ts` change derived the
+ * Dogfood Regression Gate as "scheduled BY YOUR PATHS" with nothing saying the
+ * PR would never run it, and the first run of its pins was `main`'s push
+ * battery, red.
  */
 const JOB_IF_STATUS_TERM = /(?:^|\s)!\s*cancelled\(\)\s*&&\s*/g;
 const JOB_IF_FULL_BATTERY_TERM =
@@ -1201,12 +1210,27 @@ const JOB_FILTER_OUTPUT_TERM =
  * family keeps whatever verdict it had before.
  */
 export function jobFilterOutputRefs(ifExpression) {
+  return jobIfReading(ifExpression)?.refs ?? null;
+}
+
+/**
+ * The whole reading of a job `if:` — `{ refs, fullBatteryOnly }`, or null on
+ * exactly the refusals `jobFilterOutputRefs` makes, because that function IS
+ * this one with the second half dropped. `fullBatteryOnly` is true when the
+ * full-battery clause was stripped as the last conjunct: the job runs on
+ * `main`'s push and hourly runs and NEVER on a `pull_request` or `merge_group`
+ * event. It is read in the same pass as the refs, from the same text, so the
+ * population and the event fact cannot describe two different `if:`s.
+ */
+export function jobIfReading(ifExpression) {
   if (typeof ifExpression !== 'string') return null;
   let expr = ifExpression.trim();
   const wrapped = /^\$\{\{([\s\S]*)\}\}$/.exec(expr);
   if (wrapped) expr = wrapped[1].trim();
   expr = expr.replace(JOB_IF_STATUS_TERM, ' ').trim();
-  expr = expr.replace(JOB_IF_FULL_BATTERY_TERM, '').trim();
+  const eventFree = expr.replace(JOB_IF_FULL_BATTERY_TERM, '').trim();
+  const fullBatteryOnly = eventFree !== expr;
+  expr = eventFree;
   // One balanced outer paren pair at a time — `(A || B)` is the live spelling.
   for (;;) {
     if (!expr.startsWith('(') || !expr.endsWith(')')) break;
@@ -1227,7 +1251,7 @@ export function jobFilterOutputRefs(ifExpression) {
     if (!m) return null;
     refs.push({ job: m[1], output: m[2] });
   }
-  return refs.length ? refs : null;
+  return refs.length ? { refs, fullBatteryOnly } : null;
 }
 
 /**
@@ -1426,12 +1450,15 @@ const EXTGLOB_CONSTRUCT = /[!?*+@]\(/;
  * The path population a job's `if:` resolves to, or null — the whole of
  * direction 1, assembled from the three readings above.
  *
- * Returns `{ paths, outputs, dropped }`. `paths` is a UNION: the `if:` is an OR
- * of filter outputs, so CI schedules the job when ANY of them matched.
+ * Returns `{ paths, outputs, dropped, fullBatteryOnly }`. `paths` is a UNION:
+ * the `if:` is an OR of filter outputs, so CI schedules the job when ANY of them
+ * matched. `fullBatteryOnly` is `jobIfReading`'s event fact, carried so a row
+ * built from this population can say WHEN CI schedules it (#24073).
  */
 export function jobFilterPopulation(job, filterStepsByOutputSource) {
-  const refs = jobFilterOutputRefs(job.if);
-  if (!refs) return null;
+  const reading = jobIfReading(job.if);
+  if (!reading) return null;
+  const { refs, fullBatteryOnly } = reading;
   const paths = [];
   const outputs = [];
   let dropped = 0;
@@ -1450,12 +1477,12 @@ export function jobFilterPopulation(job, filterStepsByOutputSource) {
     }
     outputs.push(`${ref.job}.${ref.output}`);
   }
-  return paths.length ? { paths, outputs, dropped } : null;
+  return paths.length ? { paths, outputs, dropped, fullBatteryOnly } : null;
 }
 
 /**
  * Every job in one workflow whose `if:` resolves to a path population, WITH the
- * job's own text: `[{ job, name, text, outputs, paths, dropped }]`.
+ * job's own text: `[{ job, name, text, outputs, paths, dropped, fullBatteryOnly }]`.
  *
  * ⛔ No check filter here, and that is the whole reason this is its own
  * function. The caller below drops a job that invokes no discoverable check
@@ -2811,6 +2838,13 @@ export function alwaysRunSteps(entries) {
  * of it runs a command no discovered family accounts for. Both halves are
  * read off the workflow text on every run; nothing here is listed.
  *
+ * ⭐ And WHEN it is scheduled (#24073). A row whose job `if:` ended in the
+ * full-battery clause carries `fullBatteryOnly: true`, read by `jobIfReading`
+ * in the same pass as the population: CI schedules that job for your path on
+ * `main`'s push and hourly runs ONLY — never on this PR, never in the merge
+ * queue. Both renderings print it on the row's own line, so "scheduled BY YOUR
+ * PATHS" cannot be read as "this PR runs it".
+ *
  * ⛔ NOT claimed: that a row is a test, a build or a setup step.
  * `alwaysRunLines` refuses that classification for its own rows and the reason
  * carries unchanged — every rule that separates them is a guess about a step's
@@ -2896,7 +2930,10 @@ export function jobFilteredSteps(entries, paths) {
       }
       if (steps.length === 0) continue;
       counts.named += 1;
-      rows.push({ workflow: file, job: job.name, outputs: job.outputs, hits, dropped: job.dropped, steps });
+      rows.push({
+        workflow: file, job: job.name, outputs: job.outputs, hits, dropped: job.dropped,
+        fullBatteryOnly: job.fullBatteryOnly === true, steps,
+      });
     }
   }
   return { rows, counts };
@@ -9316,7 +9353,7 @@ export function governedReadCensus({ files = null, read = null } = {}) {
  * quoted literal that `resolvePathExpression` refuses by construction, so
  * admitting them would add a scan that cannot return a target: dead code that
  * reads as coverage. Live specimens of the refused class in this tree, both
- * shell-quoted: `pnpm -s ${script}` and `git rev-parse --show-toplevel`.
+ * shell-quoted: `pnpm --silent ${script}` and `git rev-parse --show-toplevel`.
  *
  * THE PROGRAM POSITION ONLY — argument 0, plus the elements of an argv ARRAY
  * LITERAL in argument 1. That is where a program path is; an options object is
@@ -10572,6 +10609,172 @@ export function emitsAnHttpStatus(path, readSource = readTrackedSource) {
 }
 
 /**
+ * Does this file hold a `try`/`catch` AND spell a durability-critical callee
+ * the durability guard declares? This is the content trigger for
+ * `check:durability-log-level` (#23584), and the third CONTENT predicate,
+ * beside the code and status predicates above.
+ *
+ * ## Why no path derivation names this gate
+ *
+ * The guard runs two rules. Its read-seam rule walks three package source
+ * roots that it spells as literals, so a card touching those already reaches
+ * the matched column by path. Its log-level rule walks the bare package root
+ * and admits every non-test `.ts` source under it: 3206 tracked files at
+ * 16abea884, which is 34.8% of the files under that root. Four sibling gates
+ * walk that root the same way, and the bare-root ledger records each of them
+ * REFUSE-WIDE in `CENSUS_REFUSE_WIDE`. The wide-population ruling (decision
+ * batch #43) keeps such a root out of the matched column and out of
+ * `--commands`. So,
+ * for a file outside the three read-seam roots, the guard scored `silent` on
+ * every card. PR #23567 paid a CI round trip for that silence, on the
+ * `saveMetaItem` seam in the runtime's automation domain.
+ *
+ * ## What it matches, and why the vocabulary is READ rather than copied
+ *
+ * A log-level finding needs two things in ONE file. The first is a catch
+ * clause. The second is a call, in that clause's `try`, that resolves to a name
+ * in the guard's `DURABILITY_CRITICAL_CALLEES`. The guard resolves that call
+ * through the call's own spelling, a `const` alias or a `.call`/`.apply`/`.bind`
+ * adapter, and every one of those spells the name somewhere in the same file. So
+ * the two limbs read those two facts, and neither one grades the catch:
+ *
+ *   - CATCH CLAUSE: the keyword followed by its binding or its block. A promise
+ *     `.catch(` is not a clause and the guard never judges one.
+ *   - VOCABULARY: any declared callee name, as a whole word, anywhere in the
+ *     comment-masked source. An import specifier and a `const` alias count.
+ *
+ * The names come from the guard's own source, from the file its discovered
+ * family resolves to. They are never mirrored here. A callee added to that
+ * table is in this net on the next run, and nothing here has to move. The read
+ * keys on the table's NAME. A guard that renames the table, or stops spelling
+ * its keys as quoted words, makes this THROW, naming both. That is the loud
+ * direction, the same contract `rootTsconfigExcludeEntries` states. The read
+ * runs only for a non-test TypeScript path that already holds a catch clause.
+ * A card touching no such file never pays for it and never meets the throw.
+ *
+ * ## Measured, so a widening or narrowing has a number to beat
+ *
+ * At 16abea884, over 3441 non-test TypeScript files:
+ *
+ *   - THIS predicate matches 43 (1.2%). Every one is inside the guard's own
+ *     population. The guard's `--list` reports 46 log-level seams in 28 files,
+ *     and all 28 match, so recall over what this rule can fail on is complete.
+ *     28 of the 43 hold a seam (65%).
+ *   - A catch clause ALONE matches 705 (20.5%), at 4% precision. Over the last
+ *     300 first-parent commits on main, judged against today's content of the
+ *     paths each touched, it fires for 169 (56.3%) against 72 (24.0%) for this
+ *     predicate. That is the REFUSE-WIDE trade under another name, so this
+ *     entry declines it.
+ *
+ * The false-positive trade is the code predicate's. One wasted run costs about
+ * six seconds of a gate that needs no build. A miss costs a CI round trip.
+ *
+ * ## What it cannot see, said out loud
+ *
+ * A file with nothing on disk answers false, as in both predicates above. ⛔
+ * Do not close that by falling back to a path. One more shape can red the guard
+ * with no vocabulary name left in the file: a diff that deletes the last
+ * declared call from a function named in `FAILURE_PROPAGATION_SITES`, which
+ * leaves that entry stale. One such entry sits outside the read-seam roots
+ * today. The edit that strands it removes the very token this predicate reads,
+ * and the guard's own failure text names the entry to delete.
+ */
+export const DURABILITY_SEAM_GATE = 'check:durability-log-level';
+const DURABILITY_CALLEE_TABLE = 'DURABILITY_CRITICAL_CALLEES';
+const DURABILITY_CATCH_CLAUSE = /(?<!\.\s*)\bcatch\s*[({]/;
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * The KEYS of `const NAME = new Map([...])` in a module's source, in
+ * declaration order. Null when the module declares no such table.
+ *
+ * Bracket depth is counted on the comment-and-literal mask, so a bracket
+ * inside a reason string or a comment opens nothing. Each tuple's key is then
+ * read out of the ORIGINAL source between its quote delimiters, which that mask
+ * keeps. A tuple whose key is not a quoted identifier THROWS: the table's shape
+ * has moved, and returning fewer names would narrow the predicate silently.
+ *
+ * @param {string} source
+ * @param {string} name
+ * @returns {string[] | null}
+ */
+export function declaredMapKeys(source, name) {
+  const code = maskCommentsAndLiterals(source);
+  const decl = new RegExp(`\\b(?:const|let|var)\\s+${name}\\s*=\\s*new\\s+Map\\s*\\(\\s*\\[`).exec(code);
+  if (!decl) return null;
+  const keys = [];
+  let depth = 1;
+  for (let i = decl.index + decl[0].length; i < code.length && depth > 0; i++) {
+    const c = code[i];
+    if (c === ']' || c === ')' || c === '}') {
+      depth -= 1;
+      continue;
+    }
+    if (c !== '[' && c !== '(' && c !== '{') continue;
+    depth += 1;
+    if (c !== '[' || depth !== 2) continue;
+    const lead = /^\s*(['"`])/.exec(code.slice(i + 1, i + 200));
+    const close = lead ? code.indexOf(lead[1], i + 1 + lead[0].length) : -1;
+    const key = close > 0 ? source.slice(i + 1 + lead[0].length, close) : null;
+    if (key === null || !IDENTIFIER.test(key)) {
+      throw new Error(
+        `dispatch-gates: an entry of ${name} has no quoted identifier as its key ` +
+          `(${JSON.stringify(source.slice(i, i + 60))}), so its callee names cannot be read`,
+      );
+    }
+    keys.push(key);
+  }
+  return keys;
+}
+
+/**
+ * The guard's declared durability-critical callee names, read once per process
+ * from the file `DURABILITY_SEAM_GATE`'s discovered family resolves to.
+ */
+let durabilityCallees = null;
+export function durabilityCriticalCallees(families = null) {
+  if (!families && durabilityCallees) return durabilityCallees;
+  const entry = (families ?? discoverFamilies()).byCheck.get(DURABILITY_SEAM_GATE);
+  if (!entry) {
+    throw new Error(
+      `dispatch-gates: no workflow runs ${DURABILITY_SEAM_GATE} any more, so the durability-seam change kind cannot read ` +
+        `${DURABILITY_CALLEE_TABLE}. Re-point DURABILITY_SEAM_GATE at the gate's new name, or delete the kind with the gate`,
+    );
+  }
+  const names = [];
+  for (const file of entry.files ?? []) {
+    const source = readTrackedSource(file);
+    const keys = source === null ? null : declaredMapKeys(source, DURABILITY_CALLEE_TABLE);
+    if (keys) names.push(...keys);
+  }
+  if (names.length === 0) {
+    throw new Error(
+      `dispatch-gates: ${DURABILITY_SEAM_GATE} resolves to ${(entry.files ?? []).join(', ') || 'no file'}, and none of them ` +
+        `declares a non-empty ${DURABILITY_CALLEE_TABLE} map, so the durability-seam change kind has no vocabulary to read. ` +
+        'The table was renamed or reshaped: move this reader with it',
+    );
+  }
+  if (!families) durabilityCallees = names;
+  return names;
+}
+
+export function guardsADurabilityCriticalCall(path, readSource = readTrackedSource, callees = durabilityCriticalCallees) {
+  if (!/\.[cm]?tsx?$/.test(path) || /\.d\.[cm]?ts$/.test(path)) return false;
+  if (isTestFilePath(path)) return false;
+  const source = readSource(path);
+  if (source === null || source === undefined) return false;
+  // Masked for the code predicate's reason: a catch or a callee DISCUSSED in
+  // prose is neither a clause nor a call.
+  const masked = maskedComments(source);
+  if (!DURABILITY_CATCH_CLAUSE.test(masked)) return false;
+  const names = callees();
+  // An empty alternation matches the empty string at every word boundary, so
+  // an empty vocabulary must answer false here rather than reach every file.
+  if (names.length === 0) return false;
+  return new RegExp(`\\b(?:${names.map((n) => n.replace(/\$/g, '\\$')).join('|')})\\b`).test(masked);
+}
+
+/**
  * Is this path inside the ROOT package's tsc program — the population behind
  * the `@objectstack/spec-monorepo` entry of `check:type-check-debt`?
  *
@@ -10846,6 +11049,7 @@ const CHANGE_KIND_PREDICATES = Object.freeze({
   'root-ts-program': (path) => isInRootTsProgram(path, rootTsProgramExcludedDirs()),
   'error-code-literal': stampsAnErrorCodeLiteral,
   'http-status-emit': emitsAnHttpStatus,
+  'durability-seam': guardsADurabilityCriticalCall,
 });
 
 export function bindChangeKindRows(rows, predicates = CHANGE_KIND_PREDICATES) {
@@ -11294,6 +11498,37 @@ export function alwaysRunLines(rows, counts) {
 }
 
 /**
+ * The WHEN of a path-scheduled job row, as the one clause both renderings print
+ * on that row's own line (#24073) — or the empty string when the row's job runs
+ * on the PR like any other.
+ *
+ * Read off `row.fullBatteryOnly`, the fact `jobIfReading` took from the job's
+ * own `if:`; ⛔ never keyed on a job name, so a job that gains or loses the
+ * full-battery clause gains or loses the clause here with nothing to update.
+ * The reader it exists for: a dev whose path schedules the Dogfood Regression
+ * Gate, told only "scheduled BY YOUR PATHS", inferred that the PR would run its
+ * pins — and the first run was `main`'s push battery, red.
+ */
+export function fullBatteryOnlyClause(row) {
+  if (row?.fullBatteryOnly !== true) return '';
+  return '⛔ does NOT run on this PR or in the merge queue: its `if:` excludes the pull_request and merge_group events,' +
+    " so its first run on this change is `main`'s push battery, AFTER the merge";
+}
+
+/**
+ * One path-scheduled job row as `--commands` / `--json` print it on stderr — a
+ * named reader rather than an inline template so the line a dispatch is built
+ * from is the line the self-test pins. The WHEN clause sits directly after the
+ * job name, ahead of the step list, because a long step list is where a
+ * trailing clause goes unread.
+ */
+export function jobFilteredNotMeasuredLine(row) {
+  const when = fullBatteryOnlyClause(row);
+  return `      ⊘ NOT MEASURED — [${row.workflow} · ${row.job}]${when ? ` ${when} —` : ''} ${row.steps.length} step(s):` +
+    ` ${row.steps.map((s) => s.step).join(' · ')}`;
+}
+
+/**
  * The path-scheduled CI jobs, rendered (#16285) — printed BELOW the
  * reconciliation, because everything under that total names something OUTSIDE
  * this card's runnable answer and these rows are outside it by construction:
@@ -11335,8 +11570,9 @@ export function jobFilteredStepLines(rows, counts) {
     '  ⛔ NOT runnable and ⛔ NOT in --commands: every row is CI\'s own shell in CI\'s environment. They sit OUTSIDE the runnable',
     '    total above — running every family named there does NOT cover them, which is the gap this block exists to close.',
     '  ⛔ NOT classified into tests, builds and setup — the same refusal the always-runs tail makes, for the same reason: every rule',
-    '    that tells them apart is a guess about a step\'s intent. What is claimed for a row is only what was measured — YOUR path puts',
-    '    this job on the PR, and nothing above names a family for this step. The reader judges the rest.',
+    '    that tells them apart is a guess about a step\'s intent. What is claimed for a row is only what was measured — YOUR path',
+    '    schedules this job (on this PR unless its row says it does NOT), and nothing above names a family for this step.',
+    '    The reader judges the rest.',
     '  ⇒ The always-runs tail below is the OTHER half of this partition: it reads the jobs CI cannot narrow by path, this one reads',
     '    the jobs your paths narrow it TO — and a job carrying an `if:` is excluded there, which is every job on this list.',
   ];
@@ -11349,8 +11585,10 @@ export function jobFilteredStepLines(rows, counts) {
   for (const row of rows) {
     const via = row.hits.map((h) => `${h.path} ⇢ '${h.pattern}'`).join('; ');
     const dropped = row.dropped ? `, ${row.dropped} glob(s) of it untranslatable and dropped` : '';
+    const when = fullBatteryOnlyClause(row);
     lines.push(
-      `  - [${row.workflow} · ${row.job}]   scheduled by ${via}   (job \`if:\` reads ${row.outputs.join(', ')}${dropped})`,
+      `  - [${row.workflow} · ${row.job}]   scheduled by ${via}   (job \`if:\` reads ${row.outputs.join(', ')}${dropped})` +
+        `${when ? `   ${when}` : ''}`,
     );
     for (const { step, commands } of row.steps) {
       lines.push(`      · ${step}`);
@@ -11619,13 +11857,18 @@ export function residueLines(
 
 /**
  * The single source of truth for the model tier the PM lane's governance
- * reads — clause ②'s CONTRACT-REVIEW tier: the tier the clause-② REVIEW runs
- * at, both halves of it — the spec and skills lanes' review of every round
- * they deliver (a card that WIDENS a published accept set or the public
- * surface is spec-lane work, whichever seat found it; a card that only
- * NARROWS one is not, and owes one contract-review-tier review before the
- * queue while staying in its lane) and the `Served-tier:` line every
- * `## Contract review` record carries. The
+ * reads — clause ②'s CONTRACT-REVIEW tier: the tier a contract review runs at
+ * when the face that made it owed is a published schema or governed rules
+ * text, and the `Served-tier:` line that review's `## Contract review` record
+ * carries. The review is owed by SURFACE, never by lane, and served at the
+ * tier of the face that made it owed (ruling record 6159870311, letter B′
+ * with C): `reviewFace` in `record-recognisers.mjs` holds the mapping, and a
+ * review owed ONLY by a `Clause-②: yes` declaration is served at
+ * `TIER_DEFAULT` by the lane seat, as its own review of record. No lane names
+ * this tier. As the `--tier` note spells it, a card that WIDENS a published
+ * accept set or the public surface is spec-lane work, whichever seat found
+ * it; a card that only NARROWS one is `Clause-②: no`, stays in its lane, and
+ * owes one contract-review-tier review before the queue. The
  * BUILD of such a card is at the default judgment tier, so
  * this constant is a review tier and never a dispatch mandate. Declared HERE
  * and only here, as a constant, so a model upgrade is a one-line change in one
@@ -14174,12 +14417,7 @@ export function machineReadableOutput(mode, { paths, size = null, matchedRows, k
         ` — ${mode === 'json' ? 'under jobFilteredSteps, not in commands' : 'NOT above'}. They are CI's own shell in CI's environment,` +
         ' so there is no local invocation to hand you, and running every command on stdout does ⛔ NOT cover them.',
     );
-    for (const row of jobFiltered.rows) {
-      console.error(
-        `      ⊘ NOT MEASURED — [${row.workflow} · ${row.job}] ${row.steps.length} step(s):` +
-          ` ${row.steps.map((s) => s.step).join(' · ')}`,
-      );
-    }
+    for (const row of jobFiltered.rows) console.error(jobFilteredNotMeasuredLine(row));
     console.error('      ⇒ Run without --commands/--json to see each step printed as CI spells it.');
   }
   // ⭐ The SEVENTH thing stdout deliberately omits (#19172) — and the lane this

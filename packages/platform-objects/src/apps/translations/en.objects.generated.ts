@@ -35,7 +35,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       role: {
         label: "Platform Role",
-        help: "Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it (ADR-0068 D2). To grant platform-admin standing, list the user's verified email in `OS_PLATFORM_OWNER_EMAIL`; under the `single` tenancy posture an unscoped `admin_full_access` assignment in `sys_user_permission_set` also confers it."
+        help: "Legacy better-auth role scalar (admin, user, …). ObjectStack no longer writes it. To grant platform-admin standing, list the user's verified email in `OS_PLATFORM_OWNER_EMAIL`; under the `single` tenancy posture an unscoped `admin_full_access` assignment in `sys_user_permission_set` also confers it."
       },
       banned: {
         label: "Banned",
@@ -97,11 +97,11 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       manager_id: {
         label: "Manager",
-        help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks (ADR-0057 / @objectstack/security-enterprise)."
+        help: "This user's direct manager. Forms the reporting chain the `own_and_reports` hierarchy scope walks."
       },
       primary_business_unit_id: {
         label: "Primary Business Unit",
-        help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing (ADR-0057 addendum D12). Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
+        help: "The user's primary business unit — a denormalised projection of sys_business_unit_member.is_primary, maintained by plugin-sharing. Lets a user-lookup filter candidates by business unit without traversing the membership junction. Do not edit directly; set it via business-unit membership."
       },
       source: {
         label: "Identity Source",
@@ -142,7 +142,17 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}"
+        successMessage: "Invitation sent to ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Owner",
+              admin: "Admin",
+              delegated_admin: "Delegated Admin",
+              member: "Member"
+            }
+          }
+        }
       },
       ban_user: {
         label: "Ban User",
@@ -537,7 +547,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       parent_organization_id: {
         label: "Parent Organization",
-        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6)."
+        help: "Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference."
       },
       sort_order: {
         label: "Sort Order",
@@ -559,6 +569,21 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       }
     },
     _actions: {
+      invite_user: {
+        label: "Invite User",
+        description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
+        successMessage: "Invitation sent to ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Owner",
+              admin: "Admin",
+              delegated_admin: "Delegated Admin",
+              member: "Member"
+            }
+          }
+        }
+      },
       create_organization: {
         label: "Create Organization",
         successMessage: "Organization created"
@@ -576,15 +601,19 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Set Active",
         successMessage: "Active organization switched"
       },
-      leave_organization: {
-        label: "Leave Organization",
-        confirmText: "Leave this organization? You will lose access to all of its resources.",
-        successMessage: "You have left the organization"
+      rename_organization: {
+        label: "Rename Organization",
+        successMessage: "Organization renamed"
       },
       change_slug: {
         label: "Change Slug",
         description: "Renaming the slug rewrites every platform subdomain for this org and parks the old slug for 90 days. Continue?",
         successMessage: "Organization slug changed"
+      },
+      leave_organization: {
+        label: "Leave Organization",
+        confirmText: "Leave this organization? You will lose access to its environments and members.",
+        successMessage: "You have left the organization"
       }
     }
   },
@@ -633,7 +662,17 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}"
+        successMessage: "Invitation sent to ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Owner",
+              admin: "Admin",
+              delegated_admin: "Delegated Admin",
+              member: "Member"
+            }
+          }
+        }
       },
       add_member: {
         label: "Add Member",
@@ -649,9 +688,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         successMessage: "Member removed"
       },
       transfer_ownership: {
-        label: "Transfer Ownership",
-        confirmText: "Transfer ownership of this organization to the selected member? You will be demoted to admin and lose owner-only privileges.",
-        successMessage: "Ownership transferred"
+        label: "Make Owner",
+        confirmText: "Make the selected member an owner of this organization? They get every owner privilege, including deleting the organization. You stay an owner too; to step down, use Change Role on your own membership.",
+        successMessage: "Member is now an owner"
       }
     }
   },
@@ -710,32 +749,58 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       business_unit_id: {
         label: "Placement Business Unit",
-        help: "Business unit the invitee is placed under on acceptance (ADR-0105 D8). Must lie inside the issuer's delegated subtree."
+        help: "Business unit the invitee is placed under on acceptance. Must lie inside the issuer's delegated subtree."
       },
       positions: {
         label: "Placement Positions",
-        help: "Position names assigned on acceptance (ADR-0105 D8). Every position's permission sets must be allowlisted by the issuer's adminScope."
+        help: "Position names assigned on acceptance. Every position's permission sets must be allowlisted by the issuer's adminScope."
       }
     },
     _views: {
       pending: {
-        label: "Pending"
+        label: "Pending",
+        emptyState: {
+          title: "No pending invitations",
+          message: "An invitation stays here until it is accepted, declined or canceled, or until it expires."
+        }
       },
       accepted: {
-        label: "Accepted"
+        label: "Accepted",
+        emptyState: {
+          title: "No accepted invitations",
+          message: "An invitation moves here when the person accepts it and joins the organization."
+        }
       },
       expired: {
-        label: "Expired / Canceled"
+        label: "Expired / Canceled",
+        emptyState: {
+          title: "No expired or canceled invitations",
+          message: "Invitations that expired, were declined or were canceled are kept here."
+        }
       },
       all_invitations: {
-        label: "All"
+        label: "All",
+        emptyState: {
+          title: "No invitations yet",
+          message: "Every invitation to join an organization is listed here, whatever its status."
+        }
       }
     },
     _actions: {
       invite_user: {
         label: "Invite User",
         description: "Invite someone by email address. They join this organization with the chosen role when they accept the invitation.",
-        successMessage: "Invitation sent to ${result.email}"
+        successMessage: "Invitation sent to ${result.email}",
+        params: {
+          role: {
+            options: {
+              owner: "Owner",
+              admin: "Admin",
+              delegated_admin: "Delegated Admin",
+              member: "Member"
+            }
+          }
+        }
       },
       cancel_invitation: {
         label: "Cancel Invitation",
@@ -848,7 +913,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_business_unit: {
     label: "Business Unit",
     pluralLabel: "Business Units",
-    description: "Canonical Business Unit tree — hierarchical org/data-partition node (company / division / department / region / office). ADR-0057 D2.",
+    description: "Your company structure — divisions, departments, regions and offices — used to scope data and reports.",
     fields: {
       name: {
         label: "Name"
@@ -1008,6 +1073,13 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       revoked: {
         label: "Revoked"
       },
+      revoked_reason: {
+        label: "Revoke Reason",
+        help: "Set when an administrator's forced password reset revoked this key. Only a platform administrator can restore such a key; its owner creates a new one. Cleared when the key is restored. Empty for a key revoked from the API Keys list.",
+        options: {
+          admin_password_reset: "Administrator password reset"
+        }
+      },
       key: {
         label: "Hashed Key",
         help: "Hashed API key value — never exposed to clients"
@@ -1024,19 +1096,47 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_keys: {
-        label: "All"
+        label: "All",
+        emptyState: {
+          title: "No API keys yet",
+          message: "Create a key for scripts and integrations with Create Key; the key is shown once, when it is created."
+        }
       },
       mine: {
-        label: "My Keys"
+        label: "My Keys",
+        emptyState: {
+          title: "You have no API keys yet",
+          message: "Create a key for your scripts and integrations with Create Key; the key is shown once, when it is created."
+        }
       },
       active: {
-        label: "Active"
+        label: "Active",
+        emptyState: {
+          title: "No active API keys",
+          message: "Every key that has not been revoked is listed here."
+        }
       },
       revoked: {
-        label: "Revoked"
+        label: "Revoked",
+        emptyState: {
+          title: "No revoked keys",
+          message: "A key moves here when it is revoked; clients using it lose access until it is restored."
+        }
       }
     },
     _actions: {
+      create_api_key: {
+        label: "Create Key",
+        description: "Create a key for a script or integration. The key acts as you, with your access, in the organization you are working in now.",
+        resultDialog: {
+          title: "API key created",
+          description: "Copy the key now — it is shown only once and cannot be recovered. If it leaks, revoke it and create a new one.",
+          acknowledge: "I have saved the key",
+          fields: {
+            key: "API Key"
+          }
+        }
+      },
       revoke_api_key: {
         label: "Revoke API Key",
         confirmText: "Revoke this API key? Any clients using it will immediately lose access.",
@@ -1388,16 +1488,32 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
     },
     _views: {
       all_apps: {
-        label: "All"
+        label: "All",
+        emptyState: {
+          title: "No OAuth applications yet",
+          message: "Register an application to let its clients sign users in with this system."
+        }
       },
       mine: {
-        label: "My Applications"
+        label: "My Applications",
+        emptyState: {
+          title: "You have no OAuth applications yet",
+          message: "Applications you register are listed here."
+        }
       },
       active: {
-        label: "Active"
+        label: "Active",
+        emptyState: {
+          title: "No active OAuth applications",
+          message: "An application stays active until it is disabled; disabled applications are listed under Disabled."
+        }
       },
       disabled_apps: {
-        label: "Disabled"
+        label: "Disabled",
+        emptyState: {
+          title: "No disabled OAuth applications",
+          message: "An application moves here when it is disabled; its clients cannot sign in until it is enabled again."
+        }
       }
     },
     _actions: {
@@ -1490,7 +1606,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "Reference ID",
-        help: "Caller-supplied correlation identifier"
+        help: "Organization bound by the consent this token was issued under; empty when none was bound"
       },
       authorization_code_id: {
         label: "Authorization Code ID",
@@ -1550,7 +1666,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "Reference ID",
-        help: "Caller-supplied correlation identifier"
+        help: "Organization bound by the consent that started this refresh family; empty when none was bound"
       },
       authorization_code_id: {
         label: "Authorization Code ID",
@@ -1618,7 +1734,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       reference_id: {
         label: "Reference ID",
-        help: "Caller-supplied correlation identifier"
+        help: "Organization this consent binds: the consenting user's active organization at consent; empty when none was active"
       },
       resources: {
         label: "Resources",
@@ -1778,7 +1894,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_sso_provider: {
     label: "SSO Provider",
     pluralLabel: "SSO Providers",
-    description: "External SSO identity providers (OIDC / SAML) this environment federates login to",
+    description: "External SSO identity providers (OIDC / SAML) this system federates login to",
     fields: {
       id: {
         label: "ID"
@@ -1797,7 +1913,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       domain_verified: {
         label: "Domain Verified",
-        help: "Whether DNS ownership of the email domain has been proven (ADR-0135 D6). Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment."
+        help: "Whether DNS ownership of the email domain has been proven. Set by “Verify Domain” after the DNS TXT record resolves. Managed by better-auth — not directly editable. Only enforced when domain verification is enabled for the environment."
       },
       oidc_config: {
         label: "OIDC Config",
@@ -1849,7 +1965,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           clientId: {
             label: "Client ID",
-            helpText: "OAuth client ID issued by the IdP for this environment."
+            helpText: "OAuth client ID issued by the IdP for this system."
           },
           clientSecret: {
             label: "Client Secret",
@@ -2356,7 +2472,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_notification: {
     label: "Notification Event",
     pluralLabel: "Notification Events",
-    description: "Notification events — one row per emit() (ADR-0030 Layer 2 ingress)",
+    description: "Every notification the platform sent, one row per event.",
     fields: {
       id: {
         label: "Notification ID"
@@ -2891,7 +3007,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       undo_log: {
         label: "Undo Log",
-        help: "Reversal instructions ({created:[ids], updated:[{id,before}]}) captured for small non-dry-run jobs so the import can be undone"
+        help: "Reversal instructions ({created:[ids], updated:[{id,before}]}) captured for small non-dry-run jobs so the import can be undone. A partial undo keeps only the unreverted rows here, with a failures list giving each one's id, action, code and refusal"
       },
       reverted_at: {
         label: "Reverted At",
@@ -2982,13 +3098,9 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           deprecated: "deprecated"
         }
       },
-      organization_id: {
-        label: "Organization",
-        help: "Organization for multi-tenant isolation."
-      },
       environment_id: {
         label: "Environment (deprecated)",
-        help: "DEPRECATED. Use organization_id for tenant isolation."
+        help: "DEPRECATED. Overlays are environment rows; no tenant column."
       },
       version: {
         label: "Version"
@@ -3037,7 +3149,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_history: {
     label: "Metadata History",
     pluralLabel: "Metadata History",
-    description: "Durable event log of metadata overlay changes (per-org, append-only)",
+    description: "Durable event log of metadata overlay changes (environment-wide, append-only)",
     fields: {
       id: {
         label: "ID"
@@ -3082,10 +3194,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       source: {
         label: "Source"
       },
-      organization_id: {
-        label: "Organization",
-        help: "Organization for multi-tenant isolation."
-      },
       recorded_by: {
         label: "Recorded By",
         help: "User who made this change. NULL = system-initiated (boot sync, migration, scheduled job) — never a sentinel string."
@@ -3098,7 +3206,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_metadata_audit: {
     label: "Metadata Audit",
     pluralLabel: "Metadata Audit",
-    description: "Append-only audit trail of metadata write decisions (ADR-0010).",
+    description: "Append-only audit trail of metadata write decisions.",
     fields: {
       id: {
         label: "ID"
@@ -3118,9 +3226,6 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       name: {
         label: "Name"
-      },
-      organization_id: {
-        label: "Organization"
       },
       operation: {
         label: "Operation",

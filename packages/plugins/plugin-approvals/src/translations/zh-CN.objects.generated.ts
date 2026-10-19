@@ -35,6 +35,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "来源",
         help: "请求来源 —— 节点驱动的审批为 `flow:<flowName|nodeId>`"
       },
+      process_label: {
+        label: "流程",
+        help: "打开此请求的流程标签，记录的是请求打开时的值"
+      },
       object_name: {
         label: "对象"
       },
@@ -70,6 +74,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "当前步骤",
         help: "当前等待审批的步骤机器名称"
       },
+      current_step_label: {
+        label: "审批步骤",
+        help: "当前等待审批的步骤标签，记录的是请求进入该步骤时的值"
+      },
       current_step_index: {
         label: "当前步骤索引"
       },
@@ -77,21 +85,25 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "待审批人",
         help: "可在当前步骤执行操作的用户 ID，逗号分隔"
       },
+      pending_approver_labels: {
+        label: "等待审批人",
+        help: "请求正在等待的对象：每位待审批人的姓名；槽位不指向具体人员时显示其地址"
+      },
       payload_json: {
         label: "快照",
         help: "提交时的记录快照"
       },
       flow_run_id: {
         label: "Flow Run",
-        help: "Suspended automation run id this request gates (ADR-0019). The decision resumes it."
+        help: "Suspended automation run id this request gates. The decision resumes it."
       },
       flow_node_id: {
         label: "Flow Node",
-        help: "Approval node id within the flow that opened this request (ADR-0019)."
+        help: "Approval node id within the flow that opened this request."
       },
       node_config_json: {
         label: "Node Config",
-        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests (ADR-0019)."
+        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."
       },
       completed_at: {
         label: "完成时间"
@@ -244,6 +256,18 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "步骤",
         help: "执行该动作时对应步骤的机器名称"
       },
+      step_label: {
+        label: "审批步骤",
+        help: "执行该动作时对应步骤的标签"
+      },
+      object_name: {
+        label: "对象",
+        help: "请求所涉及记录的对象"
+      },
+      record_id: {
+        label: "记录",
+        help: "请求所涉及的记录"
+      },
       step_index: {
         label: "步骤索引"
       },
@@ -272,6 +296,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       acted_as: {
         label: "代表槽位",
         help: "执行此操作时所代表的待审批槽位，按该槽位存储的写法记录：用户 ID、邮箱或岗位地址。若操作并非经由槽位放行（如提交人自己的操作、系统操作和管理员越权操作），则为空。"
+      },
+      acted_as_label: {
+        label: "代表",
+        help: "执行此操作时所代表的槽位（用于显示）：指向人员时为其姓名，否则为槽位地址"
       },
       comment: {
         label: "评论"
@@ -315,7 +343,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "审批委派",
     pluralLabel: "审批委派",
-    description: "自助不在岗规则：在时间窗内把该用户的审批人槽位改派给候补人。",
+    description: "某人不在岗期间，直接指派给其本人的审批会转给其委派人。",
     fields: {
       id: {
         label: "委派 ID"
@@ -334,7 +362,7 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "生效时间",
-        help: "此刻之前规则不生效。留空 = 立即生效。在解析时通过 isGrantActive 强制（ADR-0091 D2 判定式）——绝不依赖后台任务。"
+        help: "此刻之前规则不生效。留空 = 立即生效。在解析时通过 isGrantActive 强制——绝不依赖后台任务。"
       },
       valid_until: {
         label: "失效时间",

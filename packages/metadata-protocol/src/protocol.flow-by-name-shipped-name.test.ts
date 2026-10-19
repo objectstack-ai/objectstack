@@ -23,9 +23,9 @@
  * real composition is `flow-shipped-name-by-name-read.dogfood.test.ts`.
  *
  * Controls: a flow name no managed package ships keeps its stored row (the
- * tenant's own flow), a shipped name with no stored row is unchanged, an
- * organization-scoped flow row is out of the read's reach, and a type in the
- * overlay regime keeps its overlay.
+ * tenant's own flow), a shipped name with no stored row is unchanged, a
+ * caller naming an organization reads as the environment does, and a type in
+ * the overlay regime keeps its overlay.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { assertEngineFindOnePredicate, isCodeArtifactBody } from '@objectstack/metadata-core';
@@ -53,17 +53,15 @@ interface StoredRow {
     id: string;
     type: string;
     name: string;
-    organization_id: string | null;
     package_id: string | null;
     state: string;
     metadata: string;
 }
 
 const storedRow = (type: string, name: string, body: unknown, extra: Partial<StoredRow> = {}): StoredRow => ({
-    id: `r_${type}_${name}_${extra.organization_id ?? 'env'}`,
+    id: `r_${type}_${name}_env`,
     type,
     name,
-    organization_id: null,
     package_id: null,
     state: 'active',
     metadata: JSON.stringify(body),
@@ -76,6 +74,12 @@ const storedRow = (type: string, name: string, body: unknown, extra: Partial<Sto
  * entry the way `applyProtection` does and leaves a bare registration's
  * provenance alone.
  */
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 function registryDouble() {
     const byType = new Map<string, Map<string, Record<string, unknown>>>();
     const collection = (type: string) => {
@@ -145,7 +149,7 @@ function harness(rows: StoredRow[], services: Map<string, unknown> = new Map()) 
             if (k.startsWith('$')) throw new Error(`[test double] unsupported WHERE combinator '${k}'`);
         }
         return rows.filter((r) =>
-            Object.entries(where).every(([k, v]) => v === undefined || (r as unknown as Record<string, unknown>)[k] === v),
+            Object.entries(where).every(([k, v]) => v === undefined || whereValueMatches((r as unknown as Record<string, unknown>)[k], v)),
         );
     };
     const engine: any = {
@@ -253,14 +257,14 @@ describe('[#20946] the by-name read of a shipped flow name serves the loader\'s 
         expect(served.label).toBe('LOADER');
     });
 
-    it('control: an organization-scoped flow row is out of the read\'s reach', async () => {
+    it('control: a caller naming an organization reads as the environment does', async () => {
         const { protocol } = harness([
-            storedRow('flow', SHIPPED, flowBody(SHIPPED, 'ORG ROW'), { organization_id: ORG_ID }),
-            storedRow('flow', CUSTOMER, flowBody(CUSTOMER, 'ORG ROW'), { organization_id: ORG_ID }),
+            storedRow('flow', SHIPPED, flowBody(SHIPPED, 'STORED ROW')),
+            storedRow('flow', CUSTOMER, flowBody(CUSTOMER, 'STORED ROW')),
         ]);
 
         expect((await byName(protocol, { type: 'flow', name: SHIPPED, organizationId: ORG_ID })).label).toBe('LOADER');
-        expect(await byName(protocol, { type: 'flow', name: CUSTOMER, organizationId: ORG_ID })).toBeUndefined();
+        expect((await byName(protocol, { type: 'flow', name: CUSTOMER, organizationId: ORG_ID })).label).toBe('STORED ROW');
     });
 
     it('control: an overlay of a packaged type in the overlay regime is still served over the artifact', async () => {

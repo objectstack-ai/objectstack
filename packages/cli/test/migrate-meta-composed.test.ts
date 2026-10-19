@@ -21,10 +21,12 @@
  *     input is not written as a literal is listed with its reason and left
  *     alone, never guessed at.
  *  3. The control: a one-package project's `applied` and `write` outcome are
- *     what they were, including a conversion the load still applies
- *     (`driver: 'mongo'`), which the shim's raw hand-back keeps visible to the
- *     chain. The expected values are the ones measured on `origin/main`
- *     `4e4111ca0` before this change.
+ *     what they were, including a conversion the load still applies, which
+ *     the shim's raw hand-back keeps visible to the chain. The expected values
+ *     are the ones measured on `origin/main` `4e4111ca0` before this change,
+ *     on `driver: 'mongo'`; that spelling was retired as a value at 18
+ *     (#23543 F1), so the load-path case now carries a flow-level
+ *     `retryDelayMs` instead.
  *  4. The boundary: an input the author never wrapped is still refused with
  *     `STACK_PROVENANCE_MISSING` — the shim produces again only what it handed
  *     through itself.
@@ -266,12 +268,22 @@ export default defineStack({
   ],
 });
 `;
-  // The same stack with a datasource spelled the old way: a conversion the
-  // load still applies. The raw hand-back keeps it visible to the chain.
-  const SINGLE_WITH_LOAD_PATH_CONVERSION = edit(
+  // The same stack with a flow whose retry policy spells its delay the old
+  // way: a second refused spelling, which the chain's step 17 renames. The raw
+  // hand-back keeps it visible to the chain. It was a conversion the load
+  // still applied — a datasource `driver: 'mongo'` until #23543 F1, then this
+  // `retryDelayMs` until F2 retired `retry-policy-converged` from the load
+  // path — and no load-path conversion is a step the chain replays from its
+  // floor any more, so the row reads the two-spelling refused arm.
+  const SINGLE_WITH_SECOND_REFUSED_SPELLING = edit(
     SINGLE,
     '  ],\n});\n',
-    "  ],\n  datasources: [{ name: 'docs', label: 'Docs', driver: 'mongo', config: {} }],\n});\n",
+    '  ],\n'
+      + "  flows: [{ name: 'probe_sync', label: 'Sync', type: 'autolaunched', "
+      + "errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 }, "
+      + "nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }], "
+      + "edges: [{ id: 'e1', source: 'start', target: 'end' }] }],\n"
+      + '});\n',
   );
   const TIME_SITE = {
     conversionId: 'time-default-utc-suffix-dropped',
@@ -279,16 +291,16 @@ export default defineStack({
     from: '"10:00Z"',
     to: '"10:00"',
   };
-  const MONGO_SITE = {
-    conversionId: 'datasource-driver-mongo-to-mongodb',
-    path: 'datasources[0].driver',
-    from: 'mongo',
-    to: 'mongodb',
+  const RETRY_SITE = {
+    conversionId: 'retry-policy-converged',
+    path: 'flows[0].errorHandling.backoffMs',
+    from: 'retryDelayMs',
+    to: 'backoffMs',
   };
 
   it.each([
     { name: 'a refused stack', source: SINGLE, applied: [TIME_SITE], writtenSites: 1 },
-    { name: 'a refused stack carrying a load-path conversion', source: SINGLE_WITH_LOAD_PATH_CONVERSION, applied: [MONGO_SITE, TIME_SITE], writtenSites: 2 },
+    { name: 'a refused stack carrying a second refused spelling', source: SINGLE_WITH_SECOND_REFUSED_SPELLING, applied: [RETRY_SITE, TIME_SITE], writtenSites: 2 },
   ])('$name: `applied` and `write.files` as measured before the change', async ({ source, applied, writtenSites }) => {
     const dir = writeProject({ 'objectstack.config.ts': source });
     const dry = json(await runMeta(dir, ['--from', '16', '--json']));
@@ -300,7 +312,7 @@ export default defineStack({
     expect(out.write.status).toBe('written');
     expect(out.write.files).toEqual([{ file: 'objectstack.config.ts', sites: writtenSites }]);
     let expected = edit(source, "defaultValue: '10:00Z'", "defaultValue: '10:00'");
-    if (writtenSites === 2) expected = edit(expected, "driver: 'mongo'", "driver: 'mongodb'");
+    if (writtenSites === 2) expected = edit(expected, 'retryDelayMs: 2000', 'backoffMs: 2000');
     expect(readFileSync(join(dir, 'objectstack.config.ts'), 'utf8')).toBe(expected);
   }, RUN_TIMEOUT);
 });

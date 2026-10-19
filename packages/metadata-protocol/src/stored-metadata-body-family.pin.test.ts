@@ -35,6 +35,15 @@
  *    (`stdio-data-bridge.stored-metadata-body.test.ts`, which also enumerates
  *    every bridge member and every engine read call site of that package, so a
  *    new reader there fails its pin instead of joining silently) [#21207];
+ *  - [#24316] the one-hop read through a reference that a formula field and a
+ *    validation rule share → `@objectstack/objectql`
+ *    (`engine-formula-hop-stored-metadata-body.test.ts`: the engine never reads
+ *    a hop into the family), and its author-time refusal → `@objectstack/lint`
+ *    (`validate-expressions.stored-metadata-body-hop.test.ts`);
+ *  - [#24358] the engine's two relationship hydrations outside that loader,
+ *    `expand` and the master-detail `parent` root → `@objectstack/objectql`
+ *    (`engine-hydration-stored-metadata-body.test.ts`: the engine never
+ *    hydrates a reference or a header into the family);
  *  - the generic data door reads / groupBy / filter+sort → this package
  *    (`protocol.data-door-stored-metadata-redaction.test.ts`, and the behaviour
  *    asserted below).
@@ -124,6 +133,39 @@ const FAMILY_SURFACES = [
     disposition: 'refuses',
     pin: 'this package (protocol.data-door-stored-content-hash.test.ts) + @objectstack/mcp + @objectstack/service-analytics',
   },
+  // [#24316] The one-hop read through a reference: a formula field (caller
+  // authority) and a validation rule (SYSTEM authority) share one loader in the
+  // engine, which never reads a hop whose target is a family object, and the
+  // lint refuses the same hop where it is written.
+  {
+    surface: 'formula one-hop read through a reference: the carrying object\'s data read, a hook body\'s ctx.api read, ctx.title(), a write response',
+    disposition: 'refuses',
+    pin: '@objectstack/objectql (engine-formula-hop-stored-metadata-body.test.ts)',
+  },
+  {
+    surface: 'validation-rule one-hop read through a reference (read as SYSTEM)',
+    disposition: 'refuses',
+    pin: '@objectstack/objectql (engine-formula-hop-stored-metadata-body.test.ts)',
+  },
+  {
+    surface: 'author time: a formula or validation condition reading through a reference into the family (os validate, the object save door)',
+    disposition: 'refuses',
+    pin: '@objectstack/lint (validate-expressions.stored-metadata-body-hop.test.ts)',
+  },
+  // [#24358] The engine's two relationship hydrations outside the one-hop
+  // loader. `expand` never reads a reference into the family, so the field
+  // keeps its stored id, and the master-detail `parent` root never reads a
+  // family header, so a `parent.*` rule has no verdict whatever the row holds.
+  {
+    surface: 'expand of a reference into the family: the carrying object\'s data read (expand / $expand, the nested form), findOne, a hook body\'s ctx.api read',
+    disposition: 'withheld',
+    pin: '@objectstack/objectql (engine-hydration-stored-metadata-body.test.ts)',
+  },
+  {
+    surface: 'master-detail parent root over a family header: requiredWhen / readonlyWhen on insert and update, the validate() preview',
+    disposition: 'refuses',
+    pin: '@objectstack/objectql (engine-hydration-stored-metadata-body.test.ts)',
+  },
 ] as const;
 
 /** A stored datasource body as it sits in the `metadata` column: serialized JSON with credential material. */
@@ -194,8 +236,10 @@ describe('[#21120] stored-metadata-body family — the data door exposes only co
     // One row per the three local data-door surfaces + five cross-package ones
     // (audit, analytics, realtime, and the MCP stdio reader's seam and refusal),
     // + [#21207] the thirteen surfaces of the stored content hash, and the two
-    // of the history change note that can quote one.
-    expect(FAMILY_SURFACES).toHaveLength(23);
+    // of the history change note that can quote one, + [#24316] the three of
+    // the one-hop read through a reference, + [#24358] the two relationship
+    // hydrations outside it.
+    expect(FAMILY_SURFACES).toHaveLength(28);
   });
 });
 

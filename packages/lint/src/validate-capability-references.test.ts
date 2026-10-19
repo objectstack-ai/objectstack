@@ -13,7 +13,7 @@ import { explainRule } from './rule-explanations.js';
 // verdict to one line of at most 200 characters — every firing variant this
 // suite exercises, not a chosen few. Run the whole file: those cases read what
 // the cases above fired.
-const fired: Array<{ rule: string; message: string }> = [];
+const fired: Array<{ rule: string; message: string; hint: string }> = [];
 const validateCapabilityReferences: typeof validateCapabilityReferencesUnrecorded = (...args) => {
   const findings = validateCapabilityReferencesUnrecorded(...args);
   fired.push(...findings);
@@ -238,5 +238,22 @@ describe('[#22161] one-line verdicts — capability-reference-unknown', () => {
       expect(f.message, f.rule).not.toContain('\n');
       expect(f.message.length, `${f.rule}: ${f.message}`).toBeLessThanOrEqual(200);
     }
+  });
+
+  // [#22161] Slice 19: the `fix:` line is one remedy line; that a capability
+  // another installed package declares needs no change is the explanation's.
+  it('every `fix:` line the cases in this file fired is the one remedy line, at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === CAPABILITY_REFERENCE_UNKNOWN);
+    expect(converted.length).toBeGreaterThan(1);
+    for (const f of converted) {
+      expect(f.hint).toBe(
+        'Fix the capability name, or declare it with `defineCapability` (`stack.capabilities`) or on a ' +
+          'permission set’s `systemPermissions`.',
+      );
+      expect(f.hint.length).toBeLessThanOrEqual(200);
+    }
+    const text = explainRule(CAPABILITY_REFERENCE_UNKNOWN)!.paragraphs.join('\n');
+    expect(text).toContain('If another installed package declares the capability, the warning is expected');
+    expect(text).toContain('fails CLOSED');
   });
 });

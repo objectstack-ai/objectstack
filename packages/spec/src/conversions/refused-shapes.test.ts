@@ -340,8 +340,11 @@ describe('#23269 — a stored flow whose CRUD filter operand is a {…} token is
 describe('#23317 — a stored page whose component binds the retired API source in its `data` prop is listed by page and component', () => {
   const PRESCRIPTION = /`view\.data\.provider: 'api'` was removed in @objectstack\/spec 18/;
   /** The components whose `data` prop is a view data source, as the D3 entry names them. */
-  const VIEW_DATA_COMPONENTS = ['object-grid', 'object-map', 'object-gantt', 'object-tree'] as const;
-  const component = (type: string, data: unknown, id = 'block') => ({ id, type, properties: { objectName: 'crm_case', data } });
+  const VIEW_DATA_COMPONENTS = ['object-grid', 'object-map', 'object-gantt', 'object-tree', 'list-view'] as const;
+  // A `list-view` names its object in `data` alone: its `objectName` is a retired
+  // alias, which a stored node carries forward through its own conversion (#22444).
+  const component = (type: string, data: unknown, id = 'block') =>
+    ({ id, type, properties: type === 'list-view' ? { data } : { objectName: 'crm_case', data } });
   const pageRow = (components: unknown[], extra: Record<string, unknown> = {}) => ({
     name: 'partner_page',
     label: 'Partner',
@@ -360,8 +363,9 @@ describe('#23317 — a stored page whose component binds the retired API source 
     const todo = todos[0]!;
     expect(todo.reason).toContain(`The \`${type}\` component \`block\` of page \`partner_page\`, at pages[0].regions[0].components[0], binds the retired view-level API data source.`);
     expect(todo.reason).toMatch(/No mechanical move: the successor is a page component's `dataSource` binding/);
-    expect(todo.reason).toMatch(/Left as stored, the parse refuses the page: it still loads and is served, registered under `\[metadata_spec_invalid\]`/);
-    expect(todo.reason).toMatch(/its next save through the Studio, REST or MCP is refused with 422/);
+    expect(todo.reason).toMatch(/Left as stored, the page still loads and is served as stored, with no read diagnostic for the binding/);
+    expect(todo.reason).toMatch(/its next save through the Studio, REST or MCP is refused with 422 by the component-props gate/);
+    expect(todo.reason).not.toContain('metadata_spec_invalid');
     expect(todo.reason).toMatch(PRESCRIPTION);
   });
 
@@ -374,12 +378,6 @@ describe('#23317 — a stored page whose component binds the retired API source 
     expect(todos.map((t) => t.path)).toEqual([
       'pages[0].regions[0].components[0].properties.items[0].children[0].properties.data',
       'pages[0].slots.details.properties.data',
-    ]);
-    // [#23357] …and the page parse refuses exactly those two positions.
-    const verdict = PageSchema.safeParse(row);
-    expect(verdict.success ? [] : verdict.error.issues.map((i) => i.path.join('.'))).toEqual([
-      'regions.0.components.0.properties.items.0.children.0.properties.data.provider',
-      'slots.details.properties.data.provider',
     ]);
   });
 
@@ -421,26 +419,24 @@ describe('#23317 — a stored page whose component binds the retired API source 
     }
   });
 
-  // [#23357] Until the page parse judged this binding the fate read "the page
-  // still loads and saves", and this pin asserted `PageSchema` ACCEPTED the
-  // row. Since `checkPageComponentViewData` the page parse refuses each listed
-  // component at the listed position with the same prescription, which is
-  // what the save door's 422 and the read / boot `_diagnostics` resolve.
-  it('the fate it states holds: the page parse refuses each listed component at the listed position, and so does its props row', () => {
+  // The fate it states, from this package's side: the page parse ACCEPTS the
+  // stored row — so the boot and read paths, which resolve that parse, raise no
+  // diagnostic for it — and each listed component's own props row refuses the
+  // binding at `data.provider` with the prescription, which is the verdict the
+  // component-props gate raises at the CLI doors and the runtime save door
+  // (that door's 422 is pinned in `@objectstack/metadata-protocol`'s
+  // `protocol.runtime-authoring-gate.test.ts`).
+  it('the fate it states holds: the page parse accepts the row, and each listed component\'s props row refuses it with the prescription', () => {
     const row = pageRow(VIEW_DATA_COMPONENTS.map((type, i) => component(type, apiData(), `b${i}`)));
     const { todos } = storedTodos('page', row);
-    const verdict = PageSchema.safeParse(row);
-    expect(verdict.success).toBe(false);
-    const refused = verdict.success ? [] : verdict.error.issues;
-    // The parse locates the issue at `…properties.data.provider`; the listing
-    // names the `data` prop it would rewrite, in the conversion walker's spelling.
-    const listedAt = (path: readonly PropertyKey[]) =>
-      `pages[0]${path.slice(0, -1).map((k) => (typeof k === 'number' ? `[${k}]` : `.${String(k)}`)).join('')}`;
-    expect(refused.map((i) => listedAt(i.path))).toEqual(todos.map((t) => t.path));
     expect(todos).toHaveLength(VIEW_DATA_COMPONENTS.length);
-    for (const issue of refused) expect(issue.message).toMatch(PRESCRIPTION);
+    const parsed = PageSchema.safeParse(row);
+    expect(parsed.success, parsed.success ? '' : JSON.stringify(parsed.error.issues)).toBe(true);
     for (const type of VIEW_DATA_COMPONENTS) {
-      expect(ComponentPropsMap[type].safeParse({ objectName: 'crm_case', data: apiData() }).success, type).toBe(false);
+      const verdict = ComponentPropsMap[type].safeParse({ objectName: 'crm_case', data: apiData() });
+      expect(verdict.success, type).toBe(false);
+      const atProvider = verdict.success ? [] : verdict.error.issues.filter((i) => i.path.join('.') === 'data.provider');
+      expect(atProvider.map((i) => i.message), type).toEqual([expect.stringMatching(PRESCRIPTION)]);
     }
   });
 

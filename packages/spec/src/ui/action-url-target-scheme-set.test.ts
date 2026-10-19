@@ -179,9 +179,8 @@ describe("an admitted `type: 'url'` target parses unchanged", () => {
 // ===========================================================================
 
 describe("the door answers the runner's pinned cases the same way", () => {
-  // The cases objectui pins for `classifyNavigationTarget`
-  // (`packages/core/src/actions/__tests__/navigationTarget.mailto-12191.test.ts`
-  // at objectui 7578323). A literal target the runner opens must parse here,
+  // The cases objectui pins for `classifyNavigationTarget` (recorded in
+  // `liveness/action.json`, row `target`). A literal target the runner opens must parse here,
   // and one it refuses must be refused here — a wider door publishes a target
   // that fails at the click, a narrower one refuses a target that works.
   it.each([

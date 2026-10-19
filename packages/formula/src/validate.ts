@@ -180,14 +180,21 @@ export interface ExprSchemaHint {
    * prescription these checks hand out is only TRUE where something hydrates.
    * `record.<reference field>.<field>` resolves the related record at exactly
    * one seam — the object validation rules (`script` / `cross_field`) evaluated
-   * by ObjectQL's `checkPredicate`. Nothing hydrates at a field `requiredWhen` /
+   * by ObjectQL's `checkPredicate` — and, since #24197, a formula field's
+   * `expression` (role `value`), whose read path ObjectQL preloads one hop for.
+   * Nothing hydrates at a field `requiredWhen` /
    * `readonlyWhen`, an option `visibleWhen`, an action's `visible` / `disabled`,
-   * a sharing-rule (RLS) condition, a hook condition, a flow node or edge
-   * condition, or a formula `value`. Telling an author at one of those sites to
+   * a sharing-rule (RLS) condition, a hook condition, or a flow node or edge
+   * condition. Telling an author at one of those sites to
    * "write `record.account.id` instead" produces an expression that faults at
    * evaluation — and on the fail-OPEN seams among them, a faulting predicate
    * stops enforcing altogether. So the refusal would trade a working rule for a
-   * dead one, at nine seams the traversal capability never covered.
+   * dead one, at the seams the traversal capability never covered.
+   *
+   * Honoured for the `predicate` and `value` roles only; on `value` the
+   * conflicts are worded for a formula (it reads null; there is no write to
+   * refuse). Only a formula field's `expression` is a `value` site the engine
+   * hydrates, so only that caller should set it on `value`.
    *
    * Set it only where the traversal is actually served. Absent ⇒ the checks do
    * not run, which is every caller's behaviour until it opts in.
@@ -1106,8 +1113,8 @@ export function validateExpression(
   // [#18682] Relationship traversal: refuse the shapes that cannot be served
   // as written — but ONLY where they are served. Three conditions, all
   // required: the caller opted in (`traversalHydration`, see its docblock for
-  // why this is not derived from `fieldTypes`), the slot is a PREDICATE (a
-  // formula `value` never hydrates), and `fieldTypes` is present to tell a
+  // why this is not derived from `fieldTypes`), the slot is a PREDICATE or a
+  // formula `value` (the two seams that hydrate), and `fieldTypes` is present to tell a
   // REFERENCE field from an object-valued one — `record.address.city` traverses
   // today and must keep traversing.
   //
@@ -1116,13 +1123,20 @@ export function validateExpression(
   // same conflict is refused independently by ObjectQL's `checkPredicate`.
   // Metadata authored through Studio, written straight to `sys_metadata` or
   // produced by an agent never reaches this check.
-  if (schema?.fieldTypes && schema.traversalHydration === true && role === 'predicate') {
+  //
+  // [#24197] A formula `value` is the second seam that serves one hop: the
+  // engine's formula read path preloads it before computing the field. Its
+  // caller opts in exactly as a validation condition's does, and the conflicts
+  // are worded for a field that reads null rather than a write that is refused.
+  if (schema?.fieldTypes && schema.traversalHydration === true && (role === 'predicate' || role === 'value')) {
     const tree = ast();
     const analysis = tree ? traversalsOf(readRootMembers(tree, [DEFAULT_TRAVERSAL_ROOT])) : null;
     if (analysis) {
       const conflicts = findTraversalConflicts(
         analysis,
         (field) => REFERENCE_VALUE_TYPES.has(schema.fieldTypes![field] ?? ''),
+        DEFAULT_TRAVERSAL_ROOT,
+        role === 'value' ? 'formula' : 'predicate',
       );
       for (const conflict of conflicts) {
         errors.push(refusal(

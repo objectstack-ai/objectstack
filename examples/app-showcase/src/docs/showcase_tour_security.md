@@ -38,8 +38,9 @@ The other sets each demonstrate one axis:
 - `showcase_executive` — org-wide read via `readScope: 'org'` (depth, not a
   bypass).
 - `showcase_auditor` — **View-All** (`viewAllRecords`): reads every private
-  record, holds no write bit. High-privilege: the publish linter blocks it
-  from `everyone`/`guest` bindings.
+  record, holds no write bit. High-privilege: suggested for the `everyone`
+  anchor (`isDefault: true`) it would fail the publish linter, and no door
+  binds a set to `everyone` or `guest` by hand.
 - `showcase_ops` — **system permissions** (`setup.access` opens the Setup
   app for non-admins — apps declaring `requiredPermissions` appear in
   `/me/apps` only when the caller's union carries them) and **Modify-All**
@@ -48,8 +49,9 @@ The other sets each demonstrate one axis:
   suggestion** (ADR-0090 D5): the read-mostly baseline every authenticated
   member holds *additively* (no fallback cliff).
 - `showcase_guest_portal` — guest-safe capability (read announcements,
-  create inquiries) for the built-in **`guest`** position (ADR-0090 D9);
-  binding it is an admin action in Setup.
+  create inquiries) shaped for the built-in **`guest`** position (ADR-0090
+  D9). No door binds a set to `guest` today (ADR-0138 D3), so the showcase
+  distributes it through the `client_portal_user` position instead.
 - `showcase_field_ops_delegate` — **delegated administration**
   (ADR-0090 D12): an `adminScope` bounded to the Field Operations subtree
   with an assignable-set allowlist; no self-escalation.

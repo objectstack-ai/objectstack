@@ -15,7 +15,8 @@
  *
  * ```text
  * throw { code: 'INVALID_FILTER', status: 400, userMessage: 'Check the filter…' }
- *   ① analytics (rest-server.ts, the `{ code, message }` it builds by hand)
+ *   ① analytics (analytics-routes.ts since #23050 slice 5, rest-server.ts
+ *                before; the `{ code, message }` it builds by hand)
  *                            → 400 {"code":"INVALID_FILTER","message":"…"}   ⛔ no mark
  *   /data door               → 400 {"error":"…","code":"INVALID_FILTER",
  *                                   "userMessage":"Check the filter…"}

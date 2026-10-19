@@ -75,6 +75,7 @@ import {
 } from './last-local-credential.js';
 import type { AdminActor, EndpointResult } from './admin-user-endpoints.js';
 import { applyUserBan, applyUserUnban } from './user-ban-write.js';
+import { readJsonRequestBody } from './request-json-body.js';
 
 /**
  * Minimal better-auth `$context` surface these two routes touch. Mirrors what
@@ -103,13 +104,19 @@ const notFound = (): EndpointResult => ({
   body: { success: false, error: { code: 'RESOURCE_NOT_FOUND', message: 'User not found' } },
 });
 
-async function parseJson(request: Request): Promise<Record<string, unknown>> {
-  try {
-    const parsed = await request.json();
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
+/**
+ * [#24032] The body, or the refusal message for a declared-JSON body that does
+ * not parse: it was read as `{}`, which answered "userId is required" for a
+ * body that carried `userId` (see request-json-body.ts). A well-formed body
+ * that is not an object still reads as no fields, as before.
+ */
+async function parseJson(
+  request: Request,
+): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }> {
+  const reading = await readJsonRequestBody(request);
+  if (!reading.ok) return reading;
+  const parsed = reading.body;
+  return { ok: true, body: parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {} };
 }
 
 /**
@@ -128,7 +135,9 @@ export async function runAdminBanUser(
   actor: AdminActor,
   request: Request,
 ): Promise<EndpointResult> {
-  const body = await parseJson(request);
+  const read = await parseJson(request);
+  if (!read.ok) return invalid(read.message);
+  const body = read.body;
   const userId = readUserId(body);
   if (!userId) return invalid('userId is required');
 
@@ -191,8 +200,9 @@ export async function runAdminUnbanUser(
   _actor: AdminActor,
   request: Request,
 ): Promise<EndpointResult> {
-  const body = await parseJson(request);
-  const userId = readUserId(body);
+  const read = await parseJson(request);
+  if (!read.ok) return invalid(read.message);
+  const userId = readUserId(read.body);
   if (!userId) return invalid('userId is required');
 
   const ctx = await deps.getAuthContext();

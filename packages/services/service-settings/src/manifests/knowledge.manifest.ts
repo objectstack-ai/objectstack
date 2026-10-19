@@ -42,9 +42,7 @@ const manifest = {
   icon: 'BookOpen',
   description:
     'Vector-store backend for RAG / knowledge sources. ' +
-    '⚠ Switching adapter does NOT migrate existing indices — documents ' +
-    'indexed under the previous adapter become unreachable until ' +
-    're-indexed. The embedder is configured separately under AI.',
+    'The embedder is configured separately under AI.',
   scope: 'global',
   readPermission: 'manage_platform_settings',
   writePermission: 'manage_platform_settings',
@@ -61,6 +59,14 @@ const manifest = {
         { value: 'ragflow', label: 'RAGFlow (external)' },
       ],
     },
+    // Warnings are `info_banner` rows with `bannerSeverity: 'warning'`, never a
+    // sentence inside a description; each `id` addresses its copy under
+    // `settings.knowledge.banners.<id>` in the locale bundles.
+    { type: 'info_banner', id: 'adapter_switch_warning', label: 'Existing indices are not migrated',
+      required: false, bannerSeverity: 'warning',
+      bannerText:
+        'Switching adapter does NOT migrate existing indices — documents indexed under the ' +
+        'previous adapter become unreachable until re-indexed.' },
 
     // ── Turso / libSQL ────────────────────────────────────────────
     { type: 'group', id: 'turso', label: 'Turso / libSQL', required: false,
@@ -113,9 +119,12 @@ const manifest = {
     { type: 'group', id: 'permissions', label: 'Permissions', required: false },
     { type: 'toggle', key: 'enforce_rls', label: 'Enforce RLS on search',
       required: false, default: true,
-      description:
-        'Re-check every hit against the caller\'s record-level permissions via IDataEngine. ' +
-        '⚠ Disabling skips the platform\'s unique safeguard against vector-store data leakage — leave on in production.' },
+      description: 'Re-check every hit against the caller\'s record-level permissions via IDataEngine.' },
+    { type: 'info_banner', id: 'enforce_rls_warning', label: 'Leave RLS on in production',
+      required: false, bannerSeverity: 'warning',
+      bannerText:
+        'Disabling skips the platform\'s unique safeguard against vector-store data leakage — ' +
+        'leave on in production.' },
 
     // ── Probe ─────────────────────────────────────────────────────
     { type: 'action_button', id: 'test', label: 'Test connection',

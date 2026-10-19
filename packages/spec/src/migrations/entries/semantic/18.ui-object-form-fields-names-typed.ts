@@ -7,12 +7,13 @@ import type { SemanticMigration } from '../../types.js';
 // while the form drew a `{ name }` field entry its own page-builder guide
 // taught. objectstack-ai/objectui#11550 retired that entry from every authoring
 // face (the form still draws a STORED one, by its name, as tolerance), so both
-// rows now take field names — objectui's own declaration of the member — and
-// an object entry is refused with what to write instead. D3 only: page-
-// component `properties` is not parsed on the metadata save or load path, so a
-// stored page is never refused; and the authored census found no authored
-// value to respell — the refused values are fixtures probing the stored read,
-// the console warning and objectui's own refusal.
+// rows now take field names — objectui's own declaration of the member — and an
+// object entry is refused with what to write instead. D3 only: page-component
+// `properties` is not parsed on the metadata load path, so a stored page is
+// never refused at load (its next save meets the component-props gate at the
+// metadata save door); and the authored census found no authored value to
+// respell — the refused values are fixtures probing the stored read, the
+// console warning and objectui's own refusal.
 export const entry: SemanticMigration = {
   id: 'ui-object-form-fields-names-typed',
   surface: 'page `object-form` and `object-master-detail-form` components — `properties.fields` (whose '
@@ -32,8 +33,7 @@ export const entry: SemanticMigration = {
     + 'the form skips at the top level with a console warning — is its bare name or belongs in a section. It is '
     + 'read where every page component\'s props are: the component-props gate reports a refused value as a '
     + '`component-props-invalid` error on `objectstack validate`, `objectstack build` and '
-    + '`objectstack lint`, and a stored page still saves and loads, because a page component\'s `properties` is '
-    + 'not parsed on the metadata save or load path. No conversion is registered: nothing on the load path '
+    + '`objectstack lint`, and a stored page still loads, because a page component\'s `properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is registered: nothing on the load path '
     + 'refuses the shape, the form already draws a stored `{ name }` entry by its name, and an override written '
     + 'beside it has no rewrite that keeps it — moving it onto a section is the judgment this entry leaves to '
     + 'the upgrader. Deployed metadata NOT MEASURED.',

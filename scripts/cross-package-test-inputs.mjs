@@ -251,66 +251,83 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // one witness per glob no literal path on this package's roster holds.
       // src/ui/view-data-api-provider-retirement.test.ts (the view-level
       // `api` data-source retirement) walks the SAME five roots with the same
-      // per-extension rule, so it is the second witness on every row.
+      // per-extension rule, so it is the second witness on every row, and
+      // src/conversions/conversion-conflict-channel-retirement.test.ts (the
+      // conversion-conflict channel's retirement) the third, for the same reason.
       'packages/**/*.mts': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.cts': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.js': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.mjs': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.cjs': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.json': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.md': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.mdx': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.yaml': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'packages/**/*.yml': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.json': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.md': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.mdx': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.yaml': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
       'examples/**/*.yml': [
         'packages/spec/src/system/compliance-families-retirement.test.ts',
         'packages/spec/src/ui/view-data-api-provider-retirement.test.ts',
+        'packages/spec/src/conversions/conversion-conflict-channel-retirement.test.ts',
       ],
     },
   },
@@ -907,6 +924,12 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     },
   },
   '@objectstack/cloud-connection': {
+    // src/marketplace-install-local-convert-forward.test.ts reads HotCRM 4.0.1's
+    // published page shape from `@objectstack/objectql`'s fixture -- the ONE
+    // copy of that artifact, which the registration door's own pin reads too --
+    // to drive the marketplace install's ADR-0087 D2 conversion over the real
+    // engine. A change to the fixture changes what this suite measures.
+    //
     // src/canonical-expression-envelopes.test.ts (#12267) imports `maskComments`
     // from `js-comment-mask.mjs` to decide which text in this package's `src/` is
     // a comment and which is a `Page` declaration — the same conversion #9367
@@ -917,6 +940,7 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
     // verdict is a function of it too — the reason the `@objectstack/cli` entry
     // above declares the pair rather than the module alone.
     globs: [
+      'packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json',
       'scripts/js-comment-mask.mjs',
       'scripts/js-comment-mask.d.mts',
     ],
@@ -1170,6 +1194,9 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       'packages/plugins/plugin-hono-server/src/**',
       'packages/rest/src/**',
       'packages/runtime/src/**',
+      'packages/services/service-print/src/**',
+      // print-service-render.dogfood.test.ts runs only where the Console bundle is built.
+      'packages/console/dist/index.html',
       'packages/services/service-realtime/src/**',
       // The three ledgers test/route-ledger-live-mount-parity.dogfood.test.ts
       // IMPORTS, which no read named and nothing declared until #10452 taught
@@ -1206,6 +1233,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // change that reopens the #9084 blind spot, so it must re-run this test.
       'content/docs/protocol/kernel/realtime-protocol.mdx',
     ],
+    heldBy: {
+      // The render pin runs only where the Console bundle is built, and reads it
+      // by its entry file. Where no bundle is built (this suite's CI job) the
+      // path names nothing on disk, so the roster cannot hold the glob; this
+      // test is what holds it.
+      'packages/console/dist/index.html': ['packages/qa/dogfood/test/print-service-render.dogfood.test.ts'],
+    },
   },
   '@objectstack/vitest-filter-preflight': {
     // test/config-wiring-sweep.test.ts is the anti-phantom sweep for the ONE
@@ -1308,6 +1342,13 @@ export const CROSS_PACKAGE_TEST_INPUTS = {
       // the scan itself.
       'docs/**': ['packages/rest/src/meta-state-route-doc-spelling.test.ts'],
     },
+  },
+  '@objectstack/service-package': {
+    // src/hydration-convert-forward.test.ts reads HotCRM 4.0.1's published page
+    // shape from `@objectstack/objectql`'s fixture -- the ONE copy of that
+    // artifact -- to drive the `sys_packages` boot hydration's ADR-0087 D2
+    // conversion over the real engine and driver.
+    globs: ['packages/objectql/src/__fixtures__/hotcrm-4.0.1-published-pages.artifact.json'],
   },
   '@objectstack/service-automation': {
     // src/connector-pull.integration.test.ts (#20919) drives the connector sync

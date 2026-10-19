@@ -130,5 +130,8 @@ describe('[#8734] standing-key lists correspond to what resolveAuthzContext read
     // [ADR-0131 D3] The resolver reads deactivation from the activation ledger,
     // no longer from the `sys_permission_set` row, which the guard no longer judges.
     expect(STANDING_KEYS_BY_TABLE.sys_metadata_activation).toBe(ACTIVATION_LEDGER_STANDING_KEYS);
+    // [ADR-0131 D5] The organization whose grant anchors standing under `single`.
+    // The guard reads this entry of the map itself, so only its content is pinned.
+    expect(STANDING_KEYS_BY_TABLE.sys_organization).toEqual(['slug']);
   });
 });

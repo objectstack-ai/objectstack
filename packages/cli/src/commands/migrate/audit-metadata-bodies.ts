@@ -18,7 +18,7 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
-import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
 import { absentTableReads } from '../../utils/absent-table-reads.js';
 
@@ -54,7 +54,7 @@ async function confirm(question: string): Promise<boolean> {
  * withholds the hashes in those notes, in the same pass. Operators run it once
  * after upgrading, dry run first.
  *
- * Dry run by default (writes nothing), `--apply` to rewrite. Idempotent: a
+ * Dry run by default (writes no row), `--apply` to rewrite. Idempotent: a
  * second run finds nothing — a redacted copy has no credential and no hash
  * left — so re-running and reading a clean report is the verification. No
  * `sys_migration` flag is recorded: nothing gates irreversible behaviour on this
@@ -115,7 +115,7 @@ export default class MigrateAuditMetadataBodies extends Command {
     if (occupancy.status === 'busy' && !flags.json) {
       printWarning(apply
         ? `--force: ${describeOccupancy(occupancy)} Rewriting anyway — the live process may write rows mid-walk.`
-        : `${describeOccupancy(occupancy)} The dry run below writes nothing, but its counts may shift while that process is running.`);
+        : `${describeOccupancy(occupancy)} The dry run below writes no row or table, but its counts may shift while that process is running. ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
     if (occupancy.status === 'unknown' && !flags.json) {
       printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);

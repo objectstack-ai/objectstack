@@ -22,6 +22,7 @@ import { ExpressionEngine } from '@objectstack/formula';
 import { noopHookMetricsRecorder, type HookMetricsRecorder, type HookMetricOutcome } from './hook-metrics.js';
 import { materializeDeclaredFields } from './declared-fields.js';
 import { describeCelFault, type CelFault } from './cel-fault.js';
+import { nullPreviousReadDetail, ruleScope, type PreviousBinding } from './validation/rule-validator.js';
 import { hookRunAs, deriveHookApi, type HookRunAs } from './hook-run-as.js';
 
 /**
@@ -281,8 +282,9 @@ export function declaredHookCondition(meta: Pick<Hook, 'condition'>): (Expressio
  *     the platform can no longer paper over.
  *   - `previous` — the record's pre-write state, built by
  *     {@link pickPreviousPayload}: `ctx.previous`, made total over the same
- *     declared fields. Absent (an unbound CEL identifier) whenever the prior
- *     state is not in hand, exactly as on the validation side.
+ *     declared fields; `null` on an insert event, which has no prior row; and
+ *     absent (an unbound CEL identifier) whenever an existing row's prior
+ *     state is not in hand — exactly as on the validation side (#23910).
  *
  * `previous` is what makes a TRANSITION expressible. Since #4770 `record` is
  * the record's STATE, so `record.done == true` is true on every update of an
@@ -313,18 +315,17 @@ export function wrapDeclarativeHook(
     const check = ExpressionEngine.compile(expr);
     if (check.ok) {
       conditionFn = (ctx: HookContext) => {
-        // `previous` is passed through as-is: `undefined` means the binding
-        // is OMITTED from the CEL scope (see `buildScope` in
-        // @objectstack/formula), which is exactly what the validation side
-        // does when no prior record is in hand. Binding it to an empty
-        // object instead would answer `previous.x == null` with a
-        // fabricated "yes" for a record whose prior state is unknown.
+        // [#23910] The scope is the validation side's, built by the same
+        // `ruleScope`: `previous` is `null` on an insert event, the prior row
+        // on any other write that carries one, and OMITTED from the CEL scope
+        // (`undefined`, see `buildScope` in @objectstack/formula) when an
+        // existing row's prior state is not in hand — never invented.
         const record = pickRecordPayload(ctx);
         const previous = pickPreviousPayload(ctx);
-        const r = ExpressionEngine.evaluate<boolean>(expr, { record: record ?? {}, previous });
+        const r = ExpressionEngine.evaluate<boolean>(expr, ruleScope(record ?? {}, previous));
         if (!r.ok) {
           // [#4775] Fail LOUD. Not `false` — see `HookConditionError`.
-          throw unevaluableConditionError(meta, ctx, source, r.error);
+          throw unevaluableConditionError(meta, ctx, source, r.error, previous);
         }
         return Boolean(r.value);
       };
@@ -991,11 +992,20 @@ function unevaluableConditionError(
   ctx: HookContext,
   source: string,
   error: CelFault,
+  previous?: PreviousBinding,
 ): HookConditionError {
-  const { summary, missingKey, detail } = describeCelFault(error, {
+  const described = describeCelFault(error, {
     what: 'condition',
     undeclaredKeyFix: "fix the hook's condition, or declare the field",
   });
+  const { summary } = described;
+  // [#23910] A column read off an insert's `null` previous gets the validation
+  // side's sentence (`nullPreviousReadDetail`): "this object does not declare"
+  // would be false for a declared column. Like the validation side, a sentence
+  // worded for the fault carries no generic `missingKey`.
+  const nullRead = nullPreviousReadDetail(error, source, previous, declaredFieldsFor(ctx), 'condition');
+  const detail = nullRead ?? described.detail;
+  const missingKey = nullRead === undefined ? described.missingKey : undefined;
   const head = `Hook '${meta.name}' could not evaluate its condition (${summary}) — operation aborted.`;
   return new HookConditionError(`${head}${detail}`, {
     hook: meta.name,
@@ -1182,26 +1192,31 @@ function pickRecordPayload(ctx: HookContext): any {
  * handlers columns the row never had (#4649 left the same note on the
  * validation side).
  *
- * ## When it is ABSENT — verbatim the validation side's rule
+ * ## When it is `null`, and when it is ABSENT — verbatim the validation side's rule
  *
- * `rule-validator.ts` binds `previous` only for `mode: 'update'` with a prior
- * record actually fetched, and passes `undefined` otherwise, which omits the
- * identifier from the CEL scope. Same here:
- *   - **insert** — there is no prior state, so `previous` is unbound and any
- *     reference to it is an author error, reported as such;
- *   - **any update-shaped context whose prior row is not in hand** — with no
- *     row there is no single prior record to bind, so `previous` stays unbound
- *     rather than being invented. A predicate (`multi: true`) bulk write is no
- *     longer one of these: since #5574 (ADR-0058 Addendum II, D1/D2) it
- *     dispatches BOTH phases per matched row — `after*` since #5038 — each
- *     context binding that row's own pre-image, so a transition condition
- *     reads exactly as it does on a single-record write.
- * Binding `null`/`{}` instead would make `previous.x == null` answer "yes"
- * for a record whose prior state is simply unknown — a fabricated fact, the
- * one thing materialisation is careful never to do.
+ * `rule-validator.ts` decides the binding once per evaluation
+ * (`previousBinding`) and both surfaces build their scope with the same
+ * `ruleScope` (#23910). Same rule here:
+ *   - **insert** (`beforeInsert` / `afterInsert`) — `null`. There is no prior
+ *     row, and that is a FACT a condition may read: `previous == null` is how
+ *     a condition says "this write creates the row", the binding a flow's
+ *     create leg and a validation rule's insert already get. A COLUMN read off
+ *     it (`previous.done`) still has no value, faults, and aborts the
+ *     operation (#4775), with a sentence naming the read and the guard to add.
+ *     Only the CEL binding is `null`: `ctx.previous`, the engine's pre-image,
+ *     is not touched.
+ *   - **any other context whose prior row is not in hand** — unbound. The row
+ *     exists and its state is unknown, so `previous` stays unbound rather than
+ *     being invented: `null` there would answer `previous == null` with "this
+ *     is an insert", a fabricated fact, the one thing materialisation is
+ *     careful never to do. A predicate (`multi: true`) bulk write is no longer
+ *     one of these: since #5574 (ADR-0058 Addendum II, D1/D2) it dispatches
+ *     BOTH phases per matched row — `after*` since #5038 — each context
+ *     binding that row's own pre-image, so a transition condition reads
+ *     exactly as it does on a single-record write.
  */
-function pickPreviousPayload(ctx: HookContext): Record<string, unknown> | undefined {
-  if (isInsertEvent(ctx.event)) return undefined;
+function pickPreviousPayload(ctx: HookContext): PreviousBinding {
+  if (isInsertEvent(ctx.event)) return null;
   const prior = ctx.previous;
   if (!prior || typeof prior !== 'object' || Array.isArray(prior)) return undefined;
   return materializeDeclaredFields({ ...(prior as Record<string, unknown>) }, declaredFieldsFor(ctx));

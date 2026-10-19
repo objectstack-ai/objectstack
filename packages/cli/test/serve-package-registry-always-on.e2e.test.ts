@@ -45,10 +45,9 @@ import {
   E2E_SECRET_KEY,
   TSX,
   childEnv,
-  portContentionError,
-  portDriftError,
+  KERNEL_ASSIGNED_PORT,
   probeThroughChild,
-  randomPort,
+  readKernelAssignedPort,
   runServe,
 } from './helpers/serve-process.js';
 
@@ -111,6 +110,8 @@ function bannerMentions(output: string, plugin: string): number {
 
 interface LiveServe {
   child: ChildProcessWithoutNullStreams;
+  /** The port the child's kernel assigned it, read back out of its banner (#24342). */
+  port: number;
   /** Everything the child has printed so far, both streams. */
   output: () => string;
 }
@@ -123,9 +124,9 @@ const dirs: string[] = [];
  * the install probe signs in as; on the second boot the admin already exists
  * in the database and the seed leaves it alone.
  */
-function bootServe(dir: string, port: string, db: string): Promise<LiveServe> {
+function bootServe(dir: string, db: string): Promise<LiveServe> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', port, '--dev'], {
+    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
@@ -142,12 +143,12 @@ function bootServe(dir: string, port: string, db: string): Promise<LiveServe> {
     const what = `os serve --dev on ${db}`;
     let out = '';
     let settled = false;
-    const settle = (err: Error | null) => {
+    const settle = (result: Error | number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (err) rejectBoot(err);
-      else resolveBoot({ child, output: () => out });
+      if (result instanceof Error) rejectBoot(result);
+      else resolveBoot({ child, port: result, output: () => out });
     };
     const timer = setTimeout(
       () => settle(new Error(`${what} never printed ${READY}\n--- output ---\n${out.slice(-4000)}`)),
@@ -155,16 +156,13 @@ function bootServe(dir: string, port: string, db: string): Promise<LiveServe> {
     );
     const onData = (d: unknown) => {
       out += String(d);
-      // The child is the authority on the port it bound (#12525).
-      if (READY.test(out)) settle(portDriftError(out, what, port));
+      // The child is the only authority on the port its kernel assigned (#24342).
+      if (READY.test(out)) settle(readKernelAssignedPort(out, what));
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
     child.on('exit', (code) =>
-      settle(
-        portContentionError(out, what, port)
-          ?? new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`),
-      ),
+      settle(new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
     );
   });
 }
@@ -240,10 +238,8 @@ describe('#19387: a stock app gets the package service — an API-created packag
     const dir = fixture('pkg-registry-stock-', appConfig('stockboot', undefined));
     dirs.push(dir);
     const db = join(dir, 'probe.db');
-    const port = randomPort();
-    const base = `http://localhost:${port}/api/v1`;
-
-    const first = await bootServe(dir, port, db);
+    const first = await bootServe(dir, db);
+    let base = `http://localhost:${first.port}/api/v1`;
     const token = await signIn(first, base);
     installStatus = await probe(first, 'the install probe', async () => {
       const r = await fetch(`${base}/packages`, {
@@ -261,7 +257,8 @@ describe('#19387: a stock app gets the package service — an API-created packag
     firstBoot = first.output();
     await stop(first.child);
 
-    const second = await bootServe(dir, port, db);
+    const second = await bootServe(dir, db);
+    base = `http://localhost:${second.port}/api/v1`;
     const token2 = await signIn(second, base);
     restartRead = await probe(second, 'the post-restart read probe', async () => {
       const r = await fetch(`${base}/packages/${SURVIVOR_ID}`, {
@@ -302,7 +299,7 @@ describe('#19387: an app that declares `marketplace` still mounts exactly one Pa
   beforeAll(async () => {
     const dir = fixture('pkg-registry-declarer-', appConfig('declarer', ['marketplace']));
     dirs.push(dir);
-    const run = await runServe(dir, ['-p', randomPort()], {
+    const run = await runServe(dir, [], {
       waitFor: READY,
       env: { OS_DATABASE_URL: join(dir, 'probe.db') },
     });

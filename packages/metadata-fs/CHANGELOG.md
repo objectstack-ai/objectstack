@@ -1,5 +1,33 @@
 # @objectstack/metadata-fs
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- Updated dependencies [31e7d0b]
+  - @objectstack/metadata-core@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies [105902f]
+- Updated dependencies [8776119]
+- Updated dependencies [30ce56e]
+- Updated dependencies [df2c551]
+- Updated dependencies [adad73f]
+- Updated dependencies [d050a8f]
+- Updated dependencies [077b75f]
+  - @objectstack/metadata-core@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [dd29bbe]
+- Updated dependencies [c2bb302]
+  - @objectstack/metadata-core@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes

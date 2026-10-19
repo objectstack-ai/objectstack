@@ -22,22 +22,27 @@ import { recordsOf } from './object-graph.js';
  * Exactly two vocabularies resolve inside a filter value: context tokens
  * (`{current_user_id}`, `{current_org_id}` — see `context-tokens.zod.ts`) and
  * date macros (`{today}`, `{30_days_ago}` — see `date-macros.zod.ts`).
- * Anything else is passed to the data engine **verbatim**, matches no row, and
- * the surface renders an empty result.
+ * Anything else does not resolve: the data engine refuses a query that carries
+ * it (`FILTER_TOKEN_UNKNOWN`, 400 — `UnknownFilterTokenError` in
+ * `@objectstack/core`'s `filter-tokens.ts`), so the surface never shows the
+ * data the filter meant.
  *
  * ## Why this is an error, not a warning
  *
- * The runtime failure mode is silent and indistinguishable from success. A
- * metric widget filtered on an unresolved `{current_user}` renders `0`, which
- * looks exactly like a metric that is legitimately zero — no console error, no
- * server log, nothing for a human reviewer to notice. Issue #3574 found a
- * dashboard that had been broken this way since the day it was written.
+ * The rule is older than that refusal. When issue #3574 was filed, the runtime
+ * substituted no placeholder: the value reached the data engine verbatim and
+ * matched no row. A metric widget filtered on an unresolved `{current_user}`
+ * rendered `0`, which looks exactly like a metric that is legitimately zero —
+ * no console error, no server log, nothing for a human reviewer to notice.
+ * Issue #3574 found a dashboard that had been broken this way since the day it
+ * was written. The runtime now refuses the query instead, so the failure is no
+ * longer silent, but it still shows only when someone opens the surface.
  *
- * That failure mode is worse for AI authors than for humans. An AI reads a
- * successful query returning `0` as a correct answer and builds on it — it has
- * no instinct that the number looks wrong. Its correction loop is
- * "author → validate → fix", so a diagnostic only reaches it if the diagnostic
- * can fail the build. A runtime warning in a server log is invisible to it.
+ * Neither form reaches an AI author. An AI read the old `0` as a correct answer
+ * and built on it — it has no instinct that the number looks wrong. Its
+ * correction loop is "author → validate → fix", so a diagnostic only reaches it
+ * if the diagnostic can fail the build. A server log line, or a refusal that
+ * arrives when a surface is opened after the build passed, is invisible to it.
  * Hence: authoring-time error.
  *
  * The near-miss spellings this catches are not hypothetical. Each is a correct
@@ -103,7 +108,7 @@ export const FILTER_TOKEN_UNKNOWN = 'filter-token-unknown';
 export type FilterTokenSeverity = 'error' | 'warning';
 
 export interface FilterTokenFinding {
-  /** Always `error` today — an unresolved placeholder silently matches nothing. */
+  /** Always `error` today — the data engine refuses a query carrying an unresolvable placeholder. */
   severity: FilterTokenSeverity;
   /** Diagnostic rule id. */
   rule: string;
@@ -233,18 +238,20 @@ function walkFilterValues(
         where,
         path,
         message:
-          `Filter value "${node}" is not a resolvable placeholder. It is sent to the ` +
-          `data engine as a literal string, matches no record, and the surface renders empty.`,
+          `Filter value "${node}" is not a resolvable placeholder. The data engine refuses a ` +
+          `query that carries it (\`FILTER_TOKEN_UNKNOWN\`, 400), so the surface never shows ` +
+          `the data the filter meant.`,
         hint: suggestion && isRecordContextToken(suggestion)
           ? `Did you mean "{${suggestion}}"? It resolves only in a filter on a component of a ` +
             `\`type: 'record'\` page, to the id of the record in view.`
           : suggestion
           ? `Did you mean "{${suggestion}}"? Context tokens are {${KNOWN_LIST}}; ` +
             `time-based values use date macros such as {today} or {30_days_ago}.`
-          : `Resolvable placeholders are the context tokens {${KNOWN_LIST}} and the ` +
-            `date macros (e.g. {today}, {week_start}, {30_days_ago}). To filter on a ` +
-            `literal value that happens to look like a placeholder, this is not supported — ` +
-            `rename the value.`,
+          // [#22161] One remedy line; the two vocabularies in full, and why a
+          // literal shaped like a placeholder cannot be filtered on, are
+          // `os explain filter-token-unknown`.
+          : `Use a context token ({${KNOWN_LIST}}) or a date macro such as {today} or ` +
+            `{30_days_ago}; a literal value that looks like a placeholder must be renamed.`,
       });
     }
     return;

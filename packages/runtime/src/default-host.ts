@@ -25,9 +25,10 @@
  */
 
 import { resolve as resolvePath } from 'node:path';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { createStandaloneStack, resolveObjectStackHome, type StandaloneStackConfig, type StandaloneStackResult } from './standalone-stack.js';
 import { isHttpUrl } from './load-artifact-bundle.js';
+import { makeDirectorySync } from './make-directory.js';
 
 export interface DefaultHostConfigOptions extends StandaloneStackConfig {
     /**
@@ -133,7 +134,9 @@ export async function createDefaultHostConfig(
         const home = resolveObjectStackHome();
         const stubPath = resolvePath(home, 'dist/objectstack.json');
         if (!existsSync(stubPath)) {
-            mkdirSync(resolvePath(stubPath, '..'), { recursive: true });
+            // Bounded (#23858): an `OS_HOME` that cannot be made is refused
+            // here, at once, with the OS's code and the path — never a loop.
+            makeDirectorySync(resolvePath(stubPath, '..'));
             writeFileSync(
                 stubPath,
                 JSON.stringify(

@@ -47,7 +47,14 @@ function setup() {
       { name: 'open' },
       { name: 'locked', enable: { apiEnabled: false } },
     ]),
-    getMetaItem: vi.fn().mockResolvedValue({}),
+    // [#24031] The gate reads its one object BY NAME; this by-name read
+    // answers the object the list above holds, as the real protocol's two
+    // reads agree.
+    getMetaItem: vi.fn(async (req: any) => ({
+      type: req?.type,
+      name: req?.name,
+      item: (await protocol.getMetaItems({ type: req?.type })).find((o: any) => o?.name === req?.name),
+    })),
     findData: vi.fn().mockResolvedValue([]),
     updateManyData,
     deleteManyData,

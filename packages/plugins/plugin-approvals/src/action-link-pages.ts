@@ -48,11 +48,23 @@ function shell(title: string, body: string): string {
 </style></head><body><div class="card">${body}</div></body></html>`;
 }
 
+/**
+ * The request summary both pages show.
+ *
+ * [#23594] The record is named by its id, never by its title. A subject title
+ * is served only to a reader who may read the field it comes from, narrowed by
+ * that reader's field-level security exactly as the payload snapshot is
+ * (#10749). These pages have no reader to narrow for: the bearer carries a
+ * token, not a session, and the token chain reads the request under the system
+ * context, which field-level security does not narrow. So no subject field is
+ * shown here — the record is named the way the approval notification names it,
+ * by the object's label and the record's id.
+ */
 function summaryRows(req: ApprovalRequestRow): string {
   const rows: Array<[string, string]> = [
     ['Process · 流程', req.process_label || req.process_name],
     ['Step · 步骤', req.step_label || req.current_step || '—'],
-    ['Record · 记录', req.record_title || req.record_id],
+    ['Record · 记录', req.record_id],
     ['Object · 对象', req.object_label || req.object_name],
     ['Requester · 申请人', req.submitter_name || req.submitter_id || '—'],
   ];

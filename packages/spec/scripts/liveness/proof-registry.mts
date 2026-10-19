@@ -452,7 +452,7 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     blockedReason:
       'this proof never AUTHORS the spec shape. It calls `SharingRuleService.defineRule` on the booted '
       + 'kernel with the RUNTIME column shape — `criteria` as an already-compiled FilterCondition, '
-      + '`recipientType`/`recipientId` — so `SharingRuleSchema` and `bootstrapDeclaredSharingRules` are '
+      + '`recipientType`/`recipientId` — so `SharingRuleSchema` and `createDeclaredSharingRuleSource` are '
       + 'not on its path and no authorable `sharing_rule.*` key is exercised; what it pins is the '
       + 'BU-subtree expansion inside the service. Binding `sharedWith.type` to it would be the '
       + 'owner-anchor/allowTransfer mistake: a proof cited for a property it does not author. '
@@ -500,9 +500,9 @@ export const HIGH_RISK_CLASSES: HighRiskClass[] = [
     blockedReason:
       'NOT the bu-hierarchy shape, and no longer blocked on a missing coordinate: this proof DOES '
       + 'author the spec shape. The showcase declares its rules through `defineSharingRule` '
-      + '(examples/app-showcase/src/security/sharing-rules.ts), `bootstrapDeclaredSharingRules` seeds '
-      + 'them, and the proof asserts the landed row — `object_name`, `recipient_type`, `recipient_id` '
-      + 'and the CEL→`criteria_json` translation — i.e. `name`/`object`/`sharedWith.type`/'
+      + '(examples/app-showcase/src/security/sharing-rules.ts), `createDeclaredSharingRuleSource` serves '
+      + 'them from the registry, and the proof asserts the served rule — `object_name`, `recipient_type`, '
+      + '`recipient_id` and the CEL→`criteria` translation — i.e. `name`/`object`/`sharedWith.type`/'
       + '`sharedWith.value`/`condition` end to end, every one of them a `live` row on the '
       + '`sharing_rule` ledger #18587 seeded. It is a REAL binding candidate, held back only because '
       + 'ADR-0054 §3 adopts one class at a time and adoption is a ledger act: each cited row must carry '

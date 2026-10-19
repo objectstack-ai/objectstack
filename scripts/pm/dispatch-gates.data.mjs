@@ -866,6 +866,15 @@ export const ESCAPABLE_LITERAL_LEDGER_ROWS = Object.freeze([
  *     row moving off REFUSE-WIDE, which takes a ruling. ⛔ Growing the gate's
  *     derivation rules does NOT qualify, and ⛔ neither does this predicate
  *     going quiet on a card, for the reason given above.
+ *   - durability-seam entry: when the durability guard's own source declares
+ *     the population its log-level rule walks in a form this derivation can
+ *     read, the ordinary path match names it and this entry is redundant. Today
+ *     that population is the bare package root, so it would take a ruling that
+ *     moves that root off the wide-population channel. ⛔ Growing the guard's
+ *     DURABILITY_CRITICAL_CALLEES does NOT qualify: the predicate already reads
+ *     that table, so a new callee widens this entry's net and does nothing to
+ *     let a path name the gate. ⛔ Neither does this predicate going quiet on a
+ *     card, for the reason given under the error-code entry.
  *   - root-program entry: when the gate's own source names its root population
  *     in a form this derivation can read — a positive literal, or a generated
  *     manifest of the resolved program — the ordinary path match names it and
@@ -987,6 +996,16 @@ export const CHANGE_KIND_ROWS = [
       {
         name: 'check:error-status-conformance',
         why: 'it derives every (code, HTTP status) pair the non-test TypeScript sources under the package root can emit (an error class declaring both, the four-argument sendError door, a code-and-status or status-and-body terminal, an assignment pair on one error) and reconciles that set in BOTH directions with the statuses the error catalog and the error-handling page publish. So a status added, changed or removed at an emit site moves it, and so does a status constant another file resolves. This is a gate no path derivation can name: it walks a bare top-level root that the bare-root ledger records as REFUSE-WIDE, so it scores the same quiet silence for every card, and PR #22311 paid a CI round trip for that silence (#22320). It needs NO build, being a source scan in one pass over the whole tree, and it names the code, the status and the emit site. Repair by DOCUMENTING the status on that code entry (an exception line when the code already publishes another status), or by correcting the emit site when the status is the defect. ⛔ Never by admitting the code to the unpinned baseline, which is ⛔ MAINTAINER-ONLY under the #8435 convention. ⚠ This lead fires on any file that binds a status value, not only one that changes it, for the trade the vocabulary entry above states: the wasted run is one cheap gate and the miss is a CI round trip',
+      },
+    ],
+  },
+  {
+    kind: 'adds or edits a file holding a catch clause and a durability-critical callee the durability guard declares (judged from CONTENT — no path derivation can name this gate)',
+    matches: 'durability-seam',
+    gates: [
+      {
+        name: 'check:durability-log-level',
+        why: 'it walks every non-test TypeScript source under the package root for a catch whose try calls an operation it declares durability-critical (a write, a DDL step, a store initialisation: the names in its DURABILITY_CRITICAL_CALLEES table, which this lead reads rather than copies), and fails when that catch logs below error without rethrowing or handing the failure to the caller. A counter-guarded summary that reaches error only through an optional call fails it too, and so does a declared propagation site that no longer excuses anything. This is a gate no path derivation can name for most of that population: its log-level walk is the bare package root, which the wide-population ruling keeps out of every matched column, and the only roots it spells are the three its read-seam rule walks, so it scored silent for every other card and PR #23567 paid a CI round trip for that silence (#23584). It needs NO build, being one AST pass over the whole tree in about six seconds, and it names the file, the catch line and the guarded callee. Repair by logging at error with the CONSEQUENCE and the FIX in the first line, by rethrowing, or by handing the failure to the caller through a callee its propagation vocabulary declares, which the checker then proves every path out of the catch reaches. ⛔ Never by `logger.error?.(…)`, which prints nothing against a sink with no error, and ⛔ never by baselining correct code: an entry in its shrink-only baseline means a real unfixed degradation. ⚠ This lead fires on any file holding both a catch clause and a declared callee name, not only one whose seam changed, for the trade the vocabulary entry above states: the wasted run is one cheap gate and the miss is a CI round trip',
       },
     ],
   },

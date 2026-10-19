@@ -69,6 +69,7 @@
  */
 
 import { keysetWalk } from '@objectstack/types';
+import type { SlotLabelSource } from './display-label-backfill.js';
 
 /**
  * The engine surface the repair needs — a structural subset of
@@ -99,7 +100,19 @@ export interface ActionSlotBackfillResult {
 }
 
 const SYSTEM_CONTEXT = { isSystem: true, positions: [], permissions: [] };
+/**
+ * [#23889] The repair's writes keep each row's own `updated_at`: moving a slot
+ * between columns, or labelling it, is not an edit of the decision.
+ * `preserveAudit` makes the engine's update stamp and the SQL driver keep the
+ * value the write passes back (the read row's); a row with none passes none.
+ */
+const PRESERVING_CONTEXT = { ...SYSTEM_CONTEXT, preserveAudit: true };
 const PAGE = 500;
+
+/** The read row's own `updated_at`, to hand back on the write. */
+function keptStamp(row: Record<string, unknown>): Record<string, unknown> {
+  return row.updated_at !== undefined && row.updated_at !== null ? { updated_at: row.updated_at } : {};
+}
 
 function nonEmpty(value: unknown): string | null {
   return typeof value === 'string' && value.length > 0 ? value : null;
@@ -123,9 +136,25 @@ export function isSlotLiteral(actorId: string): boolean {
  */
 export async function backfillActionSlots(
   engine: ActionSlotBackfillEngine,
-  options: { pageSize?: number } = {},
+  options: { pageSize?: number; labels?: Pick<SlotLabelSource, 'slotLabels'> } = {},
 ): Promise<ActionSlotBackfillResult> {
   const pageSize = options.pageSize ?? PAGE;
+  // [#23889] Every `acted_as` this repair writes gets its display label in the
+  // same write, so `acted_as_label` is null only where `acted_as` is (or where
+  // the name could not be read — the display-label backfill retries that). The
+  // labels of a page are read in ONE labeller call, never one per row.
+  const pageLabels = async (slots: string[]): Promise<Map<string, string | null>> => {
+    const out = new Map<string, string | null>();
+    const distinct = [...new Set(slots)];
+    if (!options.labels || !distinct.length) return out;
+    const answered = await options.labels.slotLabels(distinct);
+    distinct.forEach((slot, i) => out.set(slot, answered[i] ?? null));
+    return out;
+  };
+  const labelOf = (named: Map<string, string | null>, slot: string): Record<string, unknown> => {
+    const label = named.get(slot);
+    return label ? { acted_as_label: label } : {};
+  };
   let literalsMoved = 0;
   let sentinelsCleared = 0;
   let votesStamped = 0;
@@ -137,7 +166,7 @@ export async function backfillActionSlots(
   const nonIds = keysetWalk<Record<string, unknown>>(
     (q) => engine.find('sys_approval_action', {
       ...q,
-      fields: ['id', 'actor_id', 'acted_as'],
+      fields: ['id', 'actor_id', 'acted_as', 'updated_at'],
       context: SYSTEM_CONTEXT,
     }) as Promise<Record<string, unknown>[]>,
     {
@@ -146,6 +175,10 @@ export async function backfillActionSlots(
     },
   );
   for await (const rows of nonIds.pages()) {
+    const named = await pageLabels(rows
+      .filter((row) => !nonEmpty(row.acted_as))
+      .map((row) => nonEmpty(row.actor_id))
+      .filter((v): v is string => v !== null && isSlotLiteral(v)));
     for (const row of rows) {
       const id = nonEmpty(row.id);
       const actorId = nonEmpty(row.actor_id);
@@ -154,9 +187,9 @@ export async function backfillActionSlots(
       if (!sentinel && !isSlotLiteral(actorId)) continue;
       // Either way the column ends up empty. A slot also moves to `acted_as`;
       // a sentinel does not — the sweep took no slot.
-      const patch: Record<string, unknown> = { id, actor_id: null };
-      if (!sentinel && !nonEmpty(row.acted_as)) patch.acted_as = actorId;
-      await engine.update('sys_approval_action', patch, { context: SYSTEM_CONTEXT });
+      const patch: Record<string, unknown> = { id, actor_id: null, ...keptStamp(row) };
+      if (!sentinel && !nonEmpty(row.acted_as)) Object.assign(patch, { acted_as: actorId }, labelOf(named, actorId));
+      await engine.update('sys_approval_action', patch, { context: PRESERVING_CONTEXT });
       if (sentinel) sentinelsCleared++;
       else literalsMoved++;
     }
@@ -177,12 +210,16 @@ export async function backfillActionSlots(
     const votes = keysetWalk<Record<string, unknown>>(
       (q) => engine.find('sys_approval_action', {
         ...q,
-        fields: ['id', 'actor_id', 'acted_as'],
+        fields: ['id', 'actor_id', 'acted_as', 'updated_at'],
         context: SYSTEM_CONTEXT,
       }) as Promise<Record<string, unknown>[]>,
       { where: { request_id: { $in: ids }, action: 'approve', step_index: 0 }, pageSize },
     );
     for await (const rows of votes.pages()) {
+      const named = await pageLabels(rows
+        .filter((row) => !nonEmpty(row.acted_as))
+        .map((row) => nonEmpty(row.actor_id))
+        .filter((v): v is string => v !== null && !isMachineSentinel(v)));
       for (const row of rows) {
         const id = nonEmpty(row.id);
         const actorId = nonEmpty(row.actor_id);
@@ -190,7 +227,11 @@ export async function backfillActionSlots(
         // Pass 1 has already emptied every sentinel; a machine took no slot,
         // so one is never stamped as a vote even if a write raced the scan.
         if (isMachineSentinel(actorId)) continue;
-        await engine.update('sys_approval_action', { id, acted_as: actorId }, { context: SYSTEM_CONTEXT });
+        await engine.update(
+          'sys_approval_action',
+          { id, acted_as: actorId, ...labelOf(named, actorId), ...keptStamp(row) },
+          { context: PRESERVING_CONTEXT },
+        );
         votesStamped++;
       }
     }

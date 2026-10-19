@@ -57,6 +57,36 @@ describe('knowledgeSettingsManifest', () => {
   });
 });
 
+describe('knowledgeSettingsManifest — both warnings are info_banner rows', () => {
+  const specs = knowledgeSettingsManifest.specifiers as any[];
+  const sectionOf = (i: number) => specs.slice(0, i + 1).reverse().find((s) => s.type === 'group')?.id;
+
+  it('declares exactly the two warning-severity banners, each with an id, a title and a body', () => {
+    const banners = specs.filter((s) => s.type === 'info_banner');
+    expect(banners.map((b) => [b.id, b.bannerSeverity])).toEqual([
+      ['adapter_switch_warning', 'warning'],
+      ['enforce_rls_warning', 'warning'],
+    ]);
+    for (const b of banners) {
+      expect(typeof b.label, `${b.id} label`).toBe('string');
+      expect(b.label.length, `${b.id} label`).toBeGreaterThan(0);
+      expect(b.bannerText.length, `${b.id} bannerText`).toBeGreaterThan(0);
+    }
+  });
+
+  it('places each banner in the section it concerns, directly under the field it warns about', () => {
+    const at = (id: string) => specs.findIndex((s) => s.id === id);
+    expect(sectionOf(at('adapter_switch_warning'))).toBe('adapter');
+    expect(specs[at('adapter_switch_warning') - 1].key).toBe('adapter');
+    expect(sectionOf(at('enforce_rls_warning'))).toBe('permissions');
+    expect(specs[at('enforce_rls_warning') - 1].key).toBe('enforce_rls');
+  });
+
+  it('carries the warning glyph nowhere — the banner severity is the only warning marker', () => {
+    expect(JSON.stringify(knowledgeSettingsManifest)).not.toContain('⚠');
+  });
+});
+
 describe('knowledgeTestActionHandler', () => {
   it('warns for memory adapter (no service to probe)', async () => {
     const r = await knowledgeTestActionHandler({ values: { adapter: 'memory' } } as any);

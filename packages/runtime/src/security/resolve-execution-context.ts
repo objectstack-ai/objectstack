@@ -1,19 +1,15 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 /**
- * resolveExecutionContext — REST/dispatcher entry-point identity resolver.
+ * resolveExecutionContext — the runtime / MCP dispatcher's identity door.
  *
- * Thin adapter over the SINGLE shared authorization resolver
- * (`resolveAuthzContext` in `@objectstack/core/security`). This function only
- * does the transport-specific plumbing — pull `ql` and the better-auth session
- * getter out of the active kernel/scope — then delegates ALL identity +
- * position/permission/RLS aggregation to the shared resolver, and layers the
- * reference localization (timezone/locale) on top.
- *
- * The actual table reads (`sys_member` / `sys_user_position` /
- * `sys_*_permission_set`), the platform-admin derivation and the `ai_seat`
- * synthesis live in ONE place now (`@objectstack/core`), shared with the REST
- * server, so the two entry points can never drift on authorization again.
+ * [ruling record 6227928430, letter A] The composition — the session read,
+ * the tenancy-posture classification, the shared authorization resolver
+ * (`resolveAuthzContext`), the localization and the ExecutionContext assembly —
+ * is `resolveRequestExecutionContext` in `@objectstack/core`, the one function
+ * every platform door calls. This door only does what is its own: pull `ql`
+ * and the services out of the active kernel/scope, verify an OAuth access token
+ * on the `/mcp` face, and state its named parameters to that function.
  *
  * Resolves for every request it can ANSWER — anonymous requests yield the
  * guest envelope (`principalKind: 'guest'`, `positions: ['guest']`,
@@ -27,42 +23,31 @@
  */
 
 import type { ExecutionContext } from '@objectstack/spec/kernel';
-import type { ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import type { IAuthService, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
 import { scopesToAgentPermissionSets, MCP_OAUTH_SCOPE_ACTIONS } from '@objectstack/spec/ai';
 import { preferredLocaleFromHeader } from '@objectstack/spec/system';
-// [#22258] The in-process session-read rule — see the session getter below.
-import { inProcessSessionReadInput } from '@objectstack/types';
 
-import {
-  resolveAuthzContext,
-  resolveLocalizationContext,
-  assembleExecutionContextOrGuest,
-  type EntryLocalization,
-  // [#13906 decision 1 A / #16013] The ONE classification this door applies to
-  // the `tenancy` service's rejection: the REGISTRY's own "never registered"
-  // brand absorbs the supported no-tenancy composition (quiet `undefined`)
-  // while every other rejection becomes the loud `AuthzStoreUnavailableError`
-  // for an authorization input that exists and could not be read. Never
-  // message text (#13905). ⛔ The RESOLUTION stays here — see the call site.
-  classifyAdmissionTenancyPosture,
-  // [#23287, ruling C′ item 3] The auth service's per-user posture
-  // computation, bound for the shared key-admission seam.
-  userAuthGateSourceOf,
-  apiKeyLifecyclePolicySourceOf,
-  type AuthGate,
-} from '@objectstack/core';
+import { resolveRequestExecutionContext, type RequestAdmission } from '@objectstack/core';
 
 /**
  * [#4127 batch 4] The lookup facade, typed by slot like the ones on
  * `DomainHandlerDeps` and `ActionExecutionDeps`. This was the THIRD copy still
- * returning `any`, and the one that mattered most: both of its `'auth'` callers
- * read members — `verifyMcpAccessToken`, `api`, `getApi` — that nothing
- * declared, on the path that decides who a request is.
+ * returning `any`, and the one that mattered most: its `'auth'` lookup reads
+ * members — `verifyMcpAccessToken`, `api`, `getApi` — that nothing declared,
+ * on the path that decides who a request is.
  */
 interface KernelServiceLookup {
   <K extends keyof ServiceSlotContracts>(name: K): Promise<ServiceSlotContract<K> | undefined>;
   (name: string): Promise<any> | any;
 }
+
+/**
+ * A verified MCP OAuth access token, exactly as `IAuthService` declares the
+ * verifier's result — derived from the contract rather than copied, so a
+ * member the contract gains (`organizationId`, the organization the consent
+ * bound) cannot be dropped here by a hand-written shape.
+ */
+type VerifiedMcpAccessToken = NonNullable<Awaited<ReturnType<NonNullable<IAuthService['verifyMcpAccessToken']>>>>;
 
 interface ResolveOptions {
   /** Function returning a service from the active kernel (or undefined). */
@@ -96,7 +81,7 @@ interface ResolveOptions {
    * not carry either fact (its `authGate` stays withheld on this face, see
    * below), so this is the channel. Not called for an anonymous request.
    */
-  onAdmission?: (admission: { credential: 'api_key' | 'session'; authGate: AuthGate | undefined }) => void;
+  onAdmission?: (admission: RequestAdmission) => void;
 }
 
 /**
@@ -136,26 +121,29 @@ function toHeaders(input: any): any {
 export async function resolveExecutionContext(opts: ResolveOptions): Promise<ExecutionContext> {
   const headers = toHeaders(opts.request?.headers);
   const ql = await opts.getQl();
+  // The `auth` service, looked up once for every reader below: the OAuth
+  // verifier, the session read and the key-admission seam's posture and
+  // lifecycle sources. A lookup that rejects is a host with no auth service.
+  const authService = await Promise.resolve(opts.getService('auth')).catch(() => undefined);
 
   // ── OAuth 2.1 access-token provenance (MCP surface only, #2698) ──
   // Verified BEFORE session resolution so the presented credential decides
   // the outcome. Verification lives in the auth service (it owns the AS +
-  // JWKS); the *authorization* resolution below still flows through the
-  // single shared resolver — OAuth is a second provenance for the
-  // principal, never a second authz model.
-  let oauthPrincipal: { userId: string; scopes: string[]; clientId?: string } | undefined;
+  // JWKS); the *authorization* resolution still flows through the one shared
+  // composition — OAuth is a second provenance for the principal, never a
+  // second authz model. It stays at this door because the scope vocabulary
+  // it is read in (`@objectstack/spec/ai`) is MCP-domain knowledge the core
+  // package deliberately does not depend on.
+  let oauthPrincipal: VerifiedMcpAccessToken | undefined;
   let oauthBearerPresented = false;
   if (opts.acceptOAuthAccessToken) {
     const jwtBearer = extractJwtBearer(headers);
     if (jwtBearer) {
       oauthBearerPresented = true;
       try {
-        // [#4127 FINDING, batch 5]
-        // `verifyMcpAccessToken` is implemented (auth-manager.ts) and undeclared.
-        // This file's own `opts.getService: (name: string) => Promise<any> | any`
-        // is a second, smaller instance of the same problem — a lookup facade
-        // that returns `any` — and typing it is part of that batch too.
-        const authService = await opts.getService('auth');
+        // `verifyMcpAccessToken` is declared by `IAuthService` and reached
+        // through the slot-typed lookup, so the verified result is read as the
+        // contract states it — `organizationId` included.
         const verified = await authService?.verifyMcpAccessToken?.(jwtBearer);
         if (verified?.userId && Array.isArray(verified.scopes)) {
           oauthPrincipal = verified;
@@ -166,137 +154,72 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
     }
   }
 
-  // The auth service surfaces better-auth either as `.api` (legacy direct mount)
-  // or via `await getApi()` (lazy plugin). Build a session getter that tolerates
-  // both, and degrades to anonymous when auth isn't wired up.
-  const getSession = async (h: any) => {
-    try {
-      // [#4127 FINDING, batch 5]
-      // Reaches BOTH undeclared shapes in two lines — `.api` and the `getApi()`
-      // fallback — which is the clearest statement of the gap in the codebase.
-      const authService = await opts.getService('auth');
-      let api: any = authService?.api;
-      if (!api && typeof authService?.getApi === 'function') api = await authService.getApi();
-      // [#22258] A request carrying a session cookie reads without renewal:
-      // this door's response never carries a renewed cookie, so a renewal
-      // here would leave the browser's cookie to die before its session.
-      return await api?.getSession?.(inProcessSessionReadInput(h));
-    } catch {
-      return undefined;
-    }
-  };
-
-  // Session getter by provenance:
-  //  - verified OAuth token → synthetic session for the token's principal
-  //    (roles/permissions/RLS still aggregate through resolveAuthzContext);
-  //  - JWT bearer presented but NOT verified → hard anonymous (no cookie
-  //    fallback — a dead token must yield 401, not ambient session access);
-  //  - otherwise → the regular better-auth session path.
-  const getSessionForProvenance = oauthPrincipal
-    ? async () => ({ user: { id: oauthPrincipal!.userId } })
-    : oauthBearerPresented
-      ? async () => undefined
-      : getSession;
-
-  // [#8287] The EFFECTIVE tenancy posture, from the kernel's `tenancy` service —
-  // the same source `plugin-security` reconciles before handing a posture to the
-  // Layer 0 wall, so admission and the wall can never disagree. Deliberately not
-  // `OS_TENANCY_POSTURE`: that is what the operator ASKED for, and under
-  // ADR-0093 D4/D5 a requested-but-unenforceable wall resolves to `single`.
-  //
-  // [#13906 decision 1 A, at this door] `undefined` is not a neutral value
-  // here: `resolveAuthzContext` gates BOTH posture-conditional API-key
-  // refusals (`organization_required`, `organization_membership_ended`) on a
-  // PRESENT posture, so "no posture" means "no wall". The seam used to resolve
-  // EVERY rejection to that — and a `tenancy` service that was registered and
-  // FAILED to build read as a deployment with no tenancy at all. Two facts,
-  // told apart by the registry's own brand, the way `rest-server.ts` already
-  // does on both of its wirings:
-  //
-  //  - never registered → branded → `undefined`, quiet. The supported
-  //    no-tenancy composition: no wall exists, and refusing there would break
-  //    every single-organization embedder.
-  //  - registered and FAILED to build → unbranded → re-raised as the same loud
-  //    answer a failed permission-store read gives (commit 6a180e42d): the posture is an
-  //    authorization INPUT, so admission was never decided. A posture that
-  //    could not be READ is not a posture that is ABSENT.
-  //
-  // A facade that resolves `undefined` instead of rejecting (the dispatcher's
-  // capability PROBE, `resolveService`) still reads as absent — which is why
-  // `HttpDispatcher.resolveRequestScope` hands THIS read the classified
-  // rejection rather than the probe's collapsed answer.
-  //
-  // [commit 4af758d47] The CLASSIFICATION above is `classifyAdmissionTenancyPosture`'s,
-  // not a hand-written copy of it: this seam was one of the two that #16013
-  // left behind, and a copy of this decision is by construction the stale one.
-  // ⛔ The RESOLUTION is still this door's own and must stay so — `opts.getService`
-  // is this facade's lookup (the dispatcher hands it the registry's own async
-  // accessor; other callers hand it a probe), so it is handed in as the thunk
-  // and the helper never learns how this seam reaches the service.
-  const tenancyPosture = await classifyAdmissionTenancyPosture(
-    () => opts.getService('tenancy'),
-  );
-
-  // [#23287, ruling C′ item 3] The per-user posture computation the shared
-  // key-admission seam asks for a key's owner. A probe that faults is a host
-  // with no posture to ask, exactly as for the session getter above.
-  const authServiceForGates = await Promise.resolve(opts.getService('auth')).catch(() => undefined);
-
-  const authz = await resolveAuthzContext({
-    ql,
+  return resolveRequestExecutionContext({
     headers,
-    getSession: getSessionForProvenance,
-    tenancyPosture,
-    // [ADR-0138 D3/D4] This face takes the explicit guest entry below, so a
-    // request that resolves no principal is served the guest's grants: the
-    // sets bound to the `guest` anchor, in the organization D4 derives.
-    guestEntry: true,
-    userAuthGates: userAuthGateSourceOf(authServiceForGates as any),
-    // [#23367, ruling A] The API-key lifecycle policy, from the same service.
-    // A key its own lifecycle refuses raises the branded
-    // `ApiKeyLifecycleRefusalError` out of this call, and this door hands it
-    // up unchanged: whoever catches the resolution decides how loud it is.
-    apiKeyLifecycle: apiKeyLifecyclePolicySourceOf(authServiceForGates as any),
-  });
-  if (authz.userId && authz.credential) {
-    opts.onAdmission?.({ credential: authz.credential, authGate: authz.authGate });
-  }
-
-  // [commit f586f1a89 — maintainer ruling 2026-08-08, Option A] The ExecutionContext
-  // ASSEMBLY now lives in ONE place too (`assembleExecutionContext*`,
-  // @objectstack/core), shared with the REST face. Everything above is
-  // transport-specific plumbing; the field set is closed by type over there, so
-  // a new `ExecutionContext` field can no longer reach one face and miss
-  // another (the #6071 drift class), and the per-face divergences are named
-  // inputs rather than silent omissions.
-  //
-  // This face takes the EXPLICIT GUEST entry: a sessionless request on the
-  // runtime / MCP door is a first-class guest principal, and enforcement
-  // consumers read it (`plugin-security/explain-engine.ts`: guest ⇒ `EXTERNAL`
-  // posture). The REST face takes the fail-closed default entry instead
-  // (no session → no ctx → 401), unchanged.
-
-  // Anonymous → skip localization (no scope to resolve against); keep the engine
-  // default. Authenticated → resolve reference timezone/locale/currency.
-  let localization: EntryLocalization | undefined;
-  if (authz.userId) {
-    const settings = await Promise.resolve(opts.getService('settings')).catch(() => undefined);
-    localization = await resolveLocalizationContext({
-      ql,
-      settings,
-      tenantId: authz.tenantId,
-      userId: authz.userId,
-    });
-  }
-
-  return assembleExecutionContextOrGuest({
-    authz,
+    ql,
+    authService,
+    // [#8287 · #13906 decision 1 A · #16013] The EFFECTIVE tenancy posture,
+    // from the kernel's `tenancy` service, classified by the shared helper.
+    // ⛔ The RESOLUTION is still this door's own: `opts.getService` is this
+    // facade's lookup (the dispatcher hands it the registry's own async
+    // accessor for `tenancy`; other callers hand it a probe), so it is handed
+    // in as the thunk and the shared function never learns how this door
+    // reaches the service.
+    tenancy: () => opts.getService('tenancy'),
+    // [commit f586f1a89 · ADR-0138 D3/D4] The EXPLICIT GUEST entry: a sessionless
+    // request on the runtime / MCP door is a first-class guest principal,
+    // served the sets bound to the `guest` anchor, and enforcement consumers
+    // read it (`plugin-security/explain-engine.ts`: guest ⇒ `EXTERNAL`).
+    anonymous: 'guest',
+    // [ADR-0069 / #7280] WITHHELD, on the record. This face enforces the
+    // authentication-policy gate at its OWN seam: `HttpDispatcher.enforceAuthGate`
+    // re-reads the session and calls `evaluateAuthGate(session.user, path)`
+    // there, and nothing on this path ever reads `context.authGate`. [#23287]
+    // The key-admission seam's answer reaches that gate through
+    // `opts.onAdmission`, not through this field.
+    authGate: 'withhold',
+    credentials: 'api-key-and-session',
+    // This door admits an API key whether or not an auth service is wired.
+    sessionApi: 'optional',
+    // Session by provenance:
+    //  - verified OAuth token → a session established for the token's
+    //    principal (positions/permissions/RLS still aggregate in the resolver);
+    //  - JWT bearer presented but NOT verified → no session at all (no cookie
+    //    fallback — a dead token must yield 401, not ambient session access);
+    //  - otherwise → the auth service's read of this request.
+    //
+    // [ADR-0090 D10 · ruling record 6232069920, letter A] The established
+    // session is IN the one organization the user's consent bound — the
+    // verified result's `organizationId`, carried where a session carries its
+    // active organization. So the session arm vets it on every request by the
+    // rule it applies to a browser session (`vetOrganizationClaim`): kept while
+    // a current membership backs it under a walled posture; dropped — no
+    // organization, only global grants — once none does. The D10 delegator is
+    // then resolved in that organization. ⛔ Never the union of the user's
+    // organizations, never the organization their browser session has selected
+    // now, never a widened global grant. A token minted before consents bound
+    // one carries none: the principal resolves with no organization.
+    session: oauthPrincipal
+      ? {
+        established: {
+          user: { id: oauthPrincipal.userId },
+          session: { userId: oauthPrincipal.userId, activeOrganizationId: oauthPrincipal.organizationId },
+        },
+      }
+      : oauthBearerPresented ? 'none' : 'request',
+    // Authenticated → resolve reference timezone/locale/currency; a settings
+    // lookup that rejects reads as no settings service.
+    localization: { settings: () => opts.getService('settings') },
+    // [#3957] The request's OWN language preference wins over the workspace
+    // default, so a rejection message is not rendered in English beside the
+    // Chinese label of the very field it names.
+    requestLocale: preferredLocaleFromHeader(headers.get('accept-language')),
+    // A NAMED divergence (commit f586f1a89): this face has always carried the
+    // session bearer down to hooks (`session.accessToken`); the REST face never has.
+    accessToken: 'carry',
     // The OAuth SCOPE VOCABULARY is interpreted here, at the only door that
     // speaks it (`acceptOAuthAccessToken` is set solely by the `/mcp` path
-    // match), and the shared assembler receives the already-derived grant. It
-    // decides what that ceiling REPLACES on the envelope — the part that
-    // drifted — without `@objectstack/core` taking a dependency on the AI
-    // subdomain. See `OAuthTokenProvenance`.
+    // match), and the shared assembler receives the already-derived grant.
     oauth: oauthPrincipal && {
       ...oauthPrincipal,
       // [ADR-0090 D10] `data:read` → read-only, `data:write` → CRUD, neither →
@@ -306,29 +229,7 @@ export async function resolveExecutionContext(opts: ResolveOptions): Promise<Exe
       // invoke actions on their behalf; without it the agent holds none.
       delegatesActions: oauthPrincipal.scopes?.includes(MCP_OAUTH_SCOPE_ACTIONS) ?? false,
     },
-    localization,
-    // [#3957] The request's OWN language preference wins over the workspace
-    // default — `ExecutionContext.locale` drives the write path's message
-    // catalog, and metadata is already translated per `Accept-Language`, so
-    // reading only the workspace locale would put an English rejection next to
-    // the Chinese label of the very field it names. The PRECEDENCE lives in the
-    // shared assembler so the two faces cannot disagree about it.
-    requestLocale: preferredLocaleFromHeader(headers.get('accept-language')),
-    // A NAMED divergence (commit f586f1a89): this face has always carried the session
-    // bearer down to hooks (`session.accessToken`); the REST face never has.
-    // Both are preserved — see the assembler's `accessToken` doc.
-    accessToken: authz.accessToken,
-    // [ADR-0069 / #7280] WITHHELD, on the record. This face enforces the same
-    // authentication-policy gate at its OWN seam: `HttpDispatcher.enforceAuthGate`
-    // re-reads the session and calls `evaluateAuthGate(session.user, path)`
-    // there, and nothing on this path ever reads `context.authGate`. Putting the
-    // posture on the envelope here would add a second copy that no consumer
-    // reads — the shape that drifts. Converging the dispatcher onto the envelope
-    // (so the gate is resolved once per request like every other identity fact)
-    // is a real option, but it is a behaviour-bearing change to a security seam,
-    // not a declaration's rider. [#23287] The key-admission seam's answer reaches
-    // that gate through `opts.onAdmission`, not through this field.
-    authGate: undefined,
+    onAdmission: opts.onAdmission,
   });
 }
 

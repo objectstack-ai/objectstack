@@ -131,9 +131,6 @@
       "TS18048: 'out.enable' is possibly 'undefined'.": 7,
       "TS2339: Property 'indexed' does not exist on type '…'.": 3
     },
-    "src/sys-metadata-repository-list-drafts.test.ts": {
-      "TS2345: Argument of type '…' is not assignable to parameter of type '…'.": 1
-    },
     "src/sys-metadata-repository.test.ts": {
       "TS2322: Type '\"theme\"' is not assignable to type '…'.": 2,
       "TS2322: Type '\"trigger\"' is not assignable to type '…'.": 1,

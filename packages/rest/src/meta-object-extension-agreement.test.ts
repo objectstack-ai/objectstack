@@ -288,7 +288,14 @@ describe('[#7556] the by-name and list reads of an object answer one question', 
             expect(host.layerCode).toContain(field);
             expect(host.layerEffective).toContain(field);
         }
-        expect(host.layerCode).toEqual(host.listed);
+        // [#24314] `code` is the RAW layer (the #6562 boundary: the read exits
+        // govern `effective`, never `code`), so it is the owner's declaration
+        // plus the extension's fields and no platform column. It used to equal
+        // the list read only because the registry planned the extension body as
+        // an ordinary object and the fold grafted the injected columns on.
+        expect(host.layerCode).toEqual(
+            [...Object.keys(OWNER_DECLARATION.fields), ...EXTENSION_FIELDS].sort(),
+        );
         expect(host.layerEffective).toEqual(host.listed);
     });
 

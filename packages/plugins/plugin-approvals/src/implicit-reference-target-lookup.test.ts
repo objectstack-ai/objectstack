@@ -27,8 +27,8 @@ import { ApprovalService } from './approval-service.js';
 type FieldDefs = Record<string, unknown>;
 type Row = Record<string, unknown>;
 
-/** What the enrichment read, in the order it read it. */
-interface FindCall { object: string; ids: string[] }
+/** What the enrichment read, in the order it read it, and whether as the system. */
+interface FindCall { object: string; ids: string[]; system: boolean }
 
 /** The two engine members the enrichment path reads. */
 function makeEngine(
@@ -38,9 +38,9 @@ function makeEngine(
   const finds: FindCall[] = [];
   const engine = {
     getSchema: (object: string) => schemas[object],
-    async find(object: string, options?: { where?: { id?: { $in?: string[] } } }) {
+    async find(object: string, options?: { where?: { id?: { $in?: string[] } }; context?: { isSystem?: boolean } }) {
       const wanted = options?.where?.id?.$in;
-      finds.push({ object, ids: wanted ?? [] });
+      finds.push({ object, ids: wanted ?? [], system: options?.context?.isSystem === true });
       const rows = tables[object] ?? [];
       return wanted ? rows.filter(r => wanted.includes(String(r.id))) : rows;
     },
@@ -73,8 +73,13 @@ function makeService(
   const resolve = (object: string) =>
     (service as unknown as { resolveLookupFields(o: string): Array<{ key: string; reference: string }> })
       .resolveLookupFields(object);
+  // [#23594 / #23618] No security service wired, so no field-visibility answer
+  // for any object, subject or target: the reader's served fields narrow
+  // nothing here.
   const enrich = (rows: InboxRow[]) =>
-    (service as unknown as { enrichRows(r: InboxRow[]): Promise<void> }).enrichRows(rows);
+    (service as unknown as {
+      enrichRows(r: InboxRow[], served: Map<string, string[] | undefined>, context: unknown): Promise<void>;
+    }).enrichRows(rows, new Map(), { userId: 'u_reader', positions: [], permissions: [] });
   return { resolve, enrich, warn, finds };
 }
 
@@ -150,9 +155,13 @@ describe('inbox display enrichment — the previously silent path', () => {
     // The read the silent path never issued. `assignee` is this object's ONLY
     // reference field, so before the repair the enrichment asked `sys_user`
     // nothing at all — this is the half a happy-value assertion cannot see.
+    // [#23637] Two reads of it: the reader's row-access ask for the target
+    // record, then the title read of the record the reader may read.
     const userReads = finds.filter(f => f.object === 'sys_user');
-    expect(userReads).toHaveLength(1);
-    expect(userReads[0]?.ids).toEqual(['u7']);
+    expect(userReads).toEqual([
+      { object: 'sys_user', ids: ['u7'], system: false },
+      { object: 'sys_user', ids: ['u7'], system: true },
+    ]);
 
     // …and the value the reviewer actually sees, instead of the raw id.
     expect(rows[0]?.payload_display).toEqual({ assignee: 'Grace Hopper' });

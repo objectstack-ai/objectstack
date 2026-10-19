@@ -6,10 +6,9 @@
 // renderer + enum/palette presence + no row = the #5068 gate's dispatch skips
 // the props bag and every authored key rides through in silence).
 //
-// The key sets are measured from the renderers' read points at the
-// `.objectui-sha` pin (`record-alert.tsx`, `record-quick-actions.tsx`,
-// `record-history.tsx` + `HistoryTimeline.tsx`, `record-chatter.tsx`), NOT
-// from the registrations' declared-input lists — and the divergences between
+// The key sets are measured from the renderers' read points (recorded in
+// `liveness/page.json`, row `regions`), NOT from the registrations'
+// declared-input lists — and the divergences between
 // the two are the interesting pins below: quick_actions' `aria` (read under a
 // spelling the shared ARIA shape refuses), its `actions` (host channel),
 // history's `entries`/`loading` (host channel), and alert's `icon` (READ here,
@@ -332,9 +331,10 @@ describe('ComponentPropsMap["record:activity"] — the host feed slot is named, 
   });
 
   it('the `record:chatter` / `record:discussion` `feed` (the same object) refuses both keys and says nothing reads them there', () => {
-    // At the `.objectui-sha` pin the chatter renderer reads its rows and its
-    // loading flag off the discussion context and never reads `feed.items` /
-    // `feed.loading`, so the mount-true clause is the one asserted here.
+    // The chatter renderer reads its rows and its loading flag off the
+    // discussion context and never reads `feed.items` / `feed.loading` (read
+    // points recorded in `liveness/page.json`, row `regions`), so the
+    // mount-true clause is the one asserted here.
     for (const type of ['record:chatter', 'record:discussion'] as const) {
       for (const key of ['items', 'loading'] as const) {
         const result = ComponentPropsMap[type].safeParse({ feed: { [key]: key === 'items' ? [] : true } });

@@ -177,10 +177,10 @@ describe('[#22161] one-line verdicts', () => {
     }
   });
 
-  it('`os explain` carries the class rule and the seeded-but-refused consequence the verdict no longer states', () => {
+  it('`os explain` carries the class rule and the served-but-refused consequence the verdict no longer states', () => {
     const text = explainRule(SHARING_RULE_UNLOWERABLE_CONDITION)?.paragraphs.join('\n') ?? '';
     expect(text).toContain('Two columns are compared only within one comparison class');
-    expect(text).toContain('so the rule IS seeded into `sys_sharing_rule`, but every criteria query it runs is refused');
+    expect(text).toContain('so the rule IS served to enforcement, but every criteria query it runs is refused');
     expect(text).toContain('The rule is declared and grants nothing.');
   });
 

@@ -2,16 +2,17 @@
 
 import type { SemanticMigration } from '../../types.js';
 
-// #21229 — an `object-grid` page block's `exportOptions` was `z.unknown()`, so a
-// bare format array (the list view's legacy spelling, which the list view lifts
-// to `{ formats }`) was accepted on the grid, whose renderer reads
+// #21229 — an `object-grid` page block's `exportOptions` was `z.unknown()`, so
+// a bare format array (the list view's legacy spelling, which the list view
+// lifts to `{ formats }`) was accepted on the grid, whose renderer reads
 // `exportOptions.formats` and lifts nothing. The row now takes the list view's
 // five-member export options OBJECT by identity, not the list view's union. D3
-// only: page-component `properties` is not parsed on the metadata save or load
-// path, so a stored page is never refused and there is no load-path refusal for
-// a conversion to pre-empt; the bare array never worked here, and lifting it
-// would change the export menu a deployed grid shows today; the authored census
-// found nothing to respell.
+// only: page-component `properties` is not parsed on the metadata load path, so
+// a stored page is never refused at load (its next save meets the
+// component-props gate at the metadata save door) and there is no load-path
+// refusal for a conversion to pre-empt; the bare array never worked here, and
+// lifting it would change the export menu a deployed grid shows today; the
+// authored census found nothing to respell.
 export const entry: SemanticMigration = {
   id: 'ui-object-grid-export-options-closed',
   surface: 'page `object-grid` components — `properties.exportOptions` (which used to accept any value)',
@@ -35,8 +36,8 @@ export const entry: SemanticMigration = {
     + 'object does not declare is named. It is read where every page component\'s props are: the '
     + 'component-props gate reports these as `component-props-invalid` / '
     + '`component-props-unknown-key` errors on `objectstack validate`, `objectstack build` and '
-    + '`objectstack lint`, and a stored page still saves and loads, because a page component\'s '
-    + '`properties` is not parsed on the metadata save or load path. No conversion is registered: '
+    + '`objectstack lint`, and a stored page still loads, because a page component\'s '
+    + '`properties` is not parsed on the metadata load path, and the next save of the page meets the component-props gate at the metadata save door. No conversion is registered: '
     + 'nothing on the load path refuses the shape; a bare array has no rewrite that both keeps '
     + 'what the grid shows today and honours what the author wrote, which is the judgment this '
     + 'entry leaves to the upgrader; and the authored census found nothing to respell. Population '

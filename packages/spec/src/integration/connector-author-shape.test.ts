@@ -1,4 +1,5 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+// test-budget: 30 — compiles the package type graph once: every probe (the two SYNC_ARCHITECTURE.md connector examples, the retired keys a Connector must refuse, the Connector / ConnectorParsed pair, and their controls) is compiled in one ts.createProgram over the spec entry barrels it imports, the first read pays that program's type-graph resolution and every later probe reads the same program; slowest of 9 executed hourly CI readings on 2026-10-16, 21.8 s (run 38904808867), x 1.25, rounded up
 
 import { describe, it, expect } from 'vitest';
 import ts from 'typescript';

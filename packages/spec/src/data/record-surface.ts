@@ -2,19 +2,27 @@
 
 /**
  * Record-surface derivation — the single source for *how* an object's
- * create / edit / detail record opens by DEFAULT: a full page, or an overlay
- * (drawer / modal). ADR-0085 §5 "one shared derivation, every surface".
+ * create / edit / detail record opens by DEFAULT. ADR-0085 §5 "one shared
+ * derivation, every surface". The size axis comes from the record's weight
+ * ({@link deriveRecordSurface}: field-heavy or mobile → `'page'`, otherwise a
+ * side drawer); what that means per flow is {@link deriveRecordFlowSurface}'s:
+ *   - viewing a record: a routed full page when field-heavy (or on mobile),
+ *     otherwise a drawer;
+ *   - creating / editing one: always an overlay — a modal when field-heavy
+ *     or on mobile (full-screen on mobile, bounded on desktop), otherwise a
+ *     drawer.
  *
- * Why this is a derivation and NOT an authored object key
- * ------------------------------------------------------
+ * Why the default is a derivation, not an authored object key
+ * -----------------------------------------------------------
  * ADR-0085 §2's admission test rejects per-surface presentation toggles on the
- * object: modal-vs-page is not a business fact a machine cannot infer — it is
- * exactly inferable from how heavy the record is. So the platform derives a
- * sensible default here (field-heavy → full page; otherwise a side drawer),
- * and AI authors write nothing in the common case. Explicit control, when a
- * specific object genuinely needs it, is the sanctioned per-page path: an
- * assigned page. The renderer therefore uses this ONLY as the default and lets
- * an explicit form/navigation config win.
+ * object: the size of the surface is not a business fact a machine cannot
+ * infer — it is exactly inferable from how heavy the record is. So the
+ * platform derives a sensible default here and AI authors write nothing in the
+ * common case. The renderer uses this ONLY as the default and lets explicit
+ * config win: a view's navigation config, an assigned page, and the
+ * object's `editMode` (`'modal' | 'page'`, declared in `object.zod.ts` by
+ * commit f11fc61c5's maintainer ruling as edit-interaction intent, which the
+ * renderer applies; nothing in this file reads it).
  *
  * The rule is deliberately simple and predictable (a single field-count
  * threshold + a mobile override) because an unpredictable heuristic is its own
@@ -128,13 +136,31 @@ export interface RecordFlowSurface {
  *     state → route-capable; making/changing one is a task → always overlay.
  *
  * So `view` keeps the #2578 behavior verbatim (`'page'` → route), while the
- * task flows map the derived `'page'` to a FULL-SCREEN MODAL — same big
- * canvas, overlay return semantics. This mapping is why `'modal'` exists in
- * {@link RecordSurface} without the base heuristic ever emitting it.
+ * task flows map the derived `'page'` to a MODAL — overlay return semantics.
+ * This mapping is why `'modal'` exists in {@link RecordSurface} without the
+ * base heuristic ever emitting it. How big that modal is follows the viewport:
+ *   - desktop (the default): a BOUNDED modal, `size: 'auto'` — the renderer's
+ *     own `lg` / `xl` bound applies, so a field-heavy form is not stretched to
+ *     the window edge;
+ *   - `viewport: 'mobile'`: a FULL-SCREEN modal, `size: 'full'` (an overlay on
+ *     a phone has no room to be anything else).
+ * The split is by viewport only. A field-heavy form with an embedded child /
+ * line-items table takes the same bounded modal on desktop: #2604 D1 sized
+ * task flows by field count alone and scoped the in-form `inlineEdit` grid out
+ * of its design, so it never chose full-screen for that case.
  *
- * Like the base derivation this is a DEFAULT only: explicit `navigation.mode`
- * / `navigation.size`, `FormView.type` / `modalSize`, or an assigned page win
- * (the sanctioned per-object overrides — no new authorable key, ADR-0085 §2).
+ * #2604 D1 (2026-07-05) mapped a field-heavy task flow to a full-screen modal
+ * on every viewport.
+ * Amended 2026-10-15 by objectui#12521 ruling 6203721639 (letter B): on
+ * desktop the field-heavy task flow is a bounded modal; mobile keeps
+ * full-screen.
+ *
+ * Like the base derivation this is a DEFAULT only, read from `def.fields`,
+ * `flow` and `opts` and nothing else: the renderer lets explicit
+ * config win over it — `navigation.mode` / `navigation.size`, an assigned
+ * page, and the object's `editMode` (`'modal' | 'page'`, declared in
+ * `object.zod.ts` as the object's edit-interaction intent, which the renderer
+ * applies; not read here).
  */
 export function deriveRecordFlowSurface(
   def: unknown,
@@ -145,8 +171,11 @@ export function deriveRecordFlowSurface(
   if (flow === 'view') {
     return { container: surface === 'page' ? 'route' : 'overlay', surface, size: 'auto' };
   }
-  // Task flows (create / edit / child-*): never a route. Field-heavy (or
-  // mobile, where the base derivation says 'page') → full-screen modal.
-  if (surface === 'page') return { container: 'overlay', surface: 'modal', size: 'full' };
+  // Task flows (create / edit / child-*): never a route. The base derivation
+  // says 'page' when field-heavy or mobile → a modal: full-screen on mobile,
+  // bounded (`'auto'`, the renderer's lg/xl bound) on desktop.
+  if (surface === 'page') {
+    return { container: 'overlay', surface: 'modal', size: opts.viewport === 'mobile' ? 'full' : 'auto' };
+  }
   return { container: 'overlay', surface, size: 'auto' };
 }

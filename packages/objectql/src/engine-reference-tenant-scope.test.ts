@@ -221,6 +221,11 @@ describe('[#19808] the lookup existence probe is scoped to the caller\'s organiz
   beforeEach(async () => {
     observed = [];
     engine = new ObjectQL();
+    // [ADR-0131 D8] An organization wall is what this suite is about: the
+    // driver scope is the wall's verdict, and under `single` (the env
+    // default) there is no wall to scope by. Cases that test `group`
+    // re-point the provider.
+    engine.setTenancyPostureProvider(() => 'isolated');
     const stub = makeTenantScopedDriver(observed);
     storeFor = stub.storeFor;
     engine.registerDriver(stub.driver, true);
@@ -506,6 +511,11 @@ describe('[#19837] the master-detail parent binding is scoped to the caller\'s o
   beforeEach(async () => {
     observed = [];
     engine = new ObjectQL();
+    // [ADR-0131 D8] An organization wall is what this suite is about: the
+    // driver scope is the wall's verdict, and under `single` (the env
+    // default) there is no wall to scope by. Cases that test `group`
+    // re-point the provider.
+    engine.setTenancyPostureProvider(() => 'isolated');
     const stub = makeTenantScopedDriver(observed);
     storeFor = stub.storeFor;
     engine.registerDriver(stub.driver, true);

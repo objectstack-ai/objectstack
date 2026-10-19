@@ -42,13 +42,17 @@ const INSTALLER = 'usr_installer';
 
 type Handler = (c: any) => Promise<any>;
 
-function makeC(body: any) {
+function makeC(body: any, sent?: { contentType: string; text: string }) {
     const json = vi.fn((payload: any, status?: number) => ({ payload, status: status ?? 200 }));
+    // [#23914] `sent`: a body as the client sent it, served the way Hono 4.13's
+    // `HonoRequest` serves one (`json()` is the cached `text()` then `JSON.parse`).
+    const text = sent ? Promise.resolve(sent.text) : undefined;
     return {
         req: {
             url: `http://localhost:3000${ROUTE}`,
             raw: new Request(`http://localhost:3000${ROUTE}`),
-            json: async () => body,
+            json: text ? () => text.then((t) => JSON.parse(t)) : async () => body,
+            ...(sent ? { text: () => text, header: (n: string) => (n.toLowerCase() === 'content-type' ? sent.contentType : undefined) } : {}),
             param: () => undefined,
         },
         json,
@@ -118,6 +122,7 @@ async function mount(dir: string, opts: {
     register.mockClear();
     return {
         install: (body: unknown) => routes.get(`POST ${ROUTE}`)!(makeC(body)),
+        installSent: (contentType: string, text: string) => routes.get(`POST ${ROUTE}`)!(makeC(undefined, { contentType, text })),
         register,
         syncSchemas,
         importUnmanagedPackage,
@@ -401,7 +406,7 @@ describe('install-local — a managed install never takes over an unmanaged copy
         expect(res.status).toBe(409);
         expect(res.payload.error.code).toBe('RESOURCE_CONFLICT');
         expect(res.payload.error.details).toEqual({ namespace: 'crm', base: 'com.example.crm-copy' });
-        expect(res.payload.error.message).toContain("held by the environment base 'com.example.crm-copy'");
+        expect(res.payload.error.message).toContain("'com.example.crm-copy'");
         expect(h.register).not.toHaveBeenCalled();
         expect(h.syncSchemas).not.toHaveBeenCalled();
         expect(h.ledgerHas('com.example.crm')).toBe(false);
@@ -437,5 +442,31 @@ describe('install-local — a managed install never takes over an unmanaged copy
         const res = await h.install({ manifest: crm() });
         expect(res.payload?.error?.code).not.toBe('RESOURCE_CONFLICT');
         expect(h.register).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('[#23914] a truncated install body is refused, and nothing is written', () => {
+    it('a declared JSON body that does not parse → 400 INVALID_REQUEST naming the parse failure, zero writes', async () => {
+        const m = await mount(dir);
+        const sent = '{"packageId": "com.example.crm", "installMode": "unmanaged"';
+        const res = await m.installSent('application/json', sent);
+        expect(res.status).toBe(400);
+        expect(res.payload).toEqual({
+            success: false,
+            error: { code: 'INVALID_REQUEST', message: expect.stringMatching(/parsed as JSON/) },
+        });
+        expect(res.payload.error.message).not.toContain(sent);
+        expect(m.register).not.toHaveBeenCalled();
+        expect(m.syncSchemas).not.toHaveBeenCalled();
+        expect(m.importUnmanagedPackage).not.toHaveBeenCalled();
+        expect(m.ledgerHas('com.example.crm')).toBe(false);
+    });
+
+    it('CONTROL — an empty JSON body is still no body: the door answers what it answered for {}', async () => {
+        const m = await mount(dir);
+        const empty = await m.installSent('application/json', '');
+        const none = await m.install({});
+        expect(empty.status).toBe(none.status);
+        expect(empty.payload).toEqual(none.payload);
     });
 });

@@ -191,6 +191,56 @@ describe('bundled template declared version surfaces', () => {
       expect(templatePkg.packageManager).toBeUndefined();
     });
 
+    // npm 10, the npm Node 22 bundles and the one `npx create-objectstack` falls
+    // back to without pnpm, could not install this scaffold at all. Its arborist
+    // crashes in `#loadPeerSet` with `Cannot read properties of null (reading
+    // 'edgesOut')`. The template's own `vitest` range is not the path in: the
+    // crash enters through OPTIONAL `vitest` peers deeper in the closure
+    // (`@objectstack/metadata-core` peers `^4.0.0`, better-auth peers
+    // `^2 || ^3 || ^4`). npm 10 resolves those to vitest 4.1.12 (published
+    // 2026-10-15), which peers `@vitest/browser-webdriverio: ^4.1.11`; that
+    // package's only match, 4.1.11, peers `vitest: 4.1.11` exactly. Measured
+    // 2026-10-16 on a fresh scaffold, each leg with a fresh `--cache`:
+    //
+    //   no override          npm 10.9.4 / 10.9.9  exit 1, the crash (10.9.9 also
+    //                                             with `vitest` dropped from devDependencies)
+    //                        npm 11.21.x          exit 0, one vitest@4.0.18 in the tree
+    //   "vitest": "~4.0.0"   npm 10.9.x / 11.21.x exit 0, every one the same tree
+    //                                             as npm 11 installs without it
+    //
+    // The override routes every `vitest` edge in the npm graph to the range this
+    // project declares, the vitest npm 11 already dedupes the whole tree to. pnpm
+    // ignores npm's `overrides` field (measured on 10.28.0): pnpm users see no change.
+    //
+    // ⛔ Not `"$vitest"`. It installs too, but npm then stops hoisting
+    // `@objectstack/metadata-core` and nests 17 copies of it (measured, on 10.9.9
+    // and 11.21.0), and a duplicated module is a duplicated `instanceof` identity.
+    // The literal costs one thing instead, and loudly: npm refuses an override
+    // that differs from the direct dependency's own spec (`EOVERRIDE: Override
+    // for vitest@^4.1.0 conflicts with direct dependency`, measured), so the two
+    // move together. That is the second assertion. Both are stamped from
+    // `SCAFFOLD_VITEST_RANGE` at build (the `devDependencies.vitest` and
+    // `overrides.vitest` rows of the emission-policy stamp script's
+    // `POLICY_STAMPS`), the constant `os init` / `os create` emit their own
+    // override from.
+    // ⛔ Not a shipped `.npmrc` with `legacy-peer-deps`, which changes peer
+    // resolution for every npm user of the scaffold.
+    it('package.json overrides vitest to its own declared range, so npm 10 installs it', () => {
+      const templatePkg = JSON.parse(readTemplateFile('package.json'));
+      const declared: unknown = templatePkg.devDependencies?.vitest;
+      expect(
+        typeof declared,
+        `${template}/package.json must declare vitest directly — the override below is ` +
+          'only coherent against a direct dependency',
+      ).toBe('string');
+      expect(
+        templatePkg.overrides?.vitest,
+        `${template}/package.json must declare "overrides": { "vitest": "${String(declared)}" } — ` +
+          'without it npm 10 crashes (`edgesOut` of null) installing the scaffold, and with any ' +
+          'other value npm refuses it as conflicting with the direct dependency (EOVERRIDE)',
+      ).toBe(declared);
+    });
+
     // NOTE the file: this stamp lives in `objectstack.config.ts`, inside the
     // `defineStack({ manifest: … })` literal. It is NOT in
     // `objectstack.manifest.json` — the two were conflated in this suite's own

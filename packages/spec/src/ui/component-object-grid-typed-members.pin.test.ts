@@ -10,8 +10,8 @@
  * `rowHeight`, `aggregations`, `conditionalFormatting`, `rowColor`,
  * `navigation` and `operations` were `z.unknown()`, and `bulkActionDefs` an
  * array of it, while objectui's `ObjectGrid` reads each with one shape
- * (measured at the `.objectui-sha` pin `89cad75d55`; the read points are in
- * the row's docblock). So `rowHeight: 42` passed every door and rendered as a
+ * (read points recorded in `liveness/page.json`, row `regions`). So
+ * `rowHeight: 42` passed every door and rendered as a
  * compact grid, and every other off-shape value was substituted or dropped
  * with no report. `resizableColumns` was the second spelling of `resizable`,
  * read only when `resizable` was absent.
@@ -203,8 +203,8 @@ describe('§3 the members hold the list view\'s own schemas, and the measured vo
   it('aggregations[].type is AggregationFunction, whose members are exactly the six functions the grid computes', () => {
     const type = shape().aggregations.unwrap().element.shape.type;
     expect(type._zod.def).toBe(AggregationFunction._zod.def);
-    // The grid's own vocabulary at the pin (`AggregationType` in
-    // `plugin-grid/src/useGroupedData.ts`). A member added to the query AST's
+    // The grid's own vocabulary (`AggregationType`, recorded in
+    // `liveness/page.json`, row `regions`). A member added to the query AST's
     // enum widens this door past the grid's reader; this line reds first.
     expect([...AggregationFunction.options].sort()).toEqual(['avg', 'count', 'count_distinct', 'max', 'min', 'sum']);
   });

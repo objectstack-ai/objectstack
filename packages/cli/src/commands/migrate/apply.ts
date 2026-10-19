@@ -17,6 +17,8 @@ import {
 } from '../../utils/format.js';
 import {
   bootSchemaStack,
+  collectDriftApplyLimits,
+  describeWithApplyLimits,
   describeDatabaseSource,
   describeTelemetryDatabase,
   renderPlan,
@@ -24,7 +26,9 @@ import {
   summarize,
   summarizePendingSchemaWork,
   groupByCategory,
+  SKIPPED_SCHEMA_SYNC_NOTE,
 } from '../../utils/schema-migrate.js';
+import type { ManagedDriftEntry } from '@objectstack/driver-sql';
 import { exitOneShotCommand } from '../../utils/one-shot-exit.js';
 import {
   describeUnloadableHostConfig,
@@ -38,6 +42,7 @@ import {
   REACTIONS_COLUMN,
   readCommentReactionsConversion,
 } from '../../utils/comment-reactions-conversion.js';
+import { ceremonyOrganizationColumnDrops, readOrganizationOwnershipMarker } from '../../utils/organization-ownership-drop-gate.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -48,6 +53,17 @@ async function confirm(question: string): Promise<boolean> {
   } finally {
     rl.close();
   }
+}
+
+/**
+ * [#23848] One entry the driver did not apply, as the apply names it: where
+ * (`table.column`; an index entry's `column` is its leading key column), the
+ * kind, the index name for an index entry, and `(destructive)` when it is.
+ */
+function describeNotApplied(entry: ManagedDriftEntry): string {
+  const where = entry.column ? `${entry.table}.${entry.column}` : entry.table;
+  const index = 'indexName' in entry.op ? ` ${entry.op.indexName}` : '';
+  return `${where} — ${entry.op.type}${index}${entry.category === 'destructive' ? ' (destructive)' : ''}`;
 }
 
 /**
@@ -74,6 +90,17 @@ async function confirm(question: string): Promise<boolean> {
  *    set this command can see is the data stack plus the platform floor — not
  *    the deployment's. #12953 made that run exit non-zero; it still applied its
  *    DDL first. It now refuses above every write, and says so in the refusal.
+ *
+ * And since #23848, a primary whose transport cannot hold DDL back (the Turso
+ * REMOTE transport, which refused the boot until then) is reconciled too:
+ *
+ * 4. **The drift half runs where the additive half cannot be previewed.** The
+ *    boot skips schema sync instead of deferring it, as `os migrate plan`'s
+ *    does, so guarantee 1 still holds (nothing is written before the prompt)
+ *    and the additive work is reported as NOT examined rather than as none.
+ *    The drift entries are applied as on any database, and **every entry the
+ *    driver did not apply is named** by table, column and kind; a destructive
+ *    one the operator confirmed makes the run PARTIAL and exit 1.
  */
 export default class MigrateApply extends Command {
   static override description =
@@ -187,8 +214,15 @@ export default class MigrateApply extends Command {
         jsonOutput: flags.json,
         databaseUrl: flags['database-url'],
         deferSchemaDdl: true,
+        // [#23848] Where the primary's transport cannot defer DDL, skip schema
+        // sync rather than refuse — the posture `os migrate plan` passes too.
+        deferredDdlUnsupported: 'skip-schema-sync',
         composeHostStack: true,
         composeServedPlatform: true,
+        // [#24120] The plan's datasources too: each declared datasource a
+        // `datasourceMapping` rule routes objects to, connected as `os serve`
+        // connects it, reconciled where they live.
+        composeDeclaredDatasources: true,
       });
     } catch (error: any) {
       if (flags.json) { await emitJson({ error: error.message, ...errorCodeFields(error) }, 0, { compact: true }); this.exit(1); }
@@ -210,10 +244,14 @@ export default class MigrateApply extends Command {
       // to apply" is only as good as the database it was read from.
       // [#22579] …and the `telemetry` sibling lifecycle-classed objects are
       // reconciled in, when the serving boot keeps one.
+      // [#23848] …and, when the boot skipped schema sync, that `pending` /
+      // `created` were not examined: the additive work is not this run's.
+      const schemaSyncSkipped = stack.schemaSync === 'skipped';
       const target = {
         database: stack.dbLabel,
         databaseSource: stack.dbSource,
         ...(stack.telemetryDatabase !== null ? { telemetryDatabase: stack.telemetryDatabase } : {}),
+        ...(schemaSyncSkipped ? { schemaSync: 'skipped' as const } : {}),
       };
 
       // What the object set was composed from (#12938) — printed BEFORE the
@@ -225,6 +263,7 @@ export default class MigrateApply extends Command {
       if (!flags.json) {
         printInfo(`Database: ${chalk.white(stack.dbLabel)} ${chalk.dim(`(${describeDatabaseSource(stack.dbSource)})`)}`);
         if (stack.telemetryDatabase !== null) printInfo(describeTelemetryDatabase(stack.telemetryDatabase));
+        if (schemaSyncSkipped) printWarning(SKIPPED_SCHEMA_SYNC_NOTE);
         for (const note of stack.composition.notes) console.log(chalk.dim(`      ${note}`));
         console.log('');
       }
@@ -257,7 +296,11 @@ export default class MigrateApply extends Command {
       if (drift.length === 0 && pending.length === 0) {
         if (flags.json) {
           await emitJson(
-            { ...target, applied: [], skipped: [], created: [], message: unexamined > 0 ? 'in_sync_partial' : 'in_sync', ...compositionPayload },
+            {
+              ...target, applied: [], skipped: [], created: [],
+              message: unexamined > 0 || schemaSyncSkipped ? 'in_sync_partial' : 'in_sync',
+              ...compositionPayload,
+            },
             0,
             { compact: true },
           );
@@ -272,6 +315,14 @@ export default class MigrateApply extends Command {
           );
           return;
         }
+        if (schemaSyncSkipped) {
+          // [#23848] Drift was read; the additive half was not (see above).
+          printWarning(
+            'Nothing to apply over the tables this database holds — but its additive schema work was NOT examined '
+            + '(see above). This is a PARTIAL reconcile: it is not evidence that every declared table and column exists.',
+          );
+          return;
+        }
         printSuccess('Physical schema is already in sync with metadata — nothing to apply.');
         return;
       }
@@ -280,13 +331,34 @@ export default class MigrateApply extends Command {
       const intended = drift.filter((d) => d.category !== 'destructive' || allowDestructive);
       const deferred = drift.filter((d) => d.category === 'destructive' && !allowDestructive);
 
+      // [#23925] What the driver that reported each entry declares its apply
+      // door cannot perform, as `os migrate plan` reads it. Read for the human
+      // face only (the listing below and the held-back line after the apply);
+      // the --json document, `notApplied`, PARTIAL and the exit code never read
+      // it. Empty for a driver that declares nothing, which reads as it always has.
+      const limits = flags.json ? new Map<ManagedDriftEntry, string>() : collectDriftApplyLimits(stack, drift);
+
       if (!flags.json) {
+        // [#23925] An entry with a limit shows its finding and that limit, never
+        // --allow-destructive.
         await renderPendingSchemaWork(pending);
-        renderPlan(drift);
+        if (limits.size === 0) renderPlan(drift);
+        else renderPlan(drift, await describeWithApplyLimits(limits));
         if (pending.length > 0) printInfo(await summarizePendingSchemaWork(pending));
         printInfo(summarize(drift));
-        if (deferred.length > 0) {
-          printWarning(`${deferred.length} destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).`);
+        // [#23925] A re-run with --allow-destructive is offered only for the
+        // held-back entries it could apply here; the rest are named as drift
+        // that re-run would leave as it is.
+        const reRunnable = deferred.filter((d) => !limits.has(d));
+        const notReRunnable = deferred.length - reRunnable.length;
+        if (reRunnable.length > 0) {
+          printWarning(`${reRunnable.length} destructive change(s) will be SKIPPED (re-run with --allow-destructive to include them).`);
+        }
+        if (notReRunnable > 0) {
+          printWarning(
+            `${notReRunnable} destructive change(s) remain drift that a re-run with --allow-destructive cannot apply `
+            + 'on this database either (each says why above).',
+          );
         }
         if (allowDestructive && grouped.destructive.length > 0) {
           printWarning('Destructive changes assume your full app/plugin set is loaded. A column that looks "orphaned" here may belong to a plugin that is not part of this build.');
@@ -480,6 +552,55 @@ export default class MigrateApply extends Command {
         }
       }
 
+      // ── [#23429 E1, ADR-0131 D10 item 5] REFUSE AN organization_id DROP AHEAD OF THE CEREMONY ──
+      //
+      // The third sibling, placed by the same rule: below the report, above the
+      // confirmation prompt, above both writes. A v18 runtime declares no
+      // organization column on the ceremony's column-drop tables, so the drift
+      // report offers each physical one for `--allow-destructive`. Dropped here
+      // first, the ceremony never promotes or reports the legacy organization
+      // rows, they become environment rows, and the v18 boot refusal finds no
+      // column left to refuse over — the escape hatch D10 item 5 forbids. So
+      // the drop waits for the ceremony's verified marker; no flag stands it
+      // down (`utils/organization-ownership-drop-gate.ts`).
+      const organizationDrops = ceremonyOrganizationColumnDrops(intended);
+      if (organizationDrops.length > 0) {
+        const engine = (stack.kernel as { getService?: (n: string) => unknown }).getService?.call(
+          stack.kernel,
+          'objectql',
+        );
+        const marker = await readOrganizationOwnershipMarker(engine as never);
+        if (!marker.verified) {
+          const detail = marker.flag
+            ? `The last run of "os migrate organization-ownership --apply --plan-file FILE" (${marker.flag.last_run_at}) is not verified `
+              + `(${marker.flag.blocking} blocking item(s)).`
+            : 'No run of "os migrate organization-ownership --apply --plan-file FILE" is recorded on this database.';
+          if (flags.json) {
+            await emitJson({
+              ...target, created: [], applied: [], skipped: drift, pending,
+              message: 'refused_organization_ownership_unmigrated', tables: organizationDrops, detail, marker: marker.flag,
+            }, 1, { compact: true });
+            return;
+          }
+          printError(
+            `Refusing this --allow-destructive run: it would drop organization_id from ${organizationDrops.join(', ')}, a drop the organization-ownership ceremony `
+            + `owns, and the ceremony has not verified on this database. ${detail} Dropping the column first would turn `
+            + 'every legacy organization row into an environment row without the ceremony\'s promotion or report. Run '
+            + '"os migrate organization-ownership --out PLAN" to write and review its plan, then '
+            + '"os migrate organization-ownership --apply --plan-file PLAN"; it drops these columns itself, in its '
+            + 'column-drops step, before it records the run verified. Nothing in this run was applied.',
+          );
+          this.exit(1);
+          return;
+        }
+        if (!flags.json) {
+          printSuccess(
+            `organization_id on ${organizationDrops.join(', ')}: the organization-ownership ceremony verified `
+            + `(${marker.flag?.verified_at}) — the drop may proceed.`,
+          );
+        }
+      }
+
       const totalIntended = intended.length + pending.length;
       if (totalIntended === 0) {
         if (flags.json) { await emitJson({ ...target, applied: [], skipped: deferred, created: [], message: 'nothing_safe_to_apply' }, 0, { compact: true }); return; }
@@ -508,15 +629,39 @@ export default class MigrateApply extends Command {
       const created = await stack.flushSchemaDdl();
       const { applied, skipped } = await stack.applyMigrationEntries(drift, { allowDestructive });
 
+      // ── [#23848] NAME WHAT THE DRIVER DID NOT APPLY ──────────────────
+      //
+      // `skipped` mixes two things: the destructive entries this run held back
+      // for lack of --allow-destructive (`deferred` — the driver was told not
+      // to), and the entries the driver was asked to apply and did not — its
+      // dialect or transport cannot perform them, or their DDL failed, and it
+      // logged which. The Turso REMOTE transport runs no SQLite table rebuild,
+      // so of the column entries it applies a drop and skips the rest. The
+      // second kind is named entry by entry, by table, column and kind.
+      //
+      // A DESTRUCTIVE one makes the run PARTIAL and exit 1, in both faces, as
+      // the refusals above do: the operator confirmed it with
+      // --allow-destructive, and a caller gating on the status must not read
+      // a schema that still differs as a migrated one. A non-destructive one
+      // is named and the exit stays 0 — the report-only findings no driver
+      // applies (`manual_column_type_change` and its siblings) have always
+      // been skipped on every dialect, and still are.
+      const held = new Set<ManagedDriftEntry>(deferred);
+      const notApplied = skipped.filter((d) => !held.has(d));
+      const unappliedDestructive = notApplied.filter((d) => d.category === 'destructive');
+      const partial = unappliedDestructive.length > 0;
+
       if (flags.json) {
         await emitJson({
           ...target,
           created,
           applied,
           skipped,
+          notApplied,
+          ...(partial ? { message: 'partial' } : {}),
           ...compositionPayload,
           duration: timer.elapsed(),
-        });
+        }, partial ? 1 : 0);
         return;
       }
 
@@ -525,11 +670,37 @@ export default class MigrateApply extends Command {
         printSuccess(`Created/extended ${created.length} table(s): ${await summarizePendingSchemaWork(created)}.`);
       }
       printSuccess(`Applied ${applied.length} change(s).`);
-      if (skipped.length > 0) {
-        printWarning(`Skipped ${skipped.length} change(s) (destructive without --allow-destructive, or unsupported on this dialect).`);
+      // [#23925] Split as the count before the prompt splits `deferred`: a re-run
+      // is offered only for the held-back entries it could apply here, and the
+      // rest are named as drift it could not apply either.
+      const heldBackEntries = skipped.filter((d) => held.has(d));
+      const heldBack = heldBackEntries.filter((d) => !limits.has(d)).length;
+      const heldBackNotReRunnable = heldBackEntries.length - heldBack;
+      if (heldBack > 0) {
+        printWarning(`Skipped ${heldBack} destructive change(s) (re-run with --allow-destructive to include them).`);
+      }
+      if (heldBackNotReRunnable > 0) {
+        printWarning(
+          `Skipped ${heldBackNotReRunnable} destructive change(s) that a re-run could not apply on this database either: `
+          + 'they remain drift (each says why above).',
+        );
+      }
+      if (notApplied.length > 0) {
+        printWarning(
+          `${notApplied.length} change(s) were NOT applied — the driver could not perform them on this database (its log `
+          + 'above says why), so the schema still differs from metadata there:',
+        );
+        for (const d of notApplied) console.log(chalk.yellow(`      • ${describeNotApplied(d)}`));
       }
       console.log(chalk.dim(`  ${timer.display()}`));
       console.log('');
+      if (partial) {
+        printError(
+          `PARTIAL apply: ${unappliedDestructive.length} destructive change(s) confirmed with --allow-destructive were `
+          + 'NOT applied (named above), so this database still differs from its metadata.',
+        );
+        this.exit(1);
+      }
     } catch (error: any) {
       // [#21434] The account-issuer pre-flight refusals above `this.exit(1)`
       // from inside this `try`; re-reporting the signal printed a second

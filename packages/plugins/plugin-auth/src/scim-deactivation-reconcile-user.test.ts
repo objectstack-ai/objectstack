@@ -63,7 +63,7 @@
  *      principal.
  */
 
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { ADMIN_FULL_ACCESS } from '@objectstack/spec/identity';
@@ -76,6 +76,38 @@ import { registerIdentityWriteGuard, registerManagedUpdateWhitelist } from './id
 import { SYS_USER_PROFILE_EDIT_FIELDS } from './sys-user-writable-fields.js';
 import { SCIM_DEACTIVATION_BAN_REASON } from './user-ban-write.js';
 import { bindTestSecurityCatalog } from './__tests__/security-catalog.testkit.js';
+import { memoizeScrypt } from './__tests__/scrypt-memo.testkit.js';
+import { sqliteEnginePool, type BootedSqliteEngine } from './__tests__/sqlite-engine-pool.testkit.js';
+// [#23184] better-auth's first module load is paid HERE, at module load, and
+// not inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test). `AuthManager` reaches every vendor module
+// through a lazy `await import()`, so without these lines the file's first case
+// paid most of a second of vendor module evaluation. The list is what the
+// SCIM + organization + admin managers below boot through; a module it misses
+// is still loaded in the first case, as before. The module cache hands
+// `AuthManager` these same instances, and this file changes no environment the
+// vendor reads at load, so nothing a case runs is different.
+import 'better-auth';
+import 'better-auth/api';
+import 'better-auth/db';
+import 'better-auth/plugins';
+import 'better-auth/plugins/admin';
+import 'better-auth/plugins/bearer';
+import 'better-auth/plugins/organization';
+import 'better-auth/plugins/organization/access';
+import '@better-auth/core/context';
+import '@better-auth/core/error';
+import '@better-auth/oauth-provider';
+import '@better-auth/scim';
+
+/**
+ * [#23184] Every sign-in below verifies the password the case attached, which
+ * re-derives the same production-parameter scrypt against the same salt; the
+ * memo answers that repeat with the bytes the real derivation produced. A
+ * wrong password, a fresh salt or other parameters still run the real call.
+ */
+const scrypt = memoizeScrypt();
+afterAll(scrypt.restore);
 
 const BASE = 'http://localhost:3000';
 const AUTH = `${BASE}/api/v1/auth`;
@@ -135,17 +167,23 @@ const sysUserPermissionSet = {
 
 const PS_ADMIN = 'ps_admin_full_access';
 
-const engines: ObjectQL[] = [];
-afterEach(async () => {
-  while (engines.length) {
-    const e = engines.pop();
-    try {
-      await (e as unknown as { destroy?(): Promise<void> })?.destroy?.();
-    } catch {
-      /* noop */
-    }
-  }
+// [#23184] A case that moved the wall clock with `passTime()` gets the real
+// clock back before anything else runs; a no-op for every other case.
+afterEach(() => {
+  vi.useRealTimers();
 });
+
+/**
+ * [#23184] The engine every case boots on, from a per-file pool: built once by
+ * {@link bootEngine} — the same objects, the same two guards — and handed to
+ * each case with its rows deleted (`sqlite-engine-pool.testkit.ts` says what a
+ * reused engine does and does not carry). Its schema sync was about 80 ms of
+ * every case. The manager and the SCIM credential stay per case, built fresh
+ * by {@link boot} on the emptied database.
+ */
+const enginePool = sqliteEnginePool(bootEngine);
+afterEach(enginePool.release);
+afterAll(enginePool.destroy);
 
 interface Harness {
   engine: ObjectQL;
@@ -162,16 +200,32 @@ interface Harness {
  * nothing here names it.
  */
 async function boot(): Promise<Harness> {
+  const engine = await enginePool.take();
+
+  const manager = new AuthManager({
+    secret: SECRET,
+    baseUrl: BASE,
+    dataEngine: engine as never,
+    getTenancy: () => createTenancyService({ requested: 'isolated', probeIsolation: () => true }),
+    plugins: { scim: true, organization: true },
+  } as never);
+
+  const { token } = await mintScimConnectionCredential(engine as never, SECRET, {
+    connectionId: 'okta-14360',
+  });
+
+  return { engine, manager, token, send: (request) => manager.handleRequest(request) };
+}
+
+/** The engine a SCIM deployment's identity objects live on, with its two write guards. */
+async function bootEngine(): Promise<BootedSqliteEngine> {
   const engine = new ObjectQL();
-  engines.push(engine);
-  engine.registerDriver(
-    new SqlDriver({
-      client: 'better-sqlite3',
-      connection: { filename: ':memory:' },
-      useNullAsDefault: true,
-    }),
-    true,
-  );
+  const driver = new SqlDriver({
+    client: 'better-sqlite3',
+    connection: { filename: ':memory:' },
+    useNullAsDefault: true,
+  });
+  engine.registerDriver(driver, true);
   await engine.init();
   for (const object of AUTH_OBJECTS) {
     engine.registry.registerObject(object as never, '@objectstack/plugin-auth');
@@ -191,20 +245,7 @@ async function boot(): Promise<Harness> {
   registerLastAdminGuard(engine as unknown as LastAdminGuardEngine, {
     packageId: 'test.last-admin-guard',
   });
-
-  const manager = new AuthManager({
-    secret: SECRET,
-    baseUrl: BASE,
-    dataEngine: engine as never,
-    getTenancy: () => createTenancyService({ requested: 'isolated', probeIsolation: () => true }),
-    plugins: { scim: true, organization: true },
-  } as never);
-
-  const { token } = await mintScimConnectionCredential(engine as never, SECRET, {
-    connectionId: 'okta-14360',
-  });
-
-  return { engine, manager, token, send: (request) => manager.handleRequest(request) };
+  return { engine, driver };
 }
 
 // ---------------------------------------------------------------------------
@@ -302,10 +343,19 @@ async function sessionCount(h: Harness, userId: string): Promise<number> {
  * (`admin-user-endpoints.ts`: hash, then `createAccount` with the local
  * credential issuer — 1.7.2's sign-in accepts no other credential row). The
  * address is marked verified because the IdP asserted it.
+ *
+ * [#23184] The hash is made once per file, by the first case's manager, and
+ * the same stored value is written into each case's own database: every
+ * manager here is built with the same options and the vendor's default
+ * hasher, so the value is the one each would have produced, up to its random
+ * salt. That salt is the only thing shared, and no case reads it; each
+ * sign-in still verifies the stored hash through the vendor, for real.
  */
+let passwordHash: Promise<string> | undefined;
 async function attachPassword(h: Harness, user: Provisioned): Promise<void> {
   const ctx = await h.manager.getAuthContext();
-  const hashed = await ctx.password.hash(PASSWORD);
+  passwordHash ??= ctx.password.hash(PASSWORD);
+  const hashed = await passwordHash;
   await ctx.internalAdapter.createAccount({
     userId: user.userId,
     providerId: 'credential',
@@ -603,6 +653,22 @@ describe('[#14360] a SCIM update that does not change `active` touches no ban co
   /** `expiry + 500 ms` — puts both faces past the expiry with margin to spare. */
   const TIMED_BAN_WAIT_MS = TIMED_BAN_MS + 500;
 
+  /**
+   * [#23184] Let `ms` of wall-clock time pass — by moving the clock, not by
+   * waiting. The expiry is judged by the vendor's `session.create` hook against
+   * `Date.now()` (better-auth's admin plugin: `banExpires < Date.now()`), the
+   * global clock, so faking `Date` alone and setting it `ms` ahead is what the
+   * real-time wait this replaces did, minus the 5.5 s of idle wall per face.
+   * Timers and everything else stay real, and the clock keeps running from
+   * there; the `afterEach` above puts the real one back. The positive control
+   * below is the proof that the moved clock reaches the vendor: its sign-in is
+   * admitted only because the hook read the expiry as past.
+   */
+  const passTime = (ms: number): void => {
+    vi.useFakeTimers({ toFake: ['Date'], shouldAdvanceTime: true });
+    vi.setSystemTime(Date.now() + ms);
+  };
+
   it("(d) a deactivation makes an administrator's EXPIRING ban permanent — the expiry cannot re-admit a deactivated principal", async () => {
     const h = await boot();
     const hana = await provision(h, 'hana');
@@ -633,7 +699,7 @@ describe('[#14360] a SCIM update that does not change `active` touches no ban co
     // Let the administrator's expiry pass, then prove the refusal still holds
     // (status AND code): without the clearing above the vendor would have
     // auto-unbanned here and answered 2xx.
-    await new Promise((resolve) => setTimeout(resolve, TIMED_BAN_WAIT_MS));
+    passTime(TIMED_BAN_WAIT_MS);
     expect(Date.now()).toBeGreaterThan(expiresAt.getTime());
     await expectSignInBanned(h, hana.email);
     row = await userRow(h, hana.email);
@@ -660,7 +726,7 @@ describe('[#14360] a SCIM update that does not change `active` touches no ban co
     );
     await expectSignInBanned(h, hana.email);
 
-    await new Promise((resolve) => setTimeout(resolve, TIMED_BAN_WAIT_MS));
+    passTime(TIMED_BAN_WAIT_MS);
     expect(Date.now()).toBeGreaterThan(expiresAt.getTime());
 
     // The vendor's `session.create` hook auto-lifts a ban whose `banExpires`

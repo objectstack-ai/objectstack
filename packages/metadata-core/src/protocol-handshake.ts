@@ -65,7 +65,11 @@ export interface ProtocolIncompatibleDiagnostic {
    */
   protocolVersion: string;
   runtimeMajor: number;
-  /** The declared major the package targets, when a single major is determinable. */
+  /**
+   * The declared major the package targets, when a single major is
+   * determinable: the range's leading version token, and for a `||` union the
+   * lowest of its alternatives', whatever order they are written in.
+   */
   targetMajor: number | null;
   /** The command that resolves the refusal (wired end-to-end by ADR-0087 P2). */
   migrateCommand: string;
@@ -217,21 +221,48 @@ function leadingMajor(token: string): number | null {
 }
 
 /**
+ * The `||` alternatives of a range, each trimmed. A range with no `||` is its
+ * own single alternative, so no single-range reading changes through this.
+ */
+function rangeAlternatives(range: string): string[] {
+  return range.split('||').map((alternative) => alternative.trim());
+}
+
+/**
  * Decide whether a SemVer-ish range admits `runtimeMajor`.
  *
  * Returns `true`/`false` on a positive determination, or `null` when the range
  * shape is not recognized (caller admits with a warning rather than refusing).
  * Protocol compatibility is major-grained by design, so every supported form
  * reduces to "which majors does this admit".
+ *
+ * A `||` union (`'^17.7.0 || ^18.0.0'`, the spelling a package bridging two
+ * protocol majors writes) admits a major when ANY alternative admits it.
+ * When none does and any alternative is unrecognized (an empty one included:
+ * `'^17 ||'`), the union is unrecognized too and answers `null`, because the
+ * alternative this cannot read might be the one that admits. Only a union
+ * whose every alternative refuses answers `false`.
  */
 export function rangeAdmitsMajor(range: string, runtimeMajor: number): boolean | null {
   const r = range.trim();
-  if (r === '' ) return null;
   // A real SemVer range is short. Bounding the length here defuses any
-  // pathological input before it reaches a regex (a manifest's `engines`
-  // string is externally authored, so treat it as untrusted): an overlong
-  // string is simply unrecognized (admit-with-warning), never a slow scan.
+  // pathological input before it reaches a split or a regex (a manifest's
+  // `engines` string is externally authored, so treat it as untrusted): an
+  // overlong string is simply unrecognized (admit-with-warning), never a slow
+  // scan.
   if (r.length > 128) return null;
+  let verdict: boolean | null = false;
+  for (const alternative of rangeAlternatives(r)) {
+    const admits = alternativeAdmitsMajor(alternative, runtimeMajor);
+    if (admits === true) return true;
+    if (admits === null) verdict = null;
+  }
+  return verdict;
+}
+
+/** One `||` alternative: the single-range grammar {@link rangeAdmitsMajor} combines. */
+function alternativeAdmitsMajor(r: string, runtimeMajor: number): boolean | null {
+  if (r === '') return null;
   if (r === '*' || r === 'x' || r === 'latest') return true;
 
   // Compound comparator range, e.g. ">=11.0.0 <13.0.0" (space- or comma-joined).
@@ -282,6 +313,23 @@ export function rangeAdmitsMajor(range: string, runtimeMajor: number): boolean |
   if (exact !== null && /^\d+(\.\d+){0,2}$/.test(r)) return runtimeMajor === exact;
 
   return null;
+}
+
+/**
+ * The major a refused range targets: the major of its leading version token,
+ * its floor as the upgrade guidance reads it (`'^10'` → 10, `'>=15 <18'` → 15).
+ * A `||` union targets its LOWEST alternative's, in whatever order the
+ * alternatives are written: `'^16 || ^17'` and `'^17 || ^16'` are one range and
+ * get one `migrate meta --from`.
+ */
+function declaredFloorMajor(range: string): number | null {
+  let lowest: number | null = null;
+  for (const alternative of rangeAlternatives(range)) {
+    const major = leadingMajor(alternative.replace(/^[\^~<>=\s]+/, ''));
+    if (major === null) return null;
+    if (lowest === null || major < lowest) lowest = major;
+  }
+  return lowest;
 }
 
 function comparatorAdmitsMajor(comparator: string, runtimeMajor: number): boolean | null {
@@ -352,7 +400,7 @@ export function checkProtocolCompat(
   }
 
   const packageId = manifest.id ?? '<unknown>';
-  const targetMajor = leadingMajor(declared.range.replace(/^[\^~<>=\s]+/, ''));
+  const targetMajor = declaredFloorMajor(declared.range);
   const migrateCommand =
     targetMajor !== null
       ? `objectstack migrate meta --from ${targetMajor}`

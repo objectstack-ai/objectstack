@@ -5,7 +5,8 @@
  * fate comes through `--apply` with effective access IDENTICAL (and a positive
  * control: a grant the rewrite would lose reddens the comparison), mirrors
  * gone, attributed rows carrying their organization, the unattributable row
- * still present and reported, and row counts reconciling. Plus the ceremony's
+ * still present, reported, and holding certification (ruling C on the C8
+ * decision) until the operator resolves it by hand, and row counts reconciling. Plus the ceremony's
  * guarantees: idempotent, resumable from the recorded checkpoint, gated
  * (nothing deleted while a reference does not resolve by name), and no
  * deletion outside fate 2.
@@ -26,16 +27,19 @@ import { anonymousFormIntakeCandidates, anonymousFormIntakeWithdrawnIn, hashSpec
 import { buildOrganizationOwnershipPlan, inventoryDigest } from './organization-ownership-plan.js';
 import {
   applyOrganizationOwnership,
+  CEREMONY_STEPS,
   MetadataChoiceRefusal,
   ReviewedPlanRefusal,
   reviewedConflictsOf,
   reviewedPlanFromFile,
   TemplateChoiceRefusal,
+  UNATTRIBUTABLE_REMEDY,
   type ApplyExecutor,
   type CatalogPort,
   type CeremonyCheckpoint,
   type CeremonyLedgerPort,
   type ColumnDropPort,
+  type DefaultOrganizationPort,
   type MetadataDoorPort,
   type MetadataLockPort,
   type OrganizationOwnershipApplyReport,
@@ -45,6 +49,7 @@ import {
   type TemplatePort,
 } from './organization-ownership-apply.js';
 import { backfillOrgAdminGrants } from '@objectstack/plugin-security';
+import { ensureDefaultOrganizationExists } from '@objectstack/plugin-auth';
 import { assertEngineDeleteDispatch } from '@objectstack/metadata-core';
 import { describeSecurityPluginComposition, type SchemaMigrationComposition } from './schema-migration-plugins.js';
 
@@ -57,6 +62,7 @@ let writes: string[];
 function executor(opts: { failOnceOn?: RegExp } = {}): ApplyExecutor {
   let failed = false;
   return {
+    dialect: 'sqlite',
     client: 'better-sqlite3',
     async query(sql, params = []) {
       return db.prepare(sql).all(...(params as unknown[])) as Record<string, unknown>[];
@@ -424,6 +430,8 @@ const apply = (
     reviewed?: Partial<ReviewedPlan>;
     lock?: MetadataLockPort;
     securityPlugin?: SchemaMigrationComposition['securityPlugin'];
+    defaultOrganization?: DefaultOrganizationPort;
+    declaredSharingRules?: readonly string[];
   } = {},
 ): Promise<OrganizationOwnershipApplyReport> => {
   c.boot();
@@ -445,6 +453,10 @@ const apply = (
     ...(opts.templateChoices ? { templateChoices: opts.templateChoices } : {}),
     ...(opts.metadataChoices ? { metadataChoices: opts.metadataChoices } : {}),
     ...(opts.securityPlugin ? { securityPlugin: opts.securityPlugin } : {}),
+    ...(opts.defaultOrganization ? { defaultOrganization: opts.defaultOrganization } : {}),
+    ...(opts.declaredSharingRules
+      ? { declaredSharingRules: { rules: async () => opts.declaredSharingRules!.map((name) => ({ name, refused: null })) } }
+      : {}),
     posture: opts.posture ?? 'single',
     database: file,
     catalog: c,
@@ -504,7 +516,7 @@ afterEach(() => {
 });
 
 describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
-  it('comes through with effective access identical, mirrors gone, owners written, the orphan reported, counts reconciling', async () => {
+  it('comes through with effective access identical, mirrors gone, owners written, the orphan reported and holding certification, counts reconciling', async () => {
     const before = accessBefore();
     const countsBefore = counts();
     const c = catalog();
@@ -524,8 +536,10 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
       ['column-drops', 'done'],
     ]);
     expect(report.complete).toBe(true);
-    expect(report.blocking).toBe(0);
-    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 1 });
+    // Ruling C: the fate-4 orphan is the one discrepancy — the marker is not verified.
+    expect(report.blocking).toBe(1);
+    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 1, advisory: 0 });
+    expect(report.tables.filter((t) => t.remaining > 0).map((t) => [t.object, t.remaining])).toEqual([['sys_saved_report', 1]]);
 
     // Effective access: identical, read the 17.x way before and the v18 way after.
     expect(before.length).toBeGreaterThan(0);
@@ -574,9 +588,11 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     expect(rows(`SELECT organization_id FROM crm_deal WHERE id = 'deal_2'`)).toEqual([{ organization_id: 'org_default' }]);
     expect(rows(`SELECT organization_id FROM sys_user_permission_set WHERE id = 'grant_2'`)).toEqual([{ organization_id: 'org_default' }]);
 
-    // The unattributable row is still present, still NULL, and reported by id.
+    // The unattributable row is still present, still NULL — never guessed,
+    // never deleted — reported by id, and held with its count and remedy.
     expect(rows(`SELECT organization_id FROM sys_saved_report`)).toEqual([{ organization_id: null }]);
     expect(tableOf(report, 'sys_saved_report').unattributable.map((u) => u.id)).toEqual(['report_orphan']);
+    expect(tableOf(report, 'sys_saved_report').held).toEqual({ rows: 1, remedy: UNATTRIBUTABLE_REMEDY });
 
     // Fate 1: the column is gone through the column-drop port.
     expect(tableOf(report, 'sys_job').columnDropped).toBe(true);
@@ -596,6 +612,31 @@ describe('ADR-0131 D10 --apply — the acceptance fixture', () => {
     // Every delete is fate 2's, or the moved rows leaving sys_setting.
     expect(writes.filter((w) => /^DELETE/.test(w)).every((w) =>
       /sys_permission_set|sys_position|sys_position_permission_set|sys_capability|sys_email_template|"sys_setting" WHERE \(\("scope" = \?\) AND "organization_id" IS NULL\)/.test(w))).toBe(true);
+  });
+
+  it('ruling C: the operator resolves the orphan by hand — deleted, or given its organization — and the re-run certifies', async () => {
+    for (const remedy of [`DELETE FROM sys_saved_report WHERE id = 'report_orphan'`, `UPDATE sys_saved_report SET organization_id = 'org_b'`]) {
+      db.close();
+      rmSync(dir, { recursive: true, force: true });
+      dir = mkdtempSync(join(tmpdir(), 'os-c7b-apply-'));
+      file = join(dir, 'fixture.db');
+      db = new Database(file);
+      seed();
+      const c = catalog();
+      const l = ledger();
+      const first = await apply(c, l);
+      expect([first.complete, first.blocking], remedy).toEqual([true, 1]);
+      // The ceremony wrote nothing to the row: still there, still NULL.
+      expect(rows(`SELECT id, organization_id FROM sys_saved_report`)).toEqual([{ id: 'report_orphan', organization_id: null }]);
+
+      db.exec(remedy);
+      writes = [];
+      const again = await apply(c, l);
+      expect(again.resumedFrom, remedy).toEqual([...CEREMONY_STEPS]);
+      expect([again.complete, again.blocking, again.advisory], remedy).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1), remedy).toEqual({ complete: true, blocking: 0, advisory: 0 });
+      expect(tableOf(again, 'sys_saved_report').held, remedy).toBeUndefined();
+    }
   });
 
   it('positive control: a grant the rewrite would lose reddens the effective-access pin', async () => {
@@ -794,7 +835,9 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(c.templates.get('crm.late|en-US')).toMatchObject({ subject: 'Edited late' });
     expect(rows(`SELECT id FROM sys_email_template`)).toEqual([]);
     expect(resumed.complete).toBe(true);
-    expect(resumed.blocking).toBe(0);
+    // Nothing remains but the fixture's fate-4 orphan, which holds certification (ruling C).
+    expect(resumed.tables.filter((t) => t.remaining > 0).map((t) => t.object)).toEqual(['sys_saved_report']);
+    expect(resumed.blocking).toBe(1);
   });
 
   it('a customized template with no name blocks: kept, named, and verified_at stays null', async () => {
@@ -881,25 +924,38 @@ describe('ADR-0131 D10 --apply — idempotent, resumable, gated', () => {
     expect(rows('SELECT COUNT(*) AS n FROM sys_email_template')).toEqual([{ n: 6 }]);
   });
 
-  it('does not certify a ceremony whose departures have not left: the declared sharing-rule mirrors keep verified_at null', async () => {
+  it('certifies once the declared sharing-rule mirror is deleted: its grant renamed to the rule\'s name first, the organization\'s rule kept', async () => {
     db.exec(`
       CREATE TABLE sys_sharing_rule (id TEXT PRIMARY KEY, organization_id TEXT, name TEXT, managed_by TEXT, customized INTEGER);
       INSERT INTO sys_sharing_rule VALUES ('rule_declared', NULL, 'share_deals', 'package', 0), ('rule_org', 'org_b', 'mine', 'admin', 0);
+      CREATE TABLE sys_record_share (id TEXT PRIMARY KEY, organization_id TEXT, object_name TEXT, record_id TEXT, source TEXT, source_id TEXT);
+      INSERT INTO sys_record_share VALUES ('share_declared', 'org_b', 'crm_deal', 'deal_1', 'rule', 'rule_declared'),
+        ('share_org', 'org_b', 'crm_deal', 'deal_1', 'rule', 'rule_org');
     `);
     const l = ledger();
-    const report = await apply(catalog(), l);
+    const report = await apply(catalog(), l, { declaredSharingRules: ['share_deals'] });
 
-    // Every step ran, and the moved settings rung reads zero; the rule mirror
-    // is D2's to remove, so it still counts and is named.
+    // Every step ran, and the moved settings rung reads zero. The rule mirror
+    // is a copy of a declaration the registry serves (ADR-0131 D2), so the
+    // mirror-deletion step removes it — after renaming its grant — and nothing
+    // of it remains (the blocking and seeding legs:
+    // `organization-ownership-apply.declared-rule-mirrors.test.ts`). The one
+    // discrepancy left is the fixture's fate-4 orphan (ruling C).
     expect(report.complete).toBe(true);
-    expect(report.blocking).toBe(1);
-    expect(l.verdicts.at(-1)).toMatchObject({ complete: true, blocking: 1 });
+    expect(report.tables.filter((t) => t.remaining > 0).map((t) => t.object)).toEqual(['sys_saved_report']);
+    expect([report.blocking, report.advisory]).toEqual([1, 0]);
+    expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 1, advisory: 0 });
     expect(tableOf(report, 'sys_setting').departures).toEqual([]);
     const rule = tableOf(report, 'sys_sharing_rule');
-    expect(rule.remaining).toBe(1);
-    expect(rule.departures).toEqual([expect.objectContaining({ id: 'declared-rule-mirrors', as: 'mirror-deletion', rows: 1 })]);
-    expect(rule.notNull.willReceive).toBe(false);
-    expect(rows(`SELECT id FROM sys_sharing_rule ORDER BY id`).map((r) => r.id)).toEqual(['rule_declared', 'rule_org']);
+    expect(rule.remaining).toBe(0);
+    expect(rule.departures).toEqual([]);
+    expect(rule.deleted).toBe(1);
+    expect(report.warnings.filter((w) => w.startsWith('sys_sharing_rule holds'))).toEqual([]);
+    expect(rows(`SELECT id, organization_id FROM sys_sharing_rule ORDER BY id`)).toEqual([{ id: 'rule_org', organization_id: 'org_b' }]);
+    expect(rows(`SELECT id, source_id FROM sys_record_share ORDER BY id`)).toEqual([
+      { id: 'share_declared', source_id: 'share_deals' },
+      { id: 'share_org', source_id: 'rule_org' },
+    ]);
   });
 
   it('promotes under a wall too: a template with no conflict ends verified, its seeded mirror and its row gone', async () => {
@@ -1979,7 +2035,7 @@ describe('ADR-0131 D10 --apply — the grant\'s retired id column (C7b, seat ans
     expect(idColumn()).toEqual([]);
   });
 
-  it('a second platform-wide grant (organization NULL) is a duplicate too: GROUP BY keys NULLs together, unlike the index', async () => {
+  it('a second platform-wide grant (organization NULL) is a duplicate too: GROUP BY keys NULLs together, as the index\'s NULL-safe organization key part does', async () => {
     await onlyTemplates(`('tpl_none', NULL, 'crm.none', 'en-US', 'x', 0, 'package')`, async () => {
       db.exec(`
         CREATE TABLE sys_user_permission_set (id TEXT PRIMARY KEY, organization_id TEXT, user_id TEXT,
@@ -2099,7 +2155,7 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     expect(deletes()).toEqual([]);
   });
 
-  it('under a wall, the rewrite gate: the everyone binding gets the composition; an undeclared position keeps its remedy', async () => {
+  it('under a wall, the rewrite gate: the everyone binding gets the composition; an undeclared position gets the walled remedy', async () => {
     db.exec(v17Bindings);
     const report = await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin: NO_SECRET });
 
@@ -2108,7 +2164,8 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     expect(rewrite.status).toBe('blocked');
     const undeclared = blockerOf(rewrite, 'position zz_undeclared ');
     expect(undeclared).not.toContain(COMPOSITION);
-    expect(undeclared).toMatch(/resolve its blocker/);
+    expect(undeclared).toContain('PUT /api/v1/meta/position/zz_undeclared');
+    expect(undeclared).not.toMatch(/resolve its blocker/);
     const everyone = blockerOf(rewrite, 'position everyone ');
     expect(everyone).toContain(COMPOSITION);
     expect(everyone).not.toMatch(/\bremove\b/);
@@ -2135,7 +2192,462 @@ describe('ADR-0131 D10 --apply — a name only the uncomposed security plugin de
     `);
     const rewrite = step(await apply(catalog(), ledger(), { posture: 'isolated', securityPlugin }), 'rewrite');
     expect(blockerOf(rewrite, 'the permission set admin_full_access,')).toMatch(/or remove the grants/);
-    expect(blockerOf(rewrite, 'position everyone ')).toMatch(/resolve its blocker/);
+    // Not the pointer. This fake catalog declares no `everyone` (a composed boot declares it, sealed), so which
+    // walled remedy follows is not this control's question.
+    expect(blockerOf(rewrite, 'position everyone ')).not.toMatch(/resolve its blocker/);
     expect(rewrite.blockers.join('\n')).not.toContain(COMPOSITION);
+  });
+});
+
+describe('ADR-0131 D10 --apply — under a wall, the rewrite gate names the act the wall allows for a converted binding', () => {
+  type Step = OrganizationOwnershipApplyReport['steps'][number];
+  const step = (report: OrganizationOwnershipApplyReport, name: Step['step']): Step => report.steps.find((s) => s.step === name)!;
+  /** The one blocker of `s` that names `subject`. */
+  const blockerOf = (s: Step, subject: string): string => {
+    const found = s.blockers.filter((b) => b.includes(subject));
+    expect(found, subject).toHaveLength(1);
+    return found[0]!;
+  };
+  /** The remedy half of a binding blocker: what follows the fact. */
+  const remedyOf = (blocker: string): string => blocker.slice(blocker.indexOf('deleting them would lose a grant.'));
+  /** Every DELETE the run issued, beside the settings rung that moves before the rewrite. */
+  const deletes = (): string[] => writes.filter((w) => /^DELETE/.test(w) && !/^DELETE FROM "sys_setting"/.test(w));
+  /** An act, a door or a re-run: what a blocker with no sanctioned act never names. */
+  const ACT = /\b(Declare|Add|remove|resolve)\b|PUT |re-run/;
+  const POINTER = 'The authored-conversion step carries them; resolve its blocker, then re-run.';
+  /** The metadata door's lock verdict, answering `answer` and recording what it was asked. */
+  const lockAnswering = (answer: Awaited<ReturnType<MetadataLockPort['verdict']>> | Error): MetadataLockPort & { asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      async verdict(type, name, packageId) {
+        asked.push(`${type}|${name}|${packageId}`);
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+    };
+  };
+  /** A seeded position no catalog declares, its row binding member_default. */
+  const UNDECLARED = `
+    INSERT INTO sys_position VALUES ('pos_gone', NULL, 'zz_undeclared', 'Undeclared', 'platform', 0, 1);
+    INSERT INTO sys_position_permission_set VALUES ('bind_gone', NULL, 'pos_gone', 'ps_null');
+  `;
+  /** A seeded position whose rows bind member_default and zz_extra; the catalog's definition names member_default only. */
+  const DECLARED = `
+    INSERT INTO sys_permission_set VALUES ('ps_extra', NULL, 'zz_extra', 'Extra', 'platform', 1, '{}', '[]');
+    INSERT INTO sys_position VALUES ('pos_env', NULL, 'zz_env', 'Env', 'platform', 0, 1);
+    INSERT INTO sys_position_permission_set VALUES ('bind_env_1', NULL, 'pos_env', 'ps_null'), ('bind_env_2', NULL, 'pos_env', 'ps_extra');
+  `;
+  /** The catalog, declaring zz_env as `definition` from the next boot on. */
+  const declaring = async (definition: Record<string, unknown>): Promise<ReturnType<typeof catalog>> => {
+    const c = catalog();
+    await c.save('position', 'zz_env', { name: 'zz_env', label: 'Env', permissionSets: ['member_default'], ...definition });
+    return c;
+  };
+
+  it('⭐ undeclared: declare it with the bound sets through ONE of its two doors — never the step that reports done; nothing is deleted', async () => {
+    db.exec(UNDECLARED);
+    const lock = lockAnswering({ editable: true });
+    const report = await apply(catalog(), ledger(), { posture: 'isolated', lock });
+
+    expect(step(report, 'authored-conversion')).toMatchObject({ status: 'done', blockers: [] });
+    const rewrite = step(report, 'rewrite');
+    expect(rewrite.status).toBe('blocked');
+    const remedy = remedyOf(blockerOf(rewrite, 'position zz_undeclared '));
+    expect(remedy).not.toContain(POINTER);
+    expect(remedy).toContain('member_default');
+    // Both doors, and one only: the deployment's code, or the metadata door as the platform administrator.
+    expect(remedy).toContain('deployment\'s code');
+    expect(remedy).toContain('PUT /api/v1/meta/position/zz_undeclared');
+    expect(remedy).toMatch(/one door only/);
+    // The organization-authored position the base fixture binds is undeclared too, and gets the same act.
+    expect(remedyOf(blockerOf(rewrite, 'position sales_lead '))).toContain('PUT /api/v1/meta/position/sales_lead');
+    // An undeclared name has no definition for the door to judge.
+    expect(lock.asked).toEqual([]);
+    // Still refused: nothing is deleted or guessed.
+    expect(step(report, 'mirror-deletion').status).toBe('not-reached');
+    expect(deletes()).toEqual([]);
+  });
+
+  it('⭐ declared and editable: add the missing sets through the metadata door alone, as the door itself answers', async () => {
+    db.exec(DECLARED);
+    const lock = lockAnswering({ editable: true });
+    const report = await apply(await declaring({}), ledger(), { posture: 'group', lock });
+
+    const remedy = remedyOf(blockerOf(step(report, 'rewrite'), 'position zz_env '));
+    expect(remedy).not.toContain(POINTER);
+    expect(remedy).toContain('zz_extra');
+    expect(remedy).not.toContain('member_default');
+    expect(remedy).toContain('PUT /api/v1/meta/position/zz_env');
+    // The environment holds the name: the code door would refuse the cold boot.
+    expect(remedy).not.toContain('deployment\'s code');
+    expect(lock.asked).toEqual(['position|zz_env|null']);
+    expect(deletes()).toEqual([]);
+  });
+
+  it.each([
+    ['a package ships it (ADR-0131 D6)', { _packageId: 'com.example.vendor', _provenance: 'package' }, { editable: false, lock: 'no-overlay' }, ['com.example.vendor', 'ADR-0131 D6']],
+    ['an item lock', {}, { editable: false, lock: 'full', lockReason: 'frozen by the operator' }, ['full', 'frozen by the operator']],
+    ['the door\'s verdict is unreadable', {}, new Error('no metadata protocol is composed on this stack'), ['no metadata protocol is composed on this stack']],
+  ] as const)('⭐ declared and not editable — %s: the fact, and no act', async (_label, definition, answer, facts) => {
+    db.exec(DECLARED);
+    const lock = lockAnswering(answer as Awaited<ReturnType<MetadataLockPort['verdict']>> | Error);
+    const report = await apply(await declaring(definition), ledger(), { posture: 'isolated', lock });
+
+    const blocker = blockerOf(step(report, 'rewrite'), 'position zz_env ');
+    for (const fact of facts) expect(blocker).toContain(fact);
+    expect(blocker).not.toMatch(ACT);
+    expect(lock.asked).toEqual(['position|zz_env|null']);
+    expect(deletes()).toEqual([]);
+  });
+
+  it('conflicting, under a wall: the fact, and no act', async () => {
+    db.exec(`
+      INSERT INTO sys_position VALUES ('pos_c1', 'org_default', 'zz_conflict', 'C', 'platform', 0, 1),
+        ('pos_c2', 'org_b', 'zz_conflict', 'C', 'platform', 0, 1);
+      INSERT INTO sys_position_permission_set VALUES ('bind_c1', 'org_default', 'pos_c1', 'ps_null');
+    `);
+    const report = await apply(catalog(), ledger(), { posture: 'isolated' });
+
+    const blocker = blockerOf(step(report, 'rewrite'), 'Position zz_conflict:');
+    expect(blocker).not.toMatch(ACT);
+    expect(deletes()).toEqual([]);
+  });
+
+  it('control — single: the gate keeps the pointer at authored-conversion, and asks the door nothing', async () => {
+    const c = catalog();
+    const l = ledger();
+    await expect(apply(c, l, { executor: executor({ failOnceOn: /^DELETE FROM "sys_capability"/ }) })).rejects.toThrow(/killed mid-step/);
+    db.exec(UNDECLARED);
+    const lock = lockAnswering({ editable: true });
+
+    const resumed = await apply(c, l, { lock });
+
+    const deletion = step(resumed, 'mirror-deletion');
+    expect(deletion.status).toBe('blocked');
+    expect(remedyOf(blockerOf(deletion, 'position zz_undeclared '))).toBe(`deleting them would lose a grant. ${POINTER}`);
+    expect(lock.asked).toEqual([]);
+  });
+});
+
+/** Run `body` against a database holding `schema` alone (a fresh file per call). */
+let ownDatabases = 0;
+async function withDatabase(schema: string, body: () => Promise<void>): Promise<void> {
+  const own = new Database(join(dir, `own-${++ownDatabases}.db`));
+  own.exec(schema);
+  const saved = db;
+  db = own;
+  try {
+    await body();
+  } finally {
+    db = saved;
+    own.close();
+  }
+}
+
+describe('ADR-0131 D10 --apply — a single-posture database that holds no organization (D3: the Default Organization exists before the first write that needs an owner)', () => {
+  /** What a 17.x single-posture install whose seed ran before any organization existed left: rows, and no owner. */
+  const NO_ORGANIZATION = `
+    CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT, name TEXT);
+    CREATE TABLE crm_event (id TEXT PRIMARY KEY, organization_id TEXT, subject TEXT);
+    INSERT INTO crm_event VALUES ('ev_1', NULL, 'one'), ('ev_2', NULL, 'two'), ('ev_3', NULL, 'three');
+    CREATE TABLE sys_job (id TEXT PRIMARY KEY, organization_id TEXT);
+    INSERT INTO sys_job VALUES ('job_1', NULL);
+  `;
+
+  /** The producer double: the Default Organization a single-posture boot creates, written where the plan reads it. */
+  function defaultOrganizationPort(opts: { fails?: string } = {}): DefaultOrganizationPort & { calls: number } {
+    const port = {
+      calls: 0,
+      async create() {
+        port.calls++;
+        if (opts.fails) throw new Error(opts.fails);
+        db.prepare(`INSERT INTO sys_organization (id, slug, name) VALUES ('org_created', 'default', 'Default Organization')`).run();
+        return { id: 'org_created' };
+      },
+    };
+    return port;
+  }
+
+  it('⭐ the plan says --apply creates the Default Organization; --apply creates it before its first write and gives it every row no anchor names: nothing stays NULL, and the marker verifies', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ organizations: 0, defaultOrganization: null, defaultOrganizationCreatedByApply: true });
+      expect(plan.summary.unattributableRows).toBe(0);
+      const events = plan.tables.find((t) => t.object === 'crm_event')!;
+      expect(events.attribution).toEqual({ 'default-organization': 3 });
+      expect(events.fateCounts).toMatchObject({ rowsToAttribute: 3, unattributableRows: 0 });
+      expect(events.notNull.willReceive).toBe(true);
+      expect(plan.warnings).toContainEqual(expect.stringMatching(
+        /^This database holds no organization, and the tenancy posture is single: --apply creates the Default Organization \(slug 'default'\) before its first write and gives it the 3 organization-less row\(s\) no anchor names/,
+      ));
+      // The plan only reads.
+      expect(rows('SELECT COUNT(*) AS n FROM sys_organization')).toEqual([{ n: 0 }]);
+
+      const port = defaultOrganizationPort();
+      const l = ledger();
+      const report = await apply(catalog(), l, { defaultOrganization: port });
+
+      expect(port.calls).toBe(1);
+      expect(report.warnings).toEqual(plan.warnings);
+      expect(report.steps[0]).toMatchObject({ step: 'attribution', status: 'done', summary: { rowsAttributed: 3 } });
+      expect(rows('SELECT id, organization_id FROM crm_event ORDER BY id')).toEqual([
+        { id: 'ev_1', organization_id: 'org_created' },
+        { id: 'ev_2', organization_id: 'org_created' },
+        { id: 'ev_3', organization_id: 'org_created' },
+      ]);
+      expect(tableOf(report, 'crm_event')).toMatchObject({ attributed: 3, unattributable: [], remaining: 0, after: { organizationNull: 0 } });
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+    });
+  });
+
+  it('with no way to create it, the run blocks at attribution: nothing is written, nothing is checkpointed, nothing is certified', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      const l = ledger();
+      const report = await apply(catalog(), l);
+
+      expect(report.steps[0]).toMatchObject({ step: 'attribution', status: 'blocked' });
+      expect(report.steps[0]!.blockers).toEqual([
+        expect.stringMatching(/^This single-posture database holds no organization, and this run has no way to create the Default Organization/),
+      ]);
+      expect(report.steps.slice(1).every((s) => s.status === 'not-reached')).toBe(true);
+      expect([report.complete, report.blocking]).toEqual([false, 1]);
+      expect(l.checkpoint?.completed.attribution).toBeUndefined();
+      expect(rows('SELECT COUNT(*) AS n FROM crm_event WHERE organization_id IS NULL')).toEqual([{ n: 3 }]);
+      expect(writes).toEqual([]);
+    });
+  });
+
+  it('a producer that fails blocks at attribution, naming its cause; nothing is attributed', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      const report = await apply(catalog(), ledger(), { defaultOrganization: defaultOrganizationPort({ fails: 'UNIQUE constraint failed: sys_organization.slug' }) });
+
+      expect(report.steps[0]).toMatchObject({ step: 'attribution', status: 'blocked' });
+      expect(report.steps[0]!.blockers[0]).toMatch(/^The Default Organization could not be created \(UNIQUE constraint failed: sys_organization\.slug\)/);
+      expect(rows('SELECT COUNT(*) AS n FROM crm_event WHERE organization_id IS NULL')).toEqual([{ n: 3 }]);
+    });
+  });
+
+  it('control — no row falls to it: nothing is created and nothing is warned; the boot creates it once the guard lets it start', async () => {
+    await withDatabase(`${NO_ORGANIZATION} UPDATE crm_event SET organization_id = 'org_elsewhere';`, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ organizations: 0, defaultOrganizationCreatedByApply: false });
+      expect(plan.warnings.some((w) => /creates the Default Organization/.test(w))).toBe(false);
+      const port = defaultOrganizationPort();
+      const report = await apply(catalog(), ledger(), { defaultOrganization: port });
+
+      expect(port.calls).toBe(0);
+      expect([report.complete, report.blocking]).toEqual([true, 0]);
+      expect(rows('SELECT COUNT(*) AS n FROM sys_organization')).toEqual([{ n: 0 }]);
+    });
+  });
+
+  it('control — under a wall nothing is created: the rows are reported, never assigned', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'isolated', database: file });
+      expect(plan.defaultOrganizationCreatedByApply).toBe(false);
+      expect(plan.warnings.some((w) => /creates the Default Organization/.test(w))).toBe(false);
+      const port = defaultOrganizationPort();
+      const report = await apply(catalog(), ledger(), { posture: 'isolated', defaultOrganization: port });
+
+      expect(port.calls).toBe(0);
+      expect(tableOf(report, 'crm_event').unattributable.map((u) => u.id)).toEqual(['ev_1', 'ev_2', 'ev_3']);
+      expect(rows('SELECT COUNT(*) AS n FROM sys_organization')).toEqual([{ n: 0 }]);
+    });
+  });
+
+  it('control — several organizations and none of them default: nothing is created, the rows are reported with the reason', async () => {
+    await withDatabase(`${NO_ORGANIZATION} INSERT INTO sys_organization VALUES ('org_acme', 'acme', 'Acme'), ('org_beta', 'beta', 'Beta');`, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ organizations: 2, defaultOrganization: null, defaultOrganizationCreatedByApply: false });
+      const port = defaultOrganizationPort();
+      const report = await apply(catalog(), ledger(), { defaultOrganization: port });
+
+      expect(port.calls).toBe(0);
+      expect(tableOf(report, 'crm_event').unattributable).toEqual([
+        expect.objectContaining({ id: 'ev_1', reason: expect.stringContaining('no Default Organization exists to fall back to') }),
+        expect.objectContaining({ id: 'ev_2' }),
+        expect.objectContaining({ id: 'ev_3' }),
+      ]);
+    });
+  });
+
+  it('⭐ the sole organization, whatever its slug, is the Default Organization: it takes every row no anchor names, nothing is created, and the marker verifies', async () => {
+    await withDatabase(`${NO_ORGANIZATION} INSERT INTO sys_organization VALUES ('org_acme', 'acme', 'Acme');`, async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ organizations: 1, defaultOrganization: { id: 'org_acme', slug: 'acme' }, defaultOrganizationCreatedByApply: false });
+      const port = defaultOrganizationPort();
+      const l = ledger();
+      const report = await apply(catalog(), l, { defaultOrganization: port });
+
+      expect(port.calls).toBe(0);
+      expect(rows('SELECT DISTINCT organization_id FROM crm_event')).toEqual([{ organization_id: 'org_acme' }]);
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+    });
+  });
+
+  it('⭐ a checkpointed attribution runs again when the plan derives an owner for rows still NULL — the state an earlier run left when it found no Default Organization — and the ceremony verifies', async () => {
+    await withDatabase(NO_ORGANIZATION, async () => {
+      // What the release before this one left after a later boot created the
+      // Default Organization: every step checkpointed (attribution at zero rows),
+      // the column dropped, and the rows still NULL.
+      db.exec(`INSERT INTO sys_organization VALUES ('org_boot', 'default', 'Default Organization'); ALTER TABLE sys_job DROP COLUMN organization_id;`);
+      const l = ledger();
+      l.checkpoint = {
+        ceremony: 'ADR-0131 D10',
+        inventoryDigest: inventoryDigest(),
+        completed: Object.fromEntries(CEREMONY_STEPS.map((s) => [s, {
+          at: '2026-10-17T00:00:00.000Z',
+          summary: s === 'attribution' ? { rowsAttributed: 0, passes: 1 } : {},
+        }])),
+      };
+
+      const report = await apply(catalog(), l);
+
+      expect(report.resumedFrom).toEqual([...CEREMONY_STEPS]);
+      expect(report.steps.map((s) => `${s.step}:${s.status}`)).toEqual(
+        CEREMONY_STEPS.map((s) => `${s}:${s === 'attribution' ? 'done' : 'checkpointed'}`),
+      );
+      expect(report.steps[0]!.summary).toEqual({ rowsAttributed: 3, passes: 2 });
+      expect(l.checkpoint!.completed.attribution!.summary).toEqual({ rowsAttributed: 3, passes: 2 });
+      expect(rows('SELECT DISTINCT organization_id FROM crm_event')).toEqual([{ organization_id: 'org_boot' }]);
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+    });
+  });
+});
+
+describe('ruling C on the C8 decision — an unattributable row holds certification (ADR-0131 D10 fate 4: never guessed, never deleted)', () => {
+  /** A walled database: one fate-3 row whose anchor names a file that is gone, beside an attributable one. */
+  const WALLED = `
+    CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT, name TEXT);
+    INSERT INTO sys_organization VALUES ('org_a', 'acme', 'Acme'), ('org_b', 'beta', 'Beta');
+    CREATE TABLE sys_file (id TEXT PRIMARY KEY, organization_id TEXT, ref_object TEXT, ref_id TEXT);
+    INSERT INTO sys_file VALUES ('file_a', 'org_a', NULL, NULL);
+    CREATE TABLE sys_upload_session (id TEXT PRIMARY KEY, organization_id TEXT, file_id TEXT);
+    INSERT INTO sys_upload_session VALUES ('us_ok', NULL, 'file_a'), ('us_orphan', NULL, 'file_gone');
+    CREATE TABLE sys_job (id TEXT PRIMARY KEY, organization_id TEXT);
+    INSERT INTO sys_job VALUES ('job_1', NULL);
+  `;
+
+  it('⭐ under a wall, a fate-3 row whose anchor is missing blocks: named with its table, count and remedy; the marker is not verified; the row is untouched', async () => {
+    await withDatabase(WALLED, async () => {
+      const l = ledger();
+      const report = await apply(catalog(), l, { posture: 'isolated' });
+
+      expect(report.complete).toBe(true);
+      expect([report.blocking, report.advisory]).toEqual([1, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 1, advisory: 0 });
+      const sessions = tableOf(report, 'sys_upload_session');
+      expect(sessions).toMatchObject({ attributed: 1, remaining: 1, held: { rows: 1, remedy: UNATTRIBUTABLE_REMEDY } });
+      expect(sessions.unattributable).toEqual([{ id: 'us_orphan', reason: 'sys_file row file_gone not found' }]);
+      expect(report.tables.filter((t) => t.held).map((t) => t.object)).toEqual(['sys_upload_session']);
+      // Never guessed, never deleted.
+      expect(rows('SELECT id, organization_id FROM sys_upload_session ORDER BY id')).toEqual([
+        { id: 'us_ok', organization_id: 'org_a' },
+        { id: 'us_orphan', organization_id: null },
+      ]);
+      expect(writes.filter((w) => /^DELETE/i.test(w) && /sys_upload_session/.test(w))).toEqual([]);
+    });
+  });
+
+  it('the remedy the report names clears it: the operator assigns the organization by hand, and the re-run verifies', async () => {
+    await withDatabase(WALLED, async () => {
+      const l = ledger();
+      await apply(catalog(), l, { posture: 'isolated' });
+      db.exec(`UPDATE sys_upload_session SET organization_id = 'org_b' WHERE id = 'us_orphan'`);
+      const again = await apply(catalog(), l, { posture: 'isolated' });
+      expect([again.complete, again.blocking, again.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+      expect(rows(`SELECT organization_id FROM sys_upload_session WHERE id = 'us_orphan'`)).toEqual([{ organization_id: 'org_b' }]);
+    });
+  });
+
+  it('control — a clean database still certifies: every row attributed, nothing held, nothing advisory', async () => {
+    await withDatabase(`${WALLED} UPDATE sys_upload_session SET file_id = 'file_a';`, async () => {
+      const l = ledger();
+      const report = await apply(catalog(), l, { posture: 'isolated' });
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 0]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 0 });
+      expect(report.tables.filter((t) => t.held || t.unattributable.length)).toEqual([]);
+    });
+  });
+
+  it('control — on a table whose column is not the tenancy anchor (notNullExempt), an organization-less row is legitimate: reported, advisory, and the marker verifies', async () => {
+    await withDatabase(`
+      CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT, name TEXT);
+      INSERT INTO sys_organization VALUES ('org_a', 'default', 'Default');
+      CREATE TABLE sys_sso_provider (id TEXT PRIMARY KEY, organization_id TEXT, provider_id TEXT);
+      INSERT INTO sys_sso_provider VALUES ('sso_global', NULL, 'okta');
+    `, async () => {
+      const l = ledger();
+      const report = await apply(catalog(), l);
+      const sso = tableOf(report, 'sys_sso_provider');
+      expect(sso.unattributable.map((u) => u.id)).toEqual(['sso_global']);
+      expect(sso.held).toBeUndefined();
+      expect(sso.remaining).toBe(0);
+      expect([report.complete, report.blocking, report.advisory]).toEqual([true, 0, 1]);
+      expect(l.verdicts.at(-1)).toEqual({ complete: true, blocking: 0, advisory: 1 });
+    });
+  });
+});
+
+describe('one definition of the Default Organization: the plan names the organization the boot invariant names (ADR-0131 D3, ADR-0093 D3)', () => {
+  /** The same fixture for both readers: `sys_organization` as the invariant writes it, and rows no anchor names. */
+  const fixture = (organizations: string): string => `
+    CREATE TABLE sys_organization (id TEXT PRIMARY KEY, slug TEXT, name TEXT, logo TEXT, metadata TEXT);
+    ${organizations}
+    CREATE TABLE crm_event (id TEXT PRIMARY KEY, organization_id TEXT, subject TEXT);
+    INSERT INTO crm_event VALUES ('ev_1', NULL, 'one');
+  `;
+
+  /** plugin-auth's boot invariant over the same database: the engine double answers `find` and `insert` from SQLite. */
+  const invariantEngine = () => ({
+    async find(object: string, query: { where?: Record<string, unknown>; limit?: number }) {
+      const where = query.where ?? {};
+      const keys = Object.keys(where);
+      return rows(
+        `SELECT * FROM "${object}"${keys.length ? ` WHERE ${keys.map((k) => `"${k}" = '${String(where[k])}'`).join(' AND ')}` : ''} ` +
+          `ORDER BY id LIMIT ${query.limit ?? 100}`,
+      );
+    },
+    async insert(object: string, data: Record<string, unknown>) {
+      const columns = Object.keys(data);
+      db.prepare(`INSERT INTO "${object}" (${columns.map((c) => `"${c}"`).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`)
+        .run(...columns.map((c) => data[c] as string | null));
+      return data;
+    },
+  });
+
+  const cases: Array<[string, string, { plan: { id: string; slug: string } | null; invariant: { organizationId?: string; created: boolean; ambiguous?: { organizationCount: number } } }]> = [
+    ["the organization with slug 'default', beside another", `INSERT INTO sys_organization (id, slug, name) VALUES ('org_acme', 'acme', 'Acme'), ('org_def', 'default', 'Default');`,
+      { plan: { id: 'org_def', slug: 'default' }, invariant: { organizationId: 'org_def', created: false } }],
+    ['the sole organization, whatever its slug', `INSERT INTO sys_organization (id, slug, name) VALUES ('org_acme', 'acme', 'Acme');`,
+      { plan: { id: 'org_acme', slug: 'acme' }, invariant: { organizationId: 'org_acme', created: false } }],
+    ["none: two organizations, neither 'default'", `INSERT INTO sys_organization (id, slug, name) VALUES ('org_acme', 'acme', 'Acme'), ('org_beta', 'beta', 'Beta');`,
+      { plan: null, invariant: { created: false, ambiguous: { organizationCount: 2 } } }],
+  ];
+
+  it.each(cases)('⭐ %s: the plan and the invariant name the same organization', async (_label, organizations, expected) => {
+    await withDatabase(fixture(organizations), async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan.defaultOrganization).toEqual(expected.plan);
+      expect(plan.defaultOrganizationCreatedByApply).toBe(false);
+      expect(await ensureDefaultOrganizationExists(invariantEngine())).toEqual(expected.invariant);
+      expect(plan.defaultOrganization?.id).toBe(expected.invariant.organizationId);
+    });
+  });
+
+  it('⭐ none at all: the plan names none and says --apply creates it; the invariant creates it, and the plan then names the one it created', async () => {
+    await withDatabase(fixture(''), async () => {
+      const plan = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(plan).toMatchObject({ defaultOrganization: null, defaultOrganizationCreatedByApply: true });
+      const created = await ensureDefaultOrganizationExists(invariantEngine());
+      expect(created).toMatchObject({ created: true, organizationId: expect.any(String) });
+      const again = await buildOrganizationOwnershipPlan({ reader: executor(), posture: 'single', database: file });
+      expect(again.defaultOrganization).toEqual({ id: created.organizationId, slug: 'default' });
+    });
   });
 });

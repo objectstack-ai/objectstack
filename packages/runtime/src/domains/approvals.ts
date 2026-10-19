@@ -56,8 +56,11 @@
  * answered the way the self-hosted mount answers it: Hono serves a `HEAD` on a
  * `GET` route by running the `GET` handler and returning its status and
  * headers with no body, so this domain does the same against the member
- * (forwarded as a `GET`, which never decides — it only renders). Every other
- * method is not claimed and falls through as it does for any domain that
+ * (forwarded as a `GET`, which never decides — it only renders). Whether the
+ * request is a `HEAD` is read off the request the member would read, not off
+ * the dispatcher's verb: the `@objectstack/hono` catch-all dispatches a `HEAD`
+ * as `GET` (#24245) and forwards the client's `HEAD` request unchanged. Every
+ * other method is not claimed and falls through as it does for any domain that
  * declares its methods.
  */
 
@@ -94,10 +97,10 @@ export function createApprovalsActDomain(deps: DomainHandlerDeps): DomainRoute {
  * return its `Response` untouched.
  *
  * `method` is the dispatcher's; the member reads the method off the request
- * itself. They are the same value on every transport that reaches this domain
- * (the `@objectstack/hono` catch-all passes `c.req.method`, which IS the raw
- * request's), and the one place they are made to differ is the `HEAD` branch
- * below, on purpose.
+ * itself. They differ for a `HEAD`: the `@objectstack/hono` catch-all
+ * dispatches it as `GET` (#24245) and forwards the client's `HEAD` request. So
+ * the `HEAD` branch below asks the request, and it is the one place the member
+ * is handed a method the client did not send, on purpose.
  */
 export async function handleApprovalsActRequest(
     deps: DomainHandlerDeps,
@@ -110,8 +113,8 @@ export async function handleApprovalsActRequest(
         return {
             handled: true,
             response: deps.error(
-                'Approval action pages are not available: no approvals service is registered for this '
-                + 'environment. Register @objectstack/plugin-approvals to serve them.',
+                'Approval action pages are not available: no approvals service is registered. '
+                + 'Register @objectstack/plugin-approvals to serve them.',
                 501,
             ),
         };
@@ -120,8 +123,8 @@ export async function handleApprovalsActRequest(
         return {
             handled: true,
             response: deps.error(
-                'Approval action pages are not available: the approvals service registered for this '
-                + 'environment does not implement handleActionPage.',
+                'Approval action pages are not available: the registered approvals service '
+                + 'does not implement handleActionPage.',
                 501,
             ),
         };
@@ -144,7 +147,7 @@ export async function handleApprovalsActRequest(
     }
 
     try {
-        if (method === 'HEAD') {
+        if (request?.method === 'HEAD') {
             // Hono answers a HEAD on the self-hosted mount's GET route with
             // `new Response(null, getResponse)` — the GET's status and headers,
             // no body. Built here the same way, so the answer does not depend

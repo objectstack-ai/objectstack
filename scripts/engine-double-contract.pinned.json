@@ -792,6 +792,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.item-active-rows-one-read.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.item-name-every-door.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -824,6 +829,21 @@
     {
       "file": "packages/metadata-protocol/src/protocol.layered-code-unshipped-name.test.ts",
       "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.legacy-organization-read-seam.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.legacy-organization-read-seam.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.legacy-organization-read-seam.test.ts",
+      "verb": "update",
       "pinned": 1
     },
     {
@@ -887,7 +907,7 @@
       "pinned": 1
     },
     {
-      "file": "packages/metadata-protocol/src/protocol.lock-one-resolution.test.ts",
+      "file": "packages/metadata-protocol/src/protocol.lock-one-resolution.kit.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -1063,21 +1083,6 @@
     },
     {
       "file": "packages/metadata-protocol/src/protocol.occ-version-token-instant.test.ts",
-      "verb": "update",
-      "pinned": 1
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts",
-      "verb": "delete",
-      "pinned": 1
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts",
-      "verb": "findOne",
-      "pinned": 1
-    },
-    {
-      "file": "packages/metadata-protocol/src/protocol.org-scoped-cold-boot-audit.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -1502,6 +1507,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/protocol.sealed-remedy-kind.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.sealed-remedy-kind.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/protocol.sealed-remedy-kind.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/protocol.search-skip-unreadable.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -1772,6 +1792,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/metadata-protocol/src/seed-loader-landed-ids.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-landed-ids.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-landed-ids.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/metadata-protocol/src/seed-loader-locale-scope.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -1813,6 +1848,21 @@
     },
     {
       "file": "packages/metadata-protocol/src/seed-loader-name-probe.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-null-organization-holder.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-null-organization-holder.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata-protocol/src/seed-loader-null-organization-holder.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -2114,6 +2164,11 @@
     {
       "file": "packages/metadata/src/loaders/database-loader-update-id-fold-wins.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/metadata/src/loaders/database-loader.legacy-organization-count.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -3332,6 +3387,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/plugins/plugin-security/src/metadata-family-data-door-gate.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/plugins/plugin-security/src/ownership-floor-alternates.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3752,6 +3812,21 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
+      "verb": "delete",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/meta-disabled-package-doors.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/meta-object-extension-agreement.test.ts",
       "verb": "findOne",
       "pinned": 1
@@ -3792,6 +3867,11 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/meta-view-label-not-invented.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/public-form-routes.stored-row.test.ts",
       "verb": "delete",
       "pinned": 1
@@ -3817,7 +3897,17 @@
       "pinned": 1
     },
     {
+      "file": "packages/rest/src/rest-data-read-one-overlay-read.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
       "file": "packages/rest/src/rest-declared-refusal-relay.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/rest/src/rest-exposure-gate-one-object-read.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
@@ -3908,6 +3998,16 @@
     },
     {
       "file": "packages/runtime/src/api-key-lifecycle.pin.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/app-plugin.seed-landed.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/app-plugin.seed-landed.test.ts",
       "verb": "update",
       "pinned": 1
     },
@@ -4079,6 +4179,11 @@
     {
       "file": "packages/runtime/src/meta-write-org-scope.test.ts",
       "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/runtime/src/security/resolve-execution-context.oauth-organization.test.ts",
+      "verb": "findOne",
       "pinned": 1
     },
     {
@@ -4493,6 +4598,16 @@
     },
     {
       "file": "packages/services/service-storage/src/mount-storage-routes.test.ts",
+      "verb": "update",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/storage-routes.family-gate-credential.pin.test.ts",
+      "verb": "findOne",
+      "pinned": 1
+    },
+    {
+      "file": "packages/services/service-storage/src/storage-routes.family-gate-credential.pin.test.ts",
       "verb": "update",
       "pinned": 1
     },

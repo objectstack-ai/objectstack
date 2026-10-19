@@ -203,6 +203,102 @@ export type PrepareImportResult =
     | { ok: false; status: number; code: string; error: string };
 
 /**
+ * [#24348] The two request flags that take an object's declared business
+ * controls off an import's writes, read ONCE, by the parser below and by the
+ * door's gate ({@link importControlOptOutRefusal}) alike, so the gate can never
+ * judge a different reading of the body than the one the runner is handed.
+ *
+ * - `runAutomations` defaults ON: automations always ran historically (the
+ *   engine ignored the flag until #2922), so opting out must be explicit —
+ *   only a literal `false` turns them off, matching platform convention
+ *   (Salesforce runs triggers on import by default). Off, the runner writes
+ *   with `skipAutomations`, which skips the object's metadata-bound hooks and
+ *   its record-change flow triggers.
+ * - `treatAsHistorical` defaults OFF (opt-in): a normal import must still walk
+ *   the state machine — only an explicit "historical" import skips it (#3479),
+ *   so mid-lifecycle rows aren't rejected by `initialStates`. Unlike
+ *   `runAutomations`, the safe default is the strict one. On, the runner
+ *   writes with `skipStateMachine` and `preserveAudit` (#3493).
+ */
+export function readImportControlFlags(body: any): { runAutomations: boolean; treatAsHistorical: boolean } {
+    return {
+        runAutomations: body?.runAutomations !== false,
+        treatAsHistorical: body?.treatAsHistorical === true,
+    };
+}
+
+/** What each control opt-out takes off the import's writes, in the refusal's words. */
+const IMPORT_CONTROL_OPT_OUT_EFFECT = {
+    runAutomations: '`runAutomations: false` turns off its triggers and metadata-bound hooks',
+    treatAsHistorical: '`treatAsHistorical: true` skips its `state_machine` rule and keeps supplied audit and read-only values',
+} as const;
+
+/** A control opt-out the import door refuses, by its request key. */
+export type ImportControlOptOut = keyof typeof IMPORT_CONTROL_OPT_OUT_EFFECT;
+
+/** The import door's answer to a control opt-out it does not honour (ADR-0112: code AND status). */
+export interface ImportControlOptOutRefusal {
+    status: 403;
+    code: 'PERMISSION_DENIED';
+    message: string;
+    /** The opt-outs the request sent, in request-key order: the refusal's subject. */
+    refused: ImportControlOptOut[];
+}
+
+/**
+ * [#24348] WHO MAY TAKE AN OBJECT'S DECLARED CONTROLS OFF AN IMPORT. Answers
+ * the refusal when the request sends a control opt-out (`runAutomations:
+ * false`, `treatAsHistorical: true`; read through
+ * {@link readImportControlFlags}) and `caller` is not the system principal;
+ * `undefined` when it sends neither, or when the system principal sends them.
+ *
+ * Each opt-out removes an app's declared business controls from every row the
+ * import writes: its approval flows and other record-change triggers, its
+ * metadata-bound hooks (a closed-record freeze, say), its `state_machine` rule
+ * and its read-only and audit protection. So it is honoured only for the
+ * caller the platform already lets past those controls: the system principal,
+ * `ExecutionContext.isSystem === true` — the predicate every door that starts
+ * an elevated self-triggered flow asks
+ * (`refusesElevatedSelfTriggeredStart`, `@objectstack/runtime`), and the only
+ * exemption the create-side read-only strip and the approval record lock
+ * admit. ⛔ No permission, capability or administrator standing is read here:
+ * none of them lets a caller past those controls anywhere else either (an
+ * administrator releases a locked record through the audited approval rescue,
+ * never by writing past it). An HTTP request is assembled with
+ * `isSystem: false`, so at the import doors every signed-in caller,
+ * administrators included, is refused; the opt-outs remain for in-process
+ * callers that run as the system principal.
+ *
+ * Refused LOUDLY, never ignored: a caller that asked for a silent load must
+ * learn it did not get one. The doors ask this before the body is parsed, so
+ * a refused request writes no row and creates no job — on a dry run too,
+ * because a preview of a request the door refuses previews nothing. The
+ * default (both keys omitted) and an explicit `runAutomations: true` /
+ * `treatAsHistorical: false` are not opt-outs and pass untouched.
+ */
+export function importControlOptOutRefusal(body: any, caller: unknown): ImportControlOptOutRefusal | undefined {
+    const { runAutomations, treatAsHistorical } = readImportControlFlags(body);
+    const refused: ImportControlOptOut[] = [];
+    if (!runAutomations) refused.push('runAutomations');
+    if (treatAsHistorical) refused.push('treatAsHistorical');
+    if (refused.length === 0) return undefined;
+    if ((caller as { isSystem?: unknown } | null | undefined)?.isSystem === true) return undefined;
+    const named = refused.map((k) => (k === 'runAutomations' ? '`runAutomations: false`' : '`treatAsHistorical: true`'));
+    const plural = refused.length > 1;
+    return {
+        status: 403,
+        code: 'PERMISSION_DENIED',
+        refused,
+        message:
+            `${named.join(' and ')} ${plural ? 'are' : 'is'} refused for this caller. Only the system principal `
+            + '(an in-process caller such as a seed or migration job, never a signed-in user, administrators included) '
+            + "may take an object's declared controls off an import's writes: "
+            + `${refused.map((k) => IMPORT_CONTROL_OPT_OUT_EFFECT[k]).join(', and ')}. `
+            + `Send the request without ${plural ? 'them' : 'it'} to import with those controls in force.`,
+    };
+}
+
+/**
  * Parse & validate a bulk-import request body into a {@link PreparedImport}.
  *
  * Shared by the synchronous `POST /data/:object/import` route and the async
@@ -290,15 +386,11 @@ export async function prepareImportRequest(
     let matchFields: string[] = Array.isArray(body?.matchFields)
         ? body.matchFields.filter((f: any) => typeof f === 'string' && f.length > 0)
         : [];
-    // Default ON: automations always ran historically (the engine ignored the
-    // flag until #2922), so opt-out must be explicit — matches platform
-    // convention (Salesforce runs triggers on import by default).
-    const runAutomations = body?.runAutomations !== false;
-    // Default OFF (opt-in): a normal import must still walk the state machine —
-    // only an explicit "historical" import skips it (#3479), so mid-lifecycle
-    // rows aren't rejected by `initialStates`. Unlike `runAutomations`, the safe
-    // default is the strict one.
-    const treatAsHistorical = body?.treatAsHistorical === true;
+    // The two control flags, read where the door's gate reads them (#24348):
+    // the import doors refuse either opt-out from any caller but the system
+    // principal BEFORE this parse (`importControlOptOutRefusal`), so a value
+    // that reaches the runner from them is one the gate already admitted.
+    const { runAutomations, treatAsHistorical } = readImportControlFlags(body);
     const trimWhitespace = body?.trimWhitespace !== false;
     const nullValues: string[] | undefined = Array.isArray(body?.nullValues)
         ? body.nullValues.filter((v: any) => typeof v === 'string')

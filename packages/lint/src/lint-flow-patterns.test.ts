@@ -14,8 +14,9 @@ import { reduceFilterVerdict } from '@objectstack/spec/data';
 // re-judged pin in `flow-inert-node-condition` below.
 import { EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
 import { AUTHORING_RULES } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
 import {
-  lintFlowPatterns,
+  lintFlowPatterns as lintFlowPatternsUnrecorded,
   FLOW_TIME_RELATIVE_ANTIPATTERN,
   FLOW_DATE_EQUALITY_FILTER,
   FLOW_PHANTOM_AGGREGATION,
@@ -42,6 +43,38 @@ import {
 // case below. This family's own coverage is unaffected by it;
 // `validate-expressions.test.ts` owns the rest of that rule's coverage.
 import { validateStackExpressions } from './validate-expressions.js';
+
+// [#22161] Slice 19: every finding of the two wrong-syntax ids is recorded, and
+// the hint block at the foot of the file holds each recorded `fix:` line to one
+// line of at most 200 characters.
+const firedHints: Array<{ rule: string; message: string; hint: string }> = [];
+// [#22161] Slice 20: the twelve anti-pattern ids, recorded the same way for the
+// second hint block at the foot of the file.
+const SLICE_20_IDS: readonly string[] = [
+  FLOW_LOOP_BODY_UNCONTAINED,
+  FLOW_MULTI_WRITE_UNFILTERED,
+  FLOW_TRY_CATCH_WITHOUT_CATCH,
+  FLOW_DECISION_INCLUSIVE_OVERLAP,
+  FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED,
+  FLOW_TIME_RELATIVE_ANTIPATTERN,
+  FLOW_DATE_EQUALITY_FILTER,
+  FLOW_RUNAS_UNSCOPED,
+  FLOW_DECISION_MODE_INVALID,
+  FLOW_DECISION_UNCONDITIONAL_BRANCH,
+  FLOW_ERROR_LABEL_NOT_FAULT,
+  FLOW_BRANCH_LABEL_UNMATCHED,
+];
+const firedSlice20Hints: Array<{ rule: string; message: string; hint: string }> = [];
+const lintFlowPatterns: typeof lintFlowPatternsUnrecorded = (...args) => {
+  const findings = lintFlowPatternsUnrecorded(...args);
+  for (const f of findings) {
+    if (f.rule === FLOW_DOUBLE_BRACE_INTERP || f.rule === FLOW_BARE_DOLLAR_REF) firedHints.push(f as { rule: string; message: string; hint: string });
+    if (SLICE_20_IDS.includes(f.rule)) firedSlice20Hints.push(f as { rule: string; message: string; hint: string });
+  }
+  return findings;
+};
+/** [#22161] What `os explain RULE_ID` prints for `rule`, one paragraph per line. */
+const explained = (rule: string) => explainRule(rule)!.paragraphs.join('\n');
 
 const CEL = (source: string) => ({ dialect: 'cel', source });
 /**
@@ -287,7 +320,7 @@ describe('lintFlowPatterns — approval revise loop (ADR-0044)', () => {
   ) => {
     const stack = approvalFlow(edges) as any;
     stack.flows[0].nodes = stack.flows[0].nodes.map((n: any) =>
-      n.id === 'wait' ? { id: 'wait', type: 'wait', config: { eventType: 'signal' } } : n,
+      n.id === 'wait' ? { id: 'wait', type: 'wait', waitEventConfig: { eventType: 'signal' } } : n,
     );
     return stack;
   };
@@ -1760,16 +1793,21 @@ describe('lintFlowPatterns — unbounded bulk write (#5482)', () => {
 
   it('names the #3810 run-time guard and says the two judge DIFFERENT facts', () => {
     const [f] = lintFlowPatterns(purgeFlow('delete_record', { objectName: 'lead', multi: true }));
+    // [#22161] The `fix:` line is the remedy alone; the cross-naming and the
+    // way to keep a meant whole-object write are `os explain` (pinned here
+    // where they were pinned on the hint before).
+    const text = explained(FLOW_MULTI_WRITE_UNFILTERED);
     // Cross-naming, not duplication: the run-time guard refuses "a condition you
     // WROTE is gone"; this rule warns "no condition was ever written".
-    expect(f.hint).toContain('the run-time erased-condition guard');
-    expect(f.hint).toMatch(/REFUSES this node at run time/);
-    expect(f.hint).toMatch(/a written condition is gone/);
-    expect(f.hint).toMatch(/the filter is empty/);
+    expect(text).toContain('the run-time erased-condition guard');
+    expect(text).toMatch(/REFUSES this node at run time/);
+    expect(text).toMatch(/a written condition is gone/);
+    expect(text).toMatch(/the filter is empty/);
     // Both ways out are offered, and the run-time path is explicitly NOT closed.
     expect(f.hint).toMatch(/Write the constraint you mean/);
-    expect(f.hint).toMatch(/warning, not a gate/);
-    expect(f.hint).toContain('showcase_inquiry_purge');
+    expect(text).toMatch(/warning, not a gate/);
+    expect(text).toContain('showcase_inquiry_purge');
+    expect(f.hint).not.toContain('erased-condition guard');
   });
 
   describe('does NOT flag (false-positive guards)', () => {
@@ -2078,7 +2116,9 @@ describe('per-iteration containment (#13681 / #14394)', () => {
       // The prescribed spelling, with the measured minimal `catch`.
       expect(fnds[0].hint).toContain("type: 'try_catch'");
       expect(fnds[0].hint).toContain("{ id: 'handled', type: 'assignment', label: 'Handled' }");
-      expect(fnds[0].hint).toContain('`catch: {}` and `catch: { nodes: [] }` are both refused');
+      // [#22161] The empty spellings the parse refuses moved to `os explain`.
+      expect(explained(FLOW_LOOP_BODY_UNCONTAINED)).toContain('`catch: {}` and `catch: { nodes: [] }` are both refused');
+      expect(fnds[0].hint).not.toContain('are both refused');
     });
 
     it('flags every fallible builtin in the body, once each', () => {
@@ -2089,7 +2129,7 @@ describe('per-iteration containment (#13681 / #14394)', () => {
         { id: 'n4', type: 'delete_record', label: 'Delete', config: { objectName: 'task', filter: { case_id: CEL('currentCase.id') } } },
         { id: 'n5', type: 'http', label: 'Call', config: { url: 'https://example.test' } },
         { id: 'n6', type: 'notify', label: 'Notify', config: { title: 'x' } },
-        { id: 'n7', type: 'connector_action', label: 'Connector', config: { connectorId: 'c', action: 'a' } },
+        { id: 'n7', type: 'connector_action', label: 'Connector', connectorConfig: { connectorId: 'c', actionId: 'a' } },
         { id: 'n8', type: 'script', label: 'Script', config: { function: 'f' } },
         { id: 'n9', type: 'subflow', label: 'Subflow', config: { flowName: 'child' } },
         { id: 'n10', type: 'map', label: 'Map', config: { collection: { dialect: 'cel', source: 'items' } } },
@@ -2564,9 +2604,14 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(fnds.map((f) => f.rule)).toEqual([FLOW_BARE_DOLLAR_REF]);
         const refusal = textSlotTemplateRefusal('{{ $User.Id }}');
         expect(refusal).toBeDefined();
-        expect(fnds[0].hint).toContain(refusal!);
-        expect(fnds[0].hint).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
+        // [#22161] One line: the remedy every refusal of an unbound `$` root
+        // ends with; the judge's run-user remedy is the `os explain` entry's.
+        expect(fnds[0].hint).toBe(
+          'A text slot renders only `{{ }}` holes. `$User.Id` has no hole: compute the value into a variable with an ' +
+            '`assignment` node and write `{{ v }}`.',
+        );
         expect(fnds[0].hint).not.toContain('{{ $User.Id }}');
+        expect(explained(FLOW_BARE_DOLLAR_REF)).toContain("assignments: { v: { dialect: 'cel', source: 'current_user.id' } }");
       });
 
       it('control: a bare engine-bound `$error.message` keeps the hole prescription and no remedy', () => {
@@ -2580,7 +2625,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         const fnds = notifyText('Failed: $error.message, closed by $User.Id');
         expect(fnds).toHaveLength(1);
         expect(fnds[0].hint).toContain('`{{ $error.message }}`');
-        expect(fnds[0].hint).toContain(textSlotTemplateRefusal('{{ $User.Id }}')!);
+        expect(fnds[0].hint).toContain('`$User.Id` has no hole');
         expect(fnds[0].hint).not.toContain('{{ $User.Id }}');
       });
       // [#19939] What the hint prescribes in a text slot, put back in the
@@ -2592,7 +2637,9 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         const hole = /`(\{\{ [^`]* \}\})`/.exec(errorRef!.hint!)?.[1];
         expect(hole).toBe('{{ $error.message }}');
         const [userRef] = notifyText('Closed by $User.Id');
-        const computed = /assignments: \{ v: \{ dialect: 'cel', source: '([^']*)' \} \}/.exec(userRef!.hint!)?.[1];
+        // [#22161] The line names the hole `{{ v }}`; the run user's computation is the `os explain` entry's.
+        expect(userRef!.hint).toContain('write `{{ v }}`');
+        const computed = /assignments: \{ v: \{ dialect: 'cel', source: '([^']*)' \} \}/.exec(explained(FLOW_BARE_DOLLAR_REF))?.[1];
         expect(computed).toBe('current_user.id');
         const title = `Failed: ${hole}, closed by {{ v }}`;
         expect(textSlotTemplateRefusal(title)).toBeUndefined();
@@ -2650,6 +2697,13 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       /** The value-slot judge's own CEL spelling of a `{…}` token — what the hint carries word for word. */
       const judgeSpelling = (token: string) =>
         valueSlotTemplateRefusals(token)[0]!.message.slice(VALUE_SLOT_TEMPLATE_REFUSAL.length).trim();
+      /** [#22161] The judge's direct spelling of a token, `TOKEN as ENVELOPE` — what the one-line hint carries word for word. */
+      const judgeDirect = (token: string) =>
+        /^Write (`[^`]+`) as (\{ dialect: 'cel', source: (?:'[^']*'|"(?:[^"\\]|\\.)*") \})/.exec(judgeSpelling(token))!.slice(1).join(' as ');
+      /** [#22161] The line where no envelope at the string's place would evaluate. */
+      const NO_DIRECT_SPELLING =
+        "A value slot stores a bare `$` reference as written: compute it in a CEL value envelope, `{ dialect: 'cel', " +
+        "source: '…' }`, spelled as `os explain flow-bare-dollar-reference` says for this position.";
       /** Every concrete envelope source a hint prescribes; the `'…'` of its lead sentence is a placeholder. */
       function prescribedSources(hint: string): string[] {
         const out: string[] = [];
@@ -2677,29 +2731,30 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(fnds).toHaveLength(2);
         for (const f of fnds) {
           expect(f.message).toContain('in the create_record field value');
-          expect(f.hint).toContain('A value slot reads a CEL value envelope');
+          expect(f.hint).toMatch(/^A value slot stores a bare `\$` reference as written: write /);
           expect(f.hint).not.toContain('Wrap it and bind a variable');
         }
         const [owner, who] = fnds;
-        // The run user: the judge's remedy for `{$User.Id}` — `current_user.id`, and the guard.
-        expect(owner!.hint).toContain(judgeSpelling('{$User.Id}'));
-        expect(prescribedSources(owner!.hint!)).toEqual(['current_user.id', 'current_user != null ? current_user.id : null']);
+        // The run user: the judge's spelling of `{$User.Id}`, `current_user.id`. [#22161] The guard for a
+        // flow that can run without a user is the `os explain` entry's.
+        expect(owner!.hint).toContain(judgeDirect('{$User.Id}'));
+        expect(prescribedSources(owner!.hint!)).toEqual(['current_user.id']);
+        expect(explained(FLOW_BARE_DOLLAR_REF)).toContain('`current_user != null ? current_user.id : null`');
         // `$source` is no `$` variable the engine binds: the flow's own `source`, written without the `$`.
-        expect(who!.hint).toContain(judgeSpelling('{source.id}'));
+        expect(who!.hint).toContain(judgeDirect('{source.id}'));
         expect(prescribedSources(who!.hint!)).toEqual(['source.id']);
       });
 
       it('reads a `$` root the engine binds as that variable (`$error.message`)', () => {
         const [f] = bareDollar(valueFlow('update_record', { objectName: 'task', filter: { id: CEL('source.id') }, fields: { note: '$error.message' } }));
         expect(f!.message).toContain('in the update_record field value');
-        expect(f!.hint).toContain(judgeSpelling('{$error.message}'));
+        expect(f!.hint).toContain(judgeDirect('{$error.message}'));
         expect(prescribedSources(f!.hint!)).toEqual(['vars["$error"].message']);
       });
 
       it.each([
         ['$User.Id', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
         ['$source.id', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
-        ['$User.Email', 'create_record', (v: unknown) => ({ objectName: 'task', fields: { v } })],
         // [#19939, stage S6] The filter operand is an envelope over a bound
         // variable: a `{record.id}` token there is refused since S6.
         ['$error.message', 'update_record', (v: unknown) => ({ objectName: 'task', filter: { id: CEL('source.id') }, fields: { v } })],
@@ -2719,6 +2774,16 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         }
       });
 
+      // [#22161] A `$User` path other than the id never resolved, and the judge's remedy
+      // opens with the user-record read, not a spelling: the line names no envelope, and
+      // the `os explain` entry names the read.
+      it('`$User.Email`: the line names no envelope, and the explanation names the user-record read', () => {
+        const fnds = bareDollar(valueFlow('create_record', { objectName: 'task', fields: { v: '$User.Email' } }));
+        expect(fnds.map((f) => f.hint)).toEqual([NO_DIRECT_SPELLING]);
+        expect(prescribedSources(fnds[0]!.hint!)).toEqual([]);
+        expect(explained(FLOW_BARE_DOLLAR_REF)).toContain("a `get_record` node (`objectName: 'sys_user'`)");
+      });
+
       // [#19939] `subflow.input`, `map.input` and `script.inputs` are value
       // slots now. Before, the hint there named `{source.id}` — the single
       // brace the interpolator resolved — and that spelling is refused there
@@ -2731,10 +2796,12 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       ] as const)('%s: names the CEL envelope and what the callee is handed, not `{source.id}`', (type, label, config, callee) => {
         const [f] = bareDollar(valueFlow(type, config));
         expect(f!.message).toContain(`in the ${label}`);
-        expect(f!.hint).toContain('A value slot reads a CEL value envelope');
+        expect(f!.hint).toMatch(/^A value slot stores a bare `\$` reference as written: write /);
         expect(f!.hint).not.toContain('Wrap it and bind a variable');
         expect(prescribedSources(f!.hint!)).toEqual(['source.id']);
-        expect(f!.hint).toContain(callee);
+        // [#22161] What the callee is handed left the line; the entry names the guarded form's `null`.
+        expect(f!.hint).not.toContain(callee);
+        expect(explained(FLOW_BARE_DOLLAR_REF)).toContain('hands) `null`');
         expect(refusalsOf(valueFlow(type, { ...config, [type === 'script' ? 'inputs' : 'input']: { who: '{source.id}' } })).valueJudge)
           .toBe(1);
       });
@@ -2749,10 +2816,11 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       ] as const)('screen %s: names the CEL envelope and what the client is served, not `{source.id}`', (_what, label, configOf, sentence) => {
         const [f] = bareDollar(valueFlow('screen', configOf('$source.id')));
         expect(f!.message).toContain(`in the ${label}`);
-        expect(f!.hint).toContain('A value slot reads a CEL value envelope');
+        expect(f!.hint).toMatch(/^A value slot stores a bare `\$` reference as written: write /);
         expect(f!.hint).not.toContain('Wrap it and bind a variable');
         expect(prescribedSources(f!.hint!)).toEqual(['source.id']);
-        expect(f!.hint).toContain(sentence);
+        // [#22161] What the client is served left the line.
+        expect(f!.hint).not.toContain(sentence);
         expect(refusalsOf(valueFlow('screen', configOf('{source.id}'))).valueJudge).toBe(1);
         expect(refusalsOf(valueFlow('screen', configOf(CEL('source.id'))))).toEqual(NONE);
       });
@@ -2769,18 +2837,23 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       // evaluates there, never an envelope at the position.
       it('a reference nested in an object literal: the whole value built as one CEL literal, not an envelope at the position', () => {
         const [f] = bareDollar(valueFlow('create_record', { objectName: 'task', fields: { payload: { who: '$source.id' } } }));
-        expect(f!.hint).toContain('sits inside an object or list literal, where nothing evaluates');
-        expect(prescribedSources(f!.hint!)).toEqual(["{'who': source.id}"]);
+        // [#22161] An envelope at the string's place would not evaluate, so the line names none; the
+        // whole-value literal is the `os explain` entry's.
+        expect(f!.hint).toBe(NO_DIRECT_SPELLING);
+        expect(prescribedSources(f!.hint!)).toEqual([]);
+        expect(explained(FLOW_BARE_DOLLAR_REF)).toContain('A string inside an object or list literal is stored as the object it spells');
         expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { payload: CEL("{'who': source.id}") } })))
           .toEqual(NONE);
       });
 
       it('a reference in the legacy `assignments` array: the canonical map, where the envelope evaluates', () => {
         const [f] = bareDollar(valueFlow('assignment', { assignments: [{ variable: 'v', value: '$User.Id' }] }));
-        expect(f!.hint).toContain('Move the node\'s assignments into the canonical map');
-        const prescribed = prescribedSources(f!.hint!);
-        expect(prescribed).toEqual(['current_user.id', 'current_user != null ? current_user.id : null']);
-        for (const source of prescribed) {
+        // [#22161] An envelope in the legacy shape evaluates nothing, so the line names none; the move
+        // to the canonical map is the `os explain` entry's.
+        expect(f!.hint).toBe(NO_DIRECT_SPELLING);
+        expect(prescribedSources(f!.hint!)).toEqual([]);
+        expect(explained(FLOW_BARE_DOLLAR_REF)).toContain('move the assignments into the canonical `assignments: { … }` map');
+        for (const source of ['current_user.id', 'current_user != null ? current_user.id : null']) {
           expect(refusalsOf(valueFlow('assignment', { assignments: { v: CEL(source) } })), source).toEqual(NONE);
         }
       });
@@ -2795,8 +2868,9 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       it('the `has()` guard it carries tests each step off `vars`, and passes every judge as an envelope', () => {
         const [f] = bareDollar(valueFlow('create_record', { objectName: 'task', fields: { who: '$source.id' } }));
         const guard = 'has(vars.source) && has(vars.source.id) ? vars.source.id : null';
-        expect(f!.hint).toContain(`\`${guard}\``);
-        expect(f!.hint).not.toContain('`has(source.id)');
+        // [#22161] The guard left the line; the `os explain` entry states its shape.
+        expect(f!.hint).not.toContain('has(');
+        expect(explained(FLOW_BARE_DOLLAR_REF)).toContain('`has(vars.a) && has(vars.a.b) ? vars.a.b : null`');
         expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { who: CEL(guard) } }))).toEqual(NONE);
       });
 
@@ -2811,8 +2885,8 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         const filtered = (owner: string) => valueFlow('get_record', { objectName: 'task', filter: { owner } });
         const [f] = bareDollar(filtered('$source.id'));
         expect(f!.message).toContain('in the get_record filter operand');
-        expect(f!.hint).toContain('A value slot reads a CEL value envelope');
-        expect(f!.hint).toContain('an operand envelope is evaluated before the query');
+        expect(f!.hint).toMatch(/^A value slot stores a bare `\$` reference as written: write /);
+        expect(explained(FLOW_BARE_DOLLAR_REF)).toContain('A filter operand envelope is evaluated before the query');
         expect(prescribedSources(f!.hint!)).toEqual(['source.id']);
         expect(refusalsOf(valueFlow('get_record', { objectName: 'task', filter: { owner: CEL('source.id') } }))).toEqual(NONE);
         expect(flowNodeValueTemplateRefusals('get_record', { objectName: 'task', filter: { owner: '{source.id}' } })).toHaveLength(1);
@@ -2822,7 +2896,7 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         expect(plugin!.hint).not.toContain('`{source.id}`');
         // …and the http body names its envelope.
         const [body] = lintFlowPatterns(httpFlow({ ticket: '$source.id' })).filter((x) => x.rule === FLOW_BARE_DOLLAR_REF);
-        expect(body!.hint).toContain('A value slot reads a CEL value envelope');
+        expect(body!.hint).toMatch(/^A value slot stores a bare `\$` reference as written/);
       });
     });
 
@@ -2879,7 +2953,9 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
         const [f] = doubleBrace(valueFlow('create_record', { objectName: 'task', fields: { subject: text } }));
         expect(f!.message).toContain('the create_record field value reads a CEL value envelope, not a template');
         expect(f!.hint).not.toContain('Use `{var}`');
-        expect(f!.hint).toContain('the value-slot refusal reads its outer braces as literal text');
+        // [#22161] One line, the judge's spelling; the outer-brace reading is the `os explain` entry's.
+        expect(f!.hint).toMatch(/^A value slot reads no `\{\{ \}\}` template: write /);
+        expect(explained(FLOW_DOUBLE_BRACE_INTERP)).toContain('the value-slot refusal reads a `{{ }}` string\'s outer braces as literal text');
         expect(prescribedSources(f!.hint!)).toEqual([source]);
         expect(refusalsOf(valueFlow('create_record', { objectName: 'task', fields: { subject: CEL(source) } }))).toEqual(NONE);
       });
@@ -2891,7 +2967,15 @@ describe('#16405 — an `http` node payload is not a region, and both #1315 rule
       it('in an assignment value nested in a literal: the whole value as a CEL literal', () => {
         const [f] = doubleBrace(valueFlow('assignment', { assignments: { o: { t: '{{ record.title }}' } } }));
         expect(f!.message).toContain('the assignment value reads a CEL value envelope');
-        expect(prescribedSources(f!.hint!)).toEqual(["{'t': record.title}"]);
+        // [#22161] An envelope at the string's place would not evaluate, so the line names none and points
+        // at the build's value-slot refusal, which carries the whole-value literal.
+        expect(prescribedSources(f!.hint!)).toEqual([]);
+        expect(f!.hint).toContain('`os explain flow-double-brace-interpolation`');
+        expect(explained(FLOW_DOUBLE_BRACE_INTERP)).toContain('each `{{ x }}` hole is the CEL path `x`');
+        // Control: why the line does not point at the build's refusal — it reads the outer braces as
+        // literal text, so its spelling keeps them rather than the hole the author meant.
+        const refusal = flowNodeValueTemplateRefusals('assignment', { assignments: { o: { t: '{{ record.title }}' } } });
+        expect(refusal.map((r) => r.message).join(' ')).toContain("'{' + record.title + '}'");
       });
 
       // [#19939] A callee's input map is a value slot now: the hint names the
@@ -3184,7 +3268,10 @@ describe('decision `mode` (#15429)', () => {
         expect(fnds[0].where).toBe("flow 'verdict' · decision 'check' · config.mode");
         expect(fnds[0].message).toContain(`\`mode: '${mode}'\` is not valid on a decision that declares a \`conditions\` list`);
         expect(fnds[0].message).toContain('Either delete `mode` and keep the list');
-        expect(fnds[0].hint).toContain('`registerFlow` refuses this flow with the same sentence');
+        // [#22161] Why it gates moved to `os explain`; the line is the remedy.
+        expect(explained(FLOW_DECISION_MODE_INVALID)).toContain('`registerFlow` refuses this flow with the same sentence');
+        expect(fnds[0].hint).toContain("set `mode: 'inclusive'`");
+        expect(fnds[0].hint).not.toContain('registerFlow');
       }
     });
 
@@ -3229,7 +3316,9 @@ describe('decision `mode` (#15429)', () => {
       expect(fnds[0].message).toContain("'refuse', 'convert'");
       expect(fnds[0].message).toContain('EVERY one whose condition holds runs');
       expect(fnds[0].hint).toContain('delete `mode`');
-      expect(fnds[0].hint).toContain('os migrate meta --from 17');
+      // [#22161] Where the migration left the key moved to `os explain`.
+      expect(explained(FLOW_DECISION_INCLUSIVE_OVERLAP)).toContain('authored against protocol major 17 and converted by `os migrate meta`');
+      expect(fnds[0].hint).not.toContain('os migrate meta');
     });
 
     it('does NOT advise an exclusive decision — omitted or written — with the same two edges', () => {
@@ -3379,7 +3468,7 @@ describe('the http literals: neither brace dialect resolves, and the hints say s
     const body = findingsOf({ body: { id: '{{ record.id }}' } }, FLOW_DOUBLE_BRACE_INTERP);
     expect(body).toHaveLength(1);
     expect(body[0]!.hint).not.toContain('neither `{var}` nor `{{ }}` resolves there');
-    expect(body[0]!.hint).toContain('A value slot reads a CEL value envelope');
+    expect(body[0]!.hint).toContain('A value slot reads no `{{ }}` template');
   });
 
   it('a bare `$ref.field` at a literal is named as read as written — no braces offered', () => {
@@ -3388,5 +3477,224 @@ describe('the http literals: neither brace dialect resolves, and the hints say s
     expect(found[0]!.message).toContain('at `method` is NOT resolved: it is read as written.');
     expect(found[0]!.hint).toContain('Write the value itself.');
     expect(found[0]!.hint).not.toContain('`{verb.name}`');
+  });
+});
+
+// [#22161] Slice 19: the `fix:` line of the two wrong-syntax ids. One remedy
+// line each: the judge's own spelling where the position takes one envelope,
+// the hole in a text slot, the value itself at a literal; the judge's caveats
+// (guards, the run user's null, callee and client sentences, literal and
+// legacy positions, which slots read `{{ }}`) are each id's `os explain` entry.
+describe('[#22161] one-line fix — flow-double-brace-interpolation and flow-bare-dollar-reference', () => {
+  const NO_DIRECT_BARE =
+    "A value slot stores a bare `$` reference as written: compute it in a CEL value envelope, `{ dialect: 'cel', " +
+    "source: '…' }`, spelled as `os explain flow-bare-dollar-reference` says for this position.";
+  const NO_DIRECT_DOUBLE =
+    "A value slot reads no `{{ }}` template: compute the value in a CEL value envelope, `{ dialect: 'cel', " +
+    "source: '…' }`, spelled as `os explain flow-double-brace-interpolation` says for this position.";
+  const TEXT_SLOT_BOUNDED =
+    'A text slot renders only `{{ }}` holes: write each reference as a hole over a variable the run binds ' +
+    '(`os explain flow-bare-dollar-reference`).';
+  function oneNode(type: string, config: Record<string, unknown>) {
+    return {
+      flows: [{
+        name: 'one_node', label: 'One node', type: 'autolaunched',
+        variables: [{ name: 'source', type: 'object' }],
+        nodes: [
+          { id: 'start', type: 'start', label: 'Start' },
+          { id: 'n', type, label: 'N', config },
+          { id: 'done', type: 'end', label: 'Done' },
+        ],
+        edges: [{ id: 'e1', source: 'start', target: 'n' }, { id: 'e2', source: 'n', target: 'done' }],
+      }],
+    };
+  }
+  const ofRule = (stack: ReturnType<typeof oneNode>, rule: string) => lintFlowPatterns(stack).filter((f) => f.rule === rule);
+
+  it('a reference list that does not fit in one line takes the bounded line, in each slot kind', () => {
+    const many = ['alpha_reference_name', 'beta_reference_name', 'gamma_reference_name', 'delta_reference_name'];
+    const textRefs = many.map((n) => `$error.${n}`).join(' and ');
+    expect(ofRule(oneNode('notify', { recipients: ['u1'], title: `Failed: ${textRefs}` }), FLOW_BARE_DOLLAR_REF).map((f) => f.hint))
+      .toEqual([TEXT_SLOT_BOUNDED]);
+    const valueRefs = many.map((n) => `$source.${n}`).join(' and ');
+    expect(ofRule(oneNode('create_record', { objectName: 'task', fields: { v: valueRefs } }), FLOW_BARE_DOLLAR_REF).map((f) => f.hint))
+      .toEqual([NO_DIRECT_BARE]);
+    const longText = `${'A long literal sentence before the hole, '.repeat(4)}{{ source.id }}`;
+    expect(ofRule(oneNode('create_record', { objectName: 'task', fields: { v: longText } }), FLOW_DOUBLE_BRACE_INTERP).map((f) => f.hint))
+      .toEqual([NO_DIRECT_DOUBLE]);
+  });
+
+  it('every `fix:` line the cases above fired for the two ids is one line of at most 200 characters', () => {
+    // Coverage control: both ids fired, and every hint arm of each.
+    expect([...new Set(firedHints.map((f) => f.rule))].sort()).toEqual([FLOW_BARE_DOLLAR_REF, FLOW_DOUBLE_BRACE_INTERP].sort());
+    type Fired = { rule: string; hint: string };
+    const arms: Array<[string, (f: Fired) => boolean]> = [
+      ['text slot: hole', (f) => f.rule === FLOW_BARE_DOLLAR_REF && f.hint.includes('Write it as a hole: ')],
+      ['text slot: no hole', (f) => f.rule === FLOW_BARE_DOLLAR_REF && f.hint.includes('no hole: compute the value')],
+      ['text slot: bounded', (f) => f.hint === TEXT_SLOT_BOUNDED],
+      ['value slot: bare, spelled', (f) => f.hint.startsWith('A value slot stores a bare `$` reference as written: write ')],
+      ['value slot: bare, unspelled', (f) => f.hint === NO_DIRECT_BARE],
+      ['value slot: double, spelled', (f) => f.hint.startsWith('A value slot reads no `{{ }}` template: write ')],
+      ['value slot: double, unspelled', (f) => f.hint === NO_DIRECT_DOUBLE],
+      ['elsewhere: double', (f) => f.rule === FLOW_DOUBLE_BRACE_INTERP && f.hint.startsWith('This flow node value is read as written')],
+      ['elsewhere: bare', (f) => f.rule === FLOW_BARE_DOLLAR_REF && f.hint.startsWith('This flow node value is read as written')],
+      ['literal: notify', (f) => f.hint.startsWith('A notify node\'s `sourceObject`')],
+      ['literal: http', (f) => f.hint.startsWith('An http node\'s `method`')],
+    ];
+    for (const [arm, test] of arms) expect(firedHints.some(test), arm).toBe(true);
+    for (const f of firedHints) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      for (const gone of [
+        'CEL refuses an absent variable',
+        'sits inside an object or list literal',
+        'Move the node\'s assignments',
+        'template dialect of the text slots only',
+        'refused at `objectstack validate`',
+        'may name a `$` variable only when',
+        '`current_user` is `null`',
+      ]) {
+        expect(f.hint, `${f.rule}: ${gone}`).not.toContain(gone);
+      }
+    }
+  });
+
+  // What each `fix:` line stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED_FROM_HINT: Record<string, readonly string[]> = {
+    [FLOW_DOUBLE_BRACE_INTERP]: [
+      'a notify `title` / `message` / `actionUrl`, an http `url` and `headers` values',
+      'reads a `{{ }}` string\'s outer braces as literal text',
+      'inside an object or list literal',
+      'a step at a time from `vars`',
+      '`coalesce(…, \'\')`',
+      'route around the node with a `decision`',
+      'refused at `objectstack validate` and `registerFlow`',
+      'by the executor\'s parse',
+    ],
+    [FLOW_BARE_DOLLAR_REF]: [
+      'when the flow engine binds its `$` root',
+      'is written without the `$`',
+      '`current_user != null ? current_user.id : null`',
+      'which on `update_record` clears a stored value',
+      'read the user record by `current_user.id`',
+      'canonical `assignments: { … }` map',
+      'a step at a time from `vars`',
+      'refused at `objectstack validate` and `registerFlow`',
+    ],
+  };
+
+  it.each(Object.keys(MOVED_FROM_HINT))('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explained(rule);
+    for (const fact of MOVED_FROM_HINT[rule]!) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 20: the twelve anti-pattern ids. Each `fix:` line is one remedy
+// line; what it used to carry (why the shape fails, when it is a legitimate
+// reading, what the rule does not judge, the history and the worked examples)
+// is each id's `os explain` entry. The cases above fire every id, and the
+// recorder at the top of the file collects every hint they produced.
+describe('[#22161] one-line fix — the twelve flow anti-pattern ids', () => {
+  it('every `fix:` line the cases above fired for the twelve ids is one line of at most 200 characters', () => {
+    // Coverage control: every id fired, and every hint arm of each.
+    expect([...new Set(firedSlice20Hints.map((f) => f.rule))].sort()).toEqual([...SLICE_20_IDS].sort());
+    const ofRule = (rule: string) => firedSlice20Hints.filter((f) => f.rule === rule);
+    // `flow-decision-unconditional-branch` has two arms, by message.
+    expect(ofRule(FLOW_DECISION_UNCONDITIONAL_BRANCH).some((f) => f.message.startsWith('gates on NOTHING')), 'no-gate arm').toBe(true);
+    expect(ofRule(FLOW_DECISION_UNCONDITIONAL_BRANCH).some((f) => f.message.startsWith('has guarded out-edge(s)')), 'mixed arm').toBe(true);
+    // `flow-runas-unscoped` once named the trigger kind in its line; every kind still fires.
+    for (const kind of ['schedule', 'time-relative', 'api']) {
+      expect(ofRule(FLOW_RUNAS_UNSCOPED).some((f) => f.message.startsWith(`${kind}-triggered`)), kind).toBe(true);
+    }
+    for (const f of firedSlice20Hints) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('the two containment entries spell the `catch` region their `fix:` lines prescribe', () => {
+    for (const rule of [FLOW_LOOP_BODY_UNCONTAINED, FLOW_TRY_CATCH_WITHOUT_CATCH]) {
+      const hints = firedSlice20Hints.filter((f) => f.rule === rule).map((f) => f.hint);
+      expect(hints.length, rule).toBeGreaterThan(0);
+      for (const hint of hints) {
+        const region = /`catch: \{[^`]*\}`/.exec(hint)?.[0];
+        expect(region, `${rule}: ${hint}`).toBeDefined();
+        expect(explained(rule), rule).toContain(region!);
+      }
+    }
+  });
+
+  // What each `fix:` line stopped saying, which `os explain RULE_ID` now prints.
+  const MOVED_FROM_SLICE_20_HINT: Record<string, readonly string[]> = {
+    [FLOW_LOOP_BODY_UNCONTAINED]: [
+      '`catch: {}` and `catch: { nodes: [] }` are both refused by the parse',
+      'one bare `assignment` node with no `config`',
+      'processes all 5 items and the run completes',
+      'a legitimate reading',
+      'content/docs/automation/flows.mdx §"Per-iteration containment"',
+    ],
+    [FLOW_TRY_CATCH_WITHOUT_CATCH]: [
+      '`catch: {}` and `catch: { nodes: [] }` are both refused by the parse',
+      '`errorVariable`',
+      'legitimate retry-then-fail shape',
+      'content/docs/automation/flows.mdx §"Per-iteration containment"',
+    ],
+    [FLOW_MULTI_WRITE_UNFILTERED]: [
+      'showcase_inquiry_purge',
+      'warning, not a gate',
+      'the run-time erased-condition guard',
+      '"the filter is empty"',
+    ],
+    [FLOW_DECISION_INCLUSIVE_OVERLAP]: [
+      "Keep `mode: 'inclusive'` only where running every matching branch is the intent",
+      'authored against protocol major 17 and converted by `os migrate meta`',
+    ],
+    [FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED]: [
+      'POST /api/v1/approvals/requests/:id/resubmit',
+      'ADR-0044 D3 originally said `wait` here',
+      'resumable by anyone with the run id',
+    ],
+    [FLOW_TIME_RELATIVE_ANTIPATTERN]: [
+      'is swept daily',
+      'a range (`$gte` / `$lt`)',
+    ],
+    [FLOW_DATE_EQUALITY_FILTER]: [
+      'abutting windows tile the timeline',
+      'each row matches exactly once',
+      '`offsetDays` runs once per record on each offset day',
+    ],
+    [FLOW_RUNAS_UNSCOPED]: [
+      'scopes each data operation to the triggering user\'s grants',
+      'refuses the operation rather than run it unscoped',
+      'ADR-0049, ADR-0073 D5',
+    ],
+    [FLOW_DECISION_MODE_INVALID]: [
+      '`registerFlow` refuses this flow with the same sentence',
+      'Fix the node in the flow definition',
+    ],
+    [FLOW_DECISION_UNCONDITIONAL_BRANCH]: [
+      'drop `type: \'decision\'` and use the node it already behaves as',
+    ],
+    [FLOW_ERROR_LABEL_NOT_FAULT]: [
+      'A guard refusal (a filter token that resolved to nothing, a missing required config key, an unscoped run) stays fatal by design',
+    ],
+    [FLOW_BRANCH_LABEL_UNMATCHED]: [
+      'one mechanism per decision, never both',
+      '`isDefault: true` on the fallback',
+    ],
+  };
+
+  it('every one of the twelve ids has its facts listed', () => {
+    expect(Object.keys(MOVED_FROM_SLICE_20_HINT).sort()).toEqual([...SLICE_20_IDS].sort());
+  });
+
+  it.each(SLICE_20_IDS)('`os explain %s` carries what its `fix:` line no longer says, and the line does not', (rule) => {
+    const text = explained(rule);
+    const hints = firedSlice20Hints.filter((f) => f.rule === rule).map((f) => f.hint);
+    expect(hints.length, rule).toBeGreaterThan(0);
+    for (const fact of MOVED_FROM_SLICE_20_HINT[rule]!) {
+      expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+      for (const hint of hints) expect(hint, `${rule} fix: line still says ${fact}`).not.toContain(fact);
+    }
   });
 });

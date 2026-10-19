@@ -250,7 +250,7 @@ export type ImportMappingParsed = z.infer<typeof ImportMappingSchema>;
  * {
  *   format: 'csv', csv: 'Name,Owner,Stage\nAcme,jane@x.com,Won',
  *   mapping: { Name: 'name', Owner: 'owner', Stage: 'stage' },
- *   writeMode: 'upsert', matchFields: ['name'], runAutomations: false,
+ *   writeMode: 'upsert', matchFields: ['name'],
  * }
  */
 export const ImportRequestSchema = lazySchema(() => z.object({
@@ -288,13 +288,16 @@ export const ImportRequestSchema = lazySchema(() => z.object({
     .describe(
       'Fire triggers/hooks for each imported row. ON by default, and opting out must be ' +
       'explicit: automations always ran on import historically (the engine ignored this flag ' +
-      'until this flag was honoured), so a caller that wants a silent bulk load sends `runAutomations: false` — ' +
-      'omitting the key runs them. This matches platform convention (Salesforce fires triggers ' +
-      'on import by default). One boundary: a `dryRun` preview runs NO automations whatever ' +
-      'this flag says.',
+      'until this flag was honoured), so omitting the key runs them. This matches platform ' +
+      'convention (Salesforce fires triggers on import by default). Only the system principal (an ' +
+      'in-process caller such as a seed or migration job) may send `runAutomations: false`, because ' +
+      'it takes the object\'s triggers and metadata-bound hooks, its approvals and record freezes ' +
+      'among them, off every row: the import doors refuse it from every other caller, every ' +
+      'signed-in user and administrator included, with `403 PERMISSION_DENIED` before any row is ' +
+      'read. One boundary: a `dryRun` preview runs NO automations whatever this flag says.',
     ),
   treatAsHistorical: z.boolean().default(false)
-    .describe('Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates; and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them. Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped.'),
+    .describe('Import as established historical facts. Two effects, both off by default so a normal import is unchanged: (1) skip the state_machine rule so mid-lifecycle rows (e.g. already-closed tickets, closed_won deals) are not rejected by initialStates; and (2) preserve the original audit timeline — keep the supplied created_at / updated_at / updated_by and author-declared business readonly fields (e.g. closed_at, resolved_by) instead of stamping-now / stripping them. Undoing a historical import mirrors (2): the captured pre-import values are restored verbatim rather than re-stamped. Only the system principal (an in-process caller such as a seed or migration job) may send `treatAsHistorical: true`: the import doors refuse it from every other caller, every signed-in user and administrator included, with `403 PERMISSION_DENIED` before any row is read.'),
   trimWhitespace: z.boolean().default(true)
     .describe('Trim leading/trailing whitespace from string cells'),
   nullValues: z.array(z.string()).optional()
@@ -467,7 +470,7 @@ export const ImportJobProgressSchema = lazySchema(() => z.object({
   errors: z.number().int().describe('Rows that failed'),
   percentComplete: z.number().min(0).max(100).describe('processed / total as a percentage'),
   undoable: z.boolean().describe('Whether this job can still be logically rolled back (undo log captured, terminal state, not yet reverted)'),
-  revertedAt: z.string().optional().describe('When the job was undone / rolled back (ISO 8601)'),
+  revertedAt: z.string().optional().describe('When the job was undone / rolled back (ISO 8601): set only once every row is reverted. An undo that left rows unreverted sets nothing, and the job stays undoable for those rows.'),
   error: z.string().optional().describe('Fatal error message (when status = failed)'),
   startedAt: z.string().optional().describe('Processing start timestamp (ISO 8601)'),
   completedAt: z.string().optional().describe('Completion timestamp (ISO 8601)'),
@@ -521,7 +524,7 @@ export const ImportJobSummarySchema = lazySchema(() => z.object({
   createdAt: z.string().describe('Job creation timestamp (ISO 8601)'),
   completedAt: z.string().optional().describe('Completion timestamp (ISO 8601)'),
   undoable: z.boolean().describe('Whether this job can still be logically rolled back'),
-  revertedAt: z.string().optional().describe('When the job was undone / rolled back (ISO 8601)'),
+  revertedAt: z.string().optional().describe('When the job was undone / rolled back (ISO 8601): set only once every row is reverted. An undo that left rows unreverted sets nothing, and the job stays undoable for those rows.'),
 }));
 export type ImportJobSummary = z.input<typeof ImportJobSummarySchema>;
 
@@ -534,14 +537,33 @@ export type ListImportJobsResponse = z.input<typeof ListImportJobsResponseSchema
 /**
  * Undo Import Job Response — the outcome of a logical rollback: created records
  * deleted, updated records restored to their pre-import field values.
+ *
+ * The reversal writes are ordinary writes on the live app: for every caller but
+ * the system principal they run under the object's hooks, record-change
+ * triggers and `state_machine` rule, so a control can refuse a row. Each row
+ * the undo did not revert is listed in `failures` and is not counted as
+ * reverted; the job is stamped reverted only once every row is, and until then
+ * it stays undoable for exactly the rows that remain.
  */
 export const UndoImportJobResponseSchema = lazySchema(() => z.object({
-  success: z.boolean().describe('Whether the undo completed'),
+  success: z.boolean().describe('Whether every row was reverted. False when any row is listed in `failures`: the undo did not complete, and the job is not stamped reverted.'),
   jobId: z.string().describe('Import job id'),
   object: z.string().describe('Target object name'),
   deleted: z.number().int().describe('Created records deleted'),
   restored: z.number().int().describe('Updated records restored to pre-import values'),
-  failed: z.number().int().describe('Reversal operations that failed'),
+  failed: z.number().int().describe('Rows the undo did not revert: one per entry in `failures`'),
+  failures: z.array(z.object({
+    id: z.string().describe('Id of the record the reversal targeted'),
+    action: z.enum(['delete', 'restore']).describe('The reversal that did not happen: `delete` for a record the import created, `restore` for one it updated'),
+    code: z.string().describe('Error code the write was refused or failed with, as the single-record write door answers it'),
+    error: z.string().describe('Human-readable message: a refusing hook or validation rule\'s own sentence, or the door\'s withheld-fault sentence'),
+  })).describe(
+    'One entry per row the undo did not revert, in the order the undo tried them (deletes first). For every caller '
+    + 'but the system principal the reversal writes run under the object\'s hooks, record-change triggers and '
+    + '`state_machine` rule, so a row one of them refuses is listed here, as is a write that failed for any other '
+    + 'reason. The job keeps these rows, each with its entry, in its undo log and stays undoable: undoing it again '
+    + 'retries only them. Empty when every row was reverted.',
+  ),
 }));
 export type UndoImportJobResponse = z.input<typeof UndoImportJobResponseSchema>;
 

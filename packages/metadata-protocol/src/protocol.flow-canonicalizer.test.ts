@@ -4,9 +4,9 @@
  * #4498 — the flow-skip becomes ONE seam, and `duplicatePackage` stops minting
  * pre-protocol flow rows.
  *
- * `convertStoredItem` returns `flow` bodies untouched, because flow-node
- * conversions carry ADR-0078's open-namespace conflict guard and that needs the
- * automation engine's live executor registry. #4454 built the capability
+ * `convertStoredItem` returns `flow` bodies untouched, because a flow
+ * canonicalizes at the automation engine, whose registration checks need its
+ * live node registry. #4454 built the capability
  * (`AutomationEngine.canonicalizeStoredFlow`) and handed it to
  * `migrateStoredMetadata` as an explicit hook, because the CLI has to boot an
  * engine of its own to hold one.
@@ -38,7 +38,7 @@ const flowBody = (config: Record<string, unknown>) => ({
 const canonicalizeStoredFlow = (_name: string, body: any) => {
     const node = body?.nodes?.[0];
     if (!node || !('filters' in (node.config ?? {}))) {
-        return { storable: body, notices: [], conflicts: [] };
+        return { storable: body, notices: [] };
     }
     const { filters, ...rest } = node.config;
     return {
@@ -51,7 +51,6 @@ const canonicalizeStoredFlow = (_name: string, body: any) => {
             path: 'flows[0].nodes[0].config',
             message: 'filters → filter',
         }],
-        conflicts: [],
     };
 };
 
@@ -87,7 +86,7 @@ function makeProtocol(
             seeded.filter((r) => matches(r, opts?.where ?? {}))),
         registry: {
             getPackage: vi.fn(() => ({
-                manifest: { id: 'app.iojn', name: 'Repair', namespace: 'iojn', version: '1.0.0', type: 'application' },
+                manifest: { id: 'app.iojn', name: 'Repair', namespace: 'iojn', version: '1.0.0', type: 'app' },
             })),
             installPackage: vi.fn(),
         },
@@ -155,7 +154,6 @@ describe('migrateStoredMetadata resolves the engine itself (#4498)', () => {
         const explicit = vi.fn((_n: string, body: any) => ({
             storable: { ...body, label: 'From the explicit hook' },
             notices: [],
-            conflicts: [],
         }));
         const registryHook = vi.fn(canonicalizeStoredFlow);
         const { protocol, saveMetaItem } = makeProtocol(
@@ -248,33 +246,6 @@ describe('duplicatePackage canonicalizes flow rows (#4498)', () => {
         // compose; neither one replaces the other.
         expect(flow.item.nodes[0].config.filter).toEqual({ status: 'stale' });
         expect(flow.item.nodes[0].config.objectName).toBe('iojn2_repair_ticket');
-    });
-
-    it('a refused rename fails the item and names the token — never a silent legacy copy', async () => {
-        const conflicting = () => ({
-            storable: {},
-            notices: [],
-            conflicts: [{
-                conversionId: 'flow-node-type-open-namespace',
-                token: 'http_request',
-                path: 'flows[0].nodes[0].type',
-                message: 'a custom executor owns this node type here',
-            }],
-        });
-        const { protocol, saveMetaItem } = makeProtocol(
-            [legacyFlowRow],
-            new Map([['automation', { canonicalizeStoredFlow: conflicting }]]),
-        );
-
-        const res = await duplicate(protocol);
-
-        expect(res.failedCount).toBe(1);
-        expect(res.copiedCount).toBe(0);
-        expect(res.failed[0].error).toContain('http_request');
-        expect(res.failed[0].error).toContain('live name in this environment');
-        // The point of failing: copying the un-renamed body would mint exactly
-        // the row this fix exists to prevent.
-        expect(saveMetaItem).not.toHaveBeenCalled();
     });
 
     it('a flow that cannot canonicalize fails the item with the reason', async () => {

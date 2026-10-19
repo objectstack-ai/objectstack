@@ -121,6 +121,10 @@ export const PUBLIC_AUTH_FEATURES = {
       'sys_team.actions.remove_team',
       'sys_team_member.actions.add_team_member',
       'sys_team_member.actions.remove_team_member',
+      // Fourth mirror of the email-invite entry, at the organization record
+      // page's `record_header` — a `page:header` resolves ids against its own
+      // object's actions only (ruling 6228318638, B′ on #24034).
+      'sys_organization.actions.invite_user',
     ],
     notes: 'Org CAPABILITY gate, not multi-org (cloud ADR-0081 D1).',
   },
@@ -130,6 +134,9 @@ export const PUBLIC_AUTH_FEATURES = {
     gatedInputs: [
       'sys_organization.actions.create_organization',
       'sys_organization.actions.update_organization',
+      // The name/logo-only rename door, at the record header and the row:
+      // `update_organization`'s endpoint and gate, without its `slug` param.
+      'sys_organization.actions.rename_organization',
       'sys_organization.actions.delete_organization',
       'sys_organization.actions.set_active_organization',
       'sys_organization.actions.leave_organization',
@@ -317,9 +324,10 @@ type WithRequiresFeature = {
 
 /**
  * Lower the declarative `requiresFeature: '<flag>'` sugar into the canonical
- * `visible` CEL predicate and strip the sugar key from the output — mirroring
- * `normalizeVisibleWhen` (ADR-0089): persisted artifacts, lint, runtime, and
- * objectui only ever see the canonical envelope.
+ * `visible` CEL predicate and strip the sugar key from the output — the same
+ * schema-boundary fold onto one canonical key that ADR-0089 ran for
+ * `visibleOn` / `visibility` → `visibleWhen` through 17: persisted artifacts,
+ * lint, runtime, and objectui only ever see the canonical envelope.
  *
  * - No existing `visible` → `{ dialect: 'cel', source: <gate> }`, string-equal
  *   to the hand-written gates it replaces.

@@ -63,7 +63,8 @@ export const SysOauthConsent = ObjectSchema.create({
       label: 'Reference ID',
       required: false,
       maxLength: 255,
-      description: 'Caller-supplied correlation identifier',
+      description:
+        "Organization this consent binds: the consenting user's active organization at consent; empty when none was active",
     }),
 
     resources: Field.textarea({

@@ -31,7 +31,6 @@
 //   - by name and in the list, that name answers the same body;
 //   - the stored row is still reported as a shadowed contender;
 //   - a shipped name with no stored row is unchanged (control);
-//   - an organization-scoped row stays out of reach (control);
 //   - a name no managed package ships still answers its stored row (control).
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -56,8 +55,6 @@ const SUBJECT = 'showcase_urgent_task_alert';
 /** A shipped flow given no stored row at all: the control. */
 const CONTROL = 'showcase_task_completed';
 /** A shipped flow given an ORGANIZATION-scoped row only. */
-const ORG_SUBJECT = 'showcase_task_assigned_notify';
-const ORG_ID = 'org_dogfood_20946';
 /** A shipped screen flow whose body seeds the customer flow below (no trigger). */
 const CUSTOMER_SOURCE = 'showcase_reassign_wizard';
 /** A flow name no managed package ships, given an environment-wide stored row. */
@@ -162,13 +159,12 @@ describe('the by-name flow read agrees with the list for a shipped name across a
         stack = await boot(dbFile);
         const first = await engine();
         const store = await ql();
-        for (const name of [SUBJECT, CONTROL, ORG_SUBJECT, CUSTOMER_SOURCE]) loader[name] = await first.getFlow(name);
+        for (const name of [SUBJECT, CONTROL, CUSTOMER_SOURCE]) loader[name] = await first.getFlow(name);
 
         const now = new Date().toISOString();
-        const row = (name: string, organizationId: string | null, body: Record<string, unknown>) => ({
+        const row = (name: string, body: Record<string, unknown>) => ({
             type: 'flow',
             name,
-            organization_id: organizationId,
             package_id: null,
             state: 'active',
             version: 1,
@@ -179,9 +175,8 @@ describe('the by-name flow read agrees with the list for a shipped name across a
         });
         const customer = { ...plainCopy(loader[CUSTOMER_SOURCE]), name: CUSTOMER, label: CUSTOMER_LABEL };
         for (const data of [
-            row(SUBJECT, null, storedBodyFrom(loader[SUBJECT])),
-            row(ORG_SUBJECT, ORG_ID, storedBodyFrom(loader[ORG_SUBJECT])),
-            row(CUSTOMER, null, customer),
+            row(SUBJECT, storedBodyFrom(loader[SUBJECT])),
+            row(CUSTOMER, customer),
         ]) {
             await store.insert('sys_metadata', data, { context: SYSTEM_CTX });
         }
@@ -203,9 +198,8 @@ describe('the by-name flow read agrees with the list for a shipped name across a
             where: { type: 'flow', state: 'active' },
             context: SYSTEM_CTX,
         });
-        const names = rows.map((r) => `${String(r.name)}@${String(r.organization_id ?? '')}`);
+        const names = rows.map((r) => `${String(r.name)}@`);
         expect(names).toContain(`${SUBJECT}@`);
-        expect(names).toContain(`${ORG_SUBJECT}@${ORG_ID}`);
         expect(names).toContain(`${CUSTOMER}@`);
         expect((await engine()).packagedFlowOwner(SUBJECT)).toBe(SHOWCASE_PACKAGE);
         expect(loader[SUBJECT]?.label).not.toBe(STORED_LABEL);
@@ -254,14 +248,6 @@ describe('the by-name flow read agrees with the list for a shipped name across a
         expect(read.status).toBe(200);
         expect(read.doc.label).toBe(loader[CONTROL]?.label);
         expect(nodeIds(read.doc)).toEqual(nodeIds(loader[CONTROL]));
-    });
-
-    it('control: an organization-scoped row stays out of the by-name read\'s reach', async () => {
-        const read = await byName(ORG_SUBJECT);
-
-        expect(read.status).toBe(200);
-        expect(read.doc.label).toBe(loader[ORG_SUBJECT]?.label);
-        expect(nodeIds(read.doc)).toEqual(nodeIds(loader[ORG_SUBJECT]));
     });
 
     it('control: a flow name no managed package ships answers its stored row by name and in the list', async () => {

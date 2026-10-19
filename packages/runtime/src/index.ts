@@ -8,7 +8,7 @@ export { Runtime } from './runtime.js';
 export type { RuntimeConfig } from './runtime.js';
 
 // Export Standalone Stack
-export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase } from './standalone-stack.js';
+export { createStandaloneStack, resolveObjectStackHome, resolveStandaloneDatabase, sqliteFilenameFromUrl } from './standalone-stack.js';
 export type { StandaloneStackConfig, StandaloneStackResult, ResolvedStandaloneDatabase } from './standalone-stack.js';
 
 // The dev schema self-heal decision (#21733) — public because `@objectstack/cli`
@@ -67,6 +67,16 @@ export { DriverPlugin } from './driver-plugin.js';
 // runs that started and never concluded, and owns the `migration-plans`
 // registry `os migrate resume` looks plans up in.
 export { MigrationRecoveryPlugin, describeInterruptedRun } from './migration-recovery-plugin.js';
+export {
+  OrganizationOwnershipBootGuardPlugin,
+  OrganizationOwnershipBootRefusal,
+  ORGANIZATION_OWNERSHIP_BOOT_REFUSAL_CODE,
+  assertOrganizationOwnershipMigrated,
+  findV17ShapeTables,
+  isOrganizationOwnershipBootRefusal,
+  organizationOwnershipRefusalMessage,
+} from './organization-ownership-boot-guard.js';
+export type { OrganizationOwnershipBootGuardOptions } from './organization-ownership-boot-guard.js';
 export { DefaultDatasourcePlugin } from './default-datasource-plugin.js';
 export type { DefaultDatasourceDefinition, DefaultDatasourcePluginOptions } from './default-datasource-plugin.js';
 export { AppPlugin, collectBundleHooks, collectBundleFunctions, collectBundleFunctionEntries, collectBundleActions } from './app-plugin.js';

@@ -167,6 +167,7 @@ describe('collectAutomationSummary — flow-name shadowing (#12028)', () => {
 describe('startup banner — what an operator reads when a flow name is contested (#12028)', () => {
   const base: ServerReadyOptions = {
     externalBaseOrigin: 'http://localhost:3000',
+    httpServer: 'composed',
     configFile: 'objectstack.config.ts',
     isDev: true,
     pluginCount: 1,

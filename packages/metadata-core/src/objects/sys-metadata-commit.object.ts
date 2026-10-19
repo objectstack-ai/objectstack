@@ -28,7 +28,8 @@ export const SysMetadataCommitObject = ObjectSchema.create({
   icon: 'git-commit',
   isSystem: true,
   managedBy: 'engine-owned',
-  description: 'Package-scoped commit log grouping a turn’s metadata changes (ADR-0067).',
+  // ADR-0067 — the reference lives in the docblock above, not in the copy.
+  description: 'Package-scoped commit log grouping a turn’s metadata changes.',
 
   fields: {
     /**
@@ -125,14 +126,6 @@ export const SysMetadataCommitObject = ObjectSchema.create({
       readonly: true,
     }),
 
-    /** Organization ID for multi-tenant isolation. */
-    organization_id: Field.lookup('sys_organization', {
-      label: 'Organization',
-      required: false,
-      readonly: true,
-      description: 'Organization for multi-tenant isolation.',
-    }),
-
     /** When the commit was recorded. */
     created_at: Field.datetime({
       label: 'Created At',
@@ -141,11 +134,33 @@ export const SysMetadataCommitObject = ObjectSchema.create({
     }),
   },
 
+  // [ADR-0131 D6/D7, C7b] Tenant-less, like the overlays it records: the
+  // declared organization column is retired (ADR-0087 semantic entry
+  // 18.sys-metadata-commit-organization-column-retired), and `systemFields.tenant: false`
+  // keeps the engine from injecting one back. The v18 ceremony
+  // (`os migrate organization-ownership --apply`) drops the physical column.
+  systemFields: { tenant: false },
+  // [ADR-0131 D7, the #22107 precedent] With no organization column there is
+  // no tenant wall, and a walled deployment's `organization_admin` holds a
+  // `'*'` grant — so without an object-level gate the generic data door would
+  // serve every organization's rows of this table (package commit ranges and their items). D7 governs it by
+  // object permission: `studio.access`, platform-scoped (no tenant
+  // administrator holds it by role) and admitted by every door that serves
+  // this table's trail (`/meta/:type/:name/history`, `/audit` and `/diff` admit
+  // it beside `manage_metadata`; `/packages/:id/commits` admits it alone).
+  // `requiredPermissions` is an AND-gate, so it names the one capability all
+  // of those doors admit — and not `setup.access`, which organization admins
+  // DO hold (plugin-security's `PLATFORM_ADMIN_ONLY_CAPABILITIES` excludes it
+  // on purpose). [#23546] None of those doors admits `setup.access` either, so
+  // the data door and the trail doors refuse an organization admin alike.
+  // Platform code reads under the system context, which the gate does not stop.
+  requiredPermissions: ['studio.access'],
+
   indexes: [
     // List a package's history newest-first (the timeline read pattern).
-    { fields: ['organization_id', 'package_id', 'created_at'] },
-    // Org-wide commit replay / audit.
-    { fields: ['organization_id', 'created_at'] },
+    { fields: ['package_id', 'created_at'] },
+    // Environment-wide commit replay / audit.
+    { fields: ['created_at'] },
     { fields: ['parent_commit_id'] },
   ],
 

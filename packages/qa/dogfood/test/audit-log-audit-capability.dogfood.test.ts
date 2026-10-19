@@ -28,7 +28,7 @@
 //   - a private record the writer owns, which neither member can open;
 //   - a third member's second session, signed out (its sign-in row about an
 //     ended session, and its sign-out row);
-//   - a bulk of rows past the gate's pre-scan bound, inserted as the system
+//   - a bulk of rows past the old pre-scan bound, inserted as the system
 //     (the writers insert as the system too), about records that do not exist.
 //
 // `@objectstack/plugin-audit` resolves through its BUILT output here (a
@@ -54,7 +54,7 @@ const ACTIVITY = 'sys_activity';
 const OBJ = 'alc_item';
 const PRIVATE = 'alc_private';
 const SYS = { isSystem: true } as const;
-/** The parent-record gate's pre-scan bound (`PARENT_GATE_SCAN_LIMIT` in plugin-audit). */
+/** The parent-record gate's old pre-scan bound, the bounded probe's still (`PARENT_GATE_SCAN_LIMIT` in plugin-audit). */
 const SCAN_BOUND = 2_000;
 const BULK = SCAN_BOUND + 50;
 const PASSWORD = 'Alc-Fixture-Pass-21260';
@@ -133,14 +133,14 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
   let stack: VerifyStack;
   let ql: any;
   const token: Record<'admin' | 'holder' | 'reader' | 'writer', string> = { admin: '', holder: '', reader: '', writer: '' };
-  const id = { live: '', gone: '', private: '', endedSession: '' };
+  const id = { live: '', early: '', gone: '', private: '', endedSession: '' };
   const rowIds = { goneCreate: '', goneDelete: '', privateCreate: '', signOut: '', endedSignIn: '' };
   let bulkAtRest = 0;
 
   const ledgerAtRest = (where: Record<string, unknown>): Promise<Row[]> =>
     ql.find(LEDGER, { where, limit: 5_000, context: { ...SYS } });
-  const servedList = async (who: keyof typeof token, object: string, where: Record<string, unknown>) => {
-    const res = await stack.apiAs(token[who], 'GET', `/data/${object}?$filter=${filterOf(where)}&limit=200`);
+  const servedList = async (who: keyof typeof token, object: string, where: Record<string, unknown>, sort?: string) => {
+    const res = await stack.apiAs(token[who], 'GET', `/data/${object}?$filter=${filterOf(where)}&limit=200${sort ? `&sort=${sort}` : ''}`);
     expect(res.status).toBe(200);
     return rowsOf(await res.json());
   };
@@ -199,6 +199,9 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
       return String(j.id ?? j.record?.id ?? j.data?.id);
     };
     id.live = await idOf(await stack.apiAs(token.writer, 'POST', `/data/${OBJ}`, { name: 'live' }));
+    // A readable record nothing touches again: every row about it is older
+    // than the bulk below.
+    id.early = await idOf(await stack.apiAs(token.writer, 'POST', `/data/${OBJ}`, { name: 'early' }));
     id.gone = await idOf(await stack.apiAs(token.writer, 'POST', `/data/${OBJ}`, {
       name: 'gone', alc_plain: VALUE.plain, alc_withheld: VALUE.withheld,
     }));
@@ -341,14 +344,30 @@ describe('[#21260] the ledger audit capability exempts its holder from the paren
     expect(await servedList('admin', ACTIVITY, { object_name: OBJ, record_id: id.gone })).toEqual([]);
   });
 
-  it('non-holder: gets exactly the parent-record gate — none of these rows, and a broad read bounded', async () => {
+  it('non-holder: gets exactly the parent-record gate — none of these rows, and a broad read is exactly the rows about the record it can open', async () => {
     expect(await servedList('reader', LEDGER, { object_name: OBJ, record_id: id.gone })).toEqual([]);
     for (const rowId of [rowIds.goneDelete, rowIds.signOut, rowIds.endedSignIn, rowIds.privateCreate]) {
       expect(await servedById('reader', rowId), `ledger row ${rowId}`).toBe(404);
     }
-    const total = await servedTotal('reader', { object_name: OBJ });
-    expect(total).toBeLessThan(SCAN_BOUND);
-    expect(total).toBeLessThan(bulkAtRest);
+    // [ADR-0139 E5] One ReadableIds leaf per parent object, no candidate
+    // window: the reader is served the rows about the records it can open,
+    // and the total says so, whatever the order. Newest first, the bulk (about
+    // records that do not exist, written after the early record) fills the
+    // newest 2,000 rows, so no row about the early record is in the old
+    // pre-scan's window — which therefore served none of them.
+    const readable = new Set([id.live, id.early]);
+    const atRest = await ledgerAtRest({ object_name: OBJ });
+    const exact = atRest.filter((r) => readable.has(String(r.record_id))).map((r) => String(r.id)).sort();
+    const early = atRest.filter((r) => String(r.record_id) === id.early);
+    expect(early.length).toBeGreaterThan(0);
+    expect(await servedTotal('reader', { object_name: OBJ })).toBe(exact.length);
+    const newestFirst = await servedList('reader', LEDGER, { object_name: OBJ }, '-created_at');
+    // Armed: the page really is newest first.
+    const stamps = newestFirst.map((r) => String(r.created_at));
+    expect([...stamps].sort().reverse()).toEqual(stamps);
+    expect(newestFirst.map((r) => String(r.id)).sort()).toEqual(exact);
+    for (const row of early) expect(newestFirst.map((r) => String(r.id))).toContain(String(row.id));
+    expect(bulkAtRest).toBeGreaterThan(SCAN_BOUND);
   });
 
   it('non-holder control: is served the rows about the record it can open', async () => {

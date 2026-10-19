@@ -66,11 +66,15 @@ import {
     exportContentDisposition,
     type ExportFieldMeta,
 } from './export-format.js';
-import { prepareImportRequest } from './import-prepare.js';
-import { readTemplateMode } from './import-template.js';
+import { importControlOptOutRefusal, prepareImportRequest } from './import-prepare.js';
+import { readTemplateMode, templateFieldDefs } from './import-template.js';
 import { refuseRepeatedQueryParams } from './query-multiplicity.js';
 import { refuseUnknownQueryParams } from './query-allowlist.js';
-import { handleRouteError } from './error-response.js';
+import { handleRouteError, logUnexpectedRouteError, mapDataError, nestedRefusalEnvelope } from './error-response.js';
+// [#24348] The shared ADR-0112 nested envelope for the import doors' control
+// opt-out refusal — the flat sibling-`code` dialect the doors' older answers
+// use is ratcheted down by `check:route-envelope`.
+import { sendError as sendEnvelopeError } from '@objectstack/types';
 import { logError } from './log.js';
 import {
     DATA_EXPORT_PARAMS,
@@ -157,6 +161,24 @@ import {
 export type ServerScopedDataRequest<R> = R & { environmentId?: string; context?: unknown };
 
 /**
+ * [#24183] One export row as a json object carrying exactly `fields`, in that
+ * order — the json arm's counterpart of the column list `formatRowCells` writes
+ * for csv / xlsx. A name whose value the read did not return is left out, never
+ * written as `null`: the read answered nothing for it, and inventing a value
+ * would read as a stored null.
+ */
+function pickExportKeys(row: Record<string, unknown>, fields: readonly string[]): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    if (!row || typeof row !== 'object') return out;
+    for (const f of fields) {
+        // Own keys only: a name such as `constructor` must not pick up a
+        // prototype member the row never carried.
+        if (Object.prototype.hasOwnProperty.call(row, f) && row[f] !== undefined) out[f] = row[f];
+    }
+    return out;
+}
+
+/**
  * The `RestServer` members {@link registerDataActionEndpoints} reads — every
  * one of them, and no other. Each is typed AS the class member (an indexed
  * access on the class), so a change to a member's signature on the class is a
@@ -178,6 +200,68 @@ export interface DataActionRouteHost {
     resolveMessageTranslator: RestServer['resolveMessageTranslator'];
     resolveSecurityService: RestServer['resolveSecurityService'];
     answerImportTemplate: RestServer['answerImportTemplate'];
+}
+
+/**
+ * [#24380] The write context an import UNDO's reversal writes run under — the
+ * deletes of the records the job created and the restores of the fields it
+ * updated.
+ *
+ * Those writes are ordinary data changes on a live app, so they run under the
+ * object's declared controls: its metadata-bound hooks (an approval gate, a
+ * closed-record freeze), its record-change triggers and its `state_machine`
+ * rule. Only the system principal, `ExecutionContext.isSystem === true` (an
+ * in-process caller such as a migration job), takes them off, with
+ * `skipAutomations` and `skipStateMachine`: the predicate the import doors ask
+ * before they honour a control opt-out (`importControlOptOutRefusal`,
+ * `import-prepare.ts`), and the same rule — only the system principal may take
+ * an app's declared controls off a write; the undo door is not an exception.
+ * An HTTP request is assembled with `isSystem: false`, so every signed-in
+ * caller, administrators included, undoes under the controls. ⛔ No
+ * permission, capability or administrator standing is read here.
+ *
+ * A historical job (`treat_as_historical`) keeps `preserveAudit` for every
+ * caller, mirroring the import's own write context (#3549): restoring the
+ * captured snapshot re-writes its `updated_at` / `updated_by` and business
+ * `readonly` values verbatim instead of stamping or stripping them.
+ */
+function importUndoWriteContext(context: unknown, job: { treat_as_historical?: unknown }): Record<string, unknown> {
+    const systemPrincipal = (context as { isSystem?: unknown } | null | undefined)?.isSystem === true;
+    return {
+        ...((context ?? {}) as Record<string, unknown>),
+        ...(systemPrincipal ? { skipAutomations: true, skipStateMachine: true } : {}),
+        ...(job.treat_as_historical ? { preserveAudit: true } : {}),
+    };
+}
+
+/** One reversal an import undo did not make: the row stays unreverted. */
+interface ImportUndoFailure {
+    /** The record the reversal targeted. */
+    id: string;
+    /** `delete` for a record the job created, `restore` for one it updated. */
+    action: 'delete' | 'restore';
+    /** The ADR-0112 code the single-record write door answers the same failure with. */
+    code: string;
+    /** That door's sentence for it. */
+    error: string;
+}
+
+/**
+ * [#24380] A reversal write that threw, as the undo reports it per row. The
+ * classification is the one `PATCH` / `DELETE /data/:object/:id` answer the
+ * same thrown error with ({@link mapDataError}, which withholds a fault's
+ * driver text), so a refusal by the object's hook, state machine or record
+ * lock reads in the words the app wrote for it. The code is read off that
+ * classification as the nested ADR-0112 envelope reads it
+ * ({@link nestedRefusalEnvelope}): an undeclared hook refusal carries none,
+ * and the catalog's floor for its status fills it. A fault that is not a
+ * refusal is logged once here, as those doors log it.
+ */
+function importUndoFailure(id: string, action: ImportUndoFailure['action'], error: unknown, objectName: string): ImportUndoFailure {
+    const mapped = mapDataError(error, objectName);
+    logUnexpectedRouteError(error, mapped);
+    const answer = nestedRefusalEnvelope(mapped);
+    return { id, action, code: answer.code, error: answer.message };
 }
 
 /**
@@ -262,6 +346,19 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 }
                 if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return;
                 const body = req.body ?? {};
+
+                // [#24348] Who may take the object's declared controls off this
+                // import (`runAutomations: false`, `treatAsHistorical: true`):
+                // the system principal only. Asked after the object-exposure
+                // gate (a hidden object keeps its 404) and before the body is
+                // parsed, so a refused request writes no row — dry run included.
+                const optOutRefusal = importControlOptOutRefusal(body, context);
+                if (optOutRefusal) {
+                    sendEnvelopeError(res, optOutRefusal.status, optOutRefusal.code, optOutRefusal.message, {
+                        details: { object: objectName, refused: optOutRefusal.refused },
+                    });
+                    return;
+                }
 
                 // Parse + validate the payload (shared with the async job route).
                 // The synchronous path caps at 5k rows; larger files must use the
@@ -368,6 +465,17 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     return;
                 }
                 if (await this.enforceApiAccess(req, res, p, environmentId, 'import')) return;
+
+                // [#24348] The synchronous door's control opt-out gate, asked at
+                // the same point: before the body is parsed and before a job row
+                // exists, so a refused request creates no job and writes no row.
+                const optOutRefusal = importControlOptOutRefusal(req.body ?? {}, context);
+                if (optOutRefusal) {
+                    sendEnvelopeError(res, optOutRefusal.status, optOutRefusal.code, optOutRefusal.message, {
+                        details: { object: objectName, refused: optOutRefusal.refused },
+                    });
+                    return;
+                }
 
                 const prep = await prepareImportRequest(req.body ?? {}, {
                     p, objectName, environmentId, maxRows: IMPORT_JOB_MAX_ROWS,
@@ -583,26 +691,18 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 }
                 const objectName = String(row.object_name ?? '');
                 const log = parseUndoLog(row.undo_log)!;
-                // Undo automations too: reversing writes shouldn't re-fire triggers.
-                // Skip the state machine as well (#3479): restoring a prior snapshot
-                // re-writes the row's earlier state, which need not be a legal
-                // transition from where it is now — an undo reinstates an established
-                // fact, it does not walk the FSM.
-                //
-                // For a historical import (#3493/#3549), the undo write must mirror
-                // the import's own write context: carry `preserveAudit` so restoring
-                // `u.before` re-writes the captured `updated_at`/`updated_by` (and any
-                // business `readonly` fields in the snapshot) verbatim, rather than
-                // stamping-now / stripping them. Without this, undoing a historical
-                // import would silently rewrite the audit timeline the import took
-                // pains to preserve. A normal import keeps the default (stamp/strip).
-                const writeCtx = {
-                    ...(context ?? {}),
-                    skipAutomations: true,
-                    skipStateMachine: true,
-                    ...(row.treat_as_historical ? { preserveAudit: true } : {}),
-                };
-                let deleted = 0, restored = 0, failed = 0;
+                // [#24380] The reversal writes run under the object's hooks,
+                // record-change triggers and state machine for every caller but
+                // the system principal, which keeps the skips; a historical job
+                // keeps `preserveAudit` (#3549). See `importUndoWriteContext`.
+                const writeCtx = importUndoWriteContext(context, row);
+                let deleted = 0, restored = 0;
+                // [#24380] Every reversal that did not happen, per row — a write
+                // a control refused (a hook, the state machine, a record lock) or
+                // one that failed otherwise. Never swallowed: each is reported in
+                // the answer and kept, with its row, in the job's undo log.
+                const failures: ImportUndoFailure[] = [];
+                const unreverted: { created: string[]; updated: typeof log.updated } = { created: [], updated: [] };
 
                 // Delete created records first (they didn't exist before).
                 for (const id of log.created) {
@@ -610,7 +710,10 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         const undoDeleteRequest: ServerScopedDataRequest<DeleteDataRequest> = { object: objectName, id, context: writeCtx, ...(environmentId ? { environmentId } : {}) };
                         await p.deleteData(undoDeleteRequest);
                         deleted++;
-                    } catch { failed++; }
+                    } catch (error: unknown) {
+                        failures.push(importUndoFailure(id, 'delete', error, objectName));
+                        unreverted.created.push(id);
+                    }
                 }
                 // Restore the touched fields on updated records.
                 for (const u of log.updated) {
@@ -618,17 +721,29 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                         const undoRestoreRequest: ServerScopedDataRequest<UpdateDataRequest> = { object: objectName, id: u.id, data: u.before, context: writeCtx, ...(environmentId ? { environmentId } : {}) };
                         await p.updateData(undoRestoreRequest);
                         restored++;
-                    } catch { failed++; }
+                    } catch (error: unknown) {
+                        failures.push(importUndoFailure(u.id, 'restore', error, objectName));
+                        unreverted.updated.push(u);
+                    }
                 }
 
+                // [#24380] What the job's history records. `reverted_at` means
+                // EVERY row was reverted, so it is stamped only then. An undo that
+                // left rows unreverted stamps nothing: it rewrites the undo log to
+                // exactly those rows, each refusal beside them under `failures`,
+                // so the job stays undoable and undoing it again retries only
+                // what remains — never a row already reverted.
+                const reverted = failures.length === 0;
                 const undoStampRequest: ServerScopedDataRequest<UpdateDataRequest> = {
                     object: IMPORT_JOB_OBJECT, id: jobId,
-                    data: { reverted_at: new Date().toISOString() },
+                    data: reverted
+                        ? { reverted_at: new Date().toISOString() }
+                        : { undo_log: { ...unreverted, failures } },
                     context: { ...(context as any), isSystem: true }, // [ADR-0103] engine-owned
                     ...(environmentId ? { environmentId } : {}),
                 };
                 await p.updateData(undoStampRequest);
-                res.json({ success: true, jobId, object: objectName, deleted, restored, failed });
+                res.json({ success: reverted, jobId, object: objectName, deleted, restored, failed: failures.length, failures });
             } catch (error: any) {
                 handleRouteError(res, error, '');
             }
@@ -749,7 +864,12 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
     //
     // Query params:
     //   format=csv|json|xlsx (default: csv. json emits a JSON array, xlsx a workbook.)
-    //   fields=a,b,c        (default: derive from object schema; falls back to keys of the first row)
+    //   fields=a,b,c        (every format. csv / xlsx write exactly these columns and
+    //                        json rows carry exactly these keys, in list order; a key
+    //                        the read did not return is absent from a json row.
+    //                        Default for csv / xlsx: the object schema's fields minus
+    //                        those declared `hidden`; falls back to keys of the first
+    //                        row. Without it json writes each row as the read returns it.)
     //   filter=<json>       ($filter as URL-encoded JSON, same shape as list endpoint)
     //   search=<term>       (full-text term, same semantics as the list endpoint's
     //                        $search; composes with `filter` rather than replacing it)
@@ -957,6 +1077,10 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                 } else if (Array.isArray(q.fields)) {
                     fields = q.fields.filter((s: any) => typeof s === 'string' && s.length > 0);
                 }
+                // [#24183] The caller named the columns. Nothing below narrows
+                // or reorders an explicit list, so `fields` stays exactly this
+                // for every format, json included.
+                const fieldsExplicit = !!fields && fields.length > 0;
 
                 // Field metadata drives readable formatting (lookup names, select
                 // labels, 是/否, formatted dates) and the $expand that resolves
@@ -993,7 +1117,19 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                     }
                     metaMap = buildFieldMetaMap(schema);
                     if (!fields || fields.length === 0) {
-                        const names = [...metaMap.keys()];
+                        // [#24143] The default columns are the fields the object
+                        // SHOWS by default: a field declared `hidden` ("Hidden from
+                        // default UI", `FieldSchema.hidden`) is not one. Without
+                        // this the hidden `__search` companion became an empty
+                        // "Search Index" column on every export. Column selection
+                        // only: `metaMap` keeps every field, so an explicit
+                        // `?fields=` naming a hidden field is answered as before.
+                        // `templateFieldDefs` reads the field definitions under
+                        // the same names `buildFieldMetaMap` gives them.
+                        const defs = templateFieldDefs(schema);
+                        const names = [...metaMap.keys()].filter(
+                            (name) => (defs.get(name) as { hidden?: unknown } | undefined)?.hidden !== true,
+                        );
                         if (names.length > 0) { fields = names; fieldsFromSchema = true; }
                     }
                 } catch { /* fall back to first-row derivation + raw values */ }
@@ -1160,9 +1296,18 @@ export function registerDataActionEndpoints(this: DataActionRouteHost, basePath:
                             r.commit();
                         }
                     } else {
+                        // [#24183] An explicit `?fields=` is json's column set as
+                        // it is csv's and xlsx's: each row carries exactly the
+                        // named keys, in list order, read from the same resolved
+                        // `fields` the other two arms write. A named key the read
+                        // did not return (field-level security deletes it, the
+                        // read strips the search companion) stays absent rather
+                        // than being invented as `null` — the answer the list
+                        // door gives the same `$select`.
                         for (let i = 0; i < rows.length; i++) {
                             const prefix = (firstChunk && i === 0) ? '' : ',';
-                            res.write(prefix + JSON.stringify(formatRowForJson(rows[i], metaMap, timezone)));
+                            const row = fieldsExplicit ? pickExportKeys(rows[i], fields!) : rows[i];
+                            res.write(prefix + JSON.stringify(formatRowForJson(row, metaMap, timezone)));
                         }
                     }
                     firstChunk = false;

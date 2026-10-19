@@ -1,4 +1,10 @@
 import { describe, it, expect } from 'vitest';
+// Loaded here, at module top, not inside the compiler-API case below: a
+// clocked window measures behaviour, never loading, and `typescript` alone is
+// about 300 ms of module load.
+import ts from 'typescript';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   AppSchema,
   AppBrandingSchema,
@@ -1587,11 +1593,7 @@ describe('unknown keys are rejected, not stripped', () => {
     // compiler API and reads its members — the same symbol-identity measurement
     // `check:dual-source-exports` makes, over `src/`, so it runs in `pnpm test`
     // without a build.
-    it('the retired gates are gone from the TYPE, not only from the parse (compiler API)', async () => {
-      const ts = (await import('typescript')).default;
-      const { resolve, dirname } = await import('node:path');
-      const { fileURLToPath } = await import('node:url');
-
+    it('the retired gates are gone from the TYPE, not only from the parse (compiler API)', () => {
       const entry = resolve(dirname(fileURLToPath(import.meta.url)), 'app.zod.ts');
       const program = ts.createProgram([entry], {
         module: ts.ModuleKind.ESNext,

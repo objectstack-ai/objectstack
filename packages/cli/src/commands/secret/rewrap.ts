@@ -18,6 +18,8 @@ import {
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { oneShotSettingsPlugin, resolveExistingDataKey } from '../../utils/one-shot-settings.js';
 import { absentTableReads, secretUnionReadView } from '../../utils/absent-table-reads.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import type {
   DatasourceArtefactLike,
   SecretReferenceEngineLike,
@@ -41,7 +43,7 @@ import { readDeclaredDatasources } from './orphans.js';
  *
  * - **A dry run by default.** It boots read-only (the `os migrate plan` boot),
  *   opens, re-seals and verifies every attributed row in memory, prints
- *   classes and counts, and writes nothing. `--apply` writes.
+ *   classes and counts, and writes no row or table. `--apply` writes.
  * - **Never run for you.** Nothing on any boot or upgrade path invokes it, and
  *   it must not grow such a caller.
  * - **Operator-only.** ⛔ No HTTP surface, so no refusal here answers a
@@ -66,7 +68,7 @@ import { readDeclaredDatasources } from './orphans.js';
 export default class SecretRewrap extends Command {
   static override description =
     'Re-wrap version-1 `sys_secret` ciphertext under the current AAD derivation, each row under the '
-    + 'scope of the producer that holds it. A dry run by default: it writes nothing without --apply.';
+    + 'scope of the producer that holds it. A dry run by default: it writes no row or table without --apply.';
 
   static override examples = [
     '<%= config.bin %> secret rewrap --no-declared-datasources',
@@ -82,7 +84,7 @@ export default class SecretRewrap extends Command {
     }),
     apply: Flags.boolean({
       description:
-        'Write the re-wrapped rows (default is a dry run that writes nothing). Refuses whenever a '
+        'Write the re-wrapped rows (default is a dry run that writes no row or table). Refuses whenever a '
         + 'holder family could not be enumerated.',
       default: false,
     }),
@@ -141,6 +143,7 @@ export default class SecretRewrap extends Command {
       buildRewrapReport,
       executeSysSecretRewrap,
       planSysSecretRewrap,
+      REWRAP_NOTES,
       rewrapUnfinished,
     } = await import('../../utils/sys-secret-rewrap.js');
     const { ciphertextDerivationStatus } = await import('@objectstack/service-settings');
@@ -184,6 +187,23 @@ export default class SecretRewrap extends Command {
     }
 
     try {
+      // [#23622] Either mode's connect may have switched a SQLite file's
+      // journal mode (`SqlDriver.applySqliteJournalMode`, one rule for every
+      // connect), which rewrites the file header and no row. So no line below
+      // says that nothing changed: the read-only mode claims no row or table
+      // (its boot defers DDL), an abort after the plain boot claims no row
+      // (that boot may have created a missing table), and on a SQLite file
+      // each says what the connect may still have changed. A target that is
+      // no SQLite file (PostgreSQL, MySQL) has no header to switch.
+      const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
+      // [#23899] The report's "Re-running is safe" note claims that a finished
+      // run writes no sys_secret row. Under `--apply` no other line names the
+      // switch, so on a SQLite file that note is followed by it; a dry run's
+      // closing line already carries it, so there the note carries none. The
+      // `--json` `report.notes` carry the notes as they are.
+      const noteSuffix = new Map<string, string>([[REWRAP_NOTES.resumable, flags.apply ? journalNote : '']]);
       const engine = stack.kernel.getService('objectql') as SecretReferenceEngineLike | undefined;
       if (!engine) {
         const message = 'No ObjectQL engine on this runtime, so no holder family can be enumerated.';
@@ -251,7 +271,7 @@ export default class SecretRewrap extends Command {
           keySource: null,
         });
         if (json) { await emitJson({ error: 'union_incomplete', refused: plan.refusal, report }, 1, { compact: true }); return; }
-        renderReport(report);
+        renderReport(report, noteSuffix);
         printError(plan.refusal.message);
         for (const gap of plan.refusal.gaps) printError(`  family '${gap.family}': ${gap.reason}`);
         this.exit(1);
@@ -291,7 +311,7 @@ export default class SecretRewrap extends Command {
         const ok = await confirm(
           chalk.yellow(`  Open, re-seal, verify and write up to ${plan.attempts} sys_secret row(s)? [y/N] `),
         );
-        if (!ok) { printInfo('Aborted — nothing was opened or written.'); return; }
+        if (!ok) { printInfo(`Aborted — no row was opened or written.${journalNote}`); return; }
       }
 
       const result = await executeSysSecretRewrap({
@@ -309,11 +329,11 @@ export default class SecretRewrap extends Command {
       const exitCode = flags.apply && rewrapUnfinished(result) ? 1 : 0;
 
       if (json) { await emitJson({ mode, report }, exitCode, { compact: true }); return; }
-      renderReport(report);
+      renderReport(report, noteSuffix);
       if (flags.apply) {
         printSuccess(`Re-wrapped ${report.counts.rewrap} sys_secret row(s) in ${timer.display()}.`);
       } else {
-        printInfo(`Dry run — nothing was written. (${timer.display()})`);
+        printInfo(`Dry run — no row or table was written.${journalNote} (${timer.display()})`);
       }
       if (exitCode !== 0) this.exit(exitCode);
     } catch (error) {
@@ -343,8 +363,11 @@ async function confirm(question: string): Promise<boolean> {
   }
 }
 
-/** Render the report for a human. Classes and counts only. */
-function renderReport(report: SysSecretRewrapReport): void {
+/**
+ * Render the report for a human. Classes and counts only. `noteSuffix` maps a
+ * note's text to what follows it on its line (the journal-mode note, #23899).
+ */
+function renderReport(report: SysSecretRewrapReport, noteSuffix: ReadonlyMap<string, string>): void {
   console.log(chalk.bold('\n  Reference union — one line per holder family'));
   for (const [family, status] of Object.entries(report.families)) {
     if (status.status === 'enumerated') {
@@ -381,5 +404,5 @@ function renderReport(report: SysSecretRewrapReport): void {
   if (report.keySource) printInfo(`data key source: ${report.keySource}`);
 
   console.log(chalk.bold('\n  Read before acting'));
-  for (const note of report.notes) printWarning(note);
+  for (const note of report.notes) printWarning(`${note}${noteSuffix.get(note) ?? ''}`);
 }

@@ -77,7 +77,7 @@ libSQL data stayed untouched. Pass the token with `--database-auth-token`
 | **MySQL** | `@objectstack/driver-sql` (peer: `mysql2`) | `SqlDriver` | `mysql` \| `mysql2` (supported, with three dialect caveats — see [below](#mysql-dialect-caveats)) |
 | **SQLite** | `@objectstack/driver-sql` (peer: `better-sqlite3`) | `SqlDriver` | `sqlite` \| `sql` |
 | **SQLite (WASM)** | `@objectstack/driver-sqlite-wasm` | `SqliteWasmDriver` | `sqlite-wasm` \| `wasm-sqlite` \| `wasm` |
-| **MongoDB** | `@objectstack/driver-mongodb` | `MongoDBDriver` | `mongodb` \| `mongo` (single-tenant only — see [below](#multi-tenancy-not-supported)) |
+| **MongoDB** | `@objectstack/driver-mongodb` | `MongoDBDriver` | `mongodb` (single-tenant only — see [below](#multi-tenancy-not-supported)) |
 | **Turso / libSQL** | `@objectstack/driver-turso` (optional install — see the callout above) | `TursoDriver` | `turso` \| `libsql` |
 | **Memory** | `@objectstack/driver-memory` | `InMemoryDriver` | none — not a boot store (see [Memory Driver](#memory-driver)) |
 
@@ -100,8 +100,13 @@ driver ships that contract as a zod schema, exported from `@objectstack/spec/dat
 | `mysql` \| `mysql2` \| `mariadb` | `MysqlConfigSchema` | `url`, `host`, `port`, `database`, `username`, `password`, `ssl`, `autoMigrate` |
 | `sqlite` \| `sqlite3` | `SqliteConfigSchema` | `filename`, `autoMigrate` |
 | `sqlite-wasm` \| `wasm-sqlite` | `SqliteWasmConfigSchema` | `filename`, `persist` |
-| `mongo` \| `mongodb` | `MongoConfigSchema` | `url`, `host`, `port`, `database`, `username`, `password`, `authSource`, `options` |
+| `mongodb` | `MongoConfigSchema` | `url`, `host`, `port`, `database`, `username`, `password`, `authSource`, `options` |
 | `memory` \| `in-memory` \| `mingo` | `MemoryConfigSchema` | `initialData`, `strictMode`, `persistence` |
+
+`mongo` was a second spelling of `mongodb` until 18. It is retired: an authored
+`driver: 'mongo'` is refused with the prescription naming `mongodb`, and
+`OS_DATABASE_DRIVER=mongo` is no longer a driver selection. `os migrate meta --from 16`
+lists the edit for existing sources, and stored datasource rows keep loading.
 
 An unrecognised key is rejected with its correction, at authoring time and in the
 Setup → Datasources wizard alike:
@@ -185,11 +190,11 @@ ObjectStack — is what makes them secrets:
 
 | Driver | Key | What it carries |
 | :--- | :--- | :--- |
-| `mongo` \| `mongodb` | `options.proxyPassword` | SOCKS5 proxy password |
-| `mongo` \| `mongodb` | `options.tlsCertificateKeyFilePassword` | TLS key-file passphrase |
-| `mongo` \| `mongodb` | `options.key` | TLS private key material (PEM) |
-| `mongo` \| `mongodb` | `options.passphrase` | TLS key passphrase |
-| `mongo` \| `mongodb` | `options.authMechanismProperties.AWS_SESSION_TOKEN` | AWS STS session token (`MONGODB-AWS` auth) |
+| `mongodb` | `options.proxyPassword` | SOCKS5 proxy password |
+| `mongodb` | `options.tlsCertificateKeyFilePassword` | TLS key-file passphrase |
+| `mongodb` | `options.key` | TLS private key material (PEM) |
+| `mongodb` | `options.passphrase` | TLS key passphrase |
+| `mongodb` | `options.authMechanismProperties.AWS_SESSION_TOKEN` | AWS STS session token (`MONGODB-AWS` auth) |
 | `turso` \| `libsql` | `encryptionKey` | AES-256 key for the local database file |
 
 Unlike `password` / `authToken` (typed `never` in their schemas — the parse

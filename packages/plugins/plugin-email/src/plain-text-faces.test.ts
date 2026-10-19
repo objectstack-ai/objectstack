@@ -85,7 +85,10 @@ function harness(extraRows: EmailTemplateRow[] = []) {
 
 const USER = { name: 'Alice', email: 'alice@acme.test', id: 'usr_1' };
 
-/** The three link-carrying sends the card names, plus the magic link that shares the shape. */
+/**
+ * The three link-carrying sends the card names, plus the magic link that shares
+ * the shape and [#23343] the account invitation's set-password link.
+ */
 const LINK_SENDS = [
   { template: 'auth.verify_email', data: { user: USER, verificationUrl: LINK, appName: 'Acme' } },
   { template: 'auth.password_reset', data: { user: USER, resetUrl: LINK, expiresInMinutes: 30, appName: 'Acme' } },
@@ -100,6 +103,16 @@ const LINK_SENDS = [
     },
   },
   { template: 'auth.magic_link', data: { magicLinkUrl: LINK, expiresInMinutes: 10, appName: 'Acme' } },
+  {
+    template: 'auth.account_invitation',
+    data: {
+      user: USER,
+      inviter: { name: 'Bob', email: 'bob@acme.test' },
+      setPasswordUrl: LINK,
+      expiresInMinutes: 60,
+      appName: 'Acme',
+    },
+  },
 ] as const;
 
 describe('auth mail: the plain-text part carries the link verbatim', () => {
@@ -146,7 +159,8 @@ describe('control: a value carrying markup characters, per face', () => {
       data: {
         inviter: { name: "O'Brien", email: 'ob@acme.test' },
         organization: { name: 'R&D <Lab>' },
-        role: 'member',
+        // #24154 — the sender passes the role's LABEL, and the text body names it too.
+        role: 'Member',
         acceptUrl: LINK,
         appName: 'Acme',
       },
@@ -156,7 +170,7 @@ describe('control: a value carrying markup characters, per face', () => {
     expect(sent.html).toContain('<strong>R&amp;D &lt;Lab&gt;</strong>');
     expect(sent.html).toContain('<strong>O&#39;Brien</strong>');
     expect(sent.text).toBe(
-      "O'Brien (ob@acme.test) invited you to join R&D <Lab> on Acme.\n\n" + `Accept: ${LINK}`,
+      "O'Brien (ob@acme.test) invited you to join R&D <Lab> on Acme as Member.\n\n" + `Accept: ${LINK}`,
     );
     expect(sent.subject).toBe("O'Brien invited you to R&D <Lab>");
     expect(rows[0].subject).toBe("O'Brien invited you to R&D <Lab>");

@@ -352,7 +352,7 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
       'Rows "with real child data" are why this run recomputes instead of writing 0:',
       'their correct value is the aggregate over their children, not the empty-set value.',
       '· Untouched by design (no empty-set value — a null there means "no child rows"): project.avg_estimate (avg), project.max_estimate (max), project.min_estimate (min)',
-      'Dry run — nothing was written. Re-run with --apply to backfill.',
+      'Dry run — no row or table was written. Re-run with --apply to backfill.',
     ];
     const BASE_APPLY_LINES = [
       'Scanned 2 parent row(s) across 1 object(s) for count/sum roll-up columns still stored as NULL.',
@@ -560,6 +560,11 @@ describe('backfillSummaryNulls — pre-#6013 NULL roll-ups (#6063)', () => {
         expect(err.field, named.join(',')).toBe(named[named.length - 1]);
         expect(err.fields, named.join(',')).toEqual([named[named.length - 1]]);
         expect(err.message, named.join(',')).toContain(named[named.length - 1]);
+        // It vouches for the walk and nothing wider: the command that prints
+        // it booted first, and that boot can switch a SQLite file's journal
+        // mode (its header) or, under --apply, create a missing table.
+        expect(err.message, named.join(',')).toMatch(/ Refused before the walk read or wrote any row\.$/);
+        expect(err.message, named.join(',')).not.toContain('nothing was written');
       }
       // Refused BEFORE the walk: no write at all, and even the count/sum holes
       // this run would otherwise have filled are still holes.

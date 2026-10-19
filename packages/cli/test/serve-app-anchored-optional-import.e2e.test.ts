@@ -38,10 +38,9 @@
  * to the app, which is the one shape this file must not use. What IS borrowed
  * from it is everything orthogonal to the directory the child starts in:
  * `childEnv()` (commit 1ddda1d00) — this file boots the real stack, better-auth included,
- * which reads `TEST` directly — plus `randomPort()`, `portContentionError()`
- * (#12441) and `portDriftError()` (#12525, wired here by #12548), because a port
- * draw is not a property of the CWD either and this file used to carry its own
- * second, overlapping one.
+ * which reads `TEST` directly — plus `KERNEL_ASSIGNED_PORT` and
+ * `readKernelAssignedPort()` (#24342), because a port is not a property of the
+ * CWD either and this file used to carry its own second, overlapping draw.
  *
  * ── ⚠️ What this file MEASURES: the resolution, and now the BOOT behind it ──
  *
@@ -98,38 +97,17 @@
  * is an outcome one test asserts and another test is turned RED by, which is
  * what makes waiting on them a discriminator rather than a restatement.
  *
- * ── ⚠️ The port apparatus: one LIVE instrument, one insurance ─────────────
+ * ── The port apparatus: a kernel-assigned port, read back ────────────────
  *
- * #12548 wired the drift read-back into this file as the sibling of
- * `serve-process-child-env.e2e.test.ts`, and #12565 recorded HERE that it was
- * SILENT on every run this file made. That was true of the tree it was written
- * on and is not true of this one, so the note is UPDATED rather than deleted: a
- * reader who meets a live instrument described as silent misreads its greens
- * exactly as badly as the reverse.
- *
- *   `portDriftError()`      ⭐ LIVE since #12567 on the two happy-path runs.
- *                           They print a complete banner, so
- *                           `boundPortFromBanner()` answers `bound` and the port
- *                           this harness asked for is really compared against
- *                           the one the child bound. Still `null` on the
- *                           undeclared leg, which dies before `listen()` — the
- *                           helper's own stated contract, not a gap.
- *
- *   `portContentionError()` STILL INSURANCE — and ⛔ not for the reason the old
- *                           note gave. Its silence never depended on the banner:
- *                           these children spawn through `bin/run-dev.js`, which
- *                           pins `NODE_ENV=development` before argv is parsed,
- *                           so `serve`'s auto-shift branch is open and a taken
- *                           port is a hop to the next free one, never the bind
- *                           failure that helper reads for. That is a property of
- *                           the SPAWN POSTURE, so booting to a banner cannot
- *                           make it fire. It stays because the helper is the
- *                           shared shape and a spawn posture can change;
- *                           ⛔ do not read its green as a look.
- *
- * ⇒ this file's exposure is still narrower than the security file's — it issues
- * no HTTP request — but its happy-path children now DO bind a port there is
- * something to drift off, which is the half that used to be nil.
+ * Every child is spawned on `KERNEL_ASSIGNED_PORT` (#24342): its own `listen()`
+ * picks the port, so no number this harness drew can be taken in a gap and
+ * there is nothing to contend for or drift from — which retired this file's
+ * `portContentionError()` and `portDriftError()` checks. What replaces them is
+ * the read-back: the two happy-path runs print a complete banner, and
+ * `readKernelAssignedPort()` must find the non-zero port the child bound in it
+ * or the run rejects. The undeclared leg dies before `listen()` and prints no
+ * banner, so it gets no port verdict — the helper's own stated contract, not a
+ * gap. This file issues no HTTP request, so the port is checked, never used.
  *
  * ── The anti-vacuity floor ───────────────────────────────────────────────
  *
@@ -169,7 +147,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { maskComments } from '../../../scripts/js-comment-mask.mjs';
-import { childEnv, portContentionError, portDriftError, randomPort } from './helpers/serve-process.js';
+import { boundPortFromBanner, childEnv, KERNEL_ASSIGNED_PORT, readKernelAssignedPort } from './helpers/serve-process.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -379,16 +357,9 @@ interface Run { stdout: string; stderr: string; both: string; outcome: RunOutcom
  * An early exit resolves rather than rejects: a boot that DIES still has to have
  * said why, and the refusal case below reads exactly that.
  *
- * ⭐ TWO exceptions, both about the port and both about the same mis-signalling.
- * A boot that DIED because it could not BIND rejects, naming the port (#12441):
- * resolving it would hand the caller an output buffer with no marker in it, and
- * the assertions would then fail with "the cluster gate was not loaded from the
- * app" — a sentence about resolution bases, for a failure that is entirely about
- * a port. That is the whole cost the card measured, and it is more expensive
- * than the lost run. A boot that SUCCEEDED on a port other than the one it was
- * asked for rejects too (#12525, wired by #12548) — ⚠️ silent on this tree for
- * the measured reason in this file's header, and kept for the tree where it is
- * not.
+ * ⭐ ONE exception, about the port: a run whose complete banner names no
+ * non-zero port it bound rejects with `readKernelAssignedPort()`'s message
+ * rather than resolving a boot this harness cannot say it read (#24342).
  */
 function runServeFrom(
   cwd: string,
@@ -397,15 +368,9 @@ function runServeFrom(
   timeoutMs = 240_000,
 ): Promise<Run> {
   return new Promise((resolveRun, rejectRun) => {
-    // ⛔ Was an inline `String(40000 + Math.random() * 20000)`, a SECOND blind
-    // draw whose range overlapped the one in
-    // `serve-node-env-production-default.e2e.test.ts` (41000-60000) — so under
-    // `--maxWorkers > 1` the two files could collide with EACH OTHER, not only
-    // with a neighbouring agent's dev server. One bind-probed draw now, in the
-    // helper; its docblock is the authority on what that does and does not
-    // guarantee.
-    const port = randomPort();
-    const child = spawn(TSX, [CLI, 'serve', configArg, '--port', port], {
+    // A kernel-assigned port (#24342): no number is drawn here, so none can be
+    // taken between a pick and the child's bind.
+    const child = spawn(TSX, [CLI, 'serve', configArg, '--port', KERNEL_ASSIGNED_PORT], {
       cwd,
       env: childEnv({
         NO_COLOR: '1',
@@ -426,19 +391,12 @@ function runServeFrom(
       settled = true;
       clearTimeout(timer);
       try { child.kill('SIGTERM'); } catch { /* already gone */ }
-      const contended = portContentionError(stdout + stderr, WHAT, port);
-      if (contended) {
-        rejectRun(contended);
-        return;
-      }
-      // ⭐ The read-back half (#12548), LIVE here since #12567: the happy-path
-      // children print a complete banner, so this really compares the port the
-      // harness asked for against the one the child bound. ⛔ Still not a look
-      // on the undeclared leg, which dies before `listen()` — this file's
-      // header carries both halves of that measurement.
-      const drifted = portDriftError(stdout + stderr, WHAT, port);
-      if (drifted) {
-        rejectRun(drifted);
+      // ⭐ The read-back, off a COMPLETE banner only: the undeclared leg dies
+      // before `listen()` and announces no port (this file's header).
+      const both = stdout + stderr;
+      const bound = boundPortFromBanner(both).state === 'no-banner' ? null : readKernelAssignedPort(both, WHAT);
+      if (bound instanceof Error) {
+        rejectRun(bound);
         return;
       }
       resolveRun({ stdout, stderr, both: stdout + stderr, outcome });

@@ -44,7 +44,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SqlDriver } from '@objectstack/driver-sql';
-import type { IObjectQLEngine } from '@objectstack/spec/contracts';
 import { NAMESPACE_CONFLICT_CODE } from '@objectstack/objectql';
 import { SECURITY_PLUGIN_ID } from '@objectstack/plugin-security';
 import { isExitSignal } from '../../utils/format.js';
@@ -61,7 +60,6 @@ import '@objectstack/platform-objects/plugin';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CLI_ROOT = resolve(HERE, '..', '..', '..');
 const CASE_TIMEOUT_MS = 180_000;
-const SYSTEM = { context: { isSystem: true } } as const;
 
 const PKG = 'com.example.m22371';
 const ARTIFACT = {
@@ -139,11 +137,13 @@ async function trail(dbFile: string): Promise<{ history: string[]; audit: string
   const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: dbFile }, useNullAsDefault: true });
   try {
     const k = (driver as any).knex;
-    const history = await k('sys_metadata_history').select('type', 'name', 'operation_type', 'recorded_by', 'organization_id');
+    // [ADR-0131 D7] The history table carries no organization column: every
+    // tombstone is the environment's.
+    const history = await k('sys_metadata_history').select('type', 'name', 'operation_type', 'recorded_by');
     const audit = await k('sys_metadata_audit').select('type', 'name', 'operation', 'outcome', 'actor');
     return {
       history: history.filter((r: any) => r.operation_type === 'delete')
-        .map((r: any) => `${r.type}/${r.name} ${r.operation_type} by ${r.recorded_by} org=${r.organization_id ?? 'env'}`).sort(),
+        .map((r: any) => `${r.type}/${r.name} ${r.operation_type} by ${r.recorded_by}`).sort(),
       audit: audit.filter((r: any) => r.operation === 'delete')
         .map((r: any) => `${r.type}/${r.name} ${r.operation} ${r.outcome} by ${r.actor}`).sort(),
     };
@@ -240,16 +240,27 @@ beforeAll(async () => {
   const seed = await bootSchemaStack({
     jsonOutput: false, databaseUrl: `file:${templateDb}`, projectRoot: dir, hydrateMetadata: false,
   });
-  try {
-    const ql = seed.kernel.getService('objectql') as IObjectQLEngine;
-    const now = new Date().toISOString();
-    for (const row of SEED) {
-      await ql.insert('sys_metadata', {
-        ...row, version: 1, checksum: null, created_at: now, updated_at: now, metadata: JSON.stringify(bodyOf(row)),
-      }, SYSTEM);
+  await seed.shutdown();
+  // [ADR-0131 D7] The family declares no organization column, so the engine
+  // cannot write a legacy organization row. The v17 shape is seeded at the
+  // driver: the physical column a 17.x runtime created, outside the declared
+  // object, and the rows written into it the way that release stored them.
+  {
+    const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: templateDb }, useNullAsDefault: true });
+    try {
+      const k = (driver as any).knex;
+      await k.raw('ALTER TABLE sys_metadata ADD COLUMN organization_id TEXT');
+      const now = new Date().toISOString();
+      let n = 0;
+      for (const row of SEED) {
+        n += 1;
+        await k('sys_metadata').insert({
+          id: `seed_${n}`, ...row, version: 1, checksum: null, created_at: now, updated_at: now, metadata: JSON.stringify(bodyOf(row)),
+        });
+      }
+    } finally {
+      await driver.disconnect();
     }
-  } finally {
-    await seed.shutdown();
   }
 }, CASE_TIMEOUT_MS);
 
@@ -345,10 +356,10 @@ describe('os migrate security-catalog-overlays --apply — deletes exactly the l
     // row for each one the protocol's door deleted.
     const { history, audit } = await trail(db);
     expect(history).toEqual([
-      'permission/m22371_rep delete by os migrate security-catalog-overlays org=env',
-      'permissions/member_default delete by os migrate security-catalog-overlays org=env',
-      'position/m22371_lead delete by os migrate security-catalog-overlays org=env',
-      'positions/m22371_old_lead delete by os migrate security-catalog-overlays org=env',
+      'permission/m22371_rep delete by os migrate security-catalog-overlays',
+      'permissions/member_default delete by os migrate security-catalog-overlays',
+      'position/m22371_lead delete by os migrate security-catalog-overlays',
+      'positions/m22371_old_lead delete by os migrate security-catalog-overlays',
     ]);
     expect(audit).toEqual([
       'permission/m22371_rep delete allowed by os migrate security-catalog-overlays',
@@ -356,7 +367,9 @@ describe('os migrate security-catalog-overlays --apply — deletes exactly the l
     ]);
 
     // The cold boot of the same database and configuration that was refused now
-    // comes up, and a second preview lists nothing (exit 0).
+    // comes up, and a second preview lists nothing (exit 0). [ADR-0131 D7] The
+    // legacy organization control stays stored and is never hydrated: the boot
+    // leaves it out off the physical column, as the step does.
     expect(await coldBootConflicts(db)).toEqual([]);
     const again = await runJson(['--database-url', `file:${db}`, '--json']);
     expect(again.payload.listed).toBe(0);
@@ -370,6 +383,7 @@ describe('os migrate security-catalog-overlays --apply — deletes exactly the l
     expect(exitCode).toBe(0);
     expect(payload.deleted).toBe(LISTED_AUTH_OFF.length);
     expect(await storedRows(db)).toContain('permissions/member_default/env/active');
+    expect(await storedRows(db)).toContain('permission/m22371_rep/org_m22371/active');
     expect(await coldBootConflicts(db)).toEqual([]);
   }, CASE_TIMEOUT_MS * 2);
 });

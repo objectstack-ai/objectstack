@@ -179,14 +179,23 @@ const REPO_ROOT = fileURLToPath(new URL('../../../..', import.meta.url));
  *    throw reaches the transport's error mapping unaided.
  */
 const TRANSPORT_LEDGER: Record<string, 'guarded' | 'propagates'> = {
-  'packages/rest/src/rest-server.ts': 'guarded',
-  'packages/runtime/src/security/resolve-execution-context.ts': 'propagates',
+  // The one request-to-ExecutionContext composition (ruling record 6227928430,
+  // letter A). It catches nothing around the resolver: every door that calls
+  // it — the runtime dispatcher's `resolve-execution-context.ts` first, REST's
+  // `rest-server.ts` second, the settings door's `settings-service-plugin.ts`
+  // third, the storage download door's `storage-service-plugin.ts` fourth and
+  // the `/auth/me` door's `current-user-endpoints.ts` fifth (ruling record
+  // 6257816853), each of the last four through a fail-closed `catch` that
+  // re-raises the outage — receives the outage and answers it at its own net.
+  'packages/core/src/security/request-execution-context.ts': 'propagates',
   'packages/mcp/src/plugin.ts': 'propagates',
   'packages/services/service-datasource/src/admin-routes.ts': 'guarded',
-  'packages/services/service-settings/src/settings-service-plugin.ts': 'guarded',
-  'packages/services/service-storage/src/storage-service-plugin.ts': 'guarded',
   'packages/plugins/plugin-sharing/src/sharing-plugin.ts': 'guarded',
   'packages/cloud-connection/src/marketplace-install-local-plugin.ts': 'guarded',
+  'packages/cloud-connection/src/cloud-connection-plugin.ts': 'guarded',
+  // The print door: its caller-resolution `catch` relays the outage with its
+  // own status and code before any other arm can answer it.
+  'packages/services/service-print/src/print-routes.ts': 'guarded',
 };
 
 /** Test scaffolding is not a transport — it drives the resolver, it does not authorize for anyone. */
@@ -288,9 +297,19 @@ describe('[#13279] every transport that authorizes through resolveAuthzContext',
   it('CONTROL: the scanner finds transports at all, and finds THIS repo', () => {
     // Without this, a broken walk would return [] and the set-equality audit
     // below would be comparing two empty sets and passing.
+    //
+    // [#23217 slice 5] The floor is the ledger's size, 7 rows in 6 packages
+    // since the last door moved onto the one composition. Set equality below
+    // already fails a walk that loses any listed file; the floor, with the
+    // known member asserted next, refuses the one case set equality cannot
+    // see: a broken walk and a gutted ledger together. Every door now calls
+    // the composition, so no further conversion moves this number.
     const found = discoverTransports();
-    expect(found.length).toBeGreaterThanOrEqual(8);
-    expect(found).toContain('packages/rest/src/rest-server.ts');
+    expect(found.length).toBeGreaterThanOrEqual(7);
+    // A transport this repo is known to hold. [#23217 slice 2] It named
+    // `rest-server.ts` until that door moved onto the one composition, which
+    // is the call site REST's answers now come from.
+    expect(found).toContain('packages/core/src/security/request-execution-context.ts');
   }, SCAN_BUDGET_MS);
 
   it('⭐ SET EQUALITY: the ledger names exactly the transports source contains', () => {

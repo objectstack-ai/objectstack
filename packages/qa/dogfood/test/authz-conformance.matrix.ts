@@ -25,7 +25,7 @@
 // dispatcher domain files.
 //
 // The population comes from `packages/rest/src/rest-route-ledger.ts` (81 rows
-// / 18 families) and `packages/runtime/src/route-ledger.ts` (88 rows / 23
+// / 18 families) and `packages/runtime/src/route-ledger.ts` (105 rows / 23
 // domains) because those two are enumerated from a RUNNING server and guarded
 // in both directions by their own conformance tests — so a new family or
 // domain cannot be silently absent from them, and therefore cannot be silently
@@ -295,7 +295,7 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // #22430 — the API-description endpoints, under the ruling recorded on #22146
   // (the API-description endpoints refuse an anonymous caller with 401).
   { id: 'anonymous-deny-api-description', summary: 'anonymous-deny on the API-description endpoints (the document and its viewer)', state: 'enforced',
-    enforcement: 'rest/rest-server.ts registerOpenApiEndpoints — BOTH handlers (the document and its viewer page, on every base the server mounts) open with enforceAuth (→ shouldDenyAnonymous) as their first act, ahead of the bundled-artifact load and the protocol resolution, so a refused request does no work and does not reveal whether a document is bundled; an anonymous caller gets the REST seam\'s flat 401 UNAUTHENTICATED, a signed-in caller is served as before, and a session held by the ADR-0069 auth-policy gate gets that gate\'s 403',
+    enforcement: 'rest/discovery-routes.ts registerOpenApiEndpoints — BOTH handlers (the document and its viewer page, on every base the server mounts) open with enforceAuth (→ shouldDenyAnonymous) as their first act, ahead of the bundled-artifact load and the protocol resolution, so a refused request does no work and does not reveal whether a document is bundled; an anonymous caller gets the REST seam\'s flat 401 UNAUTHENTICATED, a signed-in caller is served as before, and a session held by the ADR-0069 auth-policy gate gets that gate\'s 403',
     proof: 'showcase-anonymous-deny-surfaces.dogfood.test.ts',
     // The REST family at ledger granularity. The family is exactly these two
     // routes and both handlers open with the floor, which is the property a
@@ -490,8 +490,8 @@ export const AUTHZ_CONFORMANCE: AuthzPrimitive[] = [
   // ── ADR-0057 — ERP authorization core (enforced + e2e proven) ──────────
   { id: 'scope-depth', summary: 'permission-grant access DEPTH (own/own_and_reports/unit/unit_and_below/org)', state: 'enforced',
     enforcement: 'plugin-security getEffectiveScope (stash) + plugin-sharing delegates HIERARCHY scopes to a pluggable IHierarchyScopeResolver (open: fail-closed to own; enterprise @objectstack/security-enterprise; reference resolver in this proof) — ADR-0057 D1', proof: 'showcase-scope-depth.dogfood.test.ts' },
-  { id: 'declarative-rbac-seeding', summary: 'stack-declared positions served by the security catalog (no row) + sharingRules seeded at boot', state: 'enforced',
-    enforcement: 'core createSecurityCatalogReader (positions from the registry, ADR-0131 D2) + plugin-sharing bootstrapDeclaredSharingRules — ADR-0057 D6', proof: 'showcase-declarative-rbac-seeding.dogfood.test.ts' },
+  { id: 'declarative-rbac-seeding', summary: 'stack-declared positions served by the security catalog + sharingRules served by the sharing-rule service (no row for either)', state: 'enforced',
+    enforcement: 'core createSecurityCatalogReader (positions from the registry, ADR-0131 D2) + plugin-sharing createDeclaredSharingRuleSource (declared sharing rules from the registry at enforcement, ADR-0131 D2; the boot writes no sys_sharing_rule row) — ADR-0057 D6', proof: 'showcase-declarative-rbac-seeding.dogfood.test.ts' },
   { id: 'declarative-permission-seeding', summary: 'stack-declared permission sets served by the security catalog with their owning package (no row)', state: 'enforced',
     enforcement: 'core createSecurityCatalogReader (permission sets from the registry, `_packageId` the owner, ADR-0131 D3); the boot writes no sys_permission_set row (C3 stage 6b-2 retired ADR-0086 D5\'s seeding)', proof: 'showcase-permission-seeding.dogfood.test.ts',
     note: 'Was the ADR-0086 D5 seeding pin — declared sets materialized as managed_by:package records. ADR-0131 D3 gives the catalog one home, the registry, and the proof now pins that a declared set is served from it with its package while no row is written.' },

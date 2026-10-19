@@ -19,7 +19,15 @@ import { expandEmptyOperator, type ValueShapeFieldDef } from '@objectstack/spec/
 import { STRUCTURED_JSON_TYPES, isMultiValueField } from '@objectstack/spec/data';
 import type { DriverQuery, IDataDriver } from '@objectstack/spec/contracts';
 import { Logger, createLogger, compensatedSum } from '@objectstack/core';
-import { Query, Aggregator } from 'mingo';
+// [ADR-0139 D3] The walk, the rewrite and the refusal for a `ReadableIds` leaf —
+// one source for every driver.
+import { findMisplacedReadableIds, refuseReadableIdsOnce, replaceComposedReadableIds } from '@objectstack/core';
+import type { ComposedReadableIds } from '@objectstack/spec/data';
+import { Aggregator } from 'mingo';
+// [ADR-0139 D3] mingo's `Query`, able to compile the member test a composed
+// `ReadableIds` leaf lowers to: its readable ids hashed once per query, not
+// once per row (#23679). Every other operator is mingo's.
+import { Query, READABLE_IDS_MEMBER_OP, isReadableIdsList, markReadableIdsList } from './memory-readable-ids-member.js';
 import {
   assertSingleTenantPosture,
   assertObjectsNotTenantScoped,
@@ -496,6 +504,8 @@ export class InMemoryDriver implements IDataDriver {
   readonly version = '1.0.0';
   private config: InMemoryDriverConfig;
   private logger: Logger;
+  /** [ADR-0139 D3] Whether this instance has logged its `ReadableIds` refusal (once per driver). */
+  private readonly readableIdsRefusalLog = { logged: false };
   private idCounters: Map<string, number> = new Map();
 
   /**
@@ -1449,15 +1459,41 @@ export class InMemoryDriver implements IDataDriver {
       // [#21066] With the object's declarations, so a scalar comparison on a
       // declared JSON-stored field is refused there too, before mingo answers
       // it per element.
-      assertFilterConditionShape(filters, 'filter', DRIVER_FILTER_CAPABILITIES, this.filterFieldDeclarations(object));
+      // [ADR-0139 D3] A composed `ReadableIds` leaf is evaluated in process —
+      // read the parent under the composed scope, then member-test — BEFORE the
+      // shape gate, which then sees an ordinary `$in` list. An uncomposed leaf,
+      // or a composed one outside a `$in`, is refused first: INTERNAL_ERROR /
+      // 500, logged at `error` once per driver, ⛔ never read as no restriction.
+      const misplaced = findMisplacedReadableIds(filters, true);
+      if (misplaced) throw refuseReadableIdsOnce('driver-memory', misplaced, this.logger, this.readableIdsRefusalLog);
+      const resolved = replaceComposedReadableIds(filters, (leaf) => this.readableParentIds(leaf));
+      assertFilterConditionShape(resolved, 'filter', DRIVER_FILTER_CAPABILITIES, this.filterFieldDeclarations(object));
       // Translate non-standard operators ($contains, $notContains, etc.) to Mingo-compatible format
-      return this.normalizeFilterCondition(filters, object);
+      return this.normalizeFilterCondition(resolved, object);
     }
 
     // A truthy non-object, non-array `where` emits no predicate. Pre-existing
     // behaviour on a shape only a cast can produce; untouched by #5158, which
     // is about the array dialect.
     return {};
+  }
+
+  /**
+   * [ADR-0139 D3] The ids of the parent's rows the composed scope admits
+   * (`undefined`: every row that exists) — the semi-join's subquery, run in
+   * process through this driver's own filter path, so the scope meets the same
+   * gate and translation a direct read of the parent does. Unbounded: there is
+   * no parameter ceiling in process. No tenant wall is owed: this driver
+   * refuses a tenant-scoped call and a multi-tenant boot
+   * (`memory-tenancy-guard.ts`), so a read that reaches here has none.
+   */
+  private readableParentIds(leaf: ComposedReadableIds): unknown[] {
+    let rows: Record<string, any>[] = this.getTable(leaf.object);
+    const mongoQuery = this.convertToMongoQuery(leaf.scope, leaf.object);
+    if (mongoQuery && Object.keys(mongoQuery).length > 0) rows = new Query(mongoQuery).find(rows).all() as Record<string, any>[];
+    // [#23679] Marked, so the `$in` arm lowers this list to the member test
+    // that hashes it once (`memory-readable-ids-member.ts`).
+    return markReadableIdsList(rows.map((row) => row.id));
   }
 
   /**
@@ -1860,7 +1896,13 @@ export class InMemoryDriver implements IDataDriver {
         // `$between` arm above).
         case '$eq': case '$ne': case '$gt': case '$gte': case '$lt': case '$lte':
         case '$in': case '$nin':
-          put(op, store(val));
+          // [ADR-0139 D3, #23679] The list a composed `ReadableIds` leaf was
+          // rewritten into is answered by a member test that hashes it once per
+          // query. mingo's `$in` re-hashes its whole list for every row tested,
+          // which made a read cost rows × readable parents. Only the D3 leaf's
+          // list carries the mark; every other `$in` stays mingo's.
+          if (op === '$in' && isReadableIdsList(val)) put(READABLE_IDS_MEMBER_OP, store(val));
+          else put(op, store(val));
           break;
         // [commit 9dac1ae01] `$exists` means "the field HAS A VALUE" (`!= null`), never
         // key presence — #5298 leg 3 / #5369, landed in PR #5962, and ruled

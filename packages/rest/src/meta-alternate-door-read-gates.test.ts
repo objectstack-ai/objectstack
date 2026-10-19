@@ -1007,14 +1007,60 @@ describe('[#20156] edges', () => {
     // who may.
     it('a gated type with nothing behind the name: /diff answers the plain read\'s absence, /history its events', async () => {
         const { rest, protocol } = setup('reader');
+        // Nothing behind the name: no item, and no layer either (a deleted item).
         protocol.getMetaItem.mockImplementation(async ({ type, name }: any) => ({ type: singular(type), name, item: undefined }));
+        protocol.getMetaItemLayered.mockImplementation(async ({ type, name }: any) => ({
+            type: singular(type), name, code: null, overlay: null, effective: null,
+        }));
         const diff = await drive(rest, '/diff', 'doc', 'crm_admin_runbook');
         const history = await drive(rest, '/history', 'doc', 'crm_admin_runbook');
 
         expect(envelope(diff)).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+        // [#24210] Unchanged by the withheld-item answer: already the plain read's nested body.
+        expect(diff.body).toEqual({ error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' } });
         expect(text(diff)).not.toContain(DOC_SECRET);
         expect(history.statusCode).toBe(200);
         expect(Array.isArray(history.body?.events)).toBe(true);
+    });
+
+    // [#7557, #24210] A disabled package's item: the by-name read withholds it
+    // (no item) while its layers still resolve. The event and diff doors give
+    // it the plain read's answer, absence, never the events or the diff past
+    // the gate. Driven with a caller the item's own gate refuses, who is
+    // admitted to the doors themselves (an author: `manage_metadata`).
+    it('[#24210] a gated item the plain read withholds: /history, /audit and /diff answer 404 RESOURCE_NOT_FOUND, never past the gate', async () => {
+        for (const [type, name] of [['dashboard', 'legal_board'], ['app', 'payroll']] as const) {
+            const { rest, protocol } = setup('author');
+            // Control: enabled, the gate refuses this caller the item whole.
+            for (const suffix of ['/history', '/audit', '/diff']) {
+                const res = await drive(rest, suffix, type, name);
+                expect(envelope(res), `${type} ${suffix} enabled`).toEqual({ status: 403, code: 'PERMISSION_DENIED' });
+            }
+            protocol.getMetaItem.mockImplementation(async ({ type: t, name: n }: any) => ({
+                type: singular(t), name: n, item: undefined, lock: 'none', editable: true, deletable: true, resettable: false,
+            }));
+            protocol.historyMetaItem.mockClear();
+            protocol.auditMetaItem.mockClear();
+            protocol.diffMetaItem.mockClear();
+            // [#24210] The plain read's own answer for this withheld item, the
+            // missing name's nested body (`sendMetaItemAbsent`), is the one
+            // these doors give, byte for byte: not the flat `{ error, code }`.
+            const plain = await drive(rest, '', type, name);
+            expect({ status: plain.statusCode, body: plain.body }).toEqual({
+                status: 404,
+                body: { error: { code: 'RESOURCE_NOT_FOUND', message: 'Metadata item not found or access denied.' } },
+            });
+            for (const suffix of ['/history', '/audit', '/diff']) {
+                const res = await drive(rest, suffix, type, name);
+                expect(envelope(res), `${type} ${suffix} withheld`).toEqual({ status: 404, code: 'RESOURCE_NOT_FOUND' });
+                expect(text(res), `${type} ${suffix} withheld body`).toBe(text(plain));
+                expect(text(res), `${type} ${suffix}`).not.toContain('w_open_matters');
+                expect(text(res), `${type} ${suffix}`).not.toContain('nav_payroll_runs');
+            }
+            expect(protocol.historyMetaItem).not.toHaveBeenCalled();
+            expect(protocol.auditMetaItem).not.toHaveBeenCalled();
+            expect(protocol.diffMetaItem).not.toHaveBeenCalled();
+        }
     });
 
     it('a type no per-caller gate judges costs its event and diff doors no extra read', async () => {

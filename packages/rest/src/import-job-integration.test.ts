@@ -116,7 +116,7 @@ async function boot(decorateDriver?: (driver: any) => void) {
   const routes = rest.getRoutes();
   const find = (method: string, path: string) => routes.find((r: any) => r.method === method && r.path === path);
   return {
-    engine, protocol,
+    engine, protocol, rest,
     create: find('POST', '/api/v1/data/:object/import/jobs'),
     progress: find('GET', '/api/v1/data/import/jobs/:jobId'),
     results: find('GET', '/api/v1/data/import/jobs/:jobId/results'),
@@ -408,10 +408,17 @@ describe('async import job — real engine + protocol integration', () => {
     // Seed an existing row so the historical upsert updates it (populates the undo log).
     await ctx.protocol.createData({ object: 'task', data: { id: 'h_existing', title: 'orig', score: 1 } });
 
+    // [#24348] The import doors honour `treatAsHistorical: true` for the system
+    // principal only, so the historical job is created by one (an in-process
+    // caller); the undo below is the signed-in member's, as before.
+    const memberCtx = (ctx.rest as any).resolveExecCtx;
+    (ctx.rest as any).resolveExecCtx = async () => ({ userId: 'test-user', isSystem: true });
     const created = await callCreate(ctx.create, {
       format: 'json', writeMode: 'upsert', matchFields: ['id'], treatAsHistorical: true,
       rows: [{ id: 'h_existing', title: 'historical', score: 42 }],
     });
+    (ctx.rest as any).resolveExecCtx = memberCtx;
+    expect(created._status).toBe(201);
     const jobId = created._json.jobId;
     const done = await waitForTerminal(ctx.progress, jobId);
     expect(done).toMatchObject({ status: 'succeeded', updated: 1 });

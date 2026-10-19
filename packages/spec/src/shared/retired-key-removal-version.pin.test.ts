@@ -86,12 +86,19 @@ import {
 } from '../automation/builtin-node-config.zod';
 import { NotifyConfigSchema } from '../automation/io-node-config.zod';
 import { ScriptConfigSchema, SubflowConfigSchema } from '../automation/schemaless-node-config.zod';
+import { AdminScopeSchema, PermissionSetSchema } from '../security/permission.zod';
 import { SharingLevel } from '../security/sharing.zod';
+import { DatasourceSchema } from '../data/datasource.zod';
+import { PageComponentSchema, PageSchema } from '../ui/page.zod';
+import { FormFieldSchema, FormSectionSchema } from '../ui/view.zod';
+import { FlowSchema } from '../automation/flow.zod';
+import { JobSchema } from '../system/job.zod';
 import { PROTOCOL_MAJOR } from '../kernel/protocol-version';
 import { EmailTemplateDefinitionSchema } from '../system/email-template.zod';
 import {
   ActionButtonPropsSchema,
   ActionGroupPropsSchema,
+  ComponentPropsMap,
   ActionIconPropsSchema,
   ActionMenuPropsSchema,
   ElementNumberPropsSchema,
@@ -214,6 +221,15 @@ const ELEMENTS: readonly (readonly [unknown, string, readonly string[]])[] = [
   [ElementRepeaterPropsSchema, 'element:repeater', ['object', 'filter', 'sort', 'limit']],
 ];
 
+/** A parseable flow holding one `node` after its start node. */
+const flowWithNode = (node: Record<string, unknown>) => ({
+  name: 'settle',
+  label: 'Settle',
+  type: 'autolaunched',
+  edges: [],
+  nodes: [{ id: 'n1', type: 'start', label: 'Start' }, { id: 'n2', label: 'Step', ...node }],
+});
+
 /** A notify config that is valid on its own, so a retired key is its only issue. */
 const NOTIFY_BASE = { recipients: ['u1'], title: 'Hi' };
 
@@ -228,6 +244,11 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'category'),
     tombstone(EmailTemplateDefinitionSchema, 'email_template', 'isSystem'),
   ],
+  'permission-admin-scope-binding-authoring-removed': [
+    tombstone(AdminScopeSchema, 'permission.adminScope', 'manageBindings'),
+    tombstone(AdminScopeSchema, 'permission.adminScope', 'authorEnvironmentSets'),
+  ],
+  'permission-set-managed-by-removed': [tombstone(PermissionSetSchema, 'permission', 'managedBy')],
   'manifest-permissions-string-list-removed': [
     refusal('manifest.permissions as a list of strings', () => ManifestPermissionsSchema.safeParse(['system.user.read'])),
   ],
@@ -295,6 +316,121 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
   'sharing-rule-access-level-full-to-edit': [
     refusal("sharing-rule accessLevel 'full'", () => SharingLevel.safeParse('full')),
   ],
+  // #23543 F1: an open-namespace value retired by name (`DriverType`); the
+  // config is a valid mongodb config, so `driver` is the only issue.
+  'datasource-driver-mongo-to-mongodb': [
+    refusal(
+      "datasource driver 'mongo'",
+      () => DatasourceSchema.safeParse({ name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' } }),
+      'driver',
+    ),
+  ],
+  // #23543 F5-jsx: an enum member retired through `enumWithRetiredValues`; the
+  // page is otherwise a complete html page, so `kind` is the only issue.
+  'page-kind-jsx-to-html': [
+    refusal(
+      "page kind 'jsx'",
+      () => PageSchema.safeParse({ name: 'landing', label: 'Landing', kind: 'jsx', source: '<div>hi</div>' }),
+      'kind',
+    ),
+  ],
+  // #23650: retired after 17.7.0, so the v18 train's major.
+  'page-header-show-star-removed': [tombstone(PageHeaderProps, 'page:header', 'showStar')],
+  // #23904: the two data-at-rest halves of the #23610 page refusals, retired
+  // after 17.7.0; each prescription is the parse's own refusal at its key — the
+  // one sentence the registry door prints too — and names the release.
+  'page-is-default-off-record-page-removed': [
+    refusal(
+      "isDefault: true on a type 'home' page",
+      () => PageSchema.safeParse({ name: 'sales_home_page', label: 'Sales Home', type: 'home', isDefault: true, regions: [] }),
+      'isDefault',
+    ),
+    refusal(
+      'isDefault: true on a record page bound to no object',
+      () => PageSchema.safeParse({ name: 'draft_record', label: 'Draft', type: 'record', isDefault: true, regions: [] }),
+      'isDefault',
+    ),
+  ],
+  // #22444: the page carrier's two aliases, undeclared on the `list-view` row
+  // and answered by name with the row's guidance.
+  'page-list-view-object-name-view-type-to-data-type': (['objectName', 'viewType'] as const).map((alias) =>
+    refusal(
+      `a page list-view node's properties.${alias}`,
+      () => ComponentPropsMap['list-view'].safeParse({ [alias]: alias === 'objectName' ? 'deal' : 'kanban' }),
+    ),
+  ),
+  // The data-at-rest half of the `main` region width refusal, retired after
+  // 17.7.0; the prescription is the parse's own refusal at the region's width.
+  'page-main-region-width-removed': (['small', 'medium', 'large'] as const).map((width) =>
+    refusal(
+      `width '${width}' on a page region named main`,
+      () => PageSchema.safeParse({ name: 'sales_home_page', label: 'Sales Home', type: 'home', template: 'three-column', regions: [{ name: 'main', width, components: [] }] }),
+      'regions',
+    ),
+  ),
+  'page-template-full-width-to-default': [
+    refusal(
+      "page template 'full-width'",
+      () => PageSchema.safeParse({ name: 'lead_detail_page', label: 'Lead', type: 'record', object: 'crm_lead', template: 'full-width', regions: [{ name: 'main', components: [] }] }),
+      'template',
+    ),
+  ],
+  // #23543 F3: a loose `config` key under a sibling-block node type, refused by
+  // the flow parse; the node's block is complete, so the key is the only issue.
+  'flow-node-wait-event-config-lift': [
+    refusal(
+      "a wait node's loose config.duration",
+      () => FlowSchema.safeParse(flowWithNode({
+        type: 'wait',
+        waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
+        config: { duration: 'PT9M' },
+      })),
+      'nodes',
+    ),
+  ],
+  'flow-node-connector-config-lift': [
+    refusal(
+      "a connector_action node's loose config.input",
+      () => FlowSchema.safeParse(flowWithNode({
+        type: 'connector_action',
+        connectorConfig: { connectorId: 'slack', actionId: 'chat.postMessage' },
+        config: { input: { text: 'Hi' } },
+      })),
+      'nodes',
+    ),
+  ],
+  // #23543 F2: a default flip made loud — a job's retry block with no
+  // attempts, refused by the job parse at the key; the job is otherwise
+  // complete, so the block is the only issue.
+  'retry-policy-converged': [
+    refusal(
+      'a job retryPolicy with maxRetries omitted',
+      () => JobSchema.safeParse({
+        name: 'nightly_sync',
+        schedule: { type: 'cron', expression: '0 0 * * *' },
+        handler: 'syncOrders',
+        retryPolicy: { backoffMs: 5000 },
+      }),
+      'retryPolicy',
+    ),
+  ],
+  // #23543 F4: two protocol-15 renames retired with their keys — the three
+  // tombstones naming `visibleWhen`, at each declared position.
+  'view-visibleOn-to-visibleWhen': [
+    tombstone(FormFieldSchema, 'view.form.sections[].fields[]', 'visibleOn'),
+    tombstone(FormSectionSchema, 'view.form.sections[]', 'visibleOn'),
+  ],
+  'page-component-visibility-to-visibleWhen': [tombstone(PageComponentSchema, 'page.components[]', 'visibility')],
+  // #23543 F5-http: the three retired callout names, reserved inside the open
+  // node namespace and refused by the flow parse at the node's `type`; the
+  // flow is otherwise complete, so `nodes` is the only issue path.
+  'flow-node-http-callout-rename': (['http_request', 'http_call', 'webhook'] as const).map((type) =>
+    refusal(
+      `a flow node typed '${type}'`,
+      () => FlowSchema.safeParse(flowWithNode({ type, config: { url: 'https://example.com' } })),
+      'nodes',
+    ),
+  ),
   // Shipped by a 17.x minor; `toMajor: 18` like the rows above.
   'page-header-breadcrumb-removed': [tombstone(PageHeaderProps, 'page:header', 'breadcrumb')],
   'object-grid-default-sort-removed': [tombstone(ObjectGridPropsSchema, 'object-grid', 'defaultSort')],

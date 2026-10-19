@@ -662,9 +662,10 @@ describe('#6563 — revertCommit restores a runtime-created `object`', () => {
     });
     // The token is asserted on `code` just above; the message carries the
     // human sentence and no longer restates it.
-    // [ADR-0131 D6] The repository's type door throws the managed seal.
+    // [ADR-0131 D6] The repository's type door throws the managed seal —
+    // [#23577] the one sentence every write over a sealed name reads.
     expect(res.failed[0].error).toContain(
-      `Metadata item 'object/myapp_invoice' is provided by a managed package and is sealed against in-place edits`,
+      `'object/myapp_invoice' is provided by a managed package and is sealed: it cannot be written here.`,
     );
     // Refused means refused: the edit the commit made is still the live body.
     expect(storedFields(rows, 'myapp_invoice').fields).toContain('due_date');

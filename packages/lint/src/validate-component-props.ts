@@ -109,11 +109,14 @@
  *   object arm tombstones `publicPicker`.
  *
  * Where it refuses: the three CLI doors — `os validate`, `os build`, `os lint`
- * — run every gating rule. The runtime publish door (the Studio, REST and MCP
- * write path) does not run this rule (`surfaces` in `authoring-rules.ts`), so a
- * page saved there is not refused for any of these findings. That is a
- * rollout decision, not a missing input: a `page` write's per-write snapshot
- * carries the written page, which is everything this rule reads.
+ * — and the runtime publish door (the Studio, REST and MCP write path), on a
+ * `page` write (`surfaces` / `runtimeTypes` in `authoring-rules.ts`, the ruling
+ * of record 6161173492, letter B). A `page` write's per-write snapshot carries
+ * the written page, which is everything this rule reads. The boot and read
+ * paths run no authoring rule, so a stored page with a finding still loads and
+ * is served; its next save is refused. This rule is the one judge of a
+ * component's `properties`: the page parse leaves the bag an open record and
+ * carries no second judge of any prop, a retired `data` provider included.
  *
  * ## Unregistered types are SKIPPED — a required semantic, not leniency
  *
@@ -444,12 +447,13 @@ export function validateComponentProps(stack: AnyRec): ComponentPropsFinding[] {
           where,
           path: at,
           // [#22161] `hint` is the CLI's `fix:` line, so it states the fix; the
-          // verdict's consequence rides the message.
+          // verdict's consequence rides the message. One remedy line: where the
+          // props schema lives and what correcting it means are
+          // `os explain component-props-invalid`.
           message: `${subject} — refused, so this stack does not pass until the props are ones the schema accepts`,
           hint:
-            `Give \`${type}\` props its schema accepts (ComponentPropsMap, @objectstack/spec/ui) — the ` +
-            'rejection above names what it expects — or, if the component really does honour what is ' +
-            'written, correct the schema so the declaration and the renderer agree.',
+            `Give \`${type}\` a value its props schema accepts (the verdict names what it expects), or ` +
+            'correct the schema if the component really honours what is written.',
         });
       }
     }

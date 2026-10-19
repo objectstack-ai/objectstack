@@ -27,7 +27,6 @@ export const MyWorkPage = definePage({
     },
     {
       name: 'main',
-      width: 'large',
       components: [
         // KPI hero ROW — equal-width tiles in a 3-col grid (layout grid, not ObjectGrid).
         {

@@ -116,17 +116,18 @@ export const MetadataTypeSchema = lazySchema(() => z.enum([
   'external_catalog', // Cached remote schema snapshot for federated datasources (ADR-0015) — RUNTIME-CREATED by the Sync wizard (ADR-0062/0088); packages never ship one
   'translation', // i18n resources (TranslationSchema)
   // ADR-0088: `router`/`function`/`service` are NOT metadata kinds — they are
-  // code contributions: imperative `http.server` mounts + declarative `apis:`
-  // (router — the manifest `contributes.routes` spelling never delivered and
-  // was retired, commit bc56e1881), `defineStack({ functions })` (function —
+  // code contributions: declarative `apis:` for an app, while `http.server`
+  // mounts stay the platform plugins' own primitive and are not an app-author
+  // surface (router — the manifest `contributes.routes` spelling never
+  // delivered and was retired, commit bc56e1881), `defineStack({ functions })` (function —
   // `contributes.functions` was retired unread, commit be21955ba), and the
   // plugin/service registry itself (service).
   //
   // [#5271, part of #5206] `api` is the ONE declarative endpoint ITEM kind, and
   // it is NOT a reversal of the `router` retirement above: `router` was retired
-  // as a KIND because its delivered form (the imperative `http.server` mount;
-  // the `contributes.routes` spelling never delivered and was retired, commit bc56e1881)
-  // is a code contribution. A single `ApiEndpoint` — a
+  // as a KIND because its delivered form (the platform's imperative `http.server`
+  // mount; the `contributes.routes` spelling never delivered and was retired,
+  // commit bc56e1881) is a code contribution. A single `ApiEndpoint` — a
   // stable URL plus a policy layer over an existing pipeline — is a declarative
   // artifact, and it passes all three clauses of ADR-0088's admission test:
   //   1. INDEPENDENT LIFECYCLE — the endpoint matcher indexes, invalidates and
@@ -1127,7 +1128,12 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // run at publish (stack schema, `publishPackage`, `publishPackageDrafts`) and
   // again at load (`buildEndpointIndex`). This entry adds a SHAPE check in
   // front of them, never a second opinion about servability.
-  { type: 'api', label: 'API Endpoint', description: 'Declarative HTTP endpoint — a stable URL and policy layer over an existing pipeline (ADR-0121)', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
+  //
+  // `description` is admin-facing copy (Setup reads it through the generated
+  // metadata-forms translations), so it stays in plain words; the design it
+  // summarises — a declarative endpoint, a stable URL and policy layer over an
+  // existing pipeline — is ADR-0121.
+  { type: 'api', label: 'API Endpoint', description: 'A stable HTTP URL that other systems call to run a flow or work with records in the app', filePatterns: ['**/*.api.ts', '**/*.api.yml', '**/*.api.json'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 92, domain: 'system' },
   { type: 'translation', label: 'Translation', filePatterns: ['**/*.translation.ts', '**/*.translation.yml', '**/*.translation.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 90, domain: 'system' },
   { type: 'email_template', label: 'Email Template', filePatterns: ['**/*.email-template.ts', '**/*.email-template.yml', '**/*.email-template.json'], supportsOverlay: true, allowEnvironmentOverlay: true, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 85, domain: 'system' },
   // ADR-0046: package documentation. Inert data — no runtime behavior, no
@@ -1135,7 +1141,9 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // Runtime-creatable so AI/authors can draft docs via saveMetaItem
   // (ADR-0033). Collected from flat `src/docs/*.md` by the CLI; the kernel
   // never parses `content`. loadOrder is last: nothing references docs.
-  { type: 'doc', label: 'Documentation', description: 'Package documentation — flat Markdown items (ADR-0046)', filePatterns: ['**/docs/*.md'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
+  // `description` is admin-facing copy: plain words, the ADR-0046 vocabulary
+  // (flat Markdown items) stays in this comment.
+  { type: 'doc', label: 'Documentation', description: 'A help page written in Markdown that a package ships or you write yourself', filePatterns: ['**/docs/*.md'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
   // Navigation spine over docs (ADR-0046 §6): ordered groups, membership derived
   // by rule. Overlay-mergeable at read (`supportsOverlay: true`); runtime-
   // creatable for AI/authors. loadOrder last (references docs).
@@ -1149,7 +1157,10 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // Zero live org-scoped book overlay rows in-repo at rollback. Studio's
   // drag-edit of a PACKAGED book now answers `403 not_overridable`;
   // authoring a BRAND-NEW book keeps working (`allowRuntimeCreate`).
-  { type: 'book', label: 'Documentation Book', description: 'Documentation navigation spine — ordered groups with derived membership (ADR-0046 §6)', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
+  //
+  // `description` is admin-facing copy: plain words, the ADR-0046 §6
+  // vocabulary (navigation spine, ordered groups, derived membership) stays here.
+  { type: 'book', label: 'Documentation Book', description: 'A table of contents that groups help pages into ordered sections', filePatterns: ['**/*.book.ts'], supportsOverlay: true, allowEnvironmentOverlay: false, allowRuntimeCreate: true, supportsVersioning: false, executionPinned: false, loadOrder: 99, domain: 'system' },
 
   // Security Protocol
   //
@@ -1206,7 +1217,11 @@ export const DEFAULT_METADATA_TYPE_REGISTRY: MetadataTypeRegistryEntryParsed[] =
   // declaration would let it re-scope `org` → `platform`.
   // `loadOrder: 12` — before `permission`/`position` (15), so a set's
   // `systemPermissions` resolves against capabilities that already exist.
-  { type: 'capability', label: 'Capability', description: 'Package-declared authorization capability — the DEFINITION side of ADR-0066 D1 (grants live on permission sets; requirements on resources)', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
+  //
+  // `description` is admin-facing copy in plain words. In ADR terms this is the
+  // DEFINITION side of ADR-0066 D1: grants live on permission sets,
+  // requirements on resources.
+  { type: 'capability', label: 'Capability', description: 'A permission a package defines; you grant it through permission sets', filePatterns: ['**/*.capability.ts', '**/*.capability.yml'], supportsOverlay: false, allowEnvironmentOverlay: false, allowRuntimeCreate: false, supportsVersioning: false, executionPinned: false, loadOrder: 12, domain: 'security' },
 
   // AI Protocol
   // `agent`: executionPinned — long-running conversations must stick to the

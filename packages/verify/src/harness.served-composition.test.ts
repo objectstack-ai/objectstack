@@ -28,8 +28,14 @@ import { CAPABILITY_PROVIDERS } from '@objectstack/core';
 import { composeStacks, defineStack } from '@objectstack/spec';
 import { PLATFORM_ALWAYS_ON_CAPABILITIES } from '@objectstack/spec/kernel';
 import { bootStack, type VerifyStack } from './harness.js';
+import { warmUpBoot } from './boot-warm-up.testkit.js';
 
 const BOOT_TIMEOUT = 120_000;
+
+// The boot's first load, paid during collection rather than in the first
+// case's clock (see `boot-warm-up.testkit.ts`). Every boot below uses the
+// default options.
+await warmUpBoot();
 
 const svcManifest = { id: 'com.example.svc.svc', name: 'SVC Service', namespace: 'svc', version: '1.0.0', type: 'module' };
 const appManifest = { id: 'com.example.svc.app', name: 'SVC App', namespace: 'svc', version: '1.0.0', type: 'app' };

@@ -1,5 +1,39 @@
 # @objectstack/http-conformance
 
+## 0.1.8-next.4
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [f5ef054]
+- Updated dependencies [2ac0616]
+- Updated dependencies [b036ac5]
+- Updated dependencies [62e2b6d]
+  - @objectstack/core@18.0.0-next.4
+
+## 0.1.8-next.3
+
+### Patch Changes
+
+- Updated dependencies [4ffdebe]
+- Updated dependencies [e246f06]
+  - @objectstack/core@18.0.0-next.3
+
+## 0.1.8-next.2
+
+### Patch Changes
+
+- Updated dependencies [0d3ea29]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [1d79556]
+- Updated dependencies [daafae6]
+- Updated dependencies [be48c5e]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+  - @objectstack/core@18.0.0-next.2
+
 ## 0.1.8-next.1
 
 ### Patch Changes

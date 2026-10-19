@@ -209,7 +209,7 @@ export function describeSecurityCatalogHolder(holder: SecurityCatalogHolder): st
     case 'package':
       return `package "${holder.packageId}"`;
     case 'environment':
-      return 'the environment catalog (an item authored in this environment, not shipped by a package)';
+      return 'the environment catalog (an item authored in this system, not shipped by a package)';
     case 'built-in':
       return 'the platform, as a built-in name no package can declare';
   }

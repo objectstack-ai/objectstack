@@ -271,8 +271,10 @@ describe('validatePredicatePathRefs — traversal reach', () => {
     ]);
   });
 
-  it('reads the deprecated `visibleOn` alias VALUE on a raw authored object', () => {
-    const findings = run(form([{ fields: [{ field: 'x', visibleOn: "data.tpye == 'a'" }] }]));
+  it('does not read the retired `visibleOn` key; the same value under `visibleWhen` is judged (#23543 F4)', () => {
+    // The spec refuses the key by name before any door runs this rule.
+    expect(run(form([{ fields: [{ field: 'x', visibleOn: "data.tpye == 'a'" }] }]))).toEqual([]);
+    const findings = run(form([{ fields: [{ field: 'x', visibleWhen: "data.tpye == 'a'" }] }]));
     expect(findings.map((f) => f.rule)).toEqual([PREDICATE_PATH_UNRESOLVED]);
   });
 
@@ -545,7 +547,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
       }
       if (!node || typeof node !== 'object') return;
       const rec = node as Record<string, unknown>;
-      for (const key of ['visibleWhen', 'visibleOn']) {
+      for (const key of ['visibleWhen']) {
         const value = rec[key];
         if (typeof value === 'string') {
           rec[key] = 'data.__no_such_key__';
@@ -674,7 +676,10 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // `<form>::<field>::<source>`, 87 → 88, adds exactly
     // `field :: mailAssociation :: data.type == 'email'` and removes none. It
     // does reach the literal-comparison census below.
-    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(88);
+    // It is 89 today, an ADDITION of ONE: #23735 offered the field form's
+    // `referenceDeletedWhen` composite row, gated like `referenceVia` on
+    // `data.type == 'text'`. It reaches the literal-comparison census below.
+    expect(predicates, 'the shipped metadata forms carry no predicates at all').toBe(89);
 
     const findings = validatePredicatePathRefs(corrupted);
     expect(findings).toHaveLength(predicates);
@@ -722,7 +727,7 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
       }
       if (!node || typeof node !== 'object') return;
       const rec = node as Record<string, unknown>;
-      for (const key of ['visibleWhen', 'visibleOn']) {
+      for (const key of ['visibleWhen']) {
         const value = rec[key];
         const source = typeof value === 'string' ? value
           : value && typeof value === 'object'
@@ -783,7 +788,9 @@ describe('#7010 corpus — shipped METADATA_FORM_REGISTRY', () => {
     // two more single-quoted literal comparisons.
     // It is 65 today: #22870's `field :: mailAssociation` row is gated on
     // `data.type == 'email'`, a single-quoted literal comparison.
-    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(65);
+    // It is 66 today: #23735's `field :: referenceDeletedWhen` row is gated on
+    // `data.type == 'text'`, a single-quoted literal comparison.
+    expect(comparisons, 'no shipped predicate carries an `==`/`!=` literal comparison').toBe(66);
 
     const rhsFindings = validatePredicatePathRefs(corrupted)
       .filter((f) => f.rule === PREDICATE_RHS_PATH_SHAPED);

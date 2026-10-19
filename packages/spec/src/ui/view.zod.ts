@@ -55,7 +55,6 @@ import { closedObject, strictObject, strictObjectError } from '../shared/strict-
 import { SnakeCaseIdentifierSchema, QUALIFIED_ITEM_NAME_PATTERN } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { ConditionalFormattingRuleSchema } from '../shared/conditional-formatting.zod';
-import { normalizeVisibleWhen } from '../shared/visibility';
 import { VISIBILITY_STRICT_OPTIONS } from '../shared/visibility-strict-options';
 import { SELECT_OPTION_EDITABILITY_GUIDANCE, VISIBILITY_ONLY_STRICT_OPTIONS } from '../shared/editability-boundary';
 // [#13855] The section → field-group reference form, shared with the
@@ -190,9 +189,11 @@ export type { HttpMethodSubset } from '../shared/http.zod';
  * `view-data-api-provider-retired` carries the judgement an upgrader owes.
  *
  * A page component whose `data` prop is this schema (`object-grid`,
- * `object-map`, `object-gantt`, `object-tree`) is refused by the page parse
- * with this prescription, read off this union's own issue rather than copied
- * (`checkPageComponentViewData`, `ui/page.zod.ts`, #23357).
+ * `object-map`, `object-gantt`, `object-tree`) meets this prescription through
+ * its `ComponentPropsMap` row: `@objectstack/lint`'s `validateComponentProps`
+ * parses the component's `properties` against that row at the CLI doors and at
+ * the runtime save door, and raises this union's own issue. The page parse
+ * itself leaves `properties` an open record.
  */
 const VIEW_DATA_API_PROVIDER_RETIRED =
   "`view.data.provider: 'api'` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — "
@@ -452,12 +453,11 @@ export function normalizeFilterOperator(op: unknown): string {
 // console's row builders create the same problem from the other side, and this
 // is that function's write-path twin.
 //
-// The producer is a React list key, not a protocol decision: the filter builder
-// (`components/src/custom/filter-builder.tsx:228`, re-stamped on read-back at
-// `plugin-view/src/config/view-config-utils.ts:146`/`:160`) and the sort builder
-// (`components/src/custom/sort-builder.tsx:68`/`:94`) both stamp
-// `id: crypto.randomUUID()` on every row they render, so those ids reach the
-// wire. [#20051] They no longer reach the store: `saveMetaItem` stores the
+// The producer is a React list key, not a protocol decision: the console's
+// filter builder and sort builder both stamp `id: crypto.randomUUID()` on every
+// row they render, and again on a stored row read back into them (read points
+// recorded in `liveness/view.json`, rows `list.filter` and `list.sort`), so
+// those ids reach the wire. [#20051] They no longer reach the store: `saveMetaItem` stores the
 // parsed value of every key a body carries, and the ids are removed before the
 // parse.
 //
@@ -961,10 +961,9 @@ function foldAuthoredViewFilterOperator(op: ViewFilterOperator): string {
  * this split; that hotfix is now retired rather than left standing.
  *
  * **Why the reopen was needed, and why it no longer is.** The filter builder
- * objectui renders stamps `id: crypto.randomUUID()` on every row it creates
- * (`components/src/custom/filter-builder.tsx:228`; stamped again when a stored
- * filter is read back into the builder —
- * `plugin-view/src/config/view-config-utils.ts:146`/`:160`). `saveMetaItem`
+ * objectui renders stamps `id: crypto.randomUUID()` on every row it creates,
+ * and again when a stored filter is read back into the builder (read points
+ * recorded in `liveness/view.json`, row `list.filter`). `saveMetaItem`
  * validated the PUT body and then persisted the AUTHORED body verbatim (until
  * #20051), so that `id` was on the wire and in the store. Closed *without* a wire route, this
  * shape turned every filter write carrying one into a 422 — measured on all
@@ -1307,8 +1306,8 @@ function checkGroupingFieldName(raw: string): string | undefined {
  *      about `grouping.fields[].field` and explicitly not about this axis, so
  *      quoting its date here would attribute a decision that was never made.
  *
- * What the name is used for, measured in the consumer (objectui `dda8f3815`):
- * the kanban board resolves its lane as
+ * What the name is used for, measured in the consumer (read points recorded in
+ * `liveness/view.json`, row `list.kanban`): the kanban board resolves its lane as
  * `laneField = groupByField || groupField || detectStatusField(objectDef)`
  * and buckets cards by `card[laneField]`; `ObjectGantt`'s `groupByAccessor`
  * splits the name on `.` and walks the backing record
@@ -1698,8 +1697,8 @@ export const UserFilterFieldSchema = lazySchema(() => strictObject({
  * ## Why it could not just be closed (the 批 18 blocker)
  *
  * objectui's renderer reads `config.allowAddTab` and renders an "add tab"
- * affordance from it (`packages/plugin-list/src/UserFilters.tsx:182` and
- * `:742`); its own `UserFiltersSchema` declared the key. The spec's did not —
+ * affordance from it (read points recorded in `liveness/view.json`, row
+ * `list.userFilters`); its own `UserFiltersSchema` declared the key. The spec's did not —
  * and the difference between the two shapes was *exactly* that one key.
  *
  * That gap was not inert, because the metadata write path did NOT persist
@@ -1894,14 +1893,14 @@ const emptyStateLinkSchema = () => strictObject({
  * reaches, the `object-grid` page block's, and a list page's own
  * `interfaceConfig.emptyState` (`page.zod.ts`, #23005). It was declared ahead
  * of its renderer, with the planned marker on its describe. The renderer half,
- * objectstack-ai/objectui#12270 (objectui `b434f5f47`), is inside the console
- * pin from objectui `b9814b334`, so the marker is dropped. Measured there:
- * `ListView` hands `ListEmptyState` the `link` (`ListView.tsx:5716`), which
- * draws it beside the add-record action (`ListEmptyState.tsx:153`) in the
- * empty branch of the `grid` and `gallery` visualizations; `ObjectGrid` draws
- * it in `DataEmptyState`'s action slot (`ObjectGrid.tsx:6897-6899`); and
- * `InterfaceListPage` hands `ListView` the page's own `emptyState` ahead of
- * the source view's (`InterfaceListPage.tsx:509`). Each draws it through the
+ * objectstack-ai/objectui#12270 (objectui `b434f5f47`), is inside the console's
+ * objectui pin, so the marker is dropped. Measured there (read points recorded
+ * in `liveness/view.json`, row `list.emptyState`, and `liveness/page.json`,
+ * row `interfaceConfig`): `ListView` hands `ListEmptyState` the `link`, which
+ * draws it beside the add-record action in the empty branch of the `grid` and
+ * `gallery` visualizations; `ObjectGrid` draws it in `DataEmptyState`'s action
+ * slot; and `InterfaceListPage` hands `ListView` the page's own `emptyState`
+ * ahead of the source view's. Each draws it through the
  * one shared `EmptyStateLink` (`@object-ui/components`), which follows it as a
  * `type: 'url'` action through the action runner, so a click opens what the
  * runner opens for that target.
@@ -2629,10 +2628,10 @@ const LIST_CHART_BINDING_KEYS = ['dataset', 'values'] as const;
  * - A declared `chart` block ⇒ nothing here: its own strict schema already
  *   requires both keys, at `chart.dataset` / `chart.values`.
  *
- * What such a view renders is a dead screen either way: at the pin the
- * renderer fabricates a binding nobody wrote (an aggregate over `'name'` /
- * `'value'`); from objectui#6152 round 15 (objectui `0253416`) that floor is
- * retired and `ObjectChart` refuses on screen (`chart-missing-category-axis`).
+ * What such a view renders is a dead screen either way: before objectui#6152
+ * round 15 (objectui `0253416`) the renderer fabricated a binding nobody wrote
+ * (an aggregate over `'name'` / `'value'`); since then that floor is retired
+ * and `ObjectChart` refuses on screen (`chart-missing-category-axis`).
  * ⛔ Never fabricate a default here either — only the author knows the dataset.
  *
  * Reads `type` as the door hands it: the authoring shapes apply the `grid`
@@ -2799,9 +2798,9 @@ const ListViewShapeSchema = lazySchema(() => strictObject({
    * What made the first attempt a regression: `view-metadata-schema.test.ts`
    * pins `sort: [{ id, field, order }]` as *"the exact shape
    * normalizeViewMetadata persists on a console column-sort PUT"*, and `id` is
-   * a UI row identity objectui stamps per row
-   * (`components/src/custom/sort-builder.tsx:68`, `:94` —
-   * `crypto.randomUUID()`), persisted verbatim because `saveMetaItem` stored the
+   * a UI row identity objectui's sort builder stamps per row
+   * (`crypto.randomUUID()`; read points recorded in `liveness/view.json`, row
+   * `list.sort`), persisted verbatim because `saveMetaItem` stored the
    * original body (until #20051). **`.strip()` on a wire member could not rescue it** — it
    * re-opens the TOP level only, and this is a nested block reached through that
    * member. See {@link stripViewConsoleDecorations}, which removes the
@@ -3156,7 +3155,8 @@ export const ListViewSchema = lazySchema(() =>
  * Derived structurally from `SelectOptionSchema.shape` (an Omit, not a copy) so
  * the two faces cannot drift apart key-by-key: every key the object-field
  * option shape gains or loses is gained or lost here too, minus exactly
- * `default`. The alias table is the object face's minus the two rows that
+ * `default` and — since #23809 — `kind`, the object field's lifecycle category,
+ * which no form-view reader has. The alias table is the object face's minus the two rows that
  * pointed at the removed key; those spellings move to `guidance`, because an
  * alias row must name a key the shape accepts (`alias-integrity.test.ts`) and
  * suggesting a key the schema refuses is the `triggerPhrases` failure shape
@@ -3175,7 +3175,11 @@ export const FormSelectOptionSchema = lazySchema(() => {
   // drop exactly `default`. (`.omit()` would also work, but building through
   // `strictObject` is what registers this surface's own aliases/guidance with
   // the alias-integrity audit instead of inheriting the object face's.)
-  const { default: _objectFaceOnly, ...formOptionShape } = SelectOptionSchema.shape;
+  // [#23809] `kind` (the option's lifecycle category) is object-face only as
+  // well: the stage renderers read it off the OBJECT field's options, and a
+  // form view's option list relabels or subsets that field without owning its
+  // lifecycle. It never entered this face, so the guidance below answers it.
+  const { default: _objectFaceOnly, kind: _objectLifecycleOnly, ...formOptionShape } = SelectOptionSchema.shape;
   return strictObject({
     surface: 'this form-view select option',
     history:
@@ -3207,14 +3211,18 @@ export const FormSelectOptionSchema = lazySchema(() => {
         + 'a rename to `default`, which is enforced there. Form-view options accept neither '
         + 'spelling — declare the pre-selected choice on the object definition (field-level '
         + '`defaultValue`, or `default: true` on that field\'s own `options` entry).',
+      kind:
+        '`kind` is not a form-view option key: an option\'s lifecycle category (`open` / `won` / '
+        + '`lost`) belongs to the OBJECT field, where the record path and the other stage renderers '
+        + 'read it. Delete it here and declare `kind` on that field\'s own `options` entry.',
     },
     // Same editability boundary as the object face (#8201): an option is
     // offered or withheld, never shown-but-unselectable.
     guidanceSets: [SELECT_OPTION_EDITABILITY_GUIDANCE],
   }, formOptionShape).describe(
-    'Form-view select option — the object-field option shape minus the per-option `default` key '
-    + '(declare the pre-selected choice on the object definition: field-level `defaultValue`, or '
-    + "`default: true` on that field's own `options` entry).",
+    'Form-view select option — the object-field option shape minus the per-option `default` and '
+    + '`kind` keys (declare the pre-selected choice on the object definition: field-level '
+    + "`defaultValue`, or `default: true` on that field's own `options` entry; declare `kind` there too).",
   );
 });
 
@@ -3300,6 +3308,38 @@ const FORM_FIELD_PUBLIC_PICKER_RETIRED =
   + 'block). To let a visitor choose from a fixed list, use a `select` field with static `options`; '
   + 'to let them pick an existing record, put the form behind sign-in. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
+
+/**
+ * [#23543 F4] Prescriptions for the retired `visibleOn` key on a form field and
+ * on a form section (ADR-0089 D2, retired at 18 by the maintainer's ruling F4 A).
+ *
+ * `visibleOn` was the form view's first spelling of the conditional-visibility
+ * predicate. ADR-0089 unified the predicate under `visibleWhen`, and through 17
+ * both shapes declared `visibleOn` as a deprecated alias that a `.transform`
+ * folded onto `visibleWhen` at parse — so the old spelling was accepted without
+ * a word, and the D2 conversion `view-visibleOn-to-visibleWhen` (protocol 15)
+ * that should have expired it could not retire alone. The ruling retired the
+ * key: both shapes carry a {@link retiredKey} tombstone, `tsc` types it `never`,
+ * the parse refuses it with this text, and the fold is gone. Stored form views
+ * keep loading: every stored-row rehydration seam replays the retired
+ * conversion, so a `sys_metadata` row written with `visibleOn` reaches this
+ * schema as `visibleWhen`. No `os migrate meta` sentence, on purpose: the
+ * rename belongs to protocol 15, below `MIGRATION_SUPPORT_FLOOR`, so the tool
+ * lists no edit for it.
+ */
+const FORM_FIELD_VISIBLE_ON_RETIRED =
+  '`view.form.sections[].fields[].visibleOn` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was '
+  + 'the form view\'s deprecated spelling of the conditional-visibility predicate, which the parse folded '
+  + 'into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate) '
+  + 'is unchanged. Where a field writes both, `visibleWhen` is the one that was in effect: delete `visibleOn`.';
+
+/** {@link FORM_FIELD_VISIBLE_ON_RETIRED}'s section counterpart. */
+const FORM_SECTION_VISIBLE_ON_RETIRED =
+  '`view.form.sections[].visibleOn` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the form '
+  + 'view\'s deprecated spelling of a section\'s conditional-visibility predicate, which the parse folded '
+  + 'into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate, '
+  + 'which hides the whole section when false) is unchanged. Where a section writes both, `visibleWhen` is '
+  + 'the one that was in effect: delete `visibleOn`.';
 
 const FormFieldBaseSchema = lazySchema(() => {
   const shape = {
@@ -3510,8 +3550,9 @@ const FormFieldBaseSchema = lazySchema(() => {
    * the ruling and the scanner.
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe("Visibility predicate (CEL) — field shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here — CLIENT-SIDE only: nothing server-side evaluates a form-view field `visibleWhen`, so a role test here hides the control and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse: the root is unbound on the standalone form routes (`/forms/:name`, `/f/:slug`) and the predicate would fault open there. Inside a repeater `data` is the ROW, but it is still spelled `data` — a bare identifier is unbound and faults open too. e.g. P`record.priority == 'urgent'`"),
-  /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Normalized to `visibleWhen` at parse.'),
+  // `visibleOn` REMOVED at 18 (#23543 F4, ADR-0089 D2): the tombstone carries
+  // the prescription; the fold onto `visibleWhen` went with it.
+  visibleOn: retiredKey(FORM_FIELD_VISIBLE_ON_RETIRED),
   disclosure: z.enum(['inline', 'popover']).optional().describe('Composite rendering: inline bordered box (default) or a summary line + gear popover (progressive disclosure).'),
   };
   const base = z.object(shape, {
@@ -3571,9 +3612,10 @@ const FormFieldBaseSchema = lazySchema(() => {
 /**
  * A parsed form field — the TYPE half of {@link FormFieldSchema}.
  *
- * `visibleOn` is absent by construction: ADR-0089 D2 folds it into
- * `visibleWhen` at the schema boundary, so it is accepted on input and never
- * present on output.
+ * `visibleOn` is absent by construction: the key is a {@link retiredKey}
+ * tombstone (#23543 F4), so no parse ever outputs it, and a reader of parsed
+ * output that still reaches for it fails `tsc` here rather than reading an
+ * always-absent value.
  */
 export type FormField = Omit<z.infer<typeof FormFieldBaseSchema>, 'visibleOn'> & {
   /**
@@ -3594,8 +3636,8 @@ export type FormField = Omit<z.infer<typeof FormFieldBaseSchema>, 'visibleOn'> &
  *
  * Differs from {@link FormField} in both directions, which is exactly why it
  * has to be declared: `span` is `.default('auto')` so it is optional here and
- * required there, and the deprecated `visibleOn` is accepted here and stripped
- * by the ADR-0089 D2 transform before it reaches the output.
+ * required there, and the retired `visibleOn` is a tombstone here (typed so
+ * that no value is assignable) and absent there.
  *
  * Without this, `z.input<typeof FormFieldSchema>` was `unknown` — so a form
  * section's `fields` were unchecked at every authoring site.
@@ -3626,7 +3668,7 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
   FormFieldBaseSchema.extend({
     fields: z.array(z.lazy(() => FormFieldSchema)).optional()
       .describe('Sub-fields for composite/repeater/record types'),
-  }).strict().transform(normalizeVisibleWhen));
+  }).strict());
 
 /**
  * Form Layout Section
@@ -3636,8 +3678,9 @@ export const FormFieldSchema: z.ZodType<FormField, FormFieldInput> = lazySchema(
  * converting it meant re-expressing `strictVisibilityError` as `guidance`, and
  * `guidance` could not express a family of keys; #6619 gave the channel a
  * set-keyed form and the conversion became the same one call every other closed
- * shape in this package makes. The `.transform()` that folds
- * `visibleOn` → `visibleWhen` is unchanged and still runs after the parse.
+ * shape in this package makes. The `.transform()` that folded the deprecated
+ * `visibleOn` onto `visibleWhen` went with the key at 18 (#23543 F4): `visibleOn`
+ * is a {@link retiredKey} tombstone.
  *
  * ## A section gates VISIBILITY, not editability (#7887 — boundary, not gap)
  *
@@ -3678,8 +3721,20 @@ export const FormSectionSchema = lazySchema(() => strictObject({
 }, {
   /**
    * Stable identifier for translation lookup. snake_case convention.
-   * When provided, translation bundles can target this section's `label`
-   * and `description` via `metadataForms.<type>.sections.<name>`.
+   * Translation bundles target this section's `label` and `description` at
+   * one of two addresses, decided by what the form edits:
+   *
+   *  - **An object-bound form view**: `objects.<object>._sections.<name>`,
+   *    where `<object>` is the form's own `data.object`, else its view's. The
+   *    i18n extractor (`walkObjectSections`) scaffolds this key, the
+   *    translation linter (`collectViewRecord`) accepts it and `translateView`
+   *    serves it. A section without a `name` has no key there and keeps its
+   *    authored text in every locale.
+   *  - **A metadata-editing form** (`defineForm({ schemaId })`):
+   *    `metadataForms.<type>.sections.<name>`, read by
+   *    `resolveMetadataFormLabels`. A section without a `name` is looked up
+   *    there under a slug of its `label`.
+   *
    * Optional for backward-compat with sections that only have a `label`.
    */
   name: z.string().optional().describe('Stable section identifier for i18n lookup (snake_case)'),
@@ -3780,15 +3835,33 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * {@link checkFormViewPredicateFeaturesRoot}).
    */
   visibleWhen: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL) — section shown only when TRUE. Root: `record` (+ `previous`, `parent`) in runtime forms, or `data` in metadata forms. `current_user` (and the ADR-0068 aliases `user` / `ctx.user` / `os.user`) resolves here too — CLIENT-SIDE only: nothing server-side evaluates a form-view section `visibleWhen`, so a role test here hides the controls and protects no data (declare permission-set field-level security for that), and on the public `/f/:slug` route no host publishes a scope, so the root is unbound and the predicate faults open. No `features.*` on ANY form-view predicate — refused at parse: unbound on the standalone form routes, where the predicate would fault open.'),
-  /** @deprecated ADR-0089 — use `visibleWhen`. Accepted and normalized to `visibleWhen` at parse. */
-  visibleOn: EvaluatedExpressionInputSchema.optional().describe('[DEPRECATED → `visibleWhen`] Visibility predicate (CEL). Hides the whole section when false. Normalized to `visibleWhen` at parse.'),
+  // `visibleOn` REMOVED at 18 (#23543 F4, ADR-0089 D2) — see
+  // FORM_SECTION_VISIBLE_ON_RETIRED.
+  visibleOn: retiredKey(FORM_SECTION_VISIBLE_ON_RETIRED),
+  /**
+   * Section density, two meanings and no default:
+   *
+   * - **Declared** (`1`–`4`, or the string spellings `'1'`–`'4'`, which parse
+   *   to the number): the author's CEILING — at most that many fields per row
+   *   where the container is wide enough. A renderer collapses it on narrow
+   *   containers, so `columns: 1` is the way to say "always one column".
+   * - **Undeclared**: the renderer's choice, by available width. The parse adds
+   *   nothing, so a renderer can tell "the author said nothing" apart from "the
+   *   author asked for one column" — a `default(1)` here erased exactly that.
+   *
+   * No pixel or breakpoint value belongs to the protocol: where a container
+   * counts as wide is the renderer's. `FormViewSchema.columns` (the form body)
+   * is likewise optional with no default.
+   */
   columns: z.union([
     z.enum(['1', '2', '3', '4']),
     z.literal(1),
     z.literal(2),
     z.literal(3),
     z.literal(4),
-  ]).default(1).transform(val => (typeof val === 'string' ? parseInt(val) : val) as 1 | 2 | 3 | 4),
+  ]).optional()
+    .transform(val => (typeof val === 'string' ? parseInt(val, 10) : val) as 1 | 2 | 3 | 4 | undefined)
+    .describe("Fields per row, 1–4 ('1'–'4' parse to the number). Declared: the author's ceiling — at most that many per row where the container is wide enough; a renderer collapses it on narrow containers. Undeclared: the renderer's choice by available width — the parse adds no default, so declare `columns: 1` to keep a section single-column."),
   /**
    * Which pane of a split form this section renders in (`type: 'split'` only —
    * any other form type rejects the key at parse, see the FormViewSchema
@@ -3825,7 +3898,7 @@ export const FormSectionSchema = lazySchema(() => strictObject({
    * `visibleWhen` and `collapse`, and a wizard step has no slot for either.
    */
   group: SectionGroupKeySchema.optional().describe(
-    'Field group key (snake_case) whose members and presentation this section inherits, from the bound object\'s `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`/`visibleOn`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics.',
+    'Field group key (snake_case) whose members and presentation this section inherits, from the bound object\'s `fieldGroups` (ADR-0085 §5 `deriveFieldGroupLayout`). Mutually exclusive with `fields`, and with every key the group itself declares (`name`, `label`, `description`, `collapsible`, `collapsed`, `visibleWhen`). Not valid on a wizard step. Must name a declared group — checked by reference diagnostics.',
   ),
   /**
    * The section's members, enumerated.
@@ -3844,23 +3917,25 @@ export const FormSectionSchema = lazySchema(() => strictObject({
   surface: 'this form section',
   // Exactly the keys `deriveFieldGroupLayout` fills from the group. `name` is
   // in the list because the derived section's `key` IS the group key, which is
-  // already this surface's i18n anchor (`metadataForms.<type>.sections.<name>`)
-  // — a second name would give one section two lookup identities. `visibleOn`
-  // rides along because this refinement runs BEFORE the `.transform` that folds
-  // it onto `visibleWhen`, so the deprecated spelling must be named here or it
-  // would be the one way to smuggle a section-level predicate past the rule.
+  // already the object's i18n anchor for that heading
+  // (`objects.<object>._sections.<key>`, `deriveFieldGroupLayout`'s `key`)
+  // — a second name would give one section two lookup identities. The retired
+  // `visibleOn` is not listed: until 18 a `.transform` folded it onto
+  // `visibleWhen` AFTER this refinement, so it had to be named here; now its
+  // tombstone refuses it at the key, and this refinement never runs on a
+  // section that wrote it (#23543 F4, measured: one issue, at `visibleOn`).
   //
   // NOT in the list, deliberately: `columns` and `pane`. Those are how THIS
   // form lays the section out and the group declares nothing about them, so
   // there is no second source to create.
-  derivedKeys: ['name', 'label', 'description', 'visibleWhen', 'visibleOn'],
+  derivedKeys: ['name', 'label', 'description', 'visibleWhen'],
   // `collapsible` / `collapsed` carry `.default(false)`, so an authored `false`
   // is already indistinguishable from the default by the time this runs — the
   // same asymmetry #13704 records for the wizard step keys, and it costs
   // nothing: `false` declares exactly what a group with `collapse: 'none'`
   // delivers. Only `true` declares presentation the group owns.
   trueOnlyDerivedKeys: ['collapsible', 'collapsed'],
-})).transform(normalizeVisibleWhen));
+})));
 
 /**
  * A single form action button (submit / cancel / reset): visibility + label.
@@ -3881,8 +3956,9 @@ type WithFormSectionAlias = { sections?: unknown; groups?: unknown };
 
 /**
  * Fold the legacy `groups` alias onto the canonical `sections` and drop
- * `groups` from the output (#6926) — the whole-array counterpart of
- * `normalizeVisibleWhen`.
+ * `groups` from the output (#6926) — the whole-array counterpart of the
+ * per-node `visibleOn` / `visibility` → `visibleWhen` fold ADR-0089 ran at
+ * the schema boundary through 17.
  *
  * ## What this makes true
  *
@@ -4241,8 +4317,8 @@ function refineFormFieldFeaturesRoot(
 // enum-VALUE narrowing: the enum's own error map carries the prescription,
 // keyed on `issue.input`, so only a value which used to be legal gets the "was
 // removed" message. The twin of `OBJECT_FORM_LAYOUT_RETIRED`
-// (component.zod.ts), which carries the renderer measurement at the
-// `.objectui-sha` pin: every form presentation folds 'grid' and 'inline' to
+// (component.zod.ts), whose renderer measurement is recorded in
+// `liveness/page.json`, row `regions`: every form presentation folds 'grid' and 'inline' to
 // 'vertical', and multi-column is `columns`, honoured under every arm. The
 // ADR-0087 conversion `form-layout-inline-grid-to-vertical` rewrites both to
 // 'vertical' in every form payload a view carries (`form`, `formViews.*`, a
@@ -4354,7 +4430,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
    *   is the only authorable progress surface — no progress object, no
    *   percentages, no custom step-state text.
    * - **Wizard steps carry no predicate slot and do not collapse (D2).**
-   *   `visibleWhen` (and its deprecated `visibleOn` alias) and
+   *   `visibleWhen` and
    *   `collapsible` / `collapsed: true` on a wizard section are refused at
    *   parse — see the superRefine below; it is the spec-door upgrade of
    *   objectui#6237's ruled `FormSectionConfig` split ("WizardForm steps =
@@ -4634,11 +4710,10 @@ export const FormViewSchema = lazySchema(() => strictObject({
       // ruled 2026-08-31). Breadth is ruled NARROW: exactly this step-key
       // family — no per-type presentation-key matrix.
       //
-      // Post-parse observability decides the spellings checked here:
-      // `FormSectionSchema` folds `visibleOn` → `visibleWhen` (its
-      // `.transform(normalizeVisibleWhen)`) before this refinement runs, so
-      // one check answers both spellings (the message says so, since the
-      // reported path can only name the canonical key). `collapsible` /
+      // Post-parse observability decides the spellings checked here: the
+      // retired `visibleOn` never reaches this refinement (its tombstone on
+      // `FormSectionSchema` refuses it at the section, #23543 F4), so the
+      // canonical key is the one spelling to check. `collapsible` /
       // `collapsed` carry `.default(false)`, so an authored `false` is
       // indistinguishable from the default here — and needs no refusal: it
       // declares exactly the behavior a wizard delivers. Only `true` declares
@@ -4652,8 +4727,7 @@ export const FormViewSchema = lazySchema(() => strictObject({
               '`visibleWhen` on a wizard step is refused: wizard steps carry no predicate slot '
               + '— steps are entered in array order behind the step gate, '
               + 'never conditionally. Put the predicate on the fields inside the step, or use a '
-              + "`simple`/`tabbed` form for section-level visibility. (The deprecated `visibleOn` "
-              + 'alias folds into `visibleWhen` and is refused the same way.)',
+              + '`simple`/`tabbed` form for section-level visibility.',
           });
         }
         for (const collapseKey of ['collapsible', 'collapsed'] as const) {

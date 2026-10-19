@@ -62,11 +62,14 @@ function catalogServing(names: string[]): SecurityCatalogReader {
   };
 }
 
-function stackDouble(seed: { sys_permission_set?: any[]; catalog?: SecurityCatalogReader } = {}) {
+function stackDouble(
+  seed: { sys_permission_set?: any[]; sys_member?: any[]; catalog?: SecurityCatalogReader } = {},
+) {
   const tables: Record<string, any[]> = {
     sys_user: [{ id: 'usr_probe', email: RLS_PROBE_EMAIL }],
     sys_permission_set: seed.sys_permission_set ?? [],
     sys_user_permission_set: [],
+    sys_member: seed.sys_member ?? [],
   };
   const inserted: string[] = [];
   const ql = {
@@ -104,6 +107,27 @@ describe('[ADR-0131 D3/D4] the verify RLS persona is provisioned through the reg
     expect(grants).toHaveLength(1);
     expect(grants[0]).toMatchObject({ user_id: 'usr_probe', permission_set: PROBE_SET });
     expect(grants[0].permission_set_id).toBeUndefined();
+  });
+
+  // [ADR-0131 D3/D9] An assignment is an organization row: the persona's grant
+  // belongs to the organization the persona is a member of — under `single`,
+  // the Default Organization every sign-up joins.
+  it('owns the grant by the persona\'s organization, and names none for a persona that belongs to none', async () => {
+    const member = stackDouble({
+      catalog: catalogServing([PROBE_SET]),
+      sys_member: [{ id: 'mem_1', user_id: 'usr_probe', organization_id: 'org_default' }],
+    });
+    await provisionRlsProbePersona(member.stack, { objects: [] });
+    expect(member.tables.sys_user_permission_set[0]).toMatchObject({ user_id: 'usr_probe', organization_id: 'org_default' });
+
+    for (const sys_member of [[], [
+      { id: 'mem_1', user_id: 'usr_probe', organization_id: 'org_a' },
+      { id: 'mem_2', user_id: 'usr_probe', organization_id: 'org_b' },
+    ]]) {
+      const orgLess = stackDouble({ catalog: catalogServing([PROBE_SET]), sys_member });
+      await provisionRlsProbePersona(orgLess.stack, { objects: [] });
+      expect('organization_id' in orgLess.tables.sys_user_permission_set[0]).toBe(false);
+    }
   });
 
   it('refuses, writing nothing, when the catalog does not serve the set — a row alone is not the probe set', async () => {

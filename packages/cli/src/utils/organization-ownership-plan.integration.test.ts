@@ -15,11 +15,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   buildOrganizationOwnershipPlan,
+  ceremonyDialectOf,
   OrganizationOwnershipPlanRefusal,
   type OrganizationOwnershipPlan,
   type PlanReader,
   type TablePlan,
 } from './organization-ownership-plan.js';
+import { ORGANIZATION_OWNERSHIP_INVENTORY } from './organization-ownership-inventory.js';
 
 let dir: string;
 let file: string;
@@ -28,9 +30,10 @@ let db: Database.Database;
 /** Every statement the plan issued, in order. */
 let statements: string[];
 
-function reader(opts: { client?: string; failOn?: RegExp } = {}): PlanReader {
+function reader(opts: { failOn?: RegExp } = {}): PlanReader {
   return {
-    client: opts.client ?? 'better-sqlite3',
+    dialect: 'sqlite',
+    client: 'better-sqlite3',
     async query(sql, params = []) {
       statements.push(sql);
       if (opts.failOn?.test(sql)) throw new Error('SQLITE_IOERR: disk I/O error');
@@ -216,17 +219,86 @@ describe('ADR-0131 D10 preflight — the per-table plan', () => {
   it('a deployment composed without the auth family holds no organization: nothing derives, the plan still runs', async () => {
     db.exec('DROP TABLE sys_organization');
     const p = await plan('single');
-    expect(p).toMatchObject({ organizations: 0, defaultOrganization: null });
+    expect(p).toMatchObject({ organizations: 0, defaultOrganization: null, defaultOrganizationCreatedByApply: false });
     expect(table(p, 'crm_deal').unattributable).toEqual([{ id: 'deal_2', reason: expect.stringContaining('no Default Organization') }]);
   });
 
-  it('under single with no Default Organization, nothing is assigned and the reason says why', async () => {
+  it('⭐ under single, a database that holds no organization at all: what no anchor derives falls to the Default Organization --apply creates, and a warning says so', async () => {
+    db.exec('DELETE FROM sys_organization');
+    const p = await plan('single');
+    expect(p).toMatchObject({ organizations: 0, defaultOrganization: null, defaultOrganizationCreatedByApply: true });
+    expect(table(p, 'crm_deal').attribution).toEqual({ 'default-organization': 1 });
+    expect(table(p, 'crm_deal').unattributable).toEqual([]);
+    expect(p.summary.unattributableRows).toBe(0);
+    expect(p.warnings).toContainEqual(expect.stringMatching(/^This database holds no organization, and the tenancy posture is single: --apply creates the Default Organization \(slug 'default'\)/));
+    // Read-only still: SELECTs only.
+    expect(statements.every((s) => /^\s*SELECT/i.test(s))).toBe(true);
+
+    // Under a wall nothing derives to an organization that does not exist.
+    const walled = await plan('isolated');
+    expect(walled.defaultOrganizationCreatedByApply).toBe(false);
+    expect(table(walled, 'crm_deal').unattributable.map((u) => u.id)).toEqual(['deal_2']);
+    expect(walled.warnings.some((w) => /creates the Default Organization/.test(w))).toBe(false);
+  });
+
+  it('a v17 database still holding the retired sys_scim_provider plans, listing it as fate 4', async () => {
+    // The rc.1-era table every database that booted before the retirement still
+    // holds, in its last declared shape. Neither census counted the object.
+    db.exec(`
+      CREATE TABLE sys_scim_provider (
+        id TEXT PRIMARY KEY, provider_id TEXT, provider_key TEXT, scim_token TEXT,
+        organization_id TEXT, user_id TEXT, created_at TEXT, updated_at TEXT
+      );
+      INSERT INTO sys_scim_provider VALUES
+        ('scim_1', 'okta-scim', 'org_b:okta-scim', 'hash_1', 'org_b', 'usr_1', '2026-07-01', '2026-07-01'),
+        ('scim_2', 'entra-scim', NULL, 'hash_2', NULL, NULL, '2026-07-02', '2026-07-02');
+    `);
+
+    for (const posture of ['isolated', 'single']) {
+      const scim = table(await plan(posture), 'sys_scim_provider');
+      expect(scim, posture).toMatchObject({
+        source: 'inventory',
+        fate: 'report',
+        physical: 'present',
+        organizationColumn: 'present',
+        rows: { total: 2, organizationNull: 1, stamped: 1 },
+        fateCounts: { reportedRows: 1 },
+        // Reported, never attributed — not even to the Default Organization under single.
+        unattributable: [{ id: 'scim_2', reason: 'fate 4: reported, never guessed' }],
+        notNull: { willReceive: false, reason: expect.stringContaining('left in place untouched') },
+      });
+      expect(scim.census, posture).toEqual(['retired-before-census']);
+      expect(scim.citation, posture).toContain('scim-provider-object-retired');
+    }
+
+    // Control: without its row the same database is refused, by name.
+    const r = await refusal(
+      buildOrganizationOwnershipPlan({
+        reader: reader(),
+        posture: 'isolated',
+        database: file,
+        inventory: ORGANIZATION_OWNERSHIP_INVENTORY.filter((e) => e.object !== 'sys_scim_provider'),
+      }),
+    );
+    expect(r).toMatchObject({ reason: 'uninventoried-platform-table', table: 'sys_scim_provider' });
+  });
+
+  it('under single with no Default Organization (two organizations, none of them default), nothing is assigned and the reason says why', async () => {
     db.exec("UPDATE sys_organization SET slug = 'renamed' WHERE id = 'org_default'");
     const p = await plan('single');
     expect(p.defaultOrganization).toBeNull();
     expect(table(p, 'crm_deal').unattributable).toEqual([
-      { id: 'deal_2', reason: expect.stringContaining("no Default Organization (slug 'default')") },
+      { id: 'deal_2', reason: expect.stringContaining("no Default Organization exists to fall back to (no organization has slug 'default', and the database does not hold exactly one)") },
     ]);
+  });
+
+  it('⭐ under single, the sole organization is the Default Organization whatever its slug, as the boot names it', async () => {
+    db.exec("DELETE FROM sys_organization WHERE id = 'org_b'; UPDATE sys_organization SET slug = 'renamed' WHERE id = 'org_default'");
+    const p = await plan('single');
+    expect(p.defaultOrganization).toEqual({ id: 'org_default', slug: 'renamed' });
+    expect(table(p, 'crm_deal').attribution).toEqual({ 'default-organization': 1 });
+    expect(table(p, 'crm_deal').unattributable).toEqual([]);
+    expect(p.defaultOrganizationCreatedByApply).toBe(false);
   });
 });
 
@@ -249,9 +321,10 @@ describe('ADR-0131 D10 preflight — it refuses a table it cannot enumerate, nam
     expect(r.message).toContain('managed_by');
   });
 
-  it('a driver with no catalog statement', async () => {
-    const r = await refusal(plan('isolated', reader({ client: 'oracledb' })));
+  it('a driver with no catalog statement: its dialect is refused before the plan issues one', async () => {
+    const r = await refusal((async () => plan('isolated', { ...reader(), dialect: ceremonyDialectOf({ config: { client: 'oracledb' } }) }))());
     expect(r.reason).toBe('driver-unsupported');
+    expect(statements).toEqual([]);
   });
 
   it('a database that is not an ObjectStack one (the wrong --database-url)', async () => {

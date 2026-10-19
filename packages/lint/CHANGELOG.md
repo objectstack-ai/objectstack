@@ -1,5 +1,504 @@
 # @objectstack/lint
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- d537a31: feat(lint)!: a formula field's `expression` is judged on the one-hop line — one hop through a reference passes, a second hop is refused
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, stored shape or authorable spelling is added, removed or renamed. The field-formula pass now refuses two expression shapes it accepted before, and the runtime never computed a value for either over a set reference: a read two hops through references, and a reference read both through and as a plain value. Nothing stored changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  The field-formula pass now passes `traversalHydration` for a formula `expression`, because the engine's formula read path loads one hop through a reference field.
+  
+  - `record.book.title + ' · ' + record.reader.name` passes, as before. It now also computes at run time.
+  - `record.book.shelf.code` (two hops) is refused. The refusal names the field and says a formula resolves one hop.
+  - `record.reader == null ? '—' : record.reader.name` (the reference read both through and as a plain value) is refused. The refusal names `record.reader.?name.orValue('—')`, the read that gives an empty reference a value.
+  
+  What to do. Read a field stored on the related object instead of a second hop, and replace a null test on a reference with the optional read.
+- 69147ab: fix(objectql)!: the one-hop read through a reference never reads a stored-metadata-body table, and the lint refuses that read where it is written
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No stored metadata moves and nothing is converted: what narrows is a served value (a formula field or a validation rule that reads through a reference into a stored-metadata-body table) and an author-time verdict on such an expression; no spec key, export, option, object definition or stored shape is added, removed, renamed or re-shaped, so there is nothing for `objectstack migrate meta` to rewrite. The other categories are closed on facts: both packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); nothing exported is removed (not runtime-export-retired) and no type changes (not type-surface-only or runtime-interface-only). -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The tables of the stored-metadata-body family (`STORED_METADATA_BODY_OBJECTS`) are projected or refused at every door that serves them. The one-hop read a formula field and a validation rule share (`resolveOneHopRelated`) was an ordinary engine read, which the family's projection does not reach.
+  
+  - **`@objectstack/objectql`.** A hop whose target is a family table is not read, whichever authority the hop is read under. A formula field reading through it is `null` with its reason, on every read, write response and `serveFormulaField` call (the seam a hook body's `ctx.title()` reads through). A validation rule reading through it has no verdict, so the write it judges is refused. The answer is the one an unreadable related record gets, so it says nothing about the row. A hop into any other object is unchanged.
+  - **`@objectstack/lint`.** A formula field's `expression`, or a validation rule's hydrated `condition`, that reads through a reference into a family table is an error, with the prescription. `os validate`, `os build` and the object save door run the same pass, so the author learns it at save rather than from a `null`.
+  
+  What to do. Remove the read through the reference. Stored metadata is read through the metadata API (`GET /api/v1/meta/:type/:name`), where its body is projected. Reading the reference field itself (the stored id) is unchanged.
+
+### Patch Changes
+
+- 9c74d40: fix(lint): the last eight fenced author-time rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these 8 rule ids now carries a `hint` (the CLI's `fix:` line, the runtime finding's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (lengths are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after:
+    - flow template holes (`validate-flow-template-paths.ts`): `flow-template-field-unprovisioned` (362 → 175) and `flow-template-lookup-traversal` (316 → 139);
+    - page bindings (`validate-page-field-bindings.ts`): `page-field-unprovisioned` (362 → 175) and `page-section-group-unknown` (279 → 151);
+    - `print-page-block-unprintable` (362 → 170), `form-section-group-unknown` (275 → 147), `filter-token-unknown` (259 → 170) and `component-props-invalid` (258 → 188; its value-rejection line 248–258 → 157–167, while its retired-key line, 164–181, and its node-binding line, 188, were one remedy already and are unchanged).
+  - **Examples.** `print-page-block-unprintable` FROM ``Replace or remove the block. The printable blocks are `page:section`, `page:card`, … `object-metric`. If the page is not a document, delete its `print` declaration instead.`` (362) TO ``Replace the block with a printable one (`os explain print-page-block-unprintable` lists them) or remove it; if the page is not a document, delete its `print` declaration.`` (170). `flow-template-lookup-traversal` on a flow variable FROM ``A record read into a flow variable is not expanded either — config.expand is the START node's opt-in and covers the trigger record alone. Reference the foreign-key id directly ('{{ currentCase.owner_id }}'), project the value via a formula field on 'crm_case', or add a get_record node that reads the related record.`` (316) TO ``Write '{{ currentCase.owner_id }}' (the id) or a formula field on 'crm_case', or read the related record with a get_record node.`` (128).
+  - **Lists are no longer echoed.** The two section-group ids no longer append the object's declared field groups: the line names the nearest declared group ("Did you mean") instead. An object with no field groups gets one line: declare `fieldGroups: [{ key, label }]` and `group` on the member fields, or enumerate the section's `fields`. `print-page-block-unprintable` no longer lists the thirteen printable blocks; `os explain` does. `filter-token-unknown`'s line for a placeholder with no near miss names the two vocabularies briefly, and its `os explain` entry in full.
+  - **The anchor ids converge.** `page-field-unprovisioned` and `flow-template-field-unprovisioned` now print the shared one-line anchor fix the other unprovisioned-anchor ids print (`If the remote table carries 'owner_id', declare it in ext_customer's own fields (mapped through columnMap); otherwise drop the reference or opt the object out of the injection`, 175).
+  - **`os explain RULE_ID` carries the rest.** Each of the 8 ids gains a `RULE_EXPLANATIONS` entry in `@objectstack/lint`, so its `rule:` line now carries the `os explain` pointer. What the fix lines stopped saying is there: how to vouch for an unprovisioned anchor through `columnMap` or opt the object out of the injection (`ownership: 'none'`, `systemFields: { audit: false }`); what the start node's `config.expand` does (a one-hop re-read of the triggering record as the run's identity) and why it covers the trigger record alone; how a section inherits a field group's members, and that membership is declared on the field; the printable block list, held equal to the spec's `PRINTABLE_PAGE_COMPONENT_TYPES`, and the three reasons a block is refused; the context tokens and date macros a filter value resolves, where `{record_id}` resolves, and that a literal shaped like a placeholder must be renamed; and where a page component's props schema lives, why the page and not the schema is what to fix in almost every case, and the retired-key and node-binding cases.
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), FROM → TO measured at the door. On a `page` write, as 422 `issues[].hint`: `print-page-block-unprintable` 362 → 170, `component-props-invalid`'s value-rejection line 248 → 157 (`page:tabs`), 250 → 159 (`object-grid`), 253 → 162 (`record:details`) and 258 → 167 (`record:related_list`). On a `flow` write, as 2xx `advisories[].hint`: `flow-template-field-unprovisioned` 362 → 175, `flow-template-lookup-traversal` 249 → 131 (trigger root) and 314 → 126 (flow variable), on a probe hopping through `crm_case.account`. The two page-binding ids do not fire on a `page` write, and `filter-token-unknown` and `form-section-group-unknown` run at the CLI only. No write changes channel.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- 5e97907: feat(plugin-sharing,cli)!: declared sharing rules are read from the registry — the boot writes no `sys_sharing_rule` row for them, and the 17 → 18 ownership ceremony deletes the copies the retired seeder wrote
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered sharing-rule-declared-mirror-retired -->
+  
+  The narrowings, FROM → TO, each with its one-line remedy:
+  
+  - `DELETE /api/v1/sharing/rules/:idOrName` on a declared rule — FROM `204`, the seeded row deleted (and written again by the next boot), TO `403 PERMISSION_DENIED`. Remedy: change or remove the rule in its declaration in the package; an organization's own rule is deleted as before.
+  - `sys_sharing_rule` — FROM one `managed_by: package` row per declared rule, TO none: the boot writes none and the ownership ceremony deletes the copies the seeder wrote (Setup's Sharing Rules object list, which lists rows, no longer shows declared rules). Remedy: read declared rules through `GET /api/v1/sharing/rules`, which lists them beside the organization's own; on an upgraded database run `os migrate organization-ownership --apply` with a fresh plan.
+  
+  The retirement note for the seeder is the ADR-0087 semantic entry `sharing-rule-declared-mirror-retired`.
+  
+  **BREAKING**, shipped as `minor` under the repo's launch-window convention for breaking changes.
+  
+  `@objectstack/plugin-sharing` no longer copies a stack's declared `sharingRules` into `sys_sharing_rule` at boot. ADR-0131 D2 retires that seeder (`bootstrapDeclaredSharingRules`). The sharing-rule service reads each declared rule from the registry whenever it reads the rule set: listing, getting, evaluating, the per-record hooks, the boot backfill and the orphaned-grant sweep. Rules an organization authors keep their `sys_sharing_rule` rows.
+  
+  - **A declared rule still grants, and stops granting when its declaration goes.** It is translated from the registry's copy exactly as the seeder translated it: the CEL `condition` is lowered to a `criteria` filter, and `sharedWith` becomes the recipient. A condition that does not lower is not served, and never as a match-all. It says so in one WARN line per rule per process. A declared rule's id is its NAME, and the grants it materialises carry the name as `sys_record_share.source_id`. Remove the declaration and the next boot's orphaned-grant sweep revokes those grants.
+  - **Scopes follow the posture, as the seeder's passes did.** Under `single` a declared rule is served once, organization-less, so every organization reads it. Under a wall it is served once per organization — every organization, read page by page. An organization created after boot is served from its creation on. If the organizations cannot be read at boot, no declared rule is served until the next boot, and the boot's orphaned-grant sweep revokes none of their grants meanwhile: a failed read is never a revocation.
+  - **A stored row of the same name answers for it.** Under `single` that is a row of that name in any organization, and under a wall that organization's own row. Such a row is an organization's own rule, a seeded copy an administrator customized, or a seeded copy the ceremony has not deleted yet. The declared rule is not served beside it, the same as while the seeder ran: it never overwrote an admin-authored or customized row.
+  - **`DELETE /api/v1/sharing/rules/:idOrName` refuses a declared rule** with `403 PERMISSION_DENIED`. It has no row: it is changed or removed in its declaration. Before this release a platform administrator could delete the seeded row, and the next boot wrote it again. An organization's own rule is deleted as before.
+  - **Setup's Sharing Rules object list no longer shows declared rules.** It lists `sys_sharing_rule` rows. `GET /api/v1/sharing/rules` lists both.
+  
+  `@objectstack/cli` — **`os migrate organization-ownership --apply` deletes the declared-rule mirrors.** The `declared-rule-mirrors` rows on `sys_sharing_rule` are the seeder's uncustomized copies (`managed_by` `package` or `platform`, `customized` not true). They now block certification until the ceremony's `mirror-deletion` step removes them. It works in the ruled order. It renames every grant naming a mirror by row id (`sys_record_share.source_id`, `source = 'rule'`) to the rule's name and verifies that no grant names a mirror any more. Only then does it delete the mirrors. Under a wall it deletes the organization-stamped copies too.
+  - A mirror whose rule no installed package declares, and that grants still name, blocks with nothing written. The blocker names the rows and the remedy. A mirror no grant names is deleted.
+  - The step also runs on a database whose ceremony already completed while an earlier release still seeded the rows, where they were advisory. Re-run `--apply` with a fresh plan.
+  - `DECLARED_SHARING_RULE_SEEDER_RUNS` is now `false`. A customized copy and an organization's own rule stay. Under `single` they take the Default Organization, as before.
+  
+  `@objectstack/lint` — the sharing-rule enforceability verdicts and `os explain` say what now happens to a declared rule whose condition does not lower. It is "never served", not "never seeded", because it is never written to `sys_sharing_rule`. The rule ids, severities, paths and what each rule accepts or refuses are unchanged.
+- 85be049: fix(lint): `filter-token-unknown` states what the runtime does with an unresolvable filter placeholder: the data engine refuses the query with `FILTER_TOKEN_UNKNOWN` / 400
+  
+  Clause-②: no
+  
+  The finding's message said the value "is sent to the data engine as a literal string, matches no record, and the surface renders empty". The runtime does not do that. The data engine refuses a query that carries an unresolvable placeholder, `FILTER_TOKEN_UNKNOWN` with HTTP 400, rather than compare it as a literal string. The message now reads:
+  
+  ```text
+  Filter value "{current_user}" is not a resolvable placeholder. The data engine refuses a query that carries it (`FILTER_TOKEN_UNKNOWN`, 400), so the surface never shows the data the filter meant.
+  ```
+  
+  Unchanged: the rule id, its severity (`error`), the finding's `path`, its `hint` (the `fix:` line), and which values the rule reports. The message's first sentence is unchanged as well. `os explain filter-token-unknown` already stated the refusal and is unchanged.
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/sdui-parser@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Patch Changes
+
+- e375315: fix(lint): the six `data-model-rules.ts` rule ids print a fix line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these six rule ids now carries a `fix` of one remedy sentence of at most 200 characters on every variant measured, including long object and column names. The three ADR-0120 uniqueness ids carry it as the `hint` that `os validate` and `os build` print after `fix: `; all six print it as `os lint --fix`'s `→ fix:` line. The longest of each, FROM → TO (characters of the fix text alone):
+    - `unique/legacy-organization-composite` 592 → 161;
+    - `unique/unscoped-declared-index` 380 → 150;
+    - `object/missing-name-field` 327 → 188;
+    - `unique/double-declaration` 303 → 159 (the contradiction arm; the two redundancy arms were already short and now drop one word);
+    - `rollup/non-numeric-aggregand` 300 → 165 (the line no longer names the parent object, so its length no longer grows with that name);
+    - `field/select-missing-options` 207 → 180.
+  - **What moved.** The text the fix lines stopped saying is in each id's `RULE_EXPLANATIONS` entry, which `os explain RULE_ID` prints:
+    - `unique/unscoped-declared-index`: what `unique: 'organization'` makes the driver build, and the `os migrate meta --from 17` route for existing sources (one new paragraph);
+    - `unique/legacy-organization-composite`: that the respelling makes the listed organization column NULL-safe in place, what the constraint then means, and that duplicate NULL-organization rows block the `recreate_index` with a report rather than failing a boot (one paragraph extended, one new);
+    - `unique/double-declaration`: where each scope word may be written (one new paragraph).
+    - `object/missing-name-field` now points at `os explain title-format-retired`, whose entry already says why a `titleFormat` template does not count. `field/select-missing-options` and `rollup/non-numeric-aggregand` lost only wording; the rollup entry already carries the reasoning.
+  - **Runtime publish gate:** none of the six runs there. The three uniqueness entries are `cli`-only registry rules, and the other three run only in `os lint`'s `lintDataModel` sweep. So no 422 `issues[].hint` and no 2xx `advisories[].hint` changes.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- cbbd96a: fix(lint): seven more rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these 7 rule ids now carries a `hint` (the CLI's `fix:` line, the runtime advisory's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (lengths are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after:
+    - flow reference syntax (`lint-flow-patterns.ts`): `flow-double-brace-interpolation` (1413 → 197) and `flow-bare-dollar-reference` (1234 → 198);
+    - `liveness-ledger-unreadable` (270 → 82), `capability-reference-unknown` (241 → 131), `page-section-count-not-multi-value` (228 → 167), `list-view-filters-in-views-mode` (219 → 135) and `page-field-unknown` (206 → 94).
+  - **The flow ids keep the judge's spelling, and only where it evaluates.** In a value slot the line names the spec value-slot judge's own CEL envelope for the reference, read out of the judge's remedy and never re-spelled: FROM `A value slot reads a CEL value envelope, … so a bare $ reference is stored as written. $source.id names $source, which is not one of the flow engine's own $ variables, … Write {source.id} as { dialect: 'cel', source: 'source.id' }. CEL refuses an absent variable or key … (the guarded form writes null).` (681) TO ``A value slot stores a bare `$` reference as written: write `{source.id}` as { dialect: 'cel', source: 'source.id' }.`` (116). Where an envelope at the string's place would not evaluate (a string inside an object or list literal, a legacy `assignments: [{ variable, value }]` shape, a `$User` path that never resolved), the line names no envelope and points at `os explain`. It never names the build's own refusal for a `{{ }}` string, whose spelling keeps the outer braces as literal text. In a text slot the line names the `{{ }}` hole for each reference the engine binds, and for any other `$` root says to compute the value into a variable with an `assignment` node and write `{{ v }}`. At a notify or http literal it says neither brace dialect resolves there: write the value itself.
+  - **Lists are no longer echoed.** `page-field-unknown` no longer appends the object's whole field list; it names the nearest declared field ("Did you mean") instead.
+  - **`os explain RULE_ID` carries the rest.** What the fix lines stopped saying is each id's `RULE_EXPLANATIONS` entry in `@objectstack/lint`: the `has()` guard for a value that may be absent, the run user's `current_user` null guard and the `sys_user` read for any other `$User` path, the whole-value literal and the canonical `assignments` map, what a filter operand's `null` does, which slots read `{{ }}`, and where a brace token in a literal is refused; that a capability another installed package declares needs no change; why page filter controls do nothing on an object list view (ADR-0047); that a missing liveness ledger is a platform packaging fault; which field types take `multiple: true`. Six ids gain an entry, so their `rule:` line now carries the `os explain` pointer: `flow-double-brace-interpolation`, `flow-bare-dollar-reference`, `liveness-ledger-unreadable`, `page-field-unknown`, `page-section-count-not-multi-value` and `list-view-filters-in-views-mode`. `capability-reference-unknown`'s entry gains one sentence.
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), the two flow ids fire on a `flow` write as 2xx `advisories[].hint`, FROM → TO measured at the door: a value-slot `$source.id` 681 → 116, `$User.Id` 681 → 121, `$User.Email` 742 → 198, a nested literal 1231 → 198, a legacy assignment 1030 → 198; a text-slot `$User.Id` 767 → 144 and `$error.message` 114 → 83; a value-slot `{{ }}` 746 → 116, a notify literal 297 → 137, a value no slot reads 362 → 158. Studio's save-advisory toast prints an advisory's `hint` after its message. `capability-reference-unknown` and `list-view-filters-in-views-mode` run at the CLI only; the two page ids do not fire on a `page` write; `liveness-ledger-unreadable` fires only on an install whose `@objectstack/spec` lost a ledger file.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- b6805ac: fix(lint): the twelve flow anti-pattern rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these 12 rule ids in `lint-flow-patterns.ts` now carries a `hint` (the CLI's `fix:` line, the runtime finding's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (lengths are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after: `flow-loop-body-uncontained` (800 → 174), `flow-multi-write-unfiltered` (695 → 73), `flow-try-catch-without-catch` (594 → 137), `flow-decision-inclusive-overlap` (437 → 159), `flow-approval-revise-target-not-service-owned` (412 → 76), `flow-time-relative-antipattern` (397 → 163), `flow-date-equality-filter` (379 → 123), `flow-runas-unscoped` (372 → 105), `flow-decision-mode-invalid` (295 → 134), `flow-decision-unconditional-branch` (286 → 149; its other arm, 142, is unchanged), `flow-error-label-not-fault` (239 → 81) and `flow-branch-label-unmatched` (224 → 122).
+  - **Examples.** `flow-loop-body-uncontained` FROM ``Contain the failure per iteration: put a `try_catch` INSIDE the body and move this node into its `try` region — … A `catch` region cannot be empty … Measured: with it, all 5 items are processed … See content/docs/automation/flows.mdx §"Per-iteration containment".`` (800) TO ``Move this node into the `try` region of a `type: 'try_catch'` node inside the loop body, with `catch: { nodes: [ { id: 'handled', type: 'assignment', label: 'Handled' } ] }`.`` (174). `flow-multi-write-unfiltered` FROM ``Write the constraint you mean into `filter` (e.g. `{ status: 'closed' }` — see examples/app-showcase `showcase_inquiry_purge`, …). If emptying 'lead' really is the intent, keep it: … Distinct from the run-time erased-condition guard, …`` (684–695) TO ``Write the constraint you mean into `filter`, e.g. `{ status: 'closed' }`.`` (73). `flow-runas-unscoped` FROM ``Declare `runAs:'system'` to make the elevation explicit and intended (the run reads/writes every record). A schedule flow cannot scope to a user — … (ADR-0049, ADR-0073 D5)`` (362–372) TO ``Declare `runAs:'system'` to make the elevation explicit and intended (the run reads/writes every record).`` (105). `flow-time-relative-antipattern` used to spell its range query as ``BETWEEN {TODAY()} and {TODAY()+N}``, in the single-brace dialect flows no longer resolve; its line now names the declared `timeRelative` sweep, and its entry spells the range with `$gte` / `$lt`.
+  - **`os explain RULE_ID` carries the rest.** Each of the 12 ids gains a `RULE_EXPLANATIONS` entry in `@objectstack/lint`, so its `rule:` line now carries the `os explain` pointer. What the fix lines stopped saying is there: which node types count as able to fail and how containment is judged; the two empty `catch` spellings the parse refuses, what the minimal handler may omit, and the measured result with it; when failing fast or retry-then-fail is a legitimate reading; the worked `showcase_inquiry_purge` example, keeping a meant whole-object write, and how the rule differs from the run-time erased-condition guard; when to keep `mode: 'inclusive'` and where `os migrate meta` left it on a flow authored against protocol major 17; what ends the revise window and why ADR-0044's amendment moved it off `wait`; the declared `timeRelative` sweep and the hand-written range-query alternative; why abutting one-day windows match each row once; why a user-less run is refused rather than run unscoped, and the anonymous-endpoint exception (ADR-0138 D2b); that `registerFlow` refuses an invalid `mode` with the same sentence; dropping `type: 'decision'` for a meant fan-out; which failures a `fault` edge routes and which labels read as an error path; and one branching mechanism per decision.
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), all 12 ids fire on a `flow` write, FROM → TO measured at the door. As 422 `issues[].hint`: `flow-approval-revise-target-not-service-owned` 412 → 76, `flow-runas-unscoped` 367 → 105 (schedule), 372 → 105 (time-relative) and 362 → 105 (api), `flow-decision-mode-invalid` 295 → 134, `flow-branch-label-unmatched` 224 → 122. As 2xx `advisories[].hint`: `flow-loop-body-uncontained` 800 → 174, `flow-multi-write-unfiltered` 695 → 73 and 684 → 73, `flow-try-catch-without-catch` 594 → 137, `flow-decision-inclusive-overlap` 437 → 159, `flow-time-relative-antipattern` 397 → 163, `flow-date-equality-filter` 379 → 123, `flow-decision-unconditional-branch` 286 → 149, `flow-error-label-not-fault` 239 → 81. No write changes channel.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- 105902f: feat(spec)!: retire the view form's `visibleOn` and the page component's `visibility` as keys; their ADR-0089 renames leave the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** ADR-0089 made `visibleWhen` the one conditional-visibility key, and through 17 the old spellings were declared `[DEPRECATED]` keys that the parse folded onto `visibleWhen` without a word: `visibleOn` on a form view's fields and sections, and `visibility` on a page component. At 18 all three positions carry a `retiredKey()` tombstone naming `visibleWhen`, the parse-time fold is gone, and the two ADR-0087 D2 conversions `view-visibleOn-to-visibleWhen` and `page-component-visibility-to-visibleWhen` (protocol 15) are retired from the load path (`retiredAfter: '17.7.0'`).
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `visibleOn: "…"` on a form field (`view.form.sections[].fields[]`) | `visibleWhen: "…"` |
+  | `visibleOn: "…"` on a form section (`view.form.sections[]`) | `visibleWhen: "…"` |
+  | `visibility: "…"` on a page component (`page.components[]`, slots and nested containers included) | `visibleWhen: "…"` |
+  
+  **The one-line fix:** rename the key to `visibleWhen`; the CEL predicate is unchanged. Where a node wrote both keys, `visibleWhen` was the one in effect: delete the old key.
+  
+  **What an author who still writes it sees.** `tsc` fails at a typed authoring site (`FormFieldInput`, `FormSection`, `PageComponent` type the key as retired), and the parse refuses it by name at its own path — `defineStack` throws `STACK_SCHEMA_INVALID` (422), `os validate` / `os build` print the issue, and the metadata save door answers 422:
+  
+  > `page.components[].visibility` was removed in @objectstack/spec 18 (ADR-0089 D2) — it was the page component's deprecated spelling of the conditional-visibility predicate, which the parse folded into `visibleWhen` until this release. Use `visibleWhen`. Rename the key; the value (a CEL predicate) is unchanged. Where a component writes both, `visibleWhen` is the one that was in effect: delete `visibility`.
+  
+  **No tool makes the rename.** Both conversions belong to protocol 15, below the migration floor, so `os migrate meta --from 17` applies no edit for either key and `--write` writes none: it prints each written key among the refusals the migrated stack still has, and lists the D3 entry `ui-visibility-alias-keys-retired` as the hand edit.
+  
+  **Stored metadata needs no edit.** Stored-row rehydration and the artifact-ingestion door inside its window still replay both conversions, so a `sys_metadata` view or page row written with the old key keeps loading with `visibleWhen`. A script that saves a view or page through the metadata API with the old key is refused and needs the same rename.
+  
+  ## The retirement kit
+  
+  - **Tombstones** on `FormFieldSchema`, `FormSectionSchema` and `PageComponentSchema`; `RETIRED_KEYS_BY_MAJOR[18]`: `ui/FormField:visibleOn`, `ui/FormSection:visibleOn`, `ui/PageComponent:visibility`; the authorable-surface rows read `[RETIRED]`.
+  - **The fold is gone.** The three shapes are plain closed objects again (no `.transform` pipe): a section's group-reference rule no longer lists `visibleOn` (the tombstone answers it first), and a slotted page node's `type` refusal now arrives at its own path instead of nested in an `invalid_union`.
+  - **The D3 entry `ui-visibility-alias-keys-retired`**, one for both keys.
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  `@objectstack/lint`: the visibility-predicate rules (`visibility-root-mislayered`, `visibility-bare-identifier`, `visibility-predicate-syntax`) and the predicate-path rules read `visibleWhen` only. `os validate`, `os build`, `os verify`, `defineStack` and the metadata save door parse first and refuse either retired key by name, so a body they judge cannot carry one. `os lint` is the one door that hands these rules an unparsed stack: there a predicate written under a retired key is not judged, by design — the parsing doors refuse the key itself, and `os lint` reports no refused shape.
+  
+  `@objectstack/metadata-core`: `detectUnboundFormViewPredicateRoots` reads `visibleWhen` only. Its caller scans an artifact after `applyArtifactForwardConversions`, which renames a legacy `visibleOn` first.
+  
+  Not part of it: `normalizeVisibleWhen` and `VISIBILITY_ALIAS_KEYS` stay exported (no schema here calls them any more); objectui's renderer reads of the old keys leave on the objectui side.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered ui-visibility-alias-keys-retired -->
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [6422da5]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [a65a59b]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/sdui-parser@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Minor Changes
+
+- 4e0838d: fix(spec,lint)!: an `objectExtensions` entry that leaves a `controlled_by_parent` object with anything but one required `master_detail` is refused, as the same object declared directly already was (#23210)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: registered cbp-extension-merged-master-refused -->
+  
+  **BREAKING** (an accept-set narrowing on a published authoring surface), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0055 §1: a `controlled_by_parent` object derives its master from exactly one `master_detail` field declared `required: true`. `ObjectSchema` refuses an object that declares anything else, and so does the security-posture lint. Neither looked at the object the runtime actually runs: at boot the registry merges every `objectExtensions` entry onto its target, field by field, so an extension could add a second required `master_detail`, or demote the one master. `defineStack`, `os validate` and the lint passed the stack, and the runtime then derived no master: every read of the object denied, every write refused with `422 INVALID_METADATA`.
+  
+  **What is refused, and where.**
+  
+  - **`@objectstack/spec`.** `ObjectStackDefinitionSchema` (so `defineStack`, `os validate`, `os build`, the lint scorer and an artifact load) judges the rule on the merged field set of every `controlled_by_parent` object that an `objectExtensions` entry of the same stack extends. In a multi-package artifact (`packages[]`), an extension in any package judges an object any package declares. The merge is read as the registry computes it: fields by name, a later writer replacing the whole field, extensions in ascending `priority`. The issue sits at the `fields` of the extension that wrote the deciding field (`objectExtensions.0.fields`, or `packages.0.manifest.objectExtensions.0.fields`), with the message the same object gets when declared directly. `defineStack` throws `STACK_SCHEMA_INVALID` (422) carrying it.
+  - **`@objectstack/lint`.** `security-controlled-by-parent-ambiguous-relation` and `security-controlled-by-parent-no-relation` judge the same merged shape and report it at the same extension, in the words of the declared object's finding.
+  
+  No export, signature or error code is added or removed.
+  
+  ## FROM → TO
+  
+  | stack | FROM | TO |
+  |:--|:--|:--|
+  | `objects: [{ name: 'cbpx_line', sharingModel: 'controlled_by_parent', fields: { header: { type: 'master_detail', reference: 'cbpx_header', required: true } } }, …]`, `objectExtensions: [{ extend: 'cbpx_line', fields: { other: { type: 'master_detail', reference: 'cbpx_other', required: true } } }]` | accepted; at runtime the object derived no master and failed closed | refused at `objectExtensions.0.fields`: "Object 'cbpx_line' declares sharingModel 'controlled_by_parent' with 2 required `master_detail` fields (`header`, `other`)…" |
+  | the same object, extended with `fields: { header: { type: 'master_detail', reference: 'cbpx_header', required: false } }` | accepted; no master at runtime | refused at `objectExtensions.0.fields`: "…but no required `master_detail` field…" |
+  | an artifact built before this change that carries either shape | loaded; the object failed closed | refused at load; rebuild it from the corrected source |
+  
+  **Remedy, in one line.** In the extension, drop the second master or declare it `type: 'lookup'`, and never redeclare the object's master with `required: false` or another type.
+  
+  **Unchanged.**
+  
+  - An extension adding any non-master field (a `lookup` to another parent included) to a `controlled_by_parent` object.
+  - An extension whose target the stack does not declare: another package's object, or the platform's. It is not judged, and the runtime's fail-closed refusal remains the backstop there.
+  - An object already refused as declared is reported once, at the object.
+  - In a multi-package artifact, a target on which two packages write one field at the same `priority`: the winner is the order the artifact loader registers them in, which the parse does not compute, so it is not judged.
+  - Stored `sys_metadata` rows: an extension is merged only when a stack or an artifact registers, so no stored row carries the shape and none is rewritten.
+  - The step-18 entry `cbp-extension-merged-master-refused` carries the prescription for `os migrate meta`. It is asked only of a stack that declares `objectExtensions`.
+- 54af6c0: feat(lint): export the dataset dimension leg's group-key classifier, so a consumer asks the lint instead of composing the analytics door's two predicates itself (#23235)
+  
+  Clause-②: yes
+  
+  `@objectstack/lint` now exports `groupKeyClassOf(shape)` and its result type `GroupKeyClass`:
+  
+  - `groupKeyClassOf(shape)` answers "may a dataset or cube dimension group by a column declared this way?". `null` means yes: the column stores one scalar value, and the analytics door serves it as a group key. Otherwise it names the JSON-stored class the door refuses with `400 INVALID_FIELD`: `'structured-json'` (a type in `STRUCTURED_JSON_TYPES`) or `'multi-value'` (`isMultiValueField`: `multiselect`, `checkboxes`, `tags`, or a multi-capable type such as `select` declared `multiple: true`). The two spec predicates are applied in the door's order.
+  - `shape` is `ValueShapeFieldDef` from `@objectstack/spec/data`, the slice of a field definition the predicates read (`type`, `multiple`). A declared `Field` passes as it is. The classifier reads no object graph: for a dotted path, pass the leaf field's definition.
+  
+  A consumer that derives dataset dimensions keeps a field as a group key when `groupKeyClassOf(field) === null`, and gets the lint's own verdict. The `dimension-json-stored-field-refused` rule (dataset dimensions and cube dimensions) keeps calling the same function; on the rule's own fixtures, every declared field type with and without `multiple: true` and every column of the cube fixture, the export and the rule agree on the verdict and the class. The rule's findings, paths and texts are unchanged.
+  
+  No export is removed, and no accepted or refused shape changes.
+- 301eec6: feat(spec)!: retire the object's `externalSharingModel` — the external org-wide default no principal ever read (#23268)
+  
+  **BREAKING** — `externalSharingModel` on an object (`ObjectSchema`, the `object` metadata type) is now refused at parse. ADR-0090 D11 declared it as a second org-wide default for portal and partner principals, and nothing ever evaluated it: no request resolves an external principal, and the authorization kernel's `EXTERNAL` rung (ADR-0095 / ADR-0099) admits explicitly shared rows only, never an org-wide default. Setting `externalSharingModel: 'private'` hid nothing from anyone. Delete the key. `sharingModel` is the one org-wide default; a principal reaches a row it does not own through an explicit share (a manual share or a sharing rule), and an anonymous reader through a share link (`publicSharing`, unchanged).
+  
+  Clause-②: no (narrowing)
+  
+  Measured before removal, at `e4ec6ec1a`: no row-pipeline reader in any package. The key's only readers were authoring checks of its own ordering against `sharingModel` — the publish linter's alias and wider-than-internal branches, and the `plugin-security` posture gate's env-tighten comparison — plus the Studio console's object settings select (a separate console change). The only authored instances in this repository were two showcase objects.
+  
+  ## FROM → TO
+  
+  | you wrote (17.7 and earlier) | write instead |
+  | --- | --- |
+  | `externalSharingModel: 'private'` (or `'public_read'`, `'public_read_write'`, `'controlled_by_parent'`) on an object | nothing — delete the key; share rows explicitly where an outside principal needs them |
+  | `import { SECURITY_EXTERNAL_WIDER } from '@objectstack/lint'` | nothing — the rule `security-external-wider-than-internal` is removed with the key it judged |
+  
+  **The one-line fix:** delete `externalSharingModel` from every object.
+  
+  **What an author who still writes it sees.** `tsc` fails at the authoring site (`ObjectSchema` types the key as retired), and the parse — `ObjectSchema.create()`, `defineStack({ objects })`, `PUT /api/v1/meta/object/:name` (draft saves included) — refuses it at its own path with the prescription:
+  
+  > `object.externalSharingModel` was removed in @objectstack/spec 18 (ADR-0049 enforce-or-remove) — it never had an effect: no request resolves an external principal, and the external rung of the authorization kernel (ADR-0095) admits explicitly shared rows only, never an org-wide default, so the value changed no answer for anyone. Delete the key. `sharingModel` is the one org-wide default; a principal reaches a row it does not own through an explicit share, and an anonymous reader through a share link (`publicSharing`). Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.
+  
+  ## The retirement kit
+  
+  - **A `retiredKey()` tombstone** on `ObjectSchema`, a `strictObject` — so the refusal carries the prescription rather than a bare unknown-key report, and `tsc` fails first. `RETIRED_KEYS_BY_MAJOR[18]`: `data/Object:externalSharingModel`.
+  - **The D2 conversion `object-external-sharing-model-removed`** (protocol 18, retired from the load path) deletes the key from every `objects[]` entry, one notice per object, as a lossless delete. Studio's object settings offered the select and `PUT /api/v1/meta/object` persisted it until this release, so a stored `object` row can carry it; the rehydration seams replay this conversion over stored rows, and `os migrate meta --stored` lists the rows that carry it before the upgrade.
+  - **The D3 entry `object-external-sharing-model-retired`** asks the author whether anything they built assumed the key kept outside users away from an object's rows. Nothing ever enforced that.
+  - **Ledger:** the row goes `planned` → `dead`, kept as a tombstone row (a tombstone keeps the key in the walked shape).
+  - **No deprecation window**, per the project's startup-stage posture.
+  
+  **`@objectstack/lint`:** the `security-external-wider-than-internal` rule and its exported `SECURITY_EXTERNAL_WIDER` id are removed, and `security-owd-alias` no longer reads `externalSharingModel`; the parse refuses the key on every parsed door. On an unparsed intake (`os lint` on a raw config) the ledger-driven advisory reports it as `liveness-dead-property`.
+  
+  **`@objectstack/plugin-security`:** the object posture gate's env-tighten-only rule (R1) compares `sharingModel` alone; the external half left with the key.
+  
+  ⚠️ **The out-of-repo consumer population is NOT MEASURED.** `@objectstack/spec` is published, so this is breaking for consumers no telemetry was consulted for.
+  
+  <!-- adr-0087: registered object-external-sharing-model-removed, object-external-sharing-model-retired -->
+- d0c09e4: The metadata save door runs the two page component rules that `objectstack validate`, `objectstack build` and `objectstack lint` run. A page saved through Studio, REST `/meta` or an MCP/AI author whose components carry an undeclared, wrong-typed or retired property (`component-props-unknown-key`, `component-props-invalid`), or a component `type` inside a spec-reserved namespace that the platform does not declare (`component-type-unknown`), is refused with `422 INVALID_METADATA`, and each issue carries the fix the CLI already prints. Before, the save answered `200` and the renderer ignored the property or drew a placeholder.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (already-registered element-data-source-and-object-block-filter-rule-array, element-flat-data-binding-retired, element-text-variant-heading-subheading-retired, ui-action-group-menu-member-params-array-only, ui-action-group-menu-members-typed, ui-object-block-grouping-config-typed, ui-object-form-custom-fields-typed, ui-object-form-fields-names-typed, ui-object-form-members-typed, ui-object-form-sections-typed, ui-object-gantt-markers-typed, ui-object-grid-columns-typed, ui-object-grid-export-options-closed, ui-object-grid-kanban-calendar-list-members-typed, ui-object-grid-page-size-positive-integer-refused, ui-object-grid-row-members-typed, ui-object-kanban-conditional-formatting-typed, ui-object-map-gantt-tree-navigation-typed, ui-object-master-detail-form-details-closed, ui-object-metric-aggregate-trend-typed, ui-object-metric-compare-to-typed, ui-object-metric-drill-down-report-typed, ui-object-metric-drill-down-typed, ui-object-timeline-items-typed, ui-object-timeline-mapping-typed, ui-record-line-items-props-closed) Every props shape the save door now refuses was declared, and each narrowing of one recorded in its own D3 entry, before this change; the entries named here are the step's narrowings whose refusal the component-props gate carries, and this diff amends each one whose text said a stored page still saves, to say its next save meets that gate at the metadata save door. The change moves an existing rule onto one more door; it removes no key and rewrites no shape, so it adds no entry and no conversion: nothing on the load path refuses a page. -->
+  
+  **BREAKING**: an accept-set narrowing on the metadata save door (`PUT /api/v1/meta/page/:name`, the draft promotion `POST /api/v1/meta/page/:name/publish`, the package publish, and every in-process `saveMetaItem` caller on an environment's authoring channel), shipped as `minor` under the launch-window convention for accept-set narrowings (`.changeset/pre.json` is open in `next` pre mode).
+  
+  **The next save of a stored page whose components carry an undeclared, wrong-typed or retired property, or a reserved-namespace type the platform does not declare, is refused with the fix; stored pages keep serving until then.** The door judges writes only: a stored page row is not re-judged at boot, loads and is served as before, and a draft save is not judged until it is published.
+  
+  ## FROM → TO
+  
+  | you saved | the door now answers | write instead |
+  |:--|:--|:--|
+  | `page:header` with `properties: { titel: 'Deals' }` | `422`, `component-props-unknown-key` at `…properties.titel`, offering `title` | `properties: { title: 'Deals' }` |
+  | `record:related_list` with `properties: { limit: 'five' }` | `422`, `component-props-invalid`, naming the expected type | `properties: { limit: 5 }` |
+  | a component typed `page:headr` | `422`, `component-type-unknown`: "Rename `page:headr` → `page:header`." | `type: 'page:header'` |
+  | a component typed `acme:pipeline_board` (outside the reserved namespaces) | unchanged: saved | nothing |
+  
+  **The one-line fix: apply what the issue names, then save again.** If a component really does read the key, the props row in `@objectstack/spec` is what is wrong, not the page.
+  
+  **Who is affected.** A deployment whose stored pages carry such a finding: those pages keep loading and serving, and only their next save is refused until the finding is fixed. `objectstack migrate meta --stored` does not list these findings. The authored pages measured when the props findings became errors (37 pages in this repository and 8 in `objectstack-ai/hotcrm`) carried none, and the in-repo page corpus carries no `component-type-unknown` finding; deployed rows were not measured. The two former ADR-0087 D2 aliases on page component properties, `page:header` `description` (write `subtitle`) and an `element:button` inline `type: 'api'` action's object `params` (write `bodyExtra`), are retired from the load path at 18 and refused at every door with the rename (`objectstack validate`, load, and this save door), so the save door and `objectstack validate` agree on them.
+  
+  The `@objectstack/spec` change is text only: the reason of each D3 migration entry named above (and the matching step-18 summaries) said a stored page still saves and loads, and now says it still loads and that its next save meets the component-props gate at the metadata save door.
+- 30b0fc2: fix(lint)!: a permission set's field-permission key with an empty object part (`'.FIELD'`) is refused as unqualified, at `os validate` and at the metadata save door alike (#23549)
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No metadata moves: no spec key, authorable spelling, export or stored shape is added, removed, renamed or re-shaped, and no stored row is rewritten or converted, so there is nothing for `objectstack migrate meta` to rewrite. What narrows is a lint verdict, and with it the accept set of the save door that runs the lint: a `fields` key whose object part is empty is now refused where it was accepted. No ledger entry can derive the repair, because an empty object part does not say which object the author meant; the repair is the author's edit of the key. A stored set holding such a key keeps loading until its next ordinary publish-mode save, which is judged; the `os migrate meta --stored --apply` pass, when it re-saves such a row for another conversion, does so unjudged (the gate exempts `source: 'migrate-stored'`), and the row keeps loading. The other categories are closed on facts: the package publishes (not unpublished); no ADR-0087 id covers this verdict and none is added (not registered or already-registered); and nothing exported is removed or narrowed (not runtime-interface-only, type-surface-only or runtime-export-retired). -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A permission set's `fields` map is keyed `OBJECT.FIELD`, and the security plugin applies a set's field rules to an object by the key prefix `OBJECT.` (`PermissionEvaluator.getFieldPermissions`). A key whose object part is empty, such as `'.full_name'`, matches no object, because no object name can be empty, so the mask it declares never enforces: the field stays exactly as readable and editable as the object-level grant leaves it, for every holder of the set.
+  
+  **What changes for `'.FIELD'`.**
+  
+  - Before this change, both field-permission rules let the key through. `security-fls-unqualified-key` skipped every key containing a `.`, and `security-fls-unknown-field` read the empty object part as another package's object and did not judge it. `os validate`, `os build` and `os lint` passed the stack, and the metadata save door stored the set with `success: true`.
+  - Now `security-fls-unqualified-key` reports it, at `error`: a key is object-qualified only when it has a non-empty object part before its first `.`. The finding sits at `permissions[N].fields[".FIELD"]`. Its message says the object part before the first `.` is empty, and its fix line names the `'<object>.<field>'` form, with an example that keeps the remainder as the field when it is one plain name. `security-fls-unknown-field` no longer considers the shape, so each such key earns exactly one finding. The same holds for `'.'`, `'..FIELD'` and `'.FIELD.MORE'`.
+  - At the save door, a `permission` write in publish mode on the environment authoring channel that carries such a key now answers `422 INVALID_METADATA`, with one `security-fls-unqualified-key` issue. This covers `PUT /api/v1/meta/permission/:name` (and `saveMetaItem` in publish mode), the promotion of a draft (`publishMetaItem`), and every other publish-mode save through `saveMetaItem` on that channel: cloning a permission set, `duplicatePackage`, the import of an unmanaged package and the organization-ownership ceremony. A kernel assembled on the `package-author` authoring channel skips this gate; the author-time CLI doors above judge that channel's source instead.
+  - An `os migrate meta --stored --apply` re-save is not judged: the gate exempts `source: 'migrate-stored'`, so a stored set holding such a key is rewritten into the current dialect unjudged, is not reported `failed`, and keeps loading. Its next ordinary publish-mode save is judged.
+  
+  **Remedy.** Put the object's name before the `.`, so `'.full_name'` becomes `'crm_account.full_name'` for the object whose field it masks. Saving the set as a draft (`mode: 'draft'`) is still allowed, because drafts are never gated; publishing that draft is judged.
+  
+  **Unchanged.**
+  
+  - A qualified key naming a real field (`OBJECT.FIELD`) is accepted as before.
+  - A key naming an object this stack does not define, such as `no_such_object.x` or `no_such_object.`, is still not judged, because another installed package may declare that object.
+  - A bare key (`full_name`) is refused under `security-fls-unqualified-key` with the same message and fix line as before; an empty or dangling remainder on an object of this stack (`crm_account.`, `crm_account.owner.name`) is refused under `security-fls-unknown-field` as before.
+  - Stored rows are not migrated by this change, and they are not refused on read or at boot: the save door judges new writes only. A set stored before this change keeps loading until its next ordinary publish-mode save, which is judged; an `os migrate meta --stored --apply` re-save is not (above).
+  - `OS_ALLOW_UNLINTED_METADATA_WRITES=1` still turns a refusal into a logged write.
+  - No rule id, error code, export or signature is added or removed. `PermissionSetSchema` is unchanged.
+  - Measured before this change: no permission set in this repository's examples, templates, skills or fixtures carries a `fields` key that starts with `.`.
+
+### Patch Changes
+
+- c911ab6: fix(lint): the 11 dashboard widget-binding rule ids print a `fix:` line of one remedy sentence, and `os explain RULE_ID` carries what those lines used to explain
+  
+  Clause-②: no
+  
+  - **Shorter fix lines.** Each finding of these 11 rule ids (all in `validate-widget-bindings.ts`) now carries a `hint` (the CLI's `fix:` line, the runtime issue's `hint`) of one remedy sentence of at most 200 characters on every variant the lint suite fires (the lengths here are the `hint` alone; the CLI prints it after `fix: `). The longest of each, before → after:
+    - dashboard filters: `dashboard-filter-field-unprovisioned` (561 → 177), `dashboard-filter-field-unknown` (403 → 148) and `dashboard-filter-field-not-included` (218 → 144);
+    - widget filters: `widget-filter-field-unknown` (322 → 133);
+    - refused `chartConfig` keys: `chart-field-unknown` (415 → 152);
+    - empty selections: `chart-measures-missing` (369 → 144), `widget-measures-missing` (330 → 154) and `chart-dimensions-missing` (291 → 161);
+    - legacy analytics keys: `widget-legacy-analytics-shape` (338 → 113) and `widget-legacy-analytics-unrenderable` (320 → 105);
+    - tables: `table-count-only` (311 → 136).
+  - **Lists are no longer echoed.** `dashboard-filter-field-unknown` and `widget-filter-field-unknown` no longer append the object's whole field list, and `dashboard-filter-field-not-included` no longer lists the dataset's declared `include` paths: the verdict's (or, on a bare dashboard-filter field, the fix line's own) "Did you mean" names the nearest field. The three empty-selection ids still name what the dataset declares, because no "Did you mean" can: at most three names, then `…`, or "it declares no measures yet".
+  - **One line, one remedy.** The `suppressWarnings` clause leaves every warning's fix line, and with it: how DatasetWidget reads a dataset-bound widget; that a dotted filter target must traverse relationship fields and have its prefix in `include`, and that `a.b` includes `a`; how to vouch for or opt out of an unprovisioned anchor (`dashboard-filter-field-unprovisioned` now prints the shared one-line anchor fix the other anchor ids print); what replaces each refused `chartConfig` key, and the `os migrate meta --from 17` route; which widget families need no dimensions; and why a flat record listing is not an analytics dataset (ADR-0017).
+  - **`os explain RULE_ID` carries the rest.** What the fix lines stopped saying is each id's `RULE_EXPLANATIONS` entry in `@objectstack/lint`, which `os explain RULE_ID` prints. Two ids gain an entry, so their `rule:` line now carries the `os explain` pointer: `table-count-only` and `widget-legacy-analytics-shape`. Seven existing entries gain text.
+  - **At the runtime publish gate** (Studio, REST `PUT /api/v1/meta`, and the MCP and AI authors that write through that door), all 11 fire on a `dashboard` write; the `hint` FROM → TO, measured at the door:
+    - 422 `issues[].hint`: `widget-legacy-analytics-unrenderable` 320 → 105; `dashboard-filter-field-unknown` 196 / 195 / 290 → 148 / 147 / 137 (an inherited bare field, a re-targeted bare field, a dotted path); `dashboard-filter-field-not-included` 213 → 139; `widget-filter-field-unknown` 220 → 126;
+    - 2xx `advisories[].hint`: `widget-legacy-analytics-shape` 338 → 112; `dashboard-filter-field-unprovisioned` 550 → 173; `chart-field-unknown` 413 / 294 / 324 → 150 / 124 / 127 (an x-axis, a y-axis, a series); `chart-measures-missing` 240 → 96; `widget-measures-missing` 310 → 134; `chart-dimensions-missing` 297 → 156; `table-count-only` 311 → 136.
+  
+    Studio's save-advisory toast prints an advisory's `hint` after its message, so the seven advisories shorten there; Studio renders no 422 issue's `hint`. No Studio, REST or MCP reader in this repository or in objectui matches on `hint` text; a tool that did should match on `rule` and `path` instead.
+  - **Unchanged:** every `message` (the verdict), rule id, severity and `path`, and what each rule accepts or refuses.
+- fba3712: fix(lint): `page-field-unknown` judges each of a `record:related_list`'s bindings against its own object, so a `dataSource`-bound list no longer reports its parent-side `relationshipValueField` as missing from the child (#23207)
+  
+  Clause-②: no
+  
+  - **Child refs** (`columns`, `sort`, `filter`, `relationshipField`, `add.linkField`) resolve against the node-level `dataSource.object` when the list binds its rows that way, else against `properties.objectName`. Before, they resolved only against `properties.objectName`, so a `dataSource`-bound list's child columns went unchecked.
+  - **The parent ref** (`relationshipValueField`) resolves against the list's `parentDataSource.object` when it declares one, else against the object the list inherits (its container's binding, else the page object). Before, a `dataSource`-bound list checked it against the child, which gave a false `field "…" is not a field on object "CHILD"` warning on a field of the parent.
+  - **Severity is unchanged.** These findings stay warnings, so default `os validate`, `os lint` and `os build` accept every stack they accepted before. Under `--strict`, which treats warnings as errors, a `dataSource`-bound list with a misspelled child column can now fail a stack that used to pass, because that column was not checked before. To fix it, correct the column name to a field of `dataSource.object`.
+  - `WalkedComponent` (from `walkPageComponents`) gains an optional `inheritedObject`: the object a component inherits before its own `dataSource.object` / `properties.object` override. `objectName` is unchanged.
+- 5547ad4: feat(spec): export the `controlled_by_parent` exactly-one-master predicate, so a producer asks the spec instead of restating ADR-0055 §1 (#23272)
+  
+  Clause-②: yes
+  
+  `@objectstack/spec/data` now exports the predicate `ObjectSchema` already refuses with:
+  
+  - `controlledByParentMasterRefusal(objectName, sharingModel, fields)` answers "does this object satisfy the exactly-one-master rule?". `undefined` means yes, or that the rule does not apply (another sharing model, or no field map). Otherwise it returns the refusal: the parse issue's `path` (`fields` or `sharingModel`), its `message`, the object's `shape` (`several-required-masters`, `several-masters`, `master-not-required`, `required-lookup-only` or `no-master`), and the `master_detail` and required `lookup` fields it declares. Types: `ControlledByParentMasterRefusal`, `ControlledByParentMasterShape`.
+  - `isControlledByParentMasterField(field)` answers "does this field count as the master?": a `master_detail` field declared `required: true`, and nothing else. The object satisfies the rule when exactly one of its fields counts.
+  
+  A producer that defaults an object to `controlled_by_parent` asks `controlledByParentMasterRefusal(name, 'controlled_by_parent', fields) === undefined` with the field map it is about to write. The answer is the parse's: on every shape the v18 upgrade lists, the export and `ObjectSchema` agree on the verdict, the issue path and the message.
+  
+  `@objectstack/lint`: `security-controlled-by-parent-no-relation` and `security-controlled-by-parent-ambiguous-relation` count masters with the exported field predicate instead of their own copy. Their findings, paths and texts are unchanged. A `master_detail` that names no `reference` still does not count for the lint.
+  
+  No export is removed, and no accepted or refused shape changes.
+- c5dd7fc: feat(spec)!: the page kind `jsx` is retired — an authored `kind: 'jsx'` is refused with the prescription naming `html`, and `page-kind-jsx-to-html` leaves the load path
+  
+  Clause-②: yes (narrowing)
+  
+  **BREAKING (authoring):** `jsx` was the first name of the constrained-JSX page tier (ADR-0080), which ADR-0081 renamed `html`. Through 17 it stayed a declared `PageSchema.kind` member and the loader rewrote an authored `kind: 'jsx'` to `html` with a notice. At 18 it is retired: `PageSchema.kind` declares it through `enumWithRetiredValues`, so it is refused by name at `os validate`, `os build`, the metadata save door and `defineStack`, so under `os lint` too when the config calls it: "Page `kind: 'jsx'` was removed in @objectstack/spec 18 (ADR-0087 D2) … Use `kind: 'html'`." Writing it in TypeScript no longer compiles either. The ADR-0087 D2 conversion `page-kind-jsx-to-html` is retired from the load path (`retiredAfter: '17.7.0'`), so the authoring funnel no longer rewrites the value. `COMPILED_PAGE_KINDS` is now `['html']`: `requires` is accepted on an `html` page only.
+  
+  Migration:
+  
+  - `kind: 'jsx'` → `kind: 'html'`. Change the value; the page's `source` is compiled and rendered exactly as before, and `requires` stays legal on it.
+  - A script or integration that saves a page through the metadata API with `kind: 'jsx'` → send `kind: 'html'`.
+  
+  `os migrate meta` does not list this edit: the rename belongs to protocol 11, below the migration floor, so make it by hand. The D3 entry `page-kind-jsx-retired` states it for upgraders.
+  
+  Stored metadata needs no edit. Every stored-row rehydration seam replays the retired conversion, so a `sys_metadata` page row written as `jsx` keeps loading as an `html` page, and a built artifact whose declared protocol floor is at or below `17.7.0` is still converted at the artifact-ingestion door.
+  
+  The readers that branched on the retired value dropped it: the metadata save door's html-page compile gate (`@objectstack/metadata-protocol`), the CLI's SDUI-manifest page count, and the lint page walk, `validateJsxPages` and the page-source styling rule (`@objectstack/lint`) now read `html` (and `react` where they did before) only.
+  
+  `@objectstack/platform-objects` publishes the Studio page form's `source` help text in four locales (`en`, `zh-CN`, `ja-JP`, `es-ES`); it no longer names `jsx`.
+  
+  <!-- adr-0087: registered page-kind-jsx-retired -->
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/sdui-parser@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Major Changes

@@ -5,6 +5,7 @@ import { claimOrphanOrgRows } from './claim-orphan-org-rows.js';
 import type { OrgScopingEngine } from './org-scoping-engine.js';
 import { createEnsureDefaultOrganizationOnce, isDefaultOrganizationBootstrapTrigger } from '@objectstack/plugin-auth';
 import { claimOrgSeedOwnership } from './claim-org-seed-ownership.js';
+import { SEED_SETTLEMENT_SERVICE, type ISeedSettlementService } from '@objectstack/spec/contracts';
 import { assertWalledMembershipPolicyDeclared } from './membership-policy-gate.js';
 import {
   organizationsObjects,
@@ -22,6 +23,26 @@ import {
  * tests that register plain values. Returns `undefined` when the service is
  * not registered either way — callers decide how loudly that matters.
  */
+/**
+ * [#23354] The rows an organization's seed replay landed on, per object —
+ * read through the published `seed-settlement` contract, bound to the
+ * organization the owner bind is claiming for. `undefined` when no host
+ * publishes the reading; `claimOrgSeedOwnership` then re-owns nothing, because
+ * a NULL-owner row it cannot name as seeded keeps no owner (ADR-0138 D1).
+ */
+function readSeededRecordIds(
+  ctx: PluginContext,
+  organizationId: string,
+): ((objectName: string) => readonly string[]) | undefined {
+  try {
+    const svc = (ctx as any).getService?.(SEED_SETTLEMENT_SERVICE) as ISeedSettlementService | undefined;
+    if (!svc || typeof svc.seededRecordIds !== 'function') return undefined;
+    return (objectName: string) => svc.seededRecordIds!(objectName, organizationId);
+  } catch {
+    return undefined;
+  }
+}
+
 async function resolveKernelService(kernel: any, name: string): Promise<any> {
   if (typeof kernel?.getServiceAsync === 'function') {
     try {
@@ -485,7 +506,14 @@ export class OrganizationsPlugin implements Plugin {
       // binding anyone, so a removed owner's membership stays removed.
       const ensureOnce = createEnsureDefaultOrganizationOnce({
         logger: ctx.logger,
-        claimSeedOwnership: claimOrgSeedOwnership,
+        // [#23354] The claim re-owns only the rows the organization's seed
+        // replay landed on — which ran moments earlier, inside the
+        // `sys_organization` insert that created it (Middleware B above).
+        claimSeedOwnership: (engine, organizationId, ownerUserId, claimOptions) =>
+          claimOrgSeedOwnership(engine, organizationId, ownerUserId, {
+            ...claimOptions,
+            seededRecordIds: readSeededRecordIds(ctx, organizationId),
+          }),
       });
       const runEnsure = async () => {
         try {

@@ -14,12 +14,23 @@ import { describe, expect, it } from 'vitest';
 import { normalizeStackInput } from '@objectstack/spec';
 import { ComponentPropsMap } from '@objectstack/spec/ui';
 import {
-  validateComponentProps,
+  validateComponentProps as validateComponentPropsUnrecorded,
   COMPONENT_PROPS_UNKNOWN_KEY,
   COMPONENT_PROPS_INVALID,
   DATA_SOURCE_BOUND_ELEMENT_TYPES,
 } from './validate-component-props.js';
 import { runAuthoringRules, AUTHORING_RULES } from './authoring-rules.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Slice 21: every finding this file fires is recorded, and the block at
+// the foot of the file holds each recorded `component-props-invalid` `fix:` line
+// to one line of at most 200 characters.
+const fired: Array<{ rule: string; hint: string; where: string }> = [];
+const validateComponentProps: typeof validateComponentPropsUnrecorded = (...args) => {
+  const findings = validateComponentPropsUnrecorded(...args);
+  fired.push(...findings);
+  return findings;
+};
 
 type AnyRec = Record<string, unknown>;
 
@@ -90,6 +101,25 @@ describe('validateComponentProps — undeclared keys', () => {
       expect(f.severity).toBe('error');
       expect(f.path).toBe('pages[0].regions[0].components[0].properties.breadcrumb');
       expect(f.message).toContain('`page:header` property `breadcrumb` was removed in @objectstack/spec 17');
+    }
+  });
+
+  // #23650 — `PageHeaderProps.showStar` is a retiredKey tombstone, the
+  // `breadcrumb` route one key over: the reference console draws no star, and
+  // the record's favorites entry is the header's ⋯ menu. It replaces the
+  // acceptance this file used to pin for `showStar: false` (#6776, below).
+  it('refuses a retired page-header `showStar` as an error carrying the prescription, for `true` and `false`', () => {
+    for (const showStar of [true, false]) {
+      const findings = validateComponentProps(
+        stackWith([{ type: 'page:header', properties: { title: 'T', showStar, showCopyId: false } }]),
+      );
+      expect(findings, `showStar: ${showStar}`).toHaveLength(1);
+      const [f] = findings;
+      expect(f.rule).toBe('component-props-invalid');
+      expect(f.severity).toBe('error');
+      expect(f.path).toBe('pages[0].regions[0].components[0].properties.showStar');
+      expect(f.message).toContain('`page:header` property `showStar` was removed in @objectstack/spec 18');
+      expect(f.message).toContain('the record\'s favorites entry is the header\'s ⋯ menu, and metadata does not control it');
     }
   });
 
@@ -535,7 +565,9 @@ describe('validateComponentProps — value verdicts', () => {
         // objectui `apps/console/src/preview-samples.ts:68` verbatim — the
         // measured warning site, on a non-record page.
         { type: 'page:header', properties: { title: 'Welcome to the CRM', recordChrome: false } },
-        { type: 'page:header', properties: { title: 'Lead', showStar: false, showCopyId: false } },
+        // `showStar` left this shape at 18 (#23650, a tombstone now refused
+        // below); its live sibling stays.
+        { type: 'page:header', properties: { title: 'Lead', showCopyId: false } },
         { type: 'page:accordion', properties: { items: [], variant: 'card' } },
         { type: 'page:tabs', properties: { tabStyle: 'card', items: [] } },
       ]),
@@ -1162,11 +1194,17 @@ describe('validateComponentProps — record:alert / record:quick_actions / recor
  * open-string-arm types — never in `PageComponentType` — so nothing else
  * judged them either), and the walker's unregistered-type skip swallowed the
  * whole props bag: any authored key produced ZERO findings from
- * validate/build. Their rows are strict and EMPTY — measured from the
- * renderers' read points at the `.objectui-sha` pin, where both registrations
- * discard the schema node (`() => <Widget />`) — so EVERY authored key is a
- * finding. Remove either map row and its loud test here goes back to that
- * silence.
+ * validate/build. `cloud-connection:panel`'s row is strict and EMPTY —
+ * measured from the renderer's read points at the `.objectui-sha` pin, where
+ * the registration discards the schema node (`() => <Widget />`) — so EVERY
+ * authored key is a finding. Remove the map row and its loud test here goes
+ * back to that silence.
+ *
+ * #24230 — `marketplace:installed-list` is RETIRED by name (its one renderer
+ * was deleted with the separate Installed Apps view). Its row is kept as a
+ * whole-bag refusal, so the same dispatch now refuses EVERY bag, `{}` included,
+ * as `component-props-invalid`; the type rule reports the node too (the
+ * map-driven `flags %s` case in `validate-component-types.test.ts`).
  */
 describe('validateComponentProps — cloud-connection:panel / marketplace:installed-list are dispatched (#11575)', () => {
   it('reports any key authored on `cloud-connection:panel`, naming the zero-prop surface', () => {
@@ -1183,25 +1221,19 @@ describe('validateComponentProps — cloud-connection:panel / marketplace:instal
     expect(findings[0].message).toContain('cloud-connection:panel');
   });
 
-  it('reports any key authored on `marketplace:installed-list` the same way', () => {
-    const findings = validateComponentProps(
-      stackWith([{
-        type: 'marketplace:installed-list',
-        properties: { filter: 'installed' },
-      }]),
-    );
-    expect(findings).toHaveLength(1);
-    expect(findings[0].rule).toBe(COMPONENT_PROPS_UNKNOWN_KEY);
-    expect(findings[0].where).toBe('page "probe_page" · marketplace:installed-list');
-    expect(findings[0].message).toContain('`filter`');
+  it('refuses the retired `marketplace:installed-list` bag WHOLE, `{}` included, as an error', () => {
+    for (const properties of [{}, { filter: 'installed' }]) {
+      const findings = validateComponentProps(
+        stackWith([{ type: 'marketplace:installed-list', properties }]),
+      );
+      expect(findings.map((f) => [f.rule, f.severity])).toEqual([[COMPONENT_PROPS_INVALID, 'error']]);
+      expect(findings[0].where).toBe('page "probe_page" · marketplace:installed-list');
+    }
   });
 
-  it('stays silent on the empty bag both plugin-shipped pages author', () => {
+  it('stays silent on the empty bag the cloud-connection page authors', () => {
     const findings = validateComponentProps(
-      stackWith([
-        { type: 'cloud-connection:panel', properties: {} },
-        { type: 'marketplace:installed-list', properties: {} },
-      ]),
+      stackWith([{ type: 'cloud-connection:panel', properties: {} }]),
     );
     expect(findings).toEqual([]);
   });
@@ -1296,5 +1328,56 @@ describe('validateComponentProps — record:line_items is dispatched (#21142)', 
       stackWith([{ ...fieldKeyed, properties: { ...fieldKeyed.properties, columns } }]),
     );
     expect(findings).toEqual([]);
+  });
+});
+
+// [#22161] Slice 21: the `fix:` line of a value the props schema rejects is one
+// remedy line. Where the props schema lives, that the page — not the schema — is
+// what to fix in almost every case, and the retired-key and node-binding cases
+// are the id's `os explain` entry. The retired-key and binding lines were one
+// remedy each already, and are unchanged.
+describe('[#22161] one-line fix — component-props-invalid', () => {
+  const GENERAL = (type: string) =>
+    `Give \`${type}\` a value its props schema accepts (the verdict names what it expects), or correct the ` +
+    'schema if the component really honours what is written.';
+
+  it('a wrong-typed prop prints the one remedy line', () => {
+    const findings = validateComponentProps(
+      stackWith([{ type: 'object-grid', properties: { objectName: 'task', pageSize: 'ten' } }]),
+    );
+    expect(findings.map((f) => [f.rule, f.hint])).toEqual([[COMPONENT_PROPS_INVALID, GENERAL('object-grid')]]);
+  });
+
+  it('every `fix:` line the cases in this file fired is one line of at most 200 characters', () => {
+    const converted = fired.filter((f) => f.rule === COMPONENT_PROPS_INVALID);
+    // Coverage control: the general line, the retired-key line and the
+    // node-binding line all fired.
+    expect(converted.some((f) => f.hint.startsWith('Give `'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Apply the prescription above'))).toBe(true);
+    expect(converted.some((f) => f.hint.startsWith('Name the object on the component node'))).toBe(true);
+    for (const f of converted) {
+      expect(f.hint).not.toContain('\n');
+      expect(f.hint.length, f.hint).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('each line that names its type still fits for the longest type `ComponentPropsMap` declares', () => {
+    // The two lines that interpolate the type, measured from a fired sample
+    // and re-measured at the longest key: a type the map grows past the bound
+    // turns this red rather than printing a second line.
+    const longest = Math.max(...Object.keys(ComponentPropsMap).map((t) => t.length));
+    for (const lead of ['Give `', 'Apply the prescription above']) {
+      const sample = fired.find((f) => f.rule === COMPONENT_PROPS_INVALID && f.hint.startsWith(lead))!;
+      const type = sample.where.slice(sample.where.indexOf('· ') + 2);
+      expect(sample.hint, lead).toContain(`\`${type}\``);
+      expect(sample.hint.length - type.length + longest, lead).toBeLessThanOrEqual(200);
+    }
+  });
+
+  it('`os explain component-props-invalid` carries what the `fix:` line no longer says', () => {
+    const text = explainRule(COMPONENT_PROPS_INVALID)!.paragraphs.join('\n');
+    for (const fact of ['`ComponentPropsMap`', '`@objectstack/spec/ui`', 'declaration and the renderer agree', 'never a schema change']) {
+      expect(text, fact).toContain(fact);
+    }
   });
 });

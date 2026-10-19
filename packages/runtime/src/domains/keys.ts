@@ -48,8 +48,10 @@ import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 import { postureEnforcesWall } from '@objectstack/spec/security';
 
 import { generateApiKey } from '../security/api-key.js';
+import { buildApiError } from '../error-envelope.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
 import type { DomainHandlerDeps, DomainRoute } from '../domain-handler-registry.js';
+import { readDispatchedBody } from '../deferred-request-body.js';
 
 const DAY_MS = 86_400_000;
 
@@ -63,6 +65,12 @@ const EXPIRY_CEILING_SKEW_MS = 60_000;
 
 /** [#23367] The ceiling refusal, as its wire pair (ADR-0112 ledger, `@objectstack/runtime`). */
 const API_KEY_EXPIRY_TOO_LONG = { code: 'API_KEY_EXPIRY_TOO_LONG', status: 400 } as const;
+
+/**
+ * The one method this domain serves, on every path it claims (the handler
+ * never reads the path): the `Allow` value of its 405.
+ */
+const KEYS_ALLOWED_METHODS = 'POST';
 
 /**
  * The legacy branch matched `=== '/keys' || startsWith('/keys/') ||
@@ -107,9 +115,30 @@ export async function handleKeysRequest(
             response: deps.error(ANONYMOUS_DENY_MESSAGE, ANONYMOUS_DENY_STATUS, { code: ANONYMOUS_DENY_CODE }),
         };
     }
+    // [#24151] The body is read once the baseline above has admitted the
+    // caller, never ahead of it (`../deferred-request-body.ts`).
+    body = readDispatchedBody(body);
 
     if (method !== 'POST') {
-        return { handled: true, response: deps.error('Method not allowed', 405) };
+        // RFC 9110 §15.5.6: a 405 MUST carry an `Allow` header naming the
+        // target resource's supported methods. Hand-rolled rather than
+        // `deps.error(...)` only for that header, which `deps.error` cannot
+        // carry — the shape `domains/mcp.ts`, `domains/meta.ts` and
+        // `domains/ai.ts` already answer with. The BODY still goes through the
+        // one builder, so its code stays DERIVED from the status
+        // (`METHOD_NOT_ALLOWED`) and is not spelled here. Below the anonymous
+        // baseline above, so an anonymous caller never reaches this answer.
+        return {
+            handled: true,
+            response: {
+                status: 405,
+                headers: { Allow: KEYS_ALLOWED_METHODS },
+                body: {
+                    success: false,
+                    error: buildApiError({ message: 'Method not allowed', httpStatus: 405 }),
+                },
+            },
+        };
     }
 
     // ── Whitelist the body. Only `name` and optional `expires_at`. ──

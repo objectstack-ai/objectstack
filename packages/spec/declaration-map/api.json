@@ -547,6 +547,8 @@
     "PackageExportManifestSchema": "api/PackageExportManifest",
     "PackageInstallBody": "api/PackageInstallBody",
     "PackageInstallBodySchema": "api/PackageInstallBody",
+    "PackageInstallManifest": "api/PackageInstallManifest",
+    "PackageInstallManifestSchema": "api/PackageInstallManifest",
     "PackageInstallRequest": "api/PackageInstallRequest",
     "PackageInstallRequestSchema": "api/PackageInstallRequest",
     "PackageInstallResponse": "api/PackageInstallResponse",

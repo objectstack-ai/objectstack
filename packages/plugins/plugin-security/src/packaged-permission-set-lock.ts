@@ -334,8 +334,8 @@ export class PackagedPermissionSetLockedError extends Error {
   readonly userMessage: string;
   constructor(name: string, packageId: string, _operation: 'insert' | 'update') {
     super(
-      `[Security] Permission set '${name}' is declared by package '${packageId}' and is locked in this `
-      + `environment — editing it here would silently fork it from the package, and the fork would win over `
+      `[Security] Permission set '${name}' is declared by package '${packageId}' and is locked — `
+      + `editing it here would silently fork it from the package, and the fork would win over `
       + `every future upgrade with no signal. `
       + `Clone it instead (the "Clone" action on the permission set, or POST `
       + `/api/v1/security/permission-sets/${name}/clone with a new name) and edit the clone — the clone is your organization's own set, and upgrades keep `
@@ -360,7 +360,7 @@ export class PackagedPermissionSetProvenanceUnknownError extends Error {
   readonly userMessage: string;
   constructor(name: string, reason: string) {
     super(
-      `[Security] Permission set '${name}' cannot be saved right now: this environment could not determine `
+      `[Security] Permission set '${name}' cannot be saved right now: this system could not determine `
       + `whether the set is declared by an installed package (${reason}). The save is refused rather than `
       + `accepted, because accepting it would silently fork a packaged set if it turns out to be one. Retry `
       + `once the metadata layer is readable; if you meant to customize a packaged set, clone it instead.`,

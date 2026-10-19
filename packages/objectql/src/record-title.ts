@@ -123,6 +123,10 @@ function toTitle(value: unknown): string | undefined {
  * `undefined` when the object declares no title pointer, when the pointed-at
  * field is absent from the record, or when a formula title did not evaluate.
  * Never the record's id — see this module's header.
+ *
+ * [#24197] Synchronous, so it serves no hop: a title formula that reads
+ * through a reference (`record.book.title`) answers `undefined` here. A caller
+ * holding a read channel calls {@link resolveServedRecordTitle} instead.
  */
 export function resolveRecordTitle(
   schema: unknown,
@@ -139,6 +143,67 @@ export function resolveRecordTitle(
   if (computed !== undefined) return toTitle(computed);
 
   return toTitle(record[field]);
+}
+
+/**
+ * The channel {@link resolveServedRecordTitle} evaluates a formula title on —
+ * `ScopedContext.serveFormulaField`, the body's own `ctx.api`.
+ */
+export interface FormulaServingChannel {
+  serveFormulaField(objectName: string, record: Record<string, unknown>, field: string): Promise<unknown>;
+}
+
+/**
+ * [#24197] This record's title, with a formula title SERVED as a read serves
+ * it: the one hop a title formula reads through a reference field
+ * (`record.book.title + ' · ' + record.reader.name`) is read on `channel`,
+ * under the channel's own identity and permissions.
+ *
+ * The asynchronous sibling of {@link resolveRecordTitle}, for a record no read
+ * returned — a hook's in-flight state, whose foreign keys may name records the
+ * stored row does not. {@link resolveRecordTitle} stays synchronous and serves
+ * no hop, so over lookups it answers `undefined`; this answers the title a read
+ * of the same state shows the same caller, and `undefined` wherever that read
+ * shows none (a related record missing or not readable, a second hop).
+ *
+ * Same two shapes and the same absence rules as {@link resolveRecordTitle}:
+ * the formula leg first, the stored column when the pointer is not a formula,
+ * never the record's id.
+ */
+export async function resolveServedRecordTitle(
+  schema: unknown,
+  record: Record<string, unknown> | null | undefined,
+  channel: FormulaServingChannel,
+): Promise<string | undefined> {
+  const field = titleFieldOf(schema);
+  if (!field || !record || typeof record !== 'object') return undefined;
+  const objectName = (schema as { name?: unknown }).name;
+  if (typeof objectName !== 'string' || !objectName) return undefined;
+
+  const computed = await channel.serveFormulaField(objectName, record, field);
+  if (computed !== undefined) return toTitle(computed);
+
+  return toTitle(record[field]);
+}
+
+/**
+ * [#24197] The title of a row a READ returned, as that read served it.
+ *
+ * A read (`find` / `findOne`) already materialized the row's formula fields,
+ * its one-hop title included, under the reader's own permissions — so the
+ * title is the value on the row, read and never re-derived. Re-deriving it
+ * with the synchronous {@link resolveRecordTitle} would throw a served
+ * one-hop title away (that evaluator reads no hop) and answer `undefined`, and
+ * would compute a title field-level security removed from the row. A row with
+ * no value under the title pointer has no title, as the read shows none.
+ */
+export function servedRecordTitle(
+  schema: unknown,
+  row: Record<string, unknown> | null | undefined,
+): string | undefined {
+  const field = titleFieldOf(schema);
+  if (!field || !row || typeof row !== 'object') return undefined;
+  return toTitle(row[field]);
 }
 
 /** Where a related record's title has to be read from. */

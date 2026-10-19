@@ -1,0 +1,8 @@
+{
+  "file": "packages/rest/src/meta-item-read-routes.ts",
+  "adrs": [
+    "ADR-0106",
+    "ADR-0046"
+  ],
+  "invariant": "The `/meta` per-item read doors, moved here whole from `rest-server.ts` (#23050 slice 13b): the reverse reference sweep (`GET {metaPath}/:type/:name/references`), the layered read (`/layers`), the book tree (`GET {metaPath}/book/:name/tree`) and the item read (`GET {metaPath}/:type/:name`), mounted under the per-item switch and inside the umbrella's guarded registration. ADR-0106 — every exit that serves an object schema resolves the caller's field-visibility posture once, before the fetch, and serves fetch → mask → send through it: the layered read and the item read's layered, cached and uncached branches alike. The shared cache keeps one full schema per item and varies per caller only by that projection and by the caller's visibility fingerprint folded into the ETag, so one caller's 304 never answers another; a posture that cannot be determined is served private and no-store, never under a shared validator. ADR-0046 — the book tree is answered whole by the shared book-tree answer, behind the docs-audience gate, so a book reaches only a caller its audience admits. A schema exit that skips the projection, a validator that ignores the caller's visibility, or a book tree served around the audience gate is the drift these records forbid; the bodies' own comments carry each citation."
+}

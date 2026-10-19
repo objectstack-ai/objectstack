@@ -48,14 +48,14 @@ anchors are:
 | Group (anchor id) | Filled by |
 |:---|:---|
 | **Overview** (`group_overview`) | System Overview dashboard — `platform-objects` |
-| **Apps** (`group_apps`) | Packages — `platform-objects`; marketplace — `cloud-connection` (capability plugin) |
+| **Apps** (`group_apps`) | Packages — `platform-objects`; marketplace and [Cloud Connection](/docs/deployment/cloud-connection) — `cloud-connection` (capability plugin) |
 | **People & Organization** (`group_people_org`) | Users · Organization · Business Units · Teams · Organizations · Invitations — `platform-objects` |
 | **Access Control** (`group_access_control`) | Positions / Permission Sets — `plugin-security`; Sharing Rules / Record Shares — `plugin-sharing`; API Keys — `platform-objects` |
 | **Approvals** (`group_approvals`) | Approvals Inbox (the `approvals:inbox` component) · Requests · Action History · Delegations (OOO) — `plugin-approvals` |
 | **Configuration** (`group_configuration`) | All Settings · Localization · Company · Branding · Authentication · Email · File Storage · AI & Embedder · Knowledge · Feature Flags — `platform-objects` |
-| **Diagnostics** (`group_diagnostics`) | Sessions · Notification Events — `platform-objects`; Audit Logs · Audit Log Browser — `plugin-audit` |
+| **Diagnostics** (`group_diagnostics`) | Sessions · Notification Events — `platform-objects`; Audit Log — `plugin-audit` |
 | **Integrations** (`group_integrations`) | `plugin-webhooks` |
-| **Advanced** (`group_advanced`) | OAuth Applications · Identity Links · User Preferences — `platform-objects` |
+| **Advanced** (`group_advanced`) | OAuth Applications — `platform-objects` |
 
 The exact rendered menu depends on which capability plugins are loaded.
 A few notable entries:
@@ -75,10 +75,13 @@ A few notable entries:
   (`sys_verification` and `sys_device_code` are likewise deliberately absent:
   sensitive, ephemeral secrets — not browsable, and also `private`. All three
   are pinned in `setup-nav-dead-key-tombstone.test.ts`.)
-- **Audit Logs** (`sys_audit_log`) — contributed by `plugin-audit` into
-  `group_diagnostics`. (The `sys_activity` and `sys_comment` objects also
-  live in `plugin-audit`, but they are not contributed as Setup nav
-  entries.)
+- **Audit Log** (the console's `audit:log` page) — contributed by
+  `plugin-audit` into `group_diagnostics`. It is the one audit entry: the
+  page filters `sys_audit_log` by action, object, actor and date, offers the
+  object's list views (Writes, Auth, Record Views, …) as presets, and links
+  to the object list ("Open as list"), which has no menu entry of its own.
+  (The `sys_activity` and `sys_comment` objects also live in `plugin-audit`,
+  but they are not contributed as Setup nav entries.)
 
 ### When a contribution names an anchor that is not there
 

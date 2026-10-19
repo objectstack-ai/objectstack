@@ -2,8 +2,8 @@
   "description": "Shrink-only ledger of every PUBLISHED JSON Schema that is STILL WIDER than the Zod type it was generated from, because a rule written as `.refine()` reaches the runtime and not the file (#18670). `z.toJSONSchema()` has no arm for a `custom` check: a plain record, the same record with a `.refine()`, and the same record with an ABORTING `.refine()` all project byte-identically (measured on zod 4.4.3, the version packages/spec resolves). So a document one of these files ACCEPTS can still be refused at parse time, and an author -- or an AI -- validating against packages/spec/json-schema/** finds out a release later. Each `sites` path is a position under that schema at which a refinement is dropped; the same paths are written onto the artifact itself as `x-dropped-refinements`. Item 2 closed the first patterns: a refinement DECLARED through the closed list in src/shared/refinement-projection.ts is emitted into the published file, reads `projected` rather than `dropped`, and its row LEAVES this ledger in the same PR -- which is why the ledger shrinks and never grows on a repair. Every refinement outside that closed list stays here, and adding an arm to the list is a public-contract decision, not a refactor. Hand-edited on purpose and with no `gen:` script: a generator would let a new gap be admitted by running a command instead of by a decision, which is the silence this ledger exists to end. Adding, removing or moving a site fails packages/spec/scripts/build-schemas.ts until the line moves with it, and the failure prints the corrected entry in full. ⛔ Do not delete or weaken a refinement to shorten this file -- the runtime rule is correct; it is the projection that is silent, and the remedy is to teach the closed list a NAMED pattern, never to drop the rule.",
   "measured": {
     "zod": "4.4.3",
-    "publishedSchemasWithDroppedRefinements": 234,
-    "droppedRefinementSites": 759,
+    "publishedSchemasWithDroppedRefinements": 240,
+    "droppedRefinementSites": 781,
     "refinementSitesThatDidProject": 369,
     "refinementSitesWithNoJsonFormToCompare": 0
   },
@@ -29,6 +29,11 @@
         "filter.lazy"
       ]
     },
+    "ai/BlueprintView": {
+      "sites": [
+        "filters.element"
+      ]
+    },
     "ai/Skill": {
       "sites": [
         "triggerConditions.element"
@@ -41,7 +46,8 @@
     },
     "ai/SolutionBlueprint": {
       "sites": [
-        "objects.element.fields.element.summaryOperations.filter.lazy"
+        "objects.element.fields.element.summaryOperations.filter.lazy",
+        "views.element.filters.element"
       ]
     },
     "ai/StructuredOutputConfig": {
@@ -78,6 +84,7 @@
         "manifest.datasets.element.include.element",
         "manifest.datasets.element.measures.element",
         "manifest.datasets.element.measures.element.filter",
+        "manifest.datasources",
         "manifest.datasources.element",
         "manifest.flows.element",
         "manifest.flows.element.errorHandling",
@@ -89,12 +96,13 @@
         "manifest.navigationContributions.element.items.element.lazy.options[0]",
         "manifest.objectExtensions.element",
         "manifest.objects.element",
+        "manifest.objects.element.defaultRowScope",
         "manifest.objects.element.fieldGroups",
         "manifest.objects.element.fields.out.valueType",
         "manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "manifest.objects.element.lifecycle",
         "manifest.pages.element",
-        "manifest.pages.element.slots.header.options[0].in.type",
+        "manifest.pages.element.slots.header.options[0].type",
         "manifest.permissions.element.objects.valueType.out",
         "manifest.permissions.element.rowLevelSecurity.element",
         "manifest.reports.element",
@@ -108,7 +116,7 @@
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
         "manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "manifest.views.element.form",
-        "manifest.views.element.form.sections.element.in",
+        "manifest.views.element.form.sections.element",
         "manifest.views.element.form.submitBehavior.options[1].url",
         "manifest.views.element.list",
         "manifest.views.element.list.bulkActionDefs.element",
@@ -194,6 +202,7 @@
         "data.options[1].manifest.datasets.element.include.element",
         "data.options[1].manifest.datasets.element.measures.element",
         "data.options[1].manifest.datasets.element.measures.element.filter",
+        "data.options[1].manifest.datasources",
         "data.options[1].manifest.datasources.element",
         "data.options[1].manifest.flows.element",
         "data.options[1].manifest.flows.element.errorHandling",
@@ -204,12 +213,13 @@
         "data.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.options[1].manifest.objectExtensions.element",
         "data.options[1].manifest.objects.element",
+        "data.options[1].manifest.objects.element.defaultRowScope",
         "data.options[1].manifest.objects.element.fieldGroups",
         "data.options[1].manifest.objects.element.fields.out.valueType",
         "data.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "data.options[1].manifest.objects.element.lifecycle",
         "data.options[1].manifest.pages.element",
-        "data.options[1].manifest.pages.element.slots.header.options[0].in.type",
+        "data.options[1].manifest.pages.element.slots.header.options[0].type",
         "data.options[1].manifest.permissions.element.objects.valueType.out",
         "data.options[1].manifest.permissions.element.rowLevelSecurity.element",
         "data.options[1].manifest.reports.element",
@@ -220,7 +230,7 @@
         "data.options[1].manifest.sharingRules.element.sharedWith",
         "data.options[1].manifest.skills.element.triggerConditions.element",
         "data.options[1].manifest.views.element.form",
-        "data.options[1].manifest.views.element.form.sections.element.in",
+        "data.options[1].manifest.views.element.form.sections.element",
         "data.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.options[1].manifest.views.element.list",
         "data.options[1].manifest.views.element.list.bulkActionDefs.element",
@@ -252,7 +262,7 @@
     "api/GetUiViewResponse": {
       "sites": [
         "form",
-        "form.sections.element.in",
+        "form.sections.element",
         "form.subforms.element.columns.element",
         "form.submitBehavior.options[1].url",
         "list",
@@ -300,6 +310,7 @@
         "options[1].manifest.datasets.element.include.element",
         "options[1].manifest.datasets.element.measures.element",
         "options[1].manifest.datasets.element.measures.element.filter",
+        "options[1].manifest.datasources",
         "options[1].manifest.datasources.element",
         "options[1].manifest.flows.element",
         "options[1].manifest.flows.element.errorHandling",
@@ -310,12 +321,13 @@
         "options[1].manifest.jobs.element.schedule.options[0].timezone",
         "options[1].manifest.objectExtensions.element",
         "options[1].manifest.objects.element",
+        "options[1].manifest.objects.element.defaultRowScope",
         "options[1].manifest.objects.element.fieldGroups",
         "options[1].manifest.objects.element.fields.out.valueType",
         "options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "options[1].manifest.objects.element.lifecycle",
         "options[1].manifest.pages.element",
-        "options[1].manifest.pages.element.slots.header.options[0].in.type",
+        "options[1].manifest.pages.element.slots.header.options[0].type",
         "options[1].manifest.permissions.element.objects.valueType.out",
         "options[1].manifest.permissions.element.rowLevelSecurity.element",
         "options[1].manifest.reports.element",
@@ -329,7 +341,7 @@
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.description",
         "options[1].manifest.translations.element.valueType.flows.valueType.screens.valueType.title",
         "options[1].manifest.views.element.form",
-        "options[1].manifest.views.element.form.sections.element.in",
+        "options[1].manifest.views.element.form.sections.element",
         "options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "options[1].manifest.views.element.list",
         "options[1].manifest.views.element.list.bulkActionDefs.element",
@@ -361,6 +373,7 @@
         "data.packages.element.options[1].manifest.datasets.element.include.element",
         "data.packages.element.options[1].manifest.datasets.element.measures.element",
         "data.packages.element.options[1].manifest.datasets.element.measures.element.filter",
+        "data.packages.element.options[1].manifest.datasources",
         "data.packages.element.options[1].manifest.datasources.element",
         "data.packages.element.options[1].manifest.flows.element",
         "data.packages.element.options[1].manifest.flows.element.errorHandling",
@@ -371,11 +384,13 @@
         "data.packages.element.options[1].manifest.jobs.element.schedule.options[0].timezone",
         "data.packages.element.options[1].manifest.objectExtensions.element",
         "data.packages.element.options[1].manifest.objects.element",
+        "data.packages.element.options[1].manifest.objects.element.defaultRowScope",
         "data.packages.element.options[1].manifest.objects.element.fieldGroups",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType",
         "data.packages.element.options[1].manifest.objects.element.fields.out.valueType.inlineColumns.element",
         "data.packages.element.options[1].manifest.objects.element.lifecycle",
         "data.packages.element.options[1].manifest.pages.element",
+        "data.packages.element.options[1].manifest.pages.element.slots.header.options[0].type",
         "data.packages.element.options[1].manifest.permissions.element.objects.valueType.out",
         "data.packages.element.options[1].manifest.permissions.element.rowLevelSecurity.element",
         "data.packages.element.options[1].manifest.reports.element",
@@ -386,7 +401,7 @@
         "data.packages.element.options[1].manifest.sharingRules.element.sharedWith",
         "data.packages.element.options[1].manifest.skills.element.triggerConditions.element",
         "data.packages.element.options[1].manifest.views.element.form",
-        "data.packages.element.options[1].manifest.views.element.form.sections.element.in",
+        "data.packages.element.options[1].manifest.views.element.form.sections.element",
         "data.packages.element.options[1].manifest.views.element.form.submitBehavior.options[1].url",
         "data.packages.element.options[1].manifest.views.element.list",
         "data.packages.element.options[1].manifest.views.element.list.bulkActionDefs.element",
@@ -416,6 +431,7 @@
         "data.actions.element.in.ai.outputSchema",
         "data.actions.element.in.onSuccess",
         "data.actions.element.in.params.element.in",
+        "data.defaultRowScope",
         "data.fieldGroups",
         "data.fields.out.valueType",
         "data.fields.out.valueType.inlineColumns.element",
@@ -434,6 +450,11 @@
     "api/PackageInstallBody": {
       "sites": [
         "options[1].navigationContributions.element.items.element.lazy.options[0]"
+      ]
+    },
+    "api/PackageInstallManifest": {
+      "sites": [
+        "navigationContributions.element.items.element.lazy.options[0]"
       ]
     },
     "api/PackageInstallRequest": {
@@ -864,6 +885,7 @@
         "actions.element.in.ai.outputSchema",
         "actions.element.in.onSuccess",
         "actions.element.in.params.element.in",
+        "defaultRowScope",
         "fieldGroups",
         "fields.out.valueType",
         "fields.out.valueType.inlineColumns.element",
@@ -1082,6 +1104,11 @@
         "sharedWith"
       ]
     },
+    "security/DefaultRowScope": {
+      "sites": [
+        ""
+      ]
+    },
     "security/ExplainRequest": {
       "sites": [
         ""
@@ -1145,6 +1172,7 @@
         "operations.element.options[3].object.actions.element.in.ai.outputSchema",
         "operations.element.options[3].object.actions.element.in.onSuccess",
         "operations.element.options[3].object.actions.element.in.params.element.in",
+        "operations.element.options[3].object.defaultRowScope",
         "operations.element.options[3].object.fieldGroups",
         "operations.element.options[3].object.fields.out.valueType",
         "operations.element.options[3].object.lifecycle",
@@ -1165,6 +1193,7 @@
         "object.actions.element.in.ai.outputSchema",
         "object.actions.element.in.onSuccess",
         "object.actions.element.in.params.element.in",
+        "object.defaultRowScope",
         "object.fieldGroups",
         "object.fields.out.valueType",
         "object.fields.out.valueType.inlineColumns.element",
@@ -1211,6 +1240,7 @@
         "options[3].object.actions.element.in.ai.outputSchema",
         "options[3].object.actions.element.in.onSuccess",
         "options[3].object.actions.element.in.params.element.in",
+        "options[3].object.defaultRowScope",
         "options[3].object.fieldGroups",
         "options[3].object.fields.out.valueType",
         "options[3].object.lifecycle",
@@ -1422,13 +1452,13 @@
     },
     "ui/FormSection": {
       "sites": [
-        "in"
+        ""
       ]
     },
     "ui/FormView": {
       "sites": [
         "",
-        "sections.element.in",
+        "sections.element",
         "subforms.element.columns.element",
         "submitBehavior.options[1].url"
       ]
@@ -1594,31 +1624,47 @@
       "sites": [
         "",
         "interfaceConfig.emptyState.link.url",
-        "interfaceConfig.filterBy.element",
-        "slots.header.options[0].in.type"
+        "record.filter.element",
+        "slots.header.options[0].type"
       ]
     },
     "ui/PageComponent": {
       "sites": [
-        "in.dataSource.options[0].filter.element",
-        "in.type"
+        "dataSource.options[0].filter.element",
+        "type"
+      ]
+    },
+    "ui/PageRecordBinding": {
+      "sites": [
+        "filter.element"
       ]
     },
     "ui/PageRegion": {
       "sites": [
-        "components.element.lazy.in.dataSource.options[0].filter.element",
-        "components.element.lazy.in.type"
+        "components.element.lazy.dataSource.options[0].filter.element",
+        "components.element.lazy.type"
       ]
     },
     "ui/RecordDetailsProps": {
       "sites": [
+        "emptyState.link.url",
         "sections.element"
+      ]
+    },
+    "ui/RecordHighlightsProps": {
+      "sites": [
+        "emptyState.link.url"
       ]
     },
     "ui/RecordLineItemsProps": {
       "sites": [
         "columns.element",
         "filter.element"
+      ]
+    },
+    "ui/RecordQuickActionsProps": {
+      "sites": [
+        "emptyState.link.url"
       ]
     },
     "ui/RecordRelatedListProps": {
@@ -1648,7 +1694,7 @@
     "ui/View": {
       "sites": [
         "form",
-        "form.sections.element.in",
+        "form.sections.element",
         "form.subforms.element.columns.element",
         "form.submitBehavior.options[1].url",
         "list",
@@ -1677,7 +1723,7 @@
         "options[0].config.kanban.groupByField",
         "options[0].config.timeline.groupByField",
         "options[1].config",
-        "options[1].config.sections.element.in",
+        "options[1].config.sections.element",
         "options[1].config.subforms.element.columns.element",
         "options[1].config.submitBehavior.options[1].url"
       ]
@@ -1693,7 +1739,7 @@
         "options[0].config.kanban.groupByField",
         "options[0].config.timeline.groupByField",
         "options[1].config",
-        "options[1].config.sections.element.in",
+        "options[1].config.sections.element",
         "options[1].config.subforms.element.columns.element",
         "options[1].config.submitBehavior.options[1].url"
       ]

@@ -261,12 +261,15 @@ describe('#7134 what the save path must NOT change', () => {
     it('[#20051] a form authored with canonical `sections` is stored as authored — no section default, no `sharing.enabled`, no undeclared key', async () => {
         // Re-judged at stage (iv): was "stored byte-identical", with an
         // `isPinned` the form member does not declare riding along. The parse
-        // adds `collapsible` / `collapsed` / `columns` to the section and
-        // `enabled: false` to `sharing`; ruling B stores none of them (ADR-0087's
-        // `storable` rule), and the undeclared `isPinned` is dropped.
+        // adds `collapsible` / `collapsed` to the section and `enabled: false`
+        // to `sharing`; ruling B stores none of them (ADR-0087's `storable`
+        // rule), and the undeclared `isPinned` is dropped. A section's `columns`
+        // has no default: undeclared, the parse adds no key (the renderer picks
+        // the density by available width).
         const authored = flatForm({ sections: [SECTION], isPinned: true });
         const parsed = (ViewMetadataSchema as any).parse(authored);
-        expect(parsed.sections[0]).toMatchObject({ collapsible: false, collapsed: false, columns: 1 });
+        expect(parsed.sections[0]).toMatchObject({ collapsible: false, collapsed: false });
+        expect('columns' in parsed.sections[0]).toBe(false);
         expect(parsed.sharing.enabled).toBe(false);
         const body = await storedViewBody('contact_us', authored);
         const { isPinned: _dropped, ...declared } = authored as Record<string, unknown>;
@@ -613,16 +616,17 @@ describe('[#20051] stage (iv): a saved view stores the parsed value of every key
         expect(stored.filter).toEqual([{ field: 'status', operator: 'not_equals', value: 'done' }]);
     });
 
-    it('a key moved inside a moved key is stored under its canonical spelling, with no default beside it', async () => {
-        // Two levels of key move: `groups` → `sections`, and within each section
-        // and field `visibleOn` → `visibleWhen`. Neither graft covered the
-        // second; the projection finds both by re-parsing, so the stored row
-        // keeps the predicates and drops the section / field defaults.
+    it('a key normalised inside a moved key is stored with its parsed value, with no default beside it', async () => {
+        // `groups` → `sections` moves the bucket, and inside it each section and
+        // field predicate normalises to its envelope. (Until 18 the inner level
+        // was a key move too — `visibleOn` → `visibleWhen` — which retired with
+        // the key, #23543 F4.) The stored row keeps the parsed predicates and
+        // drops the section / field defaults.
         const stored = await storedViewBody('contact_us', flatForm({
             groups: [{
                 label: 'About you',
-                visibleOn: 'record.stage == "open"',
-                fields: ['name', { field: 'email', visibleOn: 'record.opted_in == true' }],
+                visibleWhen: 'record.stage == "open"',
+                fields: ['name', { field: 'email', visibleWhen: 'record.opted_in == true' }],
             }],
         }));
         expect(stored).not.toHaveProperty('groups');

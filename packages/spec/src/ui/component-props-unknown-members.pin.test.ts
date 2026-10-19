@@ -65,7 +65,7 @@
  *
  * ## The STAGED reason is debt, not a verdict — and the debt is paid
  *
- * A `staged` member WAS read with a fixed shape at the `.objectui-sha` pin, its
+ * A `staged` member WAS read with a fixed shape by its renderer, its
  * reader cited on its line, and typing it was a later stage of #21464's
  * close-out (the census found more than one reviewable PR's worth), each stage
  * preceded by its own census of authored writers. The ledger could only lose
@@ -191,7 +191,7 @@ type Reason =
    */
   | { readonly kind: 'opaque'; readonly ruling: string; readonly why: string }
   /**
-   * Read with a fixed shape at the pin (`reader`); typing it is a named later
+   * Read with a fixed shape by a renderer (`reader`); typing it is a named later
    * stage. A `fork` line also names the viable shapes no ruling has chosen
    * between (`shapes`).
    */
@@ -232,9 +232,8 @@ const SLOT: Reason = { kind: 'slot' };
 const RUNNER: Reason = { kind: 'runner' };
 
 /**
- * `ObjectUI` source paths are at the `.objectui-sha` pin `89cad75d55`, except
- * the S-final stage's line (the timeline entry's `content`), read at the
- * `.objectui-sha` pin `2e818d0b51ec`.
+ * The objectui read points a line's reason rests on are recorded in
+ * `liveness/page.json`, row `regions`.
  */
 const LEDGER = new Map<string, Reason>();
 const on = (types: readonly string[], paths: readonly string[], reason: Reason): void => {
@@ -248,7 +247,9 @@ const on = (types: readonly string[], paths: readonly string[], reason: Reason):
 // whose values are a `records` line below
 // (`component-action-row-declarative-update.test.ts`).
 const ACTION_RUNNER_PATHS = ['params', 'bodyExtra', 'bodyShape', 'toast', 'resultDialog'];
-const VIEW_DATA_TYPES = ['object-grid', 'object-map', 'object-gantt', 'object-tree'];
+// [#22444] `list-view` is the list view itself, so its `data` member is the
+// same view data source by reference.
+const VIEW_DATA_TYPES = ['object-grid', 'object-map', 'object-gantt', 'object-tree', 'list-view'];
 
 // Composition slots.
 on(['page:tabs', 'page:accordion'], ['items[].children[]'], SLOT);
@@ -264,7 +265,7 @@ on(['action:group', 'action:menu'], ['actions[].visible.ast', 'actions[].disable
 on(['action:button', 'action:icon'], ['visible.ast', 'disabled.ast'], EXPRESSION_AST);
 on(['record:line_items'], ['columns[].readonlyWhen.ast', 'columns[].requiredWhen.ast'], EXPRESSION_AST);
 on(['object-master-detail-form'], ['details[].columns[].readonlyWhen.ast', 'details[].columns[].requiredWhen.ast'], EXPRESSION_AST);
-on(['object-grid'], ['conditionalFormatting[].condition.ast', 'bulkActionDefs[].visible.ast'], EXPRESSION_AST);
+on(['object-grid', 'list-view'], ['conditionalFormatting[].condition.ast', 'bulkActionDefs[].visible.ast'], EXPRESSION_AST);
 on(['object-kanban'], ['conditionalFormatting[].condition.ast'], EXPRESSION_AST);
 // The S-forms stage: an inline form field (`customFields[]`, and a section's
 // inline entry) and the form view's `{ field }` entry carry the three `*When`
@@ -294,15 +295,15 @@ on(['object-grid', 'object-map', 'object-gantt', 'object-tree'], ['staticData[]'
 on(['object-kanban', 'object-timeline'], ['data[]'], RECORDS);
 on(['object-calendar'], ['data[]', 'staticData[]'], RECORDS);
 on(['object-form', 'object-master-detail-form'], ['initialValues{}', 'initialData{}'], RECORDS);
-on(['object-grid'], ['bulkActionDefs[].patch{}', 'bulkActionDefs[].params[].default'], RECORDS);
+on(['object-grid', 'list-view'], ['bulkActionDefs[].patch{}', 'bulkActionDefs[].params[].default'], RECORDS);
 // A page action row's `patch` is `ActionSchema`'s record of static field
 // values, by reference: each value is one field's.
 on(['action:button', 'action:icon'], ['patch{}'], RECORDS);
 on(['action:group', 'action:menu'], ['actions[].patch{}'], RECORDS);
 // A static board's card is a record row: `id` and `title` are typed, the rest
-// is the row's own values (`plugin-kanban/src/index.tsx:155`, kept verbatim).
+// is the row's own values (the kanban's lane bucketing keeps them verbatim).
 on(['object-kanban'], ['columns[].cards[].*'], RECORDS);
-on(['object-grid'], ['bulkActionDefs[].params[].options[].*'], BULK_OPTION_ENTRY);
+on(['object-grid', 'list-view'], ['bulkActionDefs[].params[].options[].*'], BULK_OPTION_ENTRY);
 on(['object-form'], ['customFields[].summaryOperations.filter{}'], FILTER_CONDITION);
 on(['object-form', 'object-master-detail-form'], ['sections[].fields[].summaryOperations.filter{}'], FILTER_CONDITION);
 // The S-final stage: the drill-down's `report` is `ReportSchema`, by reference,
@@ -313,7 +314,7 @@ on(['object-metric'], ['drillDown.report.runtimeFilter{}', 'drillDown.report.blo
 // The rest, one line each.
 on(['element:definition-list'], ['items[].description'], {
   kind: 'any-value',
-  why: 'shown as-is — a string or number as text, an object as JSON (`components/src/renderers/basic/data-list.tsx:68`, `toText`)',
+  why: 'shown as-is — a string or number as text, an object as JSON (the definition list\'s `toText`)',
 });
 on(['object-grid'], ['pagination.*'], {
   kind: 'open-bag',
@@ -321,8 +322,8 @@ on(['object-grid'], ['pagination.*'], {
 });
 
 // Held opaque by a ruling. A timeline feed entry's `content` is child schema
-// nodes the entry draws below its description (`plugin-timeline/src/renderer.tsx:1659`,
-// `:1716`, `renderChildren`); the ruling on the decision card #21704's fork 4
+// nodes the entry draws below its description (through `renderChildren`); the
+// ruling on the decision card #21704's fork 4
 // (letter B) keeps it unjudged on this row rather than making it a slot
 // position the page walks visit, until a writer appears — the census found
 // none.
@@ -351,8 +352,8 @@ describe('§1 every `z.unknown()` member across ComponentPropsMap is typed, or l
     expect(
       unlisted,
       'A `z.unknown()` member with no recorded reason. A member a renderer reads with a fixed shape is TYPED '
-      + '(by reference where a schema already declares it, otherwise to the renderer\'s read at the '
-      + '`.objectui-sha` pin); a member handed verbatim to a runner keeps `z.unknown()` with that reason in its '
+      + '(by reference where a schema already declares it, otherwise to the renderer\'s read point, recorded in '
+      + '`liveness/page.json` row `regions`); a member handed verbatim to a runner keeps `z.unknown()` with that reason in its '
       + '`.describe()` and a `runner` line here.',
     ).toEqual([]);
   });
@@ -396,7 +397,7 @@ describe('§2 each recorded reason holds', () => {
     expect(silent).toEqual([]);
   });
 
-  it('a `staged` member names a declared stage and a reader at the pin', () => {
+  it('a `staged` member names a declared stage and a reader', () => {
     for (const [key, reason] of entries) {
       if (reason.kind !== 'staged') continue;
       expect(Object.keys(STAGES), key).toContain(reason.stage);

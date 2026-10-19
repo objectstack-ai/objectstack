@@ -5,7 +5,7 @@ import { lazySchema } from '../shared/lazy-schema';
 import { strictObject } from '../shared/strict-object';
 import { MetadataProtectionFields } from '../kernel/metadata-protection.zod';
 import { urlUserinfoUsername } from './driver/common.zod';
-import { resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
+import { RETIRED_DRIVER_ID_GUIDANCE, resolveDriverId, validateDriverConfig } from './driver/config-registry.zod';
 
 /*
  * ── Unknown-key strictness (#4001 data step, closed out by #4410) ───────────
@@ -169,10 +169,32 @@ const RETIRED_READ_REPLICAS =
   + 'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**
+ * The refusal of one retired driver spelling as a regular expression:
+ * `^(?!\s*<spelling>\s*$)` with every letter case-folded, so it reads a value the
+ * way `resolveDriverId` does (surrounding whitespace ignored, case-insensitive)
+ * — and, unlike a refinement, it survives the JSON Schema projection as a
+ * `pattern`. A flag (`/i`) would not: JSON Schema patterns carry none.
+ */
+function refusingSpelling(spelling: string): RegExp {
+  const escaped = spelling.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&');
+  const folded = escaped.replace(/[a-z]/g, (ch) => `[${ch}${ch.toUpperCase()}]`);
+  return new RegExp(`^(?!\\s*${folded}\\s*$)`);
+}
+
+/**
  * Driver Identifier
  * Can be a built-in driver or a plugin-contributed driver (e.g., "com.vendor.snowflake").
+ *
+ * An open namespace, so a `z.string()` — with one closed exception: a spelling
+ * the driver vocabulary RETIRED (`mongo`, at 18) is refused by name, with the
+ * prescription naming its canonical id (`DriverVocabularyEntry.retiredAliases`,
+ * `driver/config-registry.zod.ts`). Data at rest never reaches this refusal:
+ * every stored-row rehydration seam replays `datasource-driver-mongo-to-mongodb`
+ * before it parses.
  */
-export const DriverType = z.string().describe('Underlying driver identifier');
+export const DriverType = Object.entries(RETIRED_DRIVER_ID_GUIDANCE)
+  .reduce((schema, [spelling, guidance]) => schema.regex(refusingSpelling(spelling), guidance), z.string())
+  .describe('Underlying driver identifier');
 export type DriverType = z.input<typeof DriverType>;
 
 /**

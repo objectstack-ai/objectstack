@@ -5,17 +5,17 @@
  * typed: `object-grid` `columns`, `fields`, `selection`, `selectable`,
  * `rowActions`, `bulkActions` and `batchActions`, `object-kanban` `columns`,
  * and `object-calendar` `calendar`. Stage 2 typed eight and held `object-grid`
- * `columns`, because at the `.objectui-sha` pin `89cad75d55` the grid's group
- * headers drew a column's `options`, which the list view's column entry does
- * not declare. objectui `b0bf413` (objectstack-ai/objectui#11544) retired that
- * read: at the `.objectui-sha` pin `ab1879721595` the group-header labels come
- * from the object field's `options` only, so stage 5 types `columns` too.
+ * `columns`, because the grid's group headers then drew a column's `options`,
+ * which the list view's column entry does not declare. objectui `b0bf413`
+ * (objectstack-ai/objectui#11544) retired that read: the group-header labels
+ * now come from the object field's `options` only, so stage 5 types `columns`
+ * too (read points recorded in `liveness/page.json`, row `regions`).
  *
  * ## The defect this file closes
  *
- * Each renderer reads these members with one shape (measured at the
- * `.objectui-sha` pin `89cad75d55`; the read points are in the members'
- * docblocks), and each row declared them `z.unknown()`. So a grid column keyed
+ * Each renderer reads these members with one shape (read points recorded in
+ * `liveness/page.json`, row `regions`), and each row declared them
+ * `z.unknown()`. So a grid column keyed
  * `accessorKey`, an object entry in the grid's `fields`, a `{ name }` entry in
  * `bulkActions`, a kanban lane list mixing objects and strings and a calendar
  * block with no `startDateField` all passed the component-props gate, and the

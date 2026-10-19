@@ -152,9 +152,9 @@ on:
     # platform-checklist watchdog at :51 — 44 minutes after this run starts —
     # plus CodeQL on Mondays. `4,10,16,22` was the obvious alternative and is
     # worse on the same measurement: it drops an 800-request run into the busiest
-    # scheduled hour on this board (04:00 rerun-safety, 04:19 release-coverage
-    # patrol, 04:23 required-set patrol, 04:37 branch reaper on Mondays, 04:41
-    # create-smoke) and shares hour 16 with the required-set patrol.
+    # scheduled hour on this board (04:19 release-coverage patrol, 04:23
+    # required-set patrol, 04:37 branch reaper on Mondays, 04:41 create-smoke)
+    # and shares hour 16 with the required-set patrol.
     #
     # The minute is off the top of the hour on purpose, as in every patrol here:
     # scheduled workflows queue behind everyone else's :00 cron.

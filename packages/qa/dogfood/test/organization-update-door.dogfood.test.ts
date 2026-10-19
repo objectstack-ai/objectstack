@@ -52,7 +52,9 @@
  *    the same reason the PATCH is: the import runner writes each row under the
  *    caller's context, so the D2 guard clamps every row (`timezone` lands,
  *    `name` is stripped; a row carrying only better-auth columns is refused
- *    per row; `treatAsHistorical` does not elevate). Insert / upsert modes
+ *    per row; `treatAsHistorical` does not elevate — since #24348 the door
+ *    refuses that flag outright, `403 PERMISSION_DENIED`, to every caller but
+ *    the system principal). Insert / upsert modes
  *    stay 405, and the conjunct the envelope names is `create`;
  *  - `/auth/me/permissions`, the payload the console renders its edit
  *    affordance from: `clampManagedObjectWrites` reads `userActions.edit` for
@@ -281,11 +283,25 @@ describe('#15873: sys_organization platform-owned columns through PATCH /data/sy
 
   it('import: a row carrying only better-auth columns is refused per row, PERMISSION_DENIED — treatAsHistorical does not elevate', async () => {
     const before = await readOrg(orgId);
-    const res = await stack.apiAs(token, 'POST', '/data/sys_organization/import', {
+    // [#24348] `treatAsHistorical` no longer reaches the rows at all: the door
+    // refuses it, `403 PERMISSION_DENIED`, to every caller but the system
+    // principal — this administrator's session included — before a row is read.
+    const historical = await stack.apiAs(token, 'POST', '/data/sys_organization/import', {
       format: 'json',
       writeMode: 'update',
       matchFields: ['id'],
       treatAsHistorical: true,
+      rows: [{ id: orgId, name: 'Imported Name 2' }],
+    });
+    expect(historical.status).toBe(403);
+    expect(((await historical.json()) as any).error?.code).toBe('PERMISSION_DENIED');
+    expect((await readOrg(orgId)).name).toBe(before.name);
+    // The guard's own verdict on the import path, unchanged: the same row,
+    // without the refused flag, is refused per row.
+    const res = await stack.apiAs(token, 'POST', '/data/sys_organization/import', {
+      format: 'json',
+      writeMode: 'update',
+      matchFields: ['id'],
       rows: [{ id: orgId, name: 'Imported Name 2' }],
     });
     // The import route's contract is a per-row outcome report: the request is

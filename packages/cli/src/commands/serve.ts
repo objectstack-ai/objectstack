@@ -11,6 +11,7 @@ import { mergeBootConfig } from '../utils/merge-boot-config.js';
 import { provisionTelemetryDatasource, standaloneTelemetryPrimary } from '../utils/telemetry-datasource.js';
 import { isHostConfig, shouldBootWithLibrary } from '../utils/plugin-detection.js';
 import { readInternalArtifactPath, readInternalConfigOutputPath } from '../utils/internal-artifact-channel.js';
+import { makeDirectorySync } from '../utils/make-directory.js';
 // The precedence's last rung — whether the cwd config takes part — decided by
 // the SAME predicate the supervisors print their `Config:` row by (#21501).
 import { cwdConfigJoinsBoot } from '../utils/artifact-precedence.js';
@@ -155,6 +156,7 @@ import {
   printServerReady,
   printBootDiagnostics,
   type AutomationReadySummary,
+  type HttpServerComposition,
   type SeedSourceSummary,
 } from '../utils/format.js';
 // [#16630] The reader half of the degraded-boot data path — the kernel's own
@@ -501,6 +503,10 @@ export function formatExhaustedPortSearchNotice(requestedPort: number, cause: un
  * port, all return `requestedPort` — exactly what every channel published
  * before this function existed. This repair may not narrow what boots.
  *
+ * ⚠️ On the first of those — no transport at all — the number names nothing
+ * that listens, so `serve` publishes it on no channel (#23743): the publish
+ * site is gated on {@link resolveHttpServerComposition}, not on this value.
+ *
  * ⛔ `0` is NOT accepted as an ANSWER here, though it is a legal REQUEST: no
  * socket is ever bound to port 0, so a transport reporting it has not listened
  * yet (`HonoHttpServer.getPort()` falls back to its constructor argument until
@@ -510,14 +516,10 @@ export function resolveBoundPort(
   kernel: { getService?: (name: string) => unknown } | undefined,
   requestedPort: number,
 ): number {
+  const server = readComposedHttpServer(kernel) as { getPort?: () => unknown } | undefined;
+  if (typeof server?.getPort !== 'function') return requestedPort;
   let reported: unknown;
   try {
-    // `http.server` is the CANONICAL service name; `http-server` is a
-    // deprecated alias for the same instance (#4251) that new code must not
-    // read. ⚠️ `getService` THROWS when nothing registered the name — it does
-    // not return undefined — hence the `try`, not a `?.` chain alone.
-    const server = kernel?.getService?.('http.server') as { getPort?: () => unknown } | undefined;
-    if (typeof server?.getPort !== 'function') return requestedPort;
     reported = server.getPort();
   } catch {
     return requestedPort;
@@ -527,7 +529,156 @@ export function resolveBoundPort(
   return reported;
 }
 
-/** The `objectstack:listening` IPC message the `os dev` parent waits for. */
+/**
+ * The HTTP server this boot composed: the kernel's `http.server` service, or
+ * `undefined` when nothing registered one.
+ *
+ * The ONE read behind both {@link resolveBoundPort} (which port the transport
+ * bound) and {@link resolveHttpServerComposition} (whether there is a
+ * transport at all), so the banner's address and the banner's decision to
+ * print one cannot come from two different answers.
+ *
+ * `http.server` is the CANONICAL service name; `http-server` is a deprecated
+ * alias for the same instance (#4251) that new code must not read. ⚠️
+ * `getService` THROWS when nothing registered the name — it does not return
+ * undefined — hence the `try`, not a `?.` chain alone.
+ */
+export function readComposedHttpServer(
+  kernel: { getService?: (name: string) => unknown } | undefined,
+): unknown {
+  try {
+    return kernel?.getService?.('http.server') ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Whether this boot serves HTTP, for the ready banner's address rows (#23623).
+ *
+ * Read off the booted kernel, not off `--server`: under `--no-server` a config
+ * can still mount its own `HonoServerPlugin` (serve skips only its own
+ * auto-wired one), and then an `http.server` is registered and its address is
+ * real. `serverFlag` only says WHY there is none, so the banner names
+ * `--no-server` when that flag is what left the boot without one, and not
+ * otherwise.
+ */
+export function resolveHttpServerComposition(
+  kernel: { getService?: (name: string) => unknown } | undefined,
+  serverFlag: boolean,
+): HttpServerComposition {
+  if (readComposedHttpServer(kernel) !== undefined) return 'composed';
+  return serverFlag ? 'not-composed' : 'skipped-by-no-server';
+}
+
+/**
+ * The plugin that mounts `/api/v1/mcp` (and `/api/v1/mcp/skill`): the runtime
+ * dispatcher, `createDispatcherPlugin` in `@objectstack/runtime`. The same
+ * name `HonoServerPlugin` asks the kernel about before it warns that no data
+ * or discovery API is mounted.
+ */
+export const MCP_ROUTE_OWNER_PLUGIN = 'com.objectstack.runtime.dispatcher';
+
+/**
+ * Whether the plugin that mounts the MCP route is composed on this boot
+ * (#23743), for the ready banner's `MCP:` row.
+ *
+ * ## The defect this closes
+ *
+ * `os serve objectstack.config.ts --no-server` with a config that mounts its
+ * own `HonoServerPlugin` printed `MCP: http://localhost:PORT/api/v1/mcp` and
+ * its connect hint, and `GET /api/v1/mcp` answered 404 while
+ * `/api/v1/data/<object>` answered 401: the transport listened, the route did
+ * not exist. The dispatcher that mounts it is composed only inside `serve`'s
+ * `if (flags.server)` block, and the row was gated on `http.server` (#23623)
+ * and on the MCP switch, neither of which says whether the route is mounted.
+ *
+ * ## Why this read
+ *
+ * Read off the booted kernel, like {@link readComposedHttpServer}, so a config
+ * that mounts its own dispatcher is answered too. The dispatcher registers no
+ * service (it only consumes `http.server`), so the kernel's plugin registry is
+ * the read: `hasPlugin` answers for every `kernel.use()` already made, and by
+ * the time the banner prints every one has been. The dispatcher mounts the
+ * route in its own `start()` only when an `http.server` is registered, so the
+ * caller pairs this with a composed transport.
+ *
+ * `false` when the kernel cannot answer (no `hasPlugin`, or it throws): an
+ * unanswerable question must not print a URL an AI client will be pointed at.
+ */
+export function readComposedMcpRouteOwner(
+  kernel: { hasPlugin?: (name: string) => boolean } | undefined,
+): boolean {
+  try {
+    return typeof kernel?.hasPlugin === 'function' && kernel.hasPlugin(MCP_ROUTE_OWNER_PLUGIN) === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The period of {@link holdKernelOnlyProcess}'s handle: the largest delay a
+ * Node timer accepts (2^31 - 1 ms, about 24.8 days). Its callback does nothing,
+ * so the period decides only how rarely the event loop wakes for it.
+ */
+const KERNEL_ONLY_HOLD_PERIOD_MS = 0x7fffffff;
+
+/**
+ * Keep a boot that composes no HTTP transport alive until its kernel stops
+ * (#23744).
+ *
+ * ## The defect this closes
+ *
+ * `os serve objectstack.config.ts --no-server --preset minimal`, in production
+ * with no `OS_DATABASE_URL`, printed its ready banner ending `Press Ctrl+C to
+ * stop` and then exited 0 by itself, milliseconds later, with no signal and
+ * without its kernel ever shutting down. On a composed boot the HTTP listener
+ * holds the event loop. With none composed, nothing this command owns did. The
+ * same command stayed up whenever the storage driver happened to keep a
+ * connection pool (`--dev --no-server`, or `--no-server` with
+ * `OS_DATABASE_URL` set): measured, the only ref'd handle on those boots was
+ * the SQL driver's pool-reaping interval. So whether a kernel-only boot stayed
+ * up depended on the driver, and nothing decided it.
+ *
+ * ## Why "stay up" and not "run and exit"
+ *
+ * - The banner says `Press Ctrl+C to stop`.
+ * - The kernel is built to own the process: under `gracefulShutdown` a signal
+ *   drains it and then exits.
+ * - The platform's background loops are `unref()`ed on purpose, so they never
+ *   keep a process alive by themselves (`DispatchLoop` in `@objectstack/core`).
+ *   The host decides the lifetime.
+ * - The run-and-exit kernel boot already exists, and is explicit:
+ *   `OS_MIGRATE_AND_EXIT=1` shuts the kernel down and exits before any banner.
+ *
+ * ## The mechanism
+ *
+ * One ref'd interval whose callback does nothing. It is a handle, not a
+ * timeout: it ends nothing and decides nothing. The kernel's own shutdown
+ * releases it (`onShutdown`), so the kernel's signal handling stays the only
+ * thing that ends the process, with the kernel's exit code. ⛔ No signal
+ * listener here: the kernel installs its own, and a second one is how one
+ * SIGTERM used to exit a process more than once (#22286).
+ *
+ * Returns the handle, for the pin that reads it.
+ */
+export function holdKernelOnlyProcess(
+  kernel: { onShutdown(handler: () => Promise<void>): void },
+): ReturnType<typeof setInterval> {
+  const hold = setInterval(() => {}, KERNEL_ONLY_HOLD_PERIOD_MS);
+  kernel.onShutdown(async () => {
+    clearInterval(hold);
+  });
+  return hold;
+}
+
+/**
+ * The `objectstack:listening` IPC message the `os dev` parent waits for.
+ *
+ * Sent only when an HTTP transport is composed (#23743): its documented
+ * meaning is "The HTTP server is bound", so a boot that binds none sends no
+ * such message rather than one naming a port nothing listens on.
+ */
 export interface ListeningMessage {
   type: 'objectstack:listening';
   port: number;
@@ -562,6 +713,11 @@ export interface ListeningMessage {
  * released after {@link publishBoundPort} has driven its three channels, so a
  * parent that waits for `objectstack:listening` first can never miss this one by
  * being late. See {@link createSeedSettlementAnnouncer}.
+ *
+ * On a boot that binds no HTTP server no {@link ListeningMessage} is sent at
+ * all (#23743), and this one still is — it is then the boot's only message. A
+ * kernel-only boot still seeds, and a parent waiting for the settle must not
+ * hang for want of a listening message that is never coming.
  *
  * ## ⭐ `suppressed` is what keeps a waiting parent from hanging forever
  *
@@ -729,11 +885,13 @@ export interface BoundPortChannels {
   /**
    * Writes `runtime.<environment>.<project>.json`. ⛔ Must COMPLETE before
    * either announcement below: it is the file both of them send a consumer to.
+   * Best-effort: when it cannot be written the boot goes on, and the real
+   * channel says so once, naming the file (#24091).
    */
   writeRuntimeState: (published: { port: number; url: string }) => void;
   /**
-   * Prints the ready banner, whose `API:` row names the same address, and the
-   * boot diagnostics under it. ⛔ Must COMPLETE before the IPC message below:
+   * Prints the ready banner, whose `API:` row names the same address when an
+   * HTTP server is composed (#23623), and the boot diagnostics under it. ⛔ Must COMPLETE before the IPC message below:
    * the `os dev` parent prints its MCP connect block on that message, into the
    * same terminal (#22410).
    */
@@ -744,6 +902,9 @@ export interface BoundPortChannels {
 
 /**
  * Publish the bound port on all three channels, in the one order that is safe.
+ *
+ * Driven only when an HTTP transport is composed (#23743): a boot with none has
+ * no bound port to publish, and prints the banner alone.
  *
  * ## The bug this shape exists to make impossible
  *
@@ -915,16 +1076,20 @@ export function runtimeStateFileName(environmentId: string, servedAppRoot: strin
 }
 
 /**
- * The real channels: the same three writes this command has always done, with
- * their failure handling unchanged.
+ * The real channels: the same three writes this command has always done.
  *
  * Each leg keeps its OWN `try` — a boot must not die because a supervision file
  * could not be written or because an IPC channel had already closed, and one
- * leg failing must not cost the other two. Only the ORDER changed (commit faff497fd).
+ * leg failing must not cost the other two. The ORDER changed (commit faff497fd),
+ * and a state file that could not be written is now said once on stderr
+ * (#24091); a closed IPC channel is still the ordinary `os serve` case, silent.
  */
 export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChannels {
   return {
     writeRuntimeState: ({ port, url }) => {
+      // Named the moment it is known, so the catch below can say WHICH file
+      // was not written (#24091).
+      let attemptedFile: string | undefined;
       try {
         const environmentId = process.env.OS_ENVIRONMENT_ID ?? 'env_local';
         // Keyed by the SERVED APP'S ROOT as well as the environment, so two
@@ -936,7 +1101,13 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
           resolveObjectStackHome(),
           runtimeStateFileName(environmentId, servedAppRootOrCwd()),
         );
-        fs.mkdirSync(path.dirname(runtimeFile), { recursive: true });
+        attemptedFile = runtimeFile;
+        // Bounded (#23858): an `OS_HOME` that can never be made — a name under
+        // `/proc` — is refused here at once, and the catch below lets the boot
+        // go on without the file, saying so. Node's recursive mkdir looped on
+        // it after the bind and before the banner, holding the event loop, so
+        // the server never announced itself.
+        makeDirectorySync(path.dirname(runtimeFile));
         fs.writeFileSync(runtimeFile, JSON.stringify({
           pid: process.pid,
           port,
@@ -946,7 +1117,25 @@ export function runtimeBoundPortChannels(printBanner: () => void): BoundPortChan
         }, null, 2));
         const cleanupRuntimeFile = () => { try { fs.rmSync(runtimeFile, { force: true }); } catch { /* noop */ } };
         process.on('exit', cleanupRuntimeFile);
-      } catch { /* non-fatal — supervision file is best-effort */ }
+      } catch (error) {
+        // Best-effort, NOT silent (#24091). The file stays optional — a boot
+        // must not die for a supervision file — but both announcements that
+        // follow (the banner, the IPC message) send a consumer to it, so a
+        // refusal swallowed here told a supervisor "ready" and then answered
+        // its read with nothing. One line, naming the file and the operating
+        // system's own error, carried verbatim rather than paraphrased.
+        //
+        // Said ONCE: `run()` publishes the bound port at exactly one site, so
+        // this leg runs once per boot. Channel: `console.warn`, i.e. stderr,
+        // like every other boot warning in this file — stdout belongs to the
+        // stdio MCP transport's JSON-RPC frames (#7915).
+        const thrown = error instanceof Error ? error.message : String(error);
+        console.warn(chalk.yellow(
+          `  ⚠ Runtime state file not written: ${attemptedFile ?? '(its path could not be resolved)'} — ${thrown}. ` +
+            'The server runs on without it, so a supervisor that reads it will not find this process there; ' +
+            'point OS_HOME at a directory this process can write.',
+        ));
+      }
     },
     announceListening: (message) => {
       try {
@@ -989,6 +1178,24 @@ export function runtimeSeedSettlementChannels(
       } catch { /* IPC channel closed — best-effort */ }
     },
   };
+}
+
+/**
+ * Tell the `os dev` parent that the boot was refused for the v17
+ * organization-ownership shape, and wait until the message is handed to the
+ * channel — the child exits right after, and a message still queued would be
+ * lost. Answers whether it was sent; a closed channel is the ordinary
+ * `os serve` case.
+ */
+async function announceOrganizationOwnershipRequired(tables: string[]): Promise<boolean> {
+  const { ORGANIZATION_OWNERSHIP_REQUIRED_MESSAGE } = await import('../utils/dev-organization-ownership-upgrade.js');
+  return new Promise((resolve) => {
+    try {
+      process.send!({ type: ORGANIZATION_OWNERSHIP_REQUIRED_MESSAGE, tables }, undefined, {}, (error) => resolve(!error));
+    } catch {
+      resolve(false);
+    }
+  });
 }
 
 const hostImporters = new Map<string, HostImporter>();
@@ -1215,7 +1422,13 @@ export default class Serve extends Command {
   static override description = 'Start ObjectStack server. Reads `objectstack.config.ts` if present; otherwise falls back to `dist/objectstack.json` (or OS_ARTIFACT_PATH, including http(s):// URLs) as a portable artifact.';
 
   static override args = {
-    config: Args.string({ description: 'Configuration file path', required: false, default: 'objectstack.config.ts' }),
+    // [#24191] `ignoreStdin`: oclif otherwise fills an omitted positional from
+    // a line already waiting on stdin (`tryStdin`), and with the stdio MCP
+    // transport that line is the client's `initialize`, written at spawn. It
+    // became the config path, the boot fell back to the artifact without the
+    // config, and the request was never answered. Stdin belongs to the
+    // transport; the config path comes from argv or the default.
+    config: Args.string({ description: 'Configuration file path', required: false, default: 'objectstack.config.ts', ignoreStdin: true }),
   };
 
   static override flags = {
@@ -3089,6 +3302,13 @@ export default class Serve extends Command {
       // discards as already-registered.
       // [#15006] Same seam, same reason — see the ObjectQL gate above. The
       // driver-provider duck-typing moved into it with the read it guards.
+      //
+      // [#23573] Whether this step declared NOTHING (production, no URL, no
+      // driver plugin by name). Only recorded here: this step cannot tell a
+      // boot that fails anyway from one whose own plugin registers a driver
+      // the name test misses, so the verdict waits for the no-storage boot
+      // guard at the end of Phase 1 (registered last, before runtime.start()).
+      let productionResolvedNoStorage = false;
       if (shouldAutoRegisterStorageDriver(config, plugins)) {
          const databaseUrl = process.env.OS_DATABASE_URL;
          const driverType = resolveDriverType(process.env.OS_DATABASE_DRIVER, databaseUrl);
@@ -3136,6 +3356,8 @@ export default class Serve extends Command {
              // every other kind AND the dev-default `:memory:` store). The ONE
              // provision, shared with the standalone boot below.
              await provisionTelemetry(resolution.sqliteFilePath);
+           } else {
+             productionResolvedNoStorage = true;
            }
          } catch (e: any) {
            // "declared ≠ enforced" guard (#3276-class): a selection the CLI
@@ -3861,6 +4083,33 @@ export default class Serve extends Command {
         } catch (err: any) {
           console.warn(chalk.yellow(`  ⚠ MigrationRecoveryPlugin auto-inject failed: ${err?.message ?? err}`));
         }
+      }
+
+      // 5c-ter. [ADR-0131 D10 item 5] The v18 boot refusal, beside the
+      // recovery scan: it refuses to start a database still in the v17
+      // organization-ownership shape whose ceremony marker is not verified,
+      // or one whose ceremony ran and did not verify, naming `os migrate
+      // organization-ownership`. It judges in its own `start()`, right after
+      // the engine's (the additive schema sync the ceremony waits for), and
+      // ahead of every plugin that writes rows at start — so a refused boot
+      // writes none. Composed HERE, before the auth family and the app
+      // plugins (which also declare it in `optionalDependencies`), on served
+      // kernels only —
+      // ⛔ never in `createStandaloneStack`, which every CLI data and schema
+      // boot shares, the ceremony's own boot among them. A host that composes
+      // its own instance keeps it; a guard that cannot be composed fails the
+      // boot rather than leave the database unjudged (no escape hatch, D10).
+      const hasOrganizationOwnershipGuard = plugins.some(
+        (p: any) => p?.name === 'com.objectstack.organization-ownership-boot-guard'
+          || p?.constructor?.name === 'OrganizationOwnershipBootGuardPlugin'
+      );
+      if (!hasOrganizationOwnershipGuard) {
+        const { OrganizationOwnershipBootGuardPlugin } = await import('@objectstack/runtime');
+        // A development boot's refusal names the ceremony with `--dev`, so the
+        // ceremony boots the way this one did (its secret, .env* files and
+        // `telemetry` sibling).
+        await kernel.use(new OrganizationOwnershipBootGuardPlugin({ dev: isDev }));
+        trackPlugin('OrganizationOwnershipBootGuard');
       }
 
       // 5d. Auto-register AuthPlugin (and paired Security/Audit) when the
@@ -4897,36 +5146,11 @@ export default class Serve extends Command {
           );
           trackPlugin('DatasourceAdminServicePlugin');
 
-          // REST routes under /api/v1/datasources. Registered via a tiny
-          // plugin so it resolves http.server during init (same pattern as
-          // the hostname guard above).
-          const adminRoutePlugin: any = {
-            name: 'com.objectstack.cli.datasource-admin-routes',
-            version: '1.0.0',
-            // init() resolves the `http.server` service the hono server plugin
-            // provides — order-if-present so route registration is
-            // deterministic (ADR-0116, #4471). Soft: without a server plugin
-            // the routes degrade on purpose (warn + not installed).
-            optionalDependencies: ['com.objectstack.server.hono'],
-            init: async (ctx: any) => {
-              try {
-                const httpServer: any =
-                  ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
-                if (!httpServer || typeof httpServer.get !== 'function') {
-                  ctx.logger?.warn?.(
-                    '[datasource-admin] http.server unavailable; REST routes not installed',
-                  );
-                  return;
-                }
-                registerDatasourceAdminRoutes(httpServer, ctx, '/api/v1');
-              } catch (routeErr: any) {
-                ctx.logger?.warn?.(
-                  `[datasource-admin] route registration failed: ${routeErr?.message ?? routeErr}`,
-                );
-              }
-            },
-          };
-          await kernel.use(adminRoutePlugin);
+          // REST routes under /api/v1/datasources, mounted by a tiny plugin
+          // during its init (same pattern as the hostname guard above). What
+          // it reads, and which warning a boot without a server gets, lives
+          // on `createDatasourceAdminRoutesPlugin()` below.
+          await kernel.use(createDatasourceAdminRoutesPlugin(registerDatasourceAdminRoutes));
           trackPlugin('DatasourceAdminRoutes');
 
           if (isDev) {
@@ -5088,6 +5312,68 @@ export default class Serve extends Command {
       // detail of the CLI's own announcement — putting it there would grow a
       // published banner surface on every boot to report a thing an operator
       // cannot act on.
+
+      // ── No-storage boot guard (#23573) ─────────────────────────────
+      // Step 2 recorded that this production boot declared no storage. Whether
+      // that is fatal is only known once every plugin's init() has run, since a
+      // stack plugin the name test missed may register a driver there. This is
+      // the LAST plugin registered, so its init() runs after every other init()
+      // and before any start() (resolvePluginOrder keeps insertion order; no
+      // plugin names this one as a dependency). It reads the one map ObjectQL
+      // adopts `driver.*` services from at its start(), plus any driver the
+      // engine already holds.
+      //   • a driver is there                ⇒ nothing to say.
+      //   • none, and the auth service runs under the 'single' posture ⇒ refuse
+      //     before any start(). AuthPlugin.start() creates the Default
+      //     Organization there, which needs a driver, and no driver can arrive
+      //     before it: AppPlugin orders ObjectQL and auth ahead of every stack
+      //     plugin, so a driver registered in any start() comes too late.
+      //     Without this, the boot died there with a driver error, after an
+      //     objectql ERROR naming a datasource nobody declared.
+      //   • none otherwise                   ⇒ ONE line, and the boot goes on.
+      //     Worded as of the end of init, because a start() (a module's
+      //     onEnable) may still register a driver and some such stacks boot.
+      // ⛔ Not `trackPlugin`ed, for the announcer's reason above.
+      if (productionResolvedNoStorage) {
+        // ONE list, rendered as the refusal's bullets and as the line's sentence.
+        const noStorageRemedies = [
+          'set OS_DATABASE_URL (e.g. file:./data/app.db, or a postgres:// or mysql:// URL)',
+          "mount a storage driver in the stack's plugins (e.g. new DriverPlugin(driver) from @objectstack/runtime)",
+          'run with --dev (an in-memory SQLite store, for development)',
+        ];
+        await kernel.use({
+          name: 'com.objectstack.cli.no-storage-boot-guard',
+          version: '1.0.0',
+          init: async (ctx: any) => {
+            const services: Map<string, any> = ctx.getServices();
+            const engine = services.get('objectql');
+            const hasDriver = [...services.keys()].some((name) => name.startsWith('driver.'))
+              || (typeof engine?.getDefaultDriverName === 'function'
+                && engine.getDefaultDriverName() !== undefined);
+            if (hasDriver) return;
+            if (services.has('auth') && services.get('tenancy')?.posture === 'single') {
+              restoreOutput();
+              console.error(chalk.red(
+                '\n  ✖ This production serve has no storage: no recognized OS_DATABASE_URL declared a\n'
+                + '    default datasource, and no plugin registered a storage driver by the end of plugin\n'
+                + "    init. The auth service runs under the 'single' tenancy posture, and its start()\n"
+                + '    creates the Default Organization, which needs a driver.\n\n'
+                + '    Fix one of:\n'
+                + noStorageRemedies.map((remedy) => `      • ${remedy}\n`).join(''),
+              ));
+              throw new Error(
+                'Refusing to boot: this production serve has no storage, and its auth service needs a '
+                + 'driver when it starts. Set OS_DATABASE_URL, mount a storage driver plugin, or run with --dev.',
+              );
+            }
+            console.warn(chalk.yellow(
+              '  ⚠ No storage: no recognized OS_DATABASE_URL, and no plugin registered a storage driver by '
+              + 'the end of plugin init, so objects have no store unless a plugin registers one when it '
+              + `starts. Fix: ${noStorageRemedies[0]}; ${noStorageRemedies[1]}; or ${noStorageRemedies[2]}.`,
+            ));
+          },
+        } as any);
+      }
 
       // Boot the runtime
       await runtime.start();
@@ -5272,6 +5558,21 @@ export default class Serve extends Command {
       // what this repairs is exactly a set of channels that agreed with each
       // other while disagreeing with the socket.
       const boundPort = resolveBoundPort(kernel, port);
+      // [#23623] …and whether there is a transport at all, from the same read
+      // ({@link readComposedHttpServer}). On a boot with none, the banner's
+      // address rows give way to one line saying so (#23623), and nothing is
+      // published on the two machine channels either (#23743): see the
+      // publish site below. ⭐ ONE predicate for all three channels, so the
+      // banner, the IPC message and the state file cannot disagree about
+      // whether there is an address at all.
+      const httpServer = resolveHttpServerComposition(kernel, flags.server);
+      // [#23743] …and whether `/api/v1/mcp` is mounted, for the banner's `MCP:`
+      // row. A composed transport is not enough: the route's owner is the
+      // runtime dispatcher, which this command composes only under `--server`,
+      // so a config that mounts its own `HonoServerPlugin` under `--no-server`
+      // listens while `/api/v1/mcp` answers 404. See
+      // {@link readComposedMcpRouteOwner}.
+      const mcpRouteMounted = httpServer === 'composed' && readComposedMcpRouteOwner(kernel);
 
       // ── Clean startup summary ──────────────────────────────────────
       // #8978 — the Config:/Artifact: row must name what actually booted,
@@ -5309,6 +5610,9 @@ export default class Serve extends Command {
         // something unparseable; the banner then prints paths with no origin
         // rather than a confident wrong URL.
         externalBaseOrigin: resolveAuthBaseUrl(boundPort, boundProtocol).baseOrigin,
+        // #23623 — whether any address above is served at all. See `httpServer`
+        // a few lines up.
+        httpServer,
         ...resolveBannerConfigRow({ relativeConfig, useArtifactFallback, pinnedArtifact, configBootBundle }),
         isDev,
         pluginCount: loadedPlugins.length,
@@ -5362,9 +5666,12 @@ export default class Serve extends Command {
         bootDiagnostics: collectBootDiagnostics(),
         // #3167 — surface the default-on MCP endpoint in the dev loop, where an
         // AI client can connect to operate the running app. Same decision point
-        // that auto-loads the plugin + gates the route, so the banner never
-        // advertises an endpoint that isn't served.
-        mcpEnabled: isMcpServerEnabled(),
+        // that auto-loads the plugin + gates the route. It is not the whole
+        // answer: with no HTTP server composed nothing serves the route, and
+        // the banner drops the row on `httpServer` (#23623); with a server but
+        // no dispatcher, the route is not mounted and answers 404, so the row
+        // also needs `mcpRouteMounted` (#23743).
+        mcpEnabled: isMcpServerEnabled() && mcpRouteMounted,
       });
 
       // ── Publish the actually-bound port ────────────────────────────
@@ -5380,7 +5687,8 @@ export default class Serve extends Command {
       // one so supervisors and the `os dev` parent never have to guess:
       //   • runtime.json: a small state file under OS_HOME for external
       //     supervisors / health checks (pid + port + url).
-      //   • the ready banner, whose `API:` row names the same address.
+      //   • the ready banner, whose `API:` row names the same address (when an
+      //     HTTP server is composed; with none it prints no address, #23623).
       //   • IPC: when spawned with an 'ipc' channel (as `os dev` does), the
       //     parent learns the real port without polling.
       //
@@ -5390,7 +5698,26 @@ export default class Serve extends Command {
       // message that makes the `os dev` parent print into the same terminal
       // (#22410). {@link publishBoundPort} carries both races the old orders
       // lost, and the reason neither repair is a reader-side poll or a timer.
-      publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);
+      //
+      // [#23743] …and all of that only when a transport BOUND a port. With
+      // none composed (`--no-server` and no config-mounted transport, or a
+      // transport plugin that did not load), `boundPort` is the REQUESTED
+      // number — {@link resolveBoundPort} falls back to it by design — and
+      // nothing listens there. `objectstack:listening` is documented as "The
+      // HTTP server is bound" (`content/docs/deployment/cli.mdx`), so such a
+      // boot sends no such message, and it writes no runtime state file either:
+      // that file's whole payload answers "is my server running, and where?",
+      // and a missing file is the loud, correct answer when there is none
+      // ({@link runtimeStateFileName}). ⛔ No "unbound" record instead: the
+      // payload stays the one shape every reader already parses. The banner
+      // still prints, and says once that no address is served (#23623).
+      // ⭐ Gated on the SAME `httpServer` the banner's address rows read, so
+      // the three channels cannot disagree about whether there is an address.
+      if (httpServer === 'composed') {
+        publishBoundPort(boundPort, runtimeBoundPortChannels(printBanner), boundProtocol);
+      } else {
+        printBanner();
+      }
 
       // ── …and one beat later, whether the APP is ready too (#17329) ──
       // ⭐ AFTER the line above, and that is the whole of the ordering
@@ -5399,6 +5726,12 @@ export default class Serve extends Command {
       // sent before this call. On the ordinary in-budget boot seeding settled
       // minutes of CPU ago and this releases the latched message immediately;
       // past the budget it arms and the `app:seeded` hook speaks later.
+      //
+      // [#23743] On a boot that binds no HTTP server no `objectstack:listening`
+      // is sent at all, and this message is still sent: it is then the boot's
+      // only message. A kernel-only boot still seeds, and a parent waiting for
+      // the settle must not wait forever for a message that is never coming —
+      // the rule {@link SeedSettledMessage} exists for.
       //
       // ⛔ NOT a fourth channel inside `publishBoundPort`. Those three are one
       // publication of ONE number, ordered so the file exists before anything
@@ -5437,11 +5770,40 @@ export default class Serve extends Command {
 
       // Kernel already registers SIGINT/SIGTERM handlers during bootstrap.
       // No duplicate handler needed here — just keep the process alive.
+      //
+      // [#23744] On a composed boot the HTTP listener is what keeps it alive.
+      // With no transport composed (the SAME `httpServer` the banner and the
+      // publish site above read), nothing this command owns held the event
+      // loop: the process exited 0 milliseconds after a banner ending `Press
+      // Ctrl+C to stop`, unless the storage driver happened to keep a pool.
+      // Hold it until the kernel stops — see {@link holdKernelOnlyProcess}.
+      if (httpServer !== 'composed') holdKernelOnlyProcess(kernel);
 
     } catch (error: any) {
       restoreOutput();
       printDiagnostic();
-      printError(error.message || String(error));
+      // [ADR-0131 D10, development exception] A development child of `os dev`
+      // refused for the v17 organization-ownership shape tells its parent,
+      // which copies the development database, upgrades it in place and boots
+      // it again (`utils/dev-organization-ownership-upgrade.ts`) — so the
+      // refusal is not printed as this boot's failure. Any other boot refuses
+      // as before, naming the ceremony.
+      //
+      // The guard refuses from its `start()` (before any plugin writes a row),
+      // so the kernel hands it on as the `cause` of its own start-failure
+      // error: the refusal is looked for down the chain, and its own text is
+      // what this boot prints.
+      const { isOrganizationOwnershipBootRefusal } = await import('@objectstack/runtime');
+      let ownershipRefusal: { tables: readonly string[]; message: string } | undefined;
+      for (let cause: unknown = error, depth = 0; !ownershipRefusal && cause && typeof cause === 'object' && depth < 8; depth++) {
+        if (isOrganizationOwnershipBootRefusal(cause)) ownershipRefusal = cause;
+        cause = (cause as { cause?: unknown }).cause;
+      }
+      if (ownershipRefusal && isDev && typeof process.send === 'function') {
+        const sent = await announceOrganizationOwnershipRequired([...ownershipRefusal.tables]);
+        if (sent) this.exit(1);
+      }
+      printError(ownershipRefusal?.message || error.message || String(error));
       // A boot that died is when its warnings matter most, and the banner that
       // would normally carry them never printed (#4012).
       const diagnostics = collectBootDiagnostics();
@@ -5451,6 +5813,59 @@ export default class Serve extends Command {
     }
   }
 
+}
+
+/**
+ * The plugin that mounts the datasource admin REST routes (`/api/v1/datasources`,
+ * `registerDatasourceAdminRoutes` from `@objectstack/service-datasource`) onto
+ * the composed HTTP server, from its own `init()`. Exported (#24022) so that
+ * `init` is reachable from a test against a real kernel, as
+ * {@link createUnknownHostnameGuardPlugin}'s is.
+ *
+ * ## The read
+ *
+ * The server is read through {@link readComposedHttpServer}: `http.server`
+ * only, inside a `try`, because the kernel's `getService` THROWS on a name
+ * nothing registered. The `getService?.(…) ?? getService?.(…)` chain this
+ * replaced never reached its `??`: on a boot with no server (`--no-server`)
+ * the throw landed in the registration `catch`, which printed "route
+ * registration failed" with the kernel's "composition/ordering fault" text
+ * when nothing was at fault.
+ *
+ * ## Which warning prints, and when
+ *
+ * - No server composed: the plugin's own degrade line, once. It is kept under
+ *   `--no-server` on purpose. The banner says why there is no server; this
+ *   line names the surface that leaves unmounted, beside the same boot's
+ *   other "not mounted" lines (REST API, runtime config, marketplace
+ *   install). A config can still compose its own server under that flag, and
+ *   then the routes mount. It never says "ordering fault".
+ * - A server composed, and registration throws: "route registration failed"
+ *   with the error. That is a genuine fault and stays loud.
+ *
+ * `optionalDependencies` orders the Hono server plugin ahead when it is
+ * composed (ADR-0116), so an absent server at this `init` is final for it.
+ */
+export function createDatasourceAdminRoutesPlugin(
+  registerRoutes: (server: any, ctx: any, basePath: string) => void,
+) {
+  return {
+    name: 'com.objectstack.cli.datasource-admin-routes',
+    version: '1.0.0',
+    optionalDependencies: ['com.objectstack.server.hono'],
+    init: async (ctx: any): Promise<void> => {
+      const httpServer: any = readComposedHttpServer(ctx);
+      if (!httpServer || typeof httpServer.get !== 'function') {
+        ctx.logger?.warn?.('[datasource-admin] http.server unavailable; REST routes not installed');
+        return;
+      }
+      try {
+        registerRoutes(httpServer, ctx, '/api/v1');
+      } catch (routeErr: any) {
+        ctx.logger?.warn?.(`[datasource-admin] route registration failed: ${routeErr?.message ?? routeErr}`);
+      }
+    },
+  };
 }
 
 /**
@@ -5582,7 +5997,7 @@ export function createUnknownHostnameGuardPlugin(
     optionalDependencies: ['com.objectstack.server.hono'],
     init: async (ctx: any) => {
       try {
-        const httpServer: any = ctx.getService?.('http.server') ?? ctx.getService?.('http-server');
+        const httpServer: any = readComposedHttpServer(ctx);
         const rawApp = httpServer?.getRawApp?.();
         if (!rawApp || typeof rawApp.use !== 'function') {
           ctx.logger?.warn?.('[unknown-hostname-guard] http.server unavailable; guard not installed');

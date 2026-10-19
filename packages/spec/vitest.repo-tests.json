@@ -1,4 +1,5 @@
 [
+  "scripts/build-console-objectstack-root.test.ts",
   "scripts/build-schemas-check-mode.test.ts",
   "scripts/category-title.test.ts",
   "scripts/conversions-major18-merge.test.ts",
@@ -31,6 +32,7 @@
   "src/api/export-job-family-retirement.test.ts",
   "src/api/rest-api-config-dead-keys-retirement.test.ts",
   "src/contracts/record-share-guest-recipient-census.test.ts",
+  "src/conversions/conversion-conflict-channel-retirement.test.ts",
   "src/data/api-methods-batch-conformance.test.ts",
   "src/data/cube-member-inner-name-retirement.test.ts",
   "src/data/cube-refresh-key-retirement.test.ts",
@@ -44,6 +46,8 @@
   "src/integration/connector-triggers-retirement.test.ts",
   "src/kernel/metadata-type-registry-allow-org-override-absence.test.ts",
   "src/qa/requires-plugins-retirement.test.ts",
+  "src/security/admin-scope-binding-authoring-retirement.test.ts",
+  "src/security/permission-set-managed-by-retirement.test.ts",
   "src/security/rls-tags-retirement.test.ts",
   "src/shared/retired-key-migrate-sentence.test.ts",
   "src/system/compliance-families-retirement.test.ts",
@@ -51,13 +55,17 @@
   "src/system/email-template-category-is-system-retirement.test.ts",
   "src/system/email-template-floor-locale-parity.pin.test.ts",
   "src/ui/action-requires-confirmation-docblock.pin.test.ts",
+  "src/ui/component-marketplace-installed-list-retirement.test.ts",
+  "src/ui/component-record-json-retirement.test.ts",
   "src/ui/element-flat-binding-retirement.test.ts",
   "src/ui/element-text-variant-heading-retirement.test.ts",
   "src/ui/form-field-public-picker-retirement.test.ts",
   "src/ui/master-detail-detail-sort-field-retirement.test.ts",
   "src/ui/object-grid-resizable-columns-retirement.test.ts",
   "src/ui/page-header-breadcrumb-retirement.test.ts",
+  "src/ui/page-header-show-star-retirement.test.ts",
   "src/ui/view-data-api-provider-retirement.test.ts",
   "src/ui/view-item-owner-hidden-retirement.test.ts",
-  "src/ui/view-list-tabs-retirement.test.ts"
+  "src/ui/view-list-tabs-retirement.test.ts",
+  "src/ui/visibility-alias-keys-retirement.test.ts"
 ]

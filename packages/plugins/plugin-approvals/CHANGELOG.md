@@ -1,5 +1,305 @@
 # @objectstack/plugin-approvals
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- e15897c: fix(plugin-approvals): the approval request page's highlights strip names the flow by its label, not `flow:NAME`
+  
+  Clause-②: no
+  
+  - **The strip's first chip is the flow's label.** `sys_approval_request_detail` lists `process_label` (the "Flow" field) where it listed `process_name`, so a request opened by the Deal Desk flow reads `Deal Desk` there instead of `flow:deal_desk`. The request lists already showed this label.
+  - **The object's `highlightFields` makes the same swap** (`process_label` in place of `process_name`, `record_id` kept). The page's Details tab is a bare `record:details` node, which draws the object's `highlightFields` minus the strip. A change to the strip alone would have moved `process_name` into that tab. Changed together, the tab still shows only the target record card. Other surfaces that read the object's list show the flow's label too: a request's record preview card, Studio's object settings, and the default columns of a list, kanban, related list or lookup picker that declares none. No first-party request list uses the default columns: each request list view declares its own.
+  - **When no label is available.** The console reads a request through the approvals get, which serves `process_label` as the stored label, else the flow label in the request's node-config snapshot, else the humanized machine name (`flow:deal_desk` → `Deal Desk`). A request the boot backfill has not labelled still shows a Flow chip. Only when all three are empty does the field have no value: the strip then draws no Flow chip, and the record title still names `process_name`.
+  
+  A patch: one entry in one platform object's field list and the same entry in its page. No export, type, accepted value or stored column changes.
+- 5da2e88: fix(plugin-approvals): the approval request page's highlights strip names the current step by its label, not the node id
+  
+  Clause-②: no
+  
+  - **The approvals get serves `current_step_label`.** `ApprovalRequestRow` declares it as the step's label under the `sys_approval_request` column's own name. Every door that serves a request now serves it with exactly `step_label`'s value: the get, the list, and the request that a decision, recall, send-back, resubmit, reassign, remind, info request or comment echoes back. `step_label` stays, with the same value, for the inbox and the emailed action-link pages. `current_step` stays the Approval node's machine id.
+  - **The strip's step chip is the step's label.** `sys_approval_request_detail` lists `current_step_label` (the "Approval Step" field) where it listed `current_step`, so a request waiting on the `approve_step` node reads `Manager Review` there instead of `approve_step`. The request lists already showed this label.
+  - **The object's `highlightFields` makes the same swap.** The page's Details tab is a bare `record:details` node, which draws the object's `highlightFields` minus the strip. A change to the strip alone would have moved `current_step` into that tab.
+  - **When no label is stored.** The get serves the stored label, else the node label in the request's node-config snapshot, else the humanized node id (`approve_step` → `Approve Step`). A request the boot backfill has not labelled still shows a step chip. A request with no step serves neither field, and the strip draws no step chip.
+  
+  A patch: one served key that the contract already declares, and one entry in one platform object's field list and in its page. No export, type, accepted value or stored column changes.
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [f5ef054]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf540a7]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Minor Changes
+
+- b74434c: Clause-②: yes (widening)
+  
+  feat(plugin-approvals): the approval lists show engine-written display labels, which are the step and flow labels, whom a pending request waits on, the record an action is about, and the slot it was taken as (#23889)
+  
+  The Requests and Action History lists are generic list views. They show stored columns only, so admins used to read node ids (`manager_review`), `flow:` api names, slot addresses and raw user ids there. The approval engine now writes display columns beside the machine ones, and the list views show those columns. Nothing is removed or renamed. The machine columns (`process_name`, `current_step`, `pending_approvers`, `step_name`, `acted_as`) keep their values, and every query and decision still reads them.
+  
+  **`sys_approval_request`**, written by `ApprovalService`:
+  
+  - `process_label`: the flow's label, and `current_step_label`: the Approval node's label. Both are snapshots taken when the request opens, from the labels the flow engine already hands to `openNodeRequest`. Renaming the flow later does not rewrite them.
+  - `pending_approver_labels`: whom the request waits on, one label per pending slot, joined with `, `. A slot that names a person (a user id, or an email an account carries) gets that account's name. Any other slot (a `position:` or `team:` literal) shows its address. The column is rewritten whenever the slate is written (open, a partial tally, reassign, SLA reassign) and cleared with the slate on every terminal write.
+  - The list views: `process_label` replaces `process_name` in every view. `current_step_label` replaces `current_step` in `all_requests`, `my_pending` and `submitted_by_me`. `pending_approver_labels` is added to `all_requests` and `my_pending`.
+  
+  **`sys_approval_action`**: each new row copies these columns from its request:
+  
+  - `step_label`: the request's step label.
+  - `object_name` + `record_id`: the request's record pointer (`record_id` declares `referenceVia: 'object_name'`), so a list can name the record.
+  - `acted_as_label`: `acted_as` labelled the same way as the waiting-on column. It is null when `acted_as` is null, and also while a person slot's name could not be read (see below).
+  - The list views: `step_label` replaces `step_name` in `recent`, `all_actions` and `by_actor`. `recent` and `all_actions` add the record pointer and show `acted_as_label` in place of `acted_as`.
+  
+  The inbox door's `process_label` / `step_label` now read the new columns first. They fall back to the config snapshot for rows opened earlier, so what they serve is unchanged.
+  
+  **Read security.** Every new value is either a column of the request the row's readers can already read, or a name the approvals door already serves those readers for that request: `pending_approver_names`, and the timeline's names. The names come from the same resolver, under the same system read. The generic data door serves both objects only to the callers the approvals door would serve.
+  
+  **Rows written before this release are filled at boot.** A new boot-time pass runs on `kernel:ready`, after the action-slot repair. It fills the new columns on rows that hold null. Each request is re-read just before it is written, and the write names only the columns that are still null on that re-read row. Whom a request waits on is written only while the request is still pending on the slate its names were read for. A value a live writer stored, such as the boot sweep or another node, is therefore kept. The only window left is the single engine call between the re-read and the write. Every row it fills keeps its own `updated_at`: the write passes the stored value back under `preserveAudit`, so the request lists, which sort on `updated_at`, keep their order. The action-slot repair's writes keep it the same way. Where `plugin-audit` is composed, the first boot after the upgrade writes one system entry in the audit log and one in the record's activity timeline for each row it fills. A second boot writes nothing.
+  
+  - On every request, the flow and step labels come from the chain the approvals door serves: the authored labels the config snapshot carries, else the humanized machine name. The list and the inbox therefore show the same label for the same row, and no request is left blank.
+  - On a pending request, whom it waits on is filled.
+  - On every action, the step label and the record pointer are copied from its request, and its acting-as label is filled. An action whose request no longer exists keeps a null pointer.
+  - The action-slot repair now labels every `acted_as` it writes.
+  
+  **Two details.**
+  
+  - An empty authored label (the spec allows `label: ''`) is stored as the humanized machine name, never `''`.
+  - A name that cannot be read because the `sys_user` read failed is stored as null, never as the raw slot address. The failure is logged once at `warn`, and the boot pass fills it on the next boot. A slot that names no person still shows its address.
+
+### Patch Changes
+
+- 74b4362: fix(plugin-approvals): `sys_approval_request.record_id` declares that the record it names was deleted when `cancel_reason` is `record_deleted`
+  
+  Clause-②: no
+  
+  - **The pointer carries its own tombstone predicate.** `record_id` declares `referenceDeletedWhen: { field: 'cancel_reason', value: 'record_deleted' }` beside its `referenceVia: 'object_name'`. A request the platform cancelled because its record was deleted (`status: cancelled`, `cancel_reason: record_deleted`) therefore says, in the served object definition, that the pointer names a record that no longer exists. A renderer draws that option's label (`Related record deleted`) in place of a link, and reads nothing.
+  - **Nothing is accepted or answered differently.** The sibling is the existing `cancel_reason` select, which already holds `record_deleted`, so the spec's parse-time refusals of the key are satisfied by the shipped object. No export, type, route, stored value or request answer moves.
+  
+  A patch: one key on one platform object's served field definition.
+- 099cc9d: Clause-②: no
+  
+  The approval, security, automation and sharing objects describe their records in plain admin
+  sentences. Approval Delegations now reads "While someone is away, approvals assigned to them
+  personally go to their delegate.", Record Shares "Records shared beyond their owner, one row per
+  grant.", User Positions "Which positions each user holds, one row per assignment.", Audience
+  Binding Suggestions "A package's suggestion to give one of its permission sets to everyone who
+  signs in, and the decision taken on it." and Automation Runs "Paused automation runs waiting to
+  resume, and the recent history of finished runs." Field help on Approval Requests, Approval
+  Delegations, User Positions, User Permission Sets and Audience Binding Suggestions, the
+  descriptions of the `organization_admin_no_bypass`, `mcp_agent_data_read` and
+  `mcp_agent_data_write` permission sets, the flow-dispatch ledger's description and the
+  reserved-position refusal no longer carry design-record numbers or runtime vocabulary; those
+  references stay in the code comments. The zh-CN, ja-JP and es-ES translations follow. Wording
+  only: no field, permission or behaviour changes.
+- 44fe210: Clause-②: no
+  
+  fix(plugin-approvals): every approval notification body names its record by the object's label and the record id
+  
+  - **What changed.** The reminder, SLA-breach (to approvers and to the submitter), escalation, hand-off, revision-limit, send-back (with no note) and both out-of-office notification bodies named the record as `<object_name>/<record_id>`, for example `crm_deal/D_123`. They now name it the way `approval.requested` already did: the object's label and the record id, for example `Deal D_123`. An object whose schema declares no label is named by its API name and the id, for example `crm_memo D_123`.
+  - **No title.** No body carries the record's title, from the live record or from the submit snapshot. The body is stored and may be e-mailed, and it has no single reader whose field access it could be narrowed for.
+  - **Unchanged.** Each sentence's other wording, every topic, title, `actionUrl`, action link and audience, and the `DUPLICATE_REQUEST` refusal text.
+- b75129f: Clause-②: no
+  
+  fix(plugin-approvals): an approval request's record title reads the flow's label, not `flow:NAME`
+  
+  - **`sys_approval_request.display_title` reads `process_label`.** The title is now the flow's label and the record id (`Discount Sign-off · opp_45`), the same label the request lists show. A row with no label stored falls back to `process_name` (`flow:deal_desk · opp_42`), so the title never reads `null · …`. Every surface that draws the request's title through `nameField` shows it: the record page's heading and breadcrumb, and the request cell of the action history list.
+  - **`titleFormat` still names `{process_name}`.** A placeholder template cannot fall back, and `process_label` can be null after the boot fill (a row it could not label, or a failed fill run). A renderer that reads `titleFormat` ahead of `nameField`, such as the global search palette, still shows the machine source.
+  
+  A patch: one formula on one platform object's computed title. No export, type, accepted value or stored column changes.
+- 544b8d7: Clause-②: no
+  
+  The two out-of-office approval notifications name people by their display name instead of their raw user id. The delegate's `approval.ooo_substituted` body used to read `You are covering an approval on Deal D_123 while u_ooo is out of office.`, and now names the absent approver: `… while Olive Away is out of office.` The absent approver's `approval.ooo_skipped` body used to read `… was routed to u_bob while you are out of office.`, and now names the delegate: `… was routed to Bob …`.
+  
+  The names come from the same user-name lookup the approvals inbox uses for pending approvers and the timeline, read once per opening for every person the out-of-office routing touched. An account row with no name is named by its email, as the inbox names it. A person with no readable name (no account row for the id, or a failed read) is still named by the user id, as before. The `ooo_substitute` entry on the request's audit trail is unchanged and still records the two user ids (`u_ooo → u_bob — reason`).
+- Updated dependencies [b15f8a1]
+- Updated dependencies [4216796]
+- Updated dependencies [c40a0dd]
+- Updated dependencies [60f9baf]
+- Updated dependencies [3fed1eb]
+- Updated dependencies [a35f7a6]
+- Updated dependencies [f606ba2]
+- Updated dependencies [105902f]
+- Updated dependencies [f901746]
+- Updated dependencies [ee0e115]
+- Updated dependencies [8684079]
+- Updated dependencies [a69a40a]
+- Updated dependencies [0a052e6]
+- Updated dependencies [ae0ca66]
+- Updated dependencies [23d0bc7]
+- Updated dependencies [8776119]
+- Updated dependencies [0a168a3]
+- Updated dependencies [97b8e7a]
+- Updated dependencies [af3873b]
+- Updated dependencies [9cb9d95]
+- Updated dependencies [f846cc2]
+- Updated dependencies [30ce56e]
+- Updated dependencies [2e0e451]
+- Updated dependencies [df2c551]
+- Updated dependencies [1ecb08a]
+- Updated dependencies [adad73f]
+- Updated dependencies [77efc66]
+- Updated dependencies [6422da5]
+- Updated dependencies [8f4260f]
+- Updated dependencies [d0fe050]
+- Updated dependencies [dd11563]
+- Updated dependencies [2c702fd]
+- Updated dependencies [92fd343]
+- Updated dependencies [bbdfc05]
+- Updated dependencies [d050a8f]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [d731b89]
+- Updated dependencies [905f57b]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+- Updated dependencies [a65a59b]
+- Updated dependencies [077b75f]
+- Updated dependencies [8a83ceb]
+- Updated dependencies [462d02f]
+- Updated dependencies [45e6001]
+- Updated dependencies [9f024d8]
+  - @objectstack/spec@18.0.0-next.3
+  - @objectstack/metadata-core@18.0.0-next.3
+  - @objectstack/platform-objects@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/formula@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Patch Changes
+
+- a6d0715: fix(plugin-approvals): the `approval.requested` notification names the record by its object label and id, and the empty-slot warning no longer says the request "cannot advance"
+  
+  Clause-②: no
+  
+  - **The notification names the record's object by its label.** The body of `approval.requested` used to read `A decision on crm_opportunity/JCqLLy5dSug1MldB is waiting on you.`, with the object's API name. It now reads `A decision on Opportunity JCqLLy5dSug1MldB is waiting on you.`, using the label the Approvals Inbox row shows for that object. The API name is used only when the object's schema declares no label, as in the inbox. The body carries the record's id, as before, and not its title, from any source. Title, topic, action link and recipients are unchanged.
+  - **The empty-slot warning states the slot, not the request's fate.** An approver that expands to nobody used to log `the slot routes to no one and the request cannot advance until someone is added or the approver is re-pointed`. On the default `onEmptyApprovers: 'admin_rescue'` path the next line opened the request on the organization's administrators, who then decided it. The line now reads `the slot names no one, so no one is asked through it. Staff it or re-point the approver; a slate left naming no one is decided by the node's onEmptyApprovers.` What the node does with an empty slate is stated once, by the node-level line that already follows it.
+  
+  A patch: both are server-authored texts. No schema, translation key, export or notification field moves.
+- 9f81260: fix(plugin-approvals): a request's `record_title` is served only from fields its reader may read, and the one-tap action pages name the record by its id
+  
+  Clause-②: no
+  
+  - **The inbox title follows the reader's field-level security.** `listRequests`, `getRequest` and every action's read-back row (which the request actions' success messages read) now pick `record_title` from the subject record as served to the reading caller: the same answer the payload snapshot is redacted by (readable, and not masked for that caller). A display field the reader may not read, or is served masked, gives no title, and the key is absent, the shape the redaction gives that field in the payload. A title-eligible field the reader may read still names the record, and a reader who may read the display field gets the same title as before. Deleted records fall back to the reader's redacted snapshot, as before. Nothing is granted: record access stays with object permissions, sharing and row-level rules.
+  - **The action-link pages name the record by its id.** The session-less confirm and result pages (ADR-0043) have no reader to narrow for, so their "Record" row shows the record id beside the object's label, as the approval notification names it, and never the title.
+  
+  A patch: a narrowing of served values only. No schema, route, translation key, export or notification field moves. With no field-visibility source wired, every title is served as before.
+- b513343: fix(plugin-approvals): the inbox's referenced-record titles (`payload_display`) and the record-lock refusal's title are served only from fields the caller may read
+  
+  Clause-②: no
+  
+  - **Referenced-record titles follow the reader's field-level security on the referenced object.** `listRequests` and `getRequest` now pick each `payload_display` title from the referenced record as served to the reading caller: the same answer the payload snapshot and `record_title` are narrowed by (readable, and not masked for that caller), asked for the referenced object, once per object per read. A display field the reader may not read on the referenced object, or is served masked, gives that key no display value, so the snapshot's stored id stands, as it already does for a deleted referenced record. A title-eligible field the reader may read still names the record, and a reader who may read the display field gets the same title as before.
+  - **The `RECORD_LOCKED` refusal names the record only from what the writer may read.** The per-record refusal sentence takes its title from the record as served to the refused writer, asked with the writer's own execution context. When the writer may not read the display field, or is served it masked, the sentence names the object's label alone (`This Opportunity is locked …`), as it already does for a record with no title; it never names the id. A writer who may read the field is told the title as before. The code (`RECORD_LOCKED`) and status (409) are unchanged.
+  
+  A patch: a narrowing of served values only. Nothing is granted, and no schema, route, error code, translation key or export moves. With no field-visibility source wired, every title is served as before.
+- 7e6e4e1: fix(plugin-approvals): the inbox's referenced-record titles (`payload_display`) are served only for a referenced record the caller may read
+  
+  Clause-②: no
+  
+  - **Referenced-record titles follow the reader's access to the referenced RECORD.** `listRequests` and `getRequest` now title a lookup in the payload snapshot only when the reading caller may read the record it points at, asked through the platform's one caller-scoped row-access answer (`resolveReadableParentIds`, the same one the comment, activity, attachment and mail gates ask), once per referenced object per read. So the referenced object's object-level read, its sharing and its row-level rules decide, as they already do for the data API's `$expand`. A referenced record the reader may not read gets no display value and the snapshot's stored id stands, as it already does for a deleted referenced record. A reader who may read the record gets the same title as before, still picked from the fields they may be served. A referenced object the reader may not read at all is first skipped by the security service's object-level read admission (`canReadObject`), so an inbox read does not add an access-denied warning to the server log for it.
+  - **Nothing about the record under approval changes.** Its title (`record_title`), its label and its field-level-security-redacted snapshot are served to a routed approver exactly as before, whatever their access to that record.
+  
+  A patch: a narrowing of served values only. Nothing is granted, and no schema, route, error code, translation key or export moves. With no security plugin composed, every caller-scoped read answers every record, so every title is served as before.
+- Updated dependencies [0d3ea29]
+- Updated dependencies [f9b4217]
+- Updated dependencies [87d0619]
+- Updated dependencies [4e0838d]
+- Updated dependencies [584e737]
+- Updated dependencies [301eec6]
+- Updated dependencies [5547ad4]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [b1e9280]
+- Updated dependencies [05ab9ef]
+- Updated dependencies [1d79556]
+- Updated dependencies [07b27b3]
+- Updated dependencies [d0c09e4]
+- Updated dependencies [1692cd1]
+- Updated dependencies [73c7dc4]
+- Updated dependencies [8693110]
+- Updated dependencies [ad5a7d7]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [6f21216]
+- Updated dependencies [2372e0a]
+- Updated dependencies [5afa1e0]
+- Updated dependencies [56b2612]
+- Updated dependencies [1418de4]
+- Updated dependencies [7a96bf8]
+- Updated dependencies [daafae6]
+- Updated dependencies [3f0a307]
+- Updated dependencies [5fd2c76]
+- Updated dependencies [be48c5e]
+- Updated dependencies [57994c3]
+- Updated dependencies [23e689d]
+- Updated dependencies [bc0538a]
+- Updated dependencies [d176b0a]
+- Updated dependencies [c5dd7fc]
+- Updated dependencies [c2bb302]
+- Updated dependencies [4feb2d0]
+- Updated dependencies [1ac24f2]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [c03077e]
+- Updated dependencies [069fd40]
+- Updated dependencies [941c78a]
+  - @objectstack/platform-objects@18.0.0-next.2
+  - @objectstack/spec@18.0.0-next.2
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/metadata-core@18.0.0-next.2
+  - @objectstack/formula@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Minor Changes

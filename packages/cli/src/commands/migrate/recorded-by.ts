@@ -30,6 +30,8 @@ import {
 } from '../../utils/format.js';
 import { bootSchemaStack } from '../../utils/schema-migrate.js';
 import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js';
+import { describeDriverSqliteFile } from '../../utils/connection-display.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 
 async function confirm(question: string): Promise<boolean> {
   if (!process.stdin.isTTY) return false; // non-interactive → require --yes
@@ -59,7 +61,7 @@ async function confirm(question: string): Promise<boolean> {
  *
  * Dry run by default, like every other `os migrate` subcommand (#2186): a
  * bare invocation reports how many rows still carry the sentinel and writes
- * nothing. `--apply` runs the conversion through the ADR-0119 D2 migration
+ * no row or table. `--apply` runs the conversion through the ADR-0119 D2 migration
  * journal, so each chunk is one transaction and an interrupted run is
  * recoverable via `os migrate resume`.
  *
@@ -116,6 +118,17 @@ export default class MigrateRecordedBy extends Command {
     }
 
     try {
+      // [#23622] Either mode's connect may have switched a SQLite file's
+      // journal mode (`SqlDriver.applySqliteJournalMode`, one rule for every
+      // connect), which rewrites the file header and no row. So no line below
+      // says that nothing changed: the read-only mode claims no row or table
+      // (its boot defers DDL), an abort after the plain boot claims no row
+      // (that boot may have created a missing table), and on a SQLite file
+      // each says what the connect may still have changed. A target that is
+      // no SQLite file (PostgreSQL, MySQL) has no header to switch.
+      const journalNote = describeDriverSqliteFile(stack.driver?.config) !== undefined
+        ? ` ${JOURNAL_MODE_SWITCH_NOTE}`
+        : '';
       const engine: IObjectQLEngine = stack.kernel.getService('objectql');
       if (typeof engine?.find !== 'function') {
         throw new Error('No ObjectQL engine on this stack — cannot read sys_metadata_history.');
@@ -155,7 +168,7 @@ export default class MigrateRecordedBy extends Command {
           return;
         }
         printWarning(`${pending.length} sys_metadata_history row(s) hold recorded_by = '${RECORDED_BY_SENTINEL}'.`);
-        printInfo("Nothing was changed. Re-run with --apply to rewrite them to NULL.");
+        printInfo(`No row or table was changed. Re-run with --apply to rewrite them to NULL.${journalNote}`);
         return;
       }
 
@@ -176,7 +189,7 @@ export default class MigrateRecordedBy extends Command {
           return;
         }
         const ok = await confirm(chalk.bold(`\n${summary}? [y/N] `));
-        if (!ok) { printInfo('Aborted — nothing changed.'); return; }
+        if (!ok) { printInfo(`Aborted — no row was changed.${journalNote}`); return; }
       }
 
       if (!flags.json) printStep('Converting…');

@@ -2,8 +2,10 @@
 
 A **datasource** (`defineDatasource`, a `*.datasource.ts` metadata file) is a
 connection to a data store. Objects route to one via their `datasource` field
-(default: `'default'`). Most apps need only the `default` datasource; declare more
-to read/write a **separate** or **external** database.
+(default: `'default'`). `default` is host-reserved: the host connects it from
+`OS_DATABASE_URL`, and a stack that declares a datasource named `default` is
+refused. Declare a datasource under its own name only to read/write a
+**separate** or **external** database.
 
 Full field reference: `node_modules/@objectstack/spec/src/data/datasource.zod.ts`.
 
@@ -14,8 +16,6 @@ Full field reference: `node_modules/@objectstack/spec/src/data/datasource.zod.ts
 | `managed` (default) | ObjectStack owns the schema; DDL + migrations allowed. |
 | `external` | A mature external DB ObjectStack does **not** own; DDL forbidden; boot mismatch **fails**. |
 | `validate-only` | Like `external`, but a mismatch **warns** instead of failing boot. |
-
-`external` settings are **required** when `schemaMode !== 'managed'`.
 
 ## Federated (external) objects
 
@@ -55,7 +55,7 @@ objects' read metadata registered **automatically at boot** — no `onEnable` /
 4. a **`datasourceMapping` rule routes at least one object to it**.
 
 A `managed` datasource that nothing routes to stays **metadata-only** — visible but
-not connected. Set `autoConnect: true` to force a live connection.
+not connected.
 
 ⚠️ A `datasourceMapping` rule is **routing, not a hint**. A rule pointing at a
 datasource that cannot be connected fails the boot, and a query against a mapped

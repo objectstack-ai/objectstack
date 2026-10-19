@@ -35,6 +35,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Origen",
         help: "Origen de la solicitud — `flow:<flowName|nodeId>` para aprobaciones por nodo"
       },
+      process_label: {
+        label: "Flujo",
+        help: "Etiqueta del flujo que abrió esta solicitud, tal como estaba cuando se abrió"
+      },
       object_name: {
         label: "Objeto"
       },
@@ -70,6 +74,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Paso actual",
         help: "Nombre técnico del paso pendiente de aprobación."
       },
+      current_step_label: {
+        label: "Paso de aprobación",
+        help: "Etiqueta del paso pendiente de aprobación, tal como estaba cuando la solicitud llegó a él"
+      },
       current_step_index: {
         label: "Índice del paso actual"
       },
@@ -77,21 +85,25 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Aprobadores pendientes",
         help: "ID de usuario separados por comas que pueden actuar en el paso actual."
       },
+      pending_approver_labels: {
+        label: "En espera de",
+        help: "A quién espera la solicitud: el nombre de cada aprobador pendiente, o la dirección del turno cuando no designa a ninguna persona"
+      },
       payload_json: {
         label: "Instantánea",
         help: "Instantánea del registro en el momento del envío."
       },
       flow_run_id: {
         label: "Flow Run",
-        help: "Suspended automation run id this request gates (ADR-0019). The decision resumes it."
+        help: "Suspended automation run id this request gates. The decision resumes it."
       },
       flow_node_id: {
         label: "Flow Node",
-        help: "Approval node id within the flow that opened this request (ADR-0019)."
+        help: "Approval node id within the flow that opened this request."
       },
       node_config_json: {
         label: "Node Config",
-        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests (ADR-0019)."
+        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."
       },
       completed_at: {
         label: "Completado el"
@@ -244,6 +256,18 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
         label: "Paso",
         help: "Nombre técnico del paso en el momento de la acción."
       },
+      step_label: {
+        label: "Paso de aprobación",
+        help: "Etiqueta del paso en el momento de la acción"
+      },
+      object_name: {
+        label: "Objeto",
+        help: "Objeto del registro al que se refiere la solicitud"
+      },
+      record_id: {
+        label: "Registro",
+        help: "El registro al que se refiere la solicitud"
+      },
       step_index: {
         label: "Índice del paso"
       },
@@ -272,6 +296,10 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       acted_as: {
         label: "Actuó como",
         help: "El turno de aprobación pendiente en calidad del cual se realizó esta acción, con la grafía almacenada del turno: un ID de usuario, un correo electrónico o una dirección de puesto. Vacío cuando ningún turno admitió la acción, como las acciones propias del solicitante, las acciones del sistema y las anulaciones de administrador."
+      },
+      acted_as_label: {
+        label: "En nombre de",
+        help: "El turno en calidad del cual se realizó esta acción, para mostrar: el nombre de la persona que designa, o su dirección cuando no designa a ninguna persona"
       },
       comment: {
         label: "Comentario"
@@ -315,7 +343,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
+    description: "While someone is away, approvals assigned to them personally go to their delegate.",
     fields: {
       id: {
         label: "Delegation ID"
@@ -334,7 +362,7 @@ export const esESObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive (ADR-0091 D2 predicate) — never by a background job."
+        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive — never by a background job."
       },
       valid_until: {
         label: "Valid Until",

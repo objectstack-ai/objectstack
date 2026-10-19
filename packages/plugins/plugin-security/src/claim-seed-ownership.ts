@@ -3,6 +3,31 @@
 /**
  * claimSeedOwnership — hand seeded business records to the first platform admin.
  *
+ * ## [#23354] Only the rows the seed wrote (ADR-0138 D1)
+ *
+ * "Unowned" is not "seeded". A guest-written row and a public form's intake
+ * keep no owner on purpose — ADR-0138 D1 item 5: "the owner stays unset" when
+ * nothing in the scenario sets it — and no stored column tells such a row from
+ * a seed row. This pass used to re-own every NULL-owner row of every eligible
+ * object on every `app:seeded`, so it handed those rows to the platform admin
+ * at the next boot. The NULL arm now re-owns only the ids the seed loader
+ * reported landing on (`SeedLoadResult.landedIds`), read through the
+ * `seed-settlement` contract's `seededRecordIds` ({@link ClaimOwnershipOptions}):
+ * `owner_id IS NULL AND id IN (seeded ids)`. The loader records a row its key
+ * matched on a replay as well as one it wrote, so a later boot's replay names
+ * the rows an earlier boot seeded and the claim still reaches them. Every other
+ * unowned row is left as its writer left it.
+ *
+ * The `usr_system` arm is unchanged: only a seed (or a legacy install) writes
+ * that owner — the guest stamp and the form doors never do, and no runtime
+ * writer stamps it — so the seed identity is its own selector.
+ *
+ * Seed writers that emit no `app:seeded` publish no rows here and are outside
+ * this pass's purpose (handing the boot seed to the first admin): a package
+ * install's or a publish's seed apply, the dev hot-reload seeder, and the
+ * marketplace install's seed. A dataset they share with the boot bundle is
+ * re-reported by the next boot's replay.
+ *
  * Seed data is loaded during app-plugin `start()`, which runs BEFORE any human
  * user exists (the login admin is minted later, on `kernel:ready`). So seeded
  * rows land with `owner_id = NULL` (the author left it unset — the correct,
@@ -44,8 +69,8 @@
  * `owner_id`), and the platform — not the author — performs the handoff. There
  * is nothing to remember and nothing to mistype.
  *
- * Idempotent: only NULL / `usr_system`-owned rows are touched, so once a real
- * admin owns them a re-run is a no-op. `managedBy` and `sys_*` tables are
+ * Idempotent: only seeded NULL-owned rows and `usr_system`-owned rows are
+ * touched, so once a real admin owns them a re-run is a no-op. `managedBy` and `sys_*` tables are
  * skipped (their ownership, if any, is platform-controlled).
  *
  * ## [#22067] The claim dispatches no automation
@@ -94,13 +119,12 @@
  * this shape do its job — with no change to `plugin-sharing`.
  *
  * The unit of work is now the SET, not the row: one predicate write per unowned
- * shape (`owner_id IS NULL`, then `owner_id = usr_system`), so the matched set
- * is the same set the old two-scan rule resolved — row for row — while the
- * write count stops scaling with N. The predicates stay two narrow writes rather
- * than one `OR`/`IN` for the reason the old scans were two (driver
- * portability), and they stay disjoint in this order, because the NULL pass
- * lands `adminUserId` — never `usr_system`, that target is refused at the top of
- * this function.
+ * shape (`owner_id IS NULL` — since #23354 `AND id IN (seeded ids)`, one write
+ * per chunk of them — then `owner_id = usr_system`), so the write count stops
+ * scaling with N. The predicates stay narrow writes rather than one `OR`/`IN`
+ * for the reason the old scans were two (driver portability), and they stay
+ * disjoint in this order, because the NULL pass lands `adminUserId` — never
+ * `usr_system`, that target is refused at the top of this function.
  *
  * ### …and a paged fallback, because one write cannot always carry the set
  *
@@ -132,6 +156,20 @@
  * whole-set versus 5 865 ms always-paged, same engine, same driver, same row
  * set. The page is therefore what the engine's refusal buys, not the default.
  *
+ * [#23354] The NULL arm now pays that shape on purpose: its `id IN (seeded
+ * ids)` is the selection itself, the only way to tell the seed's rows from a
+ * guest's or a form's. Measured on `InMemoryDriver` through a real `ObjectQL`
+ * (one object, one write, two runs each): 5 000 unowned seeded rows, the
+ * first claim 2 587 / 2 650 ms against 297 / 435 ms for the old bare
+ * `owner_id IS NULL`; 1 000 rows, 62 / 69 ms against 17 / 53 ms. Every later
+ * pass — every warm boot, once the rows are owned — 4 / 5 ms against 2 / 3 ms,
+ * because `owner_id IS NULL` fails first and the `IN` list is never consulted.
+ * So the quadratic cost is paid on the pass that claims the rows, not on every
+ * boot; a SQL driver hands `id IN` to the database, which this measurement does
+ * not cover. A chunk is {@link CLAIM_PAGE_ROWS} ids, half the ceiling, so a
+ * NULL-arm write is never refused and never pages; the fallback below still
+ * serves the `usr_system` arm, which is one predicate over every such row.
+ *
  * The page size is derived from that ceiling rather than chosen: half of it
  * leaves room for a driver's own bound-parameter limits and for the ceiling
  * being the engine's answer to a different question, while staying well above
@@ -159,6 +197,18 @@ interface ClaimOwnershipOptions {
    * that reports success for the one failure it exists to catch.
    */
   seedSettlement?: SeedSettlementSnapshot | undefined;
+  /**
+   * The ids of the rows this process's boot seed landed on, per object — the
+   * `seed-settlement` contract's `seededRecordIds`, bound by the caller and
+   * read per object as the pass walks. `undefined` when no seed host on this
+   * kernel publishes them.
+   *
+   * It is the NULL arm's whole selection: a NULL-owner row it does not name is
+   * not this pass's to re-own (ADR-0138 D1). So without it the NULL arm
+   * re-owns nothing — never the old every-unowned-row predicate — and the pass
+   * report says so.
+   */
+  seededRecordIds?: ((objectName: string) => readonly string[]) | undefined;
 }
 
 /** The context of the claim's one READ (`readPage`): system-elevated, nothing more. */
@@ -187,7 +237,9 @@ const SYSTEM_CTX = { isSystem: true };
 const CLAIM_WRITE_CTX = { isSystem: true, skipAutomations: true };
 
 /**
- * Rows a single fallback page takes off the top of an over-ceiling predicate.
+ * Rows a single fallback page takes off the top of an over-ceiling predicate —
+ * and [#23354] the seeded ids one NULL-arm write carries, for the same two
+ * reasons: it stays under the ceiling, and inside a driver's parameter limit.
  *
  * Derived from the engine's per-row hook ceiling, never a free literal: that
  * ceiling is what refuses an over-sized predicate write, so the page size has to
@@ -225,16 +277,30 @@ function isPerRowHookBudgetRefusal(e: unknown): boolean {
 }
 
 /**
- * "Unowned", as two driver-portable predicates rather than one `OR`/`IN`.
+ * The two "unowned" arms, as driver-portable predicates rather than one `OR`/`IN`.
+ *
+ *  - **NULL** — `owner_id IS NULL AND id IN (one chunk of the seeded ids)`, one
+ *    predicate per chunk of {@link CLAIM_PAGE_ROWS} ids. NULL alone is every
+ *    unowned row — a guest's, a form's, a seed's — and ADR-0138 D1 leaves the
+ *    first two unowned; the seed's own report is what names the third. The
+ *    chunk keeps the `IN` list inside a driver's bound-parameter limit, and a
+ *    chunk can never match more rows than the per-row hook ceiling allows, so
+ *    the engine never refuses it whole.
+ *  - **seed identity** — `owner_id = usr_system`, unchanged: no guest door, form
+ *    door or runtime writer stamps it, so it names only seed or legacy rows.
  *
  * Order is load-bearing: the NULL pass lands `adminUserId` — which cannot be
  * `usr_system` (refused at the top of {@link claimSeedOwnership}) — so the two
  * matched sets stay disjoint and their counts sum without double-counting a row.
  */
-const UNOWNED_PREDICATES: readonly Record<string, unknown>[] = [
-  { owner_id: null },
-  { owner_id: SystemUserId.SYSTEM },
-];
+function unownedPredicates(seededIds: readonly string[]): Record<string, unknown>[] {
+  const predicates: Record<string, unknown>[] = [];
+  for (let at = 0; at < seededIds.length; at += CLAIM_PAGE_ROWS) {
+    predicates.push({ owner_id: null, id: { $in: seededIds.slice(at, at + CLAIM_PAGE_ROWS) } });
+  }
+  predicates.push({ owner_id: SystemUserId.SYSTEM });
+  return predicates;
+}
 
 function hasOwnerField(schema: ServiceObject): boolean {
   const fields: any = (schema as any)?.fields;
@@ -261,6 +327,16 @@ function hasOwnerField(schema: ServiceObject): boolean {
 function affectedRowCount(value: unknown): number | undefined {
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) return undefined;
   return value;
+}
+
+/**
+ * A predicate as a log line carries it: an `id IN (…)` list — a chunk of up to
+ * {@link CLAIM_PAGE_ROWS} seeded ids — is reported by its size, never inlined.
+ */
+function whereForLog(where: Record<string, unknown>): Record<string, unknown> {
+  const id = where.id as { $in?: unknown } | undefined;
+  if (!id || !Array.isArray(id.$in)) return where;
+  return { ...where, id: { $in: `${id.$in.length} id(s)` } };
 }
 
 /**
@@ -327,7 +403,7 @@ async function claimPredicate(
         logger?.warn?.(
           `[security] claimSeedOwnership could not read an affected-row count for ${objectName} ` +
             '— the rows were re-owned but this run cannot say how many',
-          { object: objectName, where, page },
+          { object: objectName, where: whereForLog(where), page },
         );
         return total;
       }
@@ -346,7 +422,7 @@ async function claimPredicate(
       logger?.warn?.(
         `[security] claimSeedOwnership could not page ${objectName}: the write refused as ` +
           'over-sized but the predicate matched no rows to page; those rows stay unowned',
-        { object: objectName, where, page },
+        { object: objectName, where: whereForLog(where), page },
       );
       return total;
     }
@@ -360,7 +436,7 @@ async function claimPredicate(
       logger?.warn?.(
         `[security] claimSeedOwnership could not read an affected-row count for ${objectName} ` +
           '— the page was re-owned but this run cannot say how many, and paging stops here',
-        { object: objectName, where, page, result: typeof affected },
+        { object: objectName, where: whereForLog(where), page, result: typeof affected },
       );
       return total;
     }
@@ -372,7 +448,7 @@ async function claimPredicate(
       logger?.warn?.(
         `[security] claimSeedOwnership matched ${ids.length} unowned row(s) on ${objectName} ` +
           'but re-owned none of them; those rows stay unowned',
-        { object: objectName, where, page, matched: ids.length },
+        { object: objectName, where: whereForLog(where), page, matched: ids.length },
       );
       return total;
     }
@@ -382,7 +458,7 @@ async function claimPredicate(
     `[security] claimSeedOwnership stopped after ${MAX_CLAIM_PAGES} fallback page(s) on ${objectName}; ` +
       'unowned rows may remain until the claim next runs — the next seed settle (`app:seeded`, on this ' +
       'boot or a later one) or the next platform-admin promotion',
-    { object: objectName, where, pages: MAX_CLAIM_PAGES },
+    { object: objectName, where: whereForLog(where), pages: MAX_CLAIM_PAGES },
   );
   return total;
 }
@@ -439,6 +515,13 @@ async function claimPredicate(
  * appended rather than replacing it. The recipient reads `platform admin X`, not
  * `first admin X`: on a later boot it is the admin who already holds the grant,
  * not anyone this boot promoted.
+ *
+ * ## [#23354] …and whether it could name the seed's rows at all
+ *
+ * The NULL arm re-owns only the ids the seed reported landing on. A pass with
+ * no such reading re-owns no NULL-owner row, which is "claimed 0" again — so a
+ * pass that could not tell says so, appended after the finality clause, and
+ * `meta.seededRows` carries how many seeded ids the walk held.
  */
 function reportClaimPass(
   logger: ClaimOwnershipOptions['logger'],
@@ -446,6 +529,7 @@ function reportClaimPass(
   results: { object: string; count: number }[],
   eligibleObjects: number,
   seedSettlement: SeedSettlementSnapshot | undefined,
+  seeded: { published: boolean; rows: number },
 ): void {
   const total = results.reduce((s, r) => s + r.count, 0);
   const head =
@@ -458,14 +542,19 @@ function reportClaimPass(
     breakdown: results,
     seedInFlight: seedSettlement?.inFlight,
     seedSuppressed: seedSettlement?.suppressed,
+    seededRows: seeded.published ? seeded.rows : undefined,
   };
+  const unnamed = seeded.published
+    ? ''
+    : ' No seed host on this kernel publishes the rows its seed landed on, so no NULL-owner row was ' +
+      're-owned: an unowned row this pass cannot name as seeded keeps no owner (ADR-0138 D1).';
 
   if (seedSettlement && seedSettlement.inFlight > 0) {
     logger?.warn?.(
       `${head} — PROVISIONAL: ${seedSettlement.inFlight} seed source(s) were still writing when this ` +
         'pass ran, so rows seeded after it are NOT covered by it. The claim runs again as each of those ' +
         'sources settles (`app:seeded`) and hands those rows to the same platform admin. A count of 0 ' +
-        'here is "nothing had landed yet", never "nothing to claim".',
+        `here is "nothing had landed yet", never "nothing to claim".${unnamed}`,
       meta,
     );
     return;
@@ -473,13 +562,13 @@ function reportClaimPass(
   if (!seedSettlement) {
     logger?.info?.(
       `${head} — unattested: no seed-settlement probe is registered on this kernel, so this pass ` +
-        'cannot say whether a seed was still writing when it ran.',
+        `cannot say whether a seed was still writing when it ran.${unnamed}`,
       meta,
     );
     return;
   }
   logger?.info?.(
-    `${head} — final: every seed source this boot writes has settled, so there was nothing left to claim.`,
+    `${head} — final: every seed source this boot writes has settled, so there was nothing left to claim.${unnamed}`,
     meta,
   );
 }
@@ -495,9 +584,10 @@ function reportClaimPass(
  *   (d) declare an `owner_id` field,
  * and re-owns the unowned rows as `isSystem`, with metadata-bound automation
  * off ({@link CLAIM_WRITE_CTX}), in one predicate write per
- * {@link UNOWNED_PREDICATES} entry, paging that write only when the engine
- * refuses it for its per-row hook budget. Returns a per-object summary whose
- * `count` is the sum of every write's affected-row count.
+ * {@link unownedPredicates} entry — the seeded ids' chunks under the NULL arm,
+ * then the seed identity — paging that write only when the engine refuses it
+ * for its per-row hook budget. Returns a per-object summary whose `count` is
+ * the sum of every write's affected-row count.
  */
 export async function claimSeedOwnership(
   ql: any,
@@ -521,6 +611,9 @@ export async function claimSeedOwnership(
   // "claimed 0" can be read against the size of what was examined — a pass over
   // zero eligible objects and a pass over forty are different facts.
   let eligibleObjects = 0;
+  // [#23354] The NULL arm's selection, read per object as the walk reaches it.
+  const seededRecordIds = options.seededRecordIds;
+  let seededRows = 0;
 
   for (const schema of schemas) {
     if (!schema?.name) continue;
@@ -551,8 +644,11 @@ export async function claimSeedOwnership(
       ),
     };
 
+    const seededIds = seededRecordIds?.(schema.name) ?? [];
+    seededRows += seededIds.length;
+
     let updated = 0;
-    for (const where of UNOWNED_PREDICATES) {
+    for (const where of unownedPredicates(seededIds)) {
       try {
         updated += await claimPredicate(io, schema.name, where, logger);
       } catch (e) {
@@ -568,13 +664,16 @@ export async function claimSeedOwnership(
           `[security] claimSeedOwnership failed for ${schema.name}; those rows stay unowned until the ` +
             'claim next runs — the next seed settle (`app:seeded`, on this boot or a later one) or the ' +
             'next platform-admin promotion',
-          { object: schema.name, where, error: (e as Error).message },
+          { object: schema.name, where: whereForLog(where), error: (e as Error).message },
         );
       }
     }
     if (updated > 0) results.push({ object: schema.name, count: updated });
   }
 
-  reportClaimPass(logger, adminUserId, results, eligibleObjects, options.seedSettlement);
+  reportClaimPass(logger, adminUserId, results, eligibleObjects, options.seedSettlement, {
+    published: typeof seededRecordIds === 'function',
+    rows: seededRows,
+  });
   return results;
 }

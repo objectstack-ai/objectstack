@@ -133,6 +133,11 @@ async function ensureDefaultOrganization(engine: any): Promise<void> {
  */
 function securityProcess(engine: any) {
   let inFlight = 1;
+  // [#23354] The rows this process's seed reported landing on — what the
+  // runtime host publishes from the loader's `landedIds` before it settles. A
+  // replay reports the rows an earlier boot wrote as well as the ones it
+  // writes, so a warm boot publishes every seed row it matched.
+  const seeded = new Set<string>();
   const hooks: Array<[string, (...a: any[]) => any]> = [];
   const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
   const services: Record<string, any> = {
@@ -141,6 +146,7 @@ function securityProcess(engine: any) {
     metadata: { get: async () => null, list: async () => [] },
     [SEED_SETTLEMENT_SERVICE]: {
       snapshot: () => ({ pending: inFlight, inFlight, suppressed: [] }),
+      seededRecordIds: (object: string) => (object === 'crm_case' ? [...seeded] : []),
     },
   };
   const ctx: any = {
@@ -163,6 +169,15 @@ function securityProcess(engine: any) {
     fire,
     init: () => plugin.init(ctx),
     start: () => plugin.start(ctx),
+    /** The seed writes a row, and reports it. */
+    seed: async (id: string) => {
+      await seedCase(engine, id);
+      seeded.add(id);
+    },
+    /** A replay matched rows an earlier boot wrote, and reports them. */
+    replayed: (...ids: string[]) => {
+      for (const id of ids) seeded.add(id);
+    },
     /** The runtime settles the source BEFORE it triggers `app:seeded`. */
     seedSettles: () => {
       inFlight = 0;
@@ -205,7 +220,7 @@ async function firstBoot(file: string) {
   const proc = securityProcess(engine);
   await proc.init();
   await proc.start();
-  for (const id of ['c1', 'c2', 'c3']) await seedCase(engine, id);
+  for (const id of ['c1', 'c2', 'c3']) await proc.seed(id);
   await proc.seedSettles();
   // No admin yet: the settle claims nothing and says nothing.
   expect(proc.claimReports()).toEqual([]);
@@ -224,11 +239,14 @@ async function firstBoot(file: string) {
   await engine.delete('crm_case', { where: { id: 'c2' }, context: { isSystem: true } } as any);
   await engine.update('crm_case', { owner_id: null }, { where: { id: 'c3' }, multi: true, context: { isSystem: true } });
   await engine.insert('crm_case', { id: 'c4', name: 'c4', owner_id: OTHER }, SYS);
+  // [#23354] A row the seed never wrote, left unowned on purpose — a guest's or
+  // a public form's (ADR-0138 D1). No warm boot may hand it over.
+  await engine.insert('crm_case', { id: 'g1', name: 'g1', owner_id: null }, SYS);
   await engine.destroy();
 }
 
 /** What every warm boot must leave once its seed has settled. */
-const SETTLED = { c1: ADMIN, c2: ADMIN, c3: ADMIN, c4: OTHER };
+const SETTLED = { c1: ADMIN, c2: ADMIN, c3: ADMIN, c4: OTHER, g1: null };
 
 describe('seed-ownership claim on a WARM boot — an admin exists, the seed replays in budget', () => {
   it('claims the replayed rows when the seed settles BEFORE kernel:ready (plugin registered before the app)', async () => {
@@ -240,7 +258,8 @@ describe('seed-ownership claim on a WARM boot — an admin exists, the seed repl
     await proc.init();
     await proc.start();
     // AppPlugin.start(): the replay re-inserts the deleted row, then settles.
-    await seedCase(engine, 'c2');
+    proc.replayed('c1', 'c3');
+    await proc.seed('c2');
     expect((await owners(engine)).c2).toBeNull();
     await proc.seedSettles();
 
@@ -264,7 +283,8 @@ describe('seed-ownership claim on a WARM boot — an admin exists, the seed repl
     await proc.init();
     // AppPlugin.start() runs first: replay, settle — this plugin's start() has
     // not run yet.
-    await seedCase(engine, 'c2');
+    proc.replayed('c1', 'c3');
+    await proc.seed('c2');
     const heard = await proc.seedSettles();
     expect(heard).toBe(1);
     expect(await owners(engine)).toEqual(SETTLED);
@@ -284,7 +304,8 @@ describe('seed-ownership claim on a WARM boot — an admin exists, the seed repl
     await proc.init();
     await proc.start();
     await proc.fire('kernel:ready');
-    await seedCase(engine, 'c2');
+    proc.replayed('c1', 'c3');
+    await proc.seed('c2');
     await proc.seedSettles();
 
     expect(await owners(engine)).toEqual(SETTLED);
@@ -319,7 +340,7 @@ describe('the claim target is the existing platform admin, by the bootstrap rule
     const proc = securityProcess(engine);
     await proc.init();
     await proc.start();
-    await seedCase(engine, 'c1');
+    await proc.seed('c1');
     await proc.seedSettles();
 
     expect(await owners(engine)).toEqual({ c1: 'usr_zed' });

@@ -97,14 +97,11 @@ type Route =
     /** The write-through or the heal is called after the write, in the same member, before its next write. */
     | { readonly sameMember: 'applyRegistryWriteThrough' | 'restoreArtifactRegistryView' }
     /** The member hands the row to its callers, and each of them calls `then`, which calls the write-through. */
-    | { readonly handedTo: 'callers'; readonly then: 'runPublishSideEffects' }
-    /** An organization-scoped row, which never enters the registry (#6602): nothing to reconcile. */
-    | { readonly organizationScoped: true };
+    | { readonly handedTo: 'callers'; readonly then: 'runPublishSideEffects' };
 
 const WRITES: ReadonlyArray<{ readonly member: string; readonly verb: string; readonly route: Route }> = [
     { member: 'saveMetaItem', verb: 'repo.put(', route: { sameMember: 'applyRegistryWriteThrough' } },
     { member: 'promoteDraftForPublish', verb: 'repo.promoteDraft(', route: { handedTo: 'callers', then: 'runPublishSideEffects' } },
-    { member: 'removeLegacyOrganizationRowOnUninstall', verb: 'repo.delete(', route: { organizationScoped: true } },
     { member: 'revertCommit', verb: 'repo.delete(', route: { sameMember: 'restoreArtifactRegistryView' } },
     { member: 'revertCommit', verb: 'repo.restoreVersion(', route: { sameMember: 'applyRegistryWriteThrough' } },
     { member: 'rollbackMetaItem', verb: 'repo.restoreVersion(', route: { sameMember: 'applyRegistryWriteThrough' } },
@@ -156,24 +153,18 @@ describe('[#23198] every stored-row write in protocol.ts reaches the reconcile',
         }
     });
 
-    it('an organization-scoped write reaches only a legacy organization\'s repository', () => {
-        for (const row of WRITES.filter((r) => 'organizationScoped' in r.route)) {
-            expect(bodyOf(row.member)).toContain('const repo = this.legacyOrganizationRepo(');
-        }
-    });
-
     it('a repository is bound under the one spelling the census reads', () => {
         // A repository bound under any other name would write past the census.
-        const ACQUIRE = /this\.(?:getOverlayRepo\(\)|legacyOrganizationRepo\(|repositoryFor\()|new SysMetadataRepository\(/;
-        const OWN = ['getOverlayRepo', 'legacyOrganizationRepo', 'repositoryFor'];
+        const ACQUIRE = /this\.getOverlayRepo\(\)|new SysMetadataRepository\(/;
+        const OWN = ['getOverlayRepo'];
         const stray = codeMatches(ACQUIRE).filter(({ offset, member }) => {
             if (OWN.includes(member)) return false;
             const line = LINES[lineOf(offset)].trim();
-            return !/^const repo = this\.(?:getOverlayRepo\(\)|legacyOrganizationRepo\([^)]*\));$/.test(line)
+            return !/^const repo = this\.getOverlayRepo\(\);$/.test(line)
                 && !/this\.getOverlayRepo\(\)\.listDrafts\(/.test(line);
         });
         expect(stray.map(({ member, offset }) => `${member}: ${LINES[lineOf(offset)].trim()}`)).toEqual([]);
-        expect(codeMatches(/new SysMetadataRepository\(/).map((m) => m.member)).toEqual(['repositoryFor']);
+        expect(codeMatches(/new SysMetadataRepository\(/).map((m) => m.member)).toEqual(['getOverlayRepo']);
     });
 });
 

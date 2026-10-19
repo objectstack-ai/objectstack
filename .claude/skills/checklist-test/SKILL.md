@@ -115,26 +115,22 @@ Tier 1 批量清掉,剩下的预算才对得起 Tier 2。
 绿,落在任务分支上。运行中发现的产品缺陷按 §4 收束抽取成独立卡;条款侧可记
 expected-fail 探针 —— 永不在真实缺陷上把条款打成绿。
 
-## 4. 结果 issue —— 一次运行一张 GitHub issue,纯文本
+## 4. 结果 issue —— 一次整轮运行一张 GitHub issue,纯文本
 
-每次完成的运行 —— **通过与失败同等** —— 恰好立一张 GitHub issue 作为持久记录。运行
-的任何产物都不进仓库树:JSON 不进,截图不进。JSON 运行记录(RUNNER.md 形状)是执行
-环境里的草稿;`runs/` 保持 git-ignore。issue 就是报告。
+每次完成的整轮运行(发版候选、区或 `all`、维护者点名目标)—— **通过与失败同等** ——
+恰好立一张 GitHub issue 作为持久记录;§5 的验证重测不立。运行产物一概不进仓库树:JSON
+运行记录(RUNNER.md 形状)只是执行环境里的草稿,`runs/` 保持 git-ignore。issue 就是报告。
 
 **issue 是纯文本 —— 永不放图。** 截图只为让你和子代理**现场**得出判定;它们是判断辅
 助,随运行环境一起丢弃。持久报告需要的是**复现规则,不是图片**。
 
 经 REST 代理 `POST .../issues` 立单(`Content-Type: application/json`;⛔ 永不 MCP `issue_write`,锁 1 已拒):
 
-- **标题** —— `QA run · <selector> (<已判定>/<总数>) · <sha8> · <date> · <counts>`:恰好
-  一种形状、严格解析,`(<已判定>/<总数>)` **强制**;语法与退役写法见
-  RUNNER.md「The record title」。
-- **标签** —— 只带 `qa-run`,⛔ 不挂 `bug`/priority 等工作标签:run 记录是协议载体、
-  不入分诊 sweep,⛔ 不是可派发单元;工作标签随抽取出的缺陷卡走(RUNNER 抽取义务条款)。
-  **这条在记录的整个生命周期成立** —— 收口与关闭时同样不补挂。实测漂移形态:记录事
-  后
-  被补上 `tests` / `tracking` / `bug`,每一个都把协议载体推回排除清单本要挡住的
-  sweep。
+- **标题** —— `QA run · <selector> (<已判定>/<总数>) · <sha8> · <date> · <counts>`:唯一
+  形状、严格解析、分数**强制**;语法与退役写法见 RUNNER.md「The record title」。
+- **标签** —— 只带 `qa-run`,⛔ 不挂 `bug`/`tests`/`tracking`/priority 等工作标签:run 记录
+  是协议载体、不入分诊 sweep,⛔ 不是可派发单元;工作标签随抽取出的缺陷卡走(RUNNER 抽取
+  义务条款)。**这条在记录的整个生命周期成立** —— 收口与关闭时同样不补挂。
 - **正文**,按此顺序:
   - **环境指纹** —— framework sha、`.objectui-sha`、端口、db、seed、时间戳。
   - **范围** —— 选择器 + 每项所对的 `revision`。
@@ -224,6 +220,10 @@ QA-source: #运行记录号 · area.item · 条款
 
 ⛔ 其它一切都不是重测触发:凭手感「再跑一遍」只增加收口债,不增加覆盖。
 
+**验证重测**不是第四条触发:由同一 PR 对该项的清单编辑(§3)引发,⛔ 不立 `qa-run` 记录。
+逐项判定表进 PR 正文,该项 `history` 行的 `ref` 指向该 PR;`partial`/`blocked` 的缺口进 PR
+正文与 `fixtures.knownGaps`;产品缺陷 `fail` 照常抽卡、溯源指向该 PR;条款过期在同一 diff 修。
+
 ## Guardrails
 
 - **不伪造覆盖。** 缺 fixture → `blocked(fixture)` 带理由;console 没构建 → 构建它
@@ -234,5 +234,5 @@ QA-source: #运行记录号 · area.item · 条款
   告终局,⛔ 不等维护者。⚠ 这与 RUNNER 规则 2 是**同一条规则写在两处**,⛔ 两边都不是对
   另一边的优先级主张;完整论证与它的维护者裁定在 RUNNER。
 - **不把 blocked 项当可运行的跑** —— 解析器隐藏它们正为此。
-- **一个选择器、一次运行、一张 issue。** release sweep 把 `since:vN` 与
-  `priority:P0` 作为分开的两轮跑 → 两张 issue,不要糊在一起。
+- **一个选择器、一次运行、一张 issue;验证重测不立 issue,证据进 PR 正文(§5)。** release
+  sweep 把 `since:vN` 与 `priority:P0` 作为分开的两轮跑 → 两张 issue,不要糊在一起。

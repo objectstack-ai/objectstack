@@ -643,7 +643,7 @@ describe('#6960 — SysMetadataRepository: the delete verb diverges, the put ver
                 return { deleted: existed ? 1 : 0 };
             },
         };
-        return { repo: new SysMetadataRepository({ engine, organizationId: null }), rows, historyRows };
+        return { repo: new SysMetadataRepository({ engine }), rows, historyRows };
     }
 
     describe('rolled-back overlayable tier', () => {

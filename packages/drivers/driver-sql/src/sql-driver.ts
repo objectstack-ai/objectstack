@@ -155,6 +155,7 @@ import {
   type UndeliveredAttribute,
 } from './builtin-column-collision.js';
 import { recoverUnencodedJsonText } from './unencoded-json-text.js';
+import { makeDatabaseDirectory, SqliteDatabaseFileError } from './sqlite-database-file.js';
 import { jsonMembershipPredicate } from '@objectstack/core';
 import knex, { Knex } from 'knex';
 import { nanoid } from 'nanoid';
@@ -172,6 +173,11 @@ import {
   jsonColumnOperatorRefusalText,
   type JsonColumnFieldClass,
 } from '@objectstack/core';
+// [ADR-0139 D3] The walk that finds a `ReadableIds` leaf this compiler will not
+// evaluate, and the one refusal every driver answers it with — shared with
+// Turso's remote transport, `driver-memory` and `driver-mongodb`.
+import { findMisplacedReadableIds, refuseReadableIdsOnce } from '@objectstack/core';
+import { isComposedReadableIds, type ComposedReadableIds } from '@objectstack/spec/data';
 
 /**
  * [#20768] The async scope of a driver's own PRE-DDL question: the ADR-0104
@@ -5699,6 +5705,14 @@ export class SqlDriver implements IDataDriver {
 
   /** Throttle table for missing-tenantId warnings ({object}:{op}). */
   protected tenantAuditWarned: Set<string> = new Set();
+  /** [ADR-0139 D3] Whether this instance has logged its `ReadableIds` refusal (once per driver). */
+  protected readonly readableIdsRefusalLog = { logged: false };
+  /**
+   * [ADR-0139 D3] The driver its `ReadableIds` refusal names — the package a
+   * subclass that inherits this compiler ships in (`driver-sqlite-wasm`,
+   * `driver-turso`), so the operator reading the line looks in the right place.
+   */
+  protected readonly readableIdsDriverName: string = 'driver-sql';
 
   /**
    * Optional logger sink for security-audit warnings. Tests inject a spy;
@@ -6988,6 +7002,16 @@ export class SqlDriver implements IDataDriver {
       // let the step-down message that follows explain the outcome. Any OTHER
       // PRAGMA failure keeps the full warning (with stack) as before.
       const code = (e as { code?: string } | null | undefined)?.code;
+      // The file itself cannot be opened or created (#23696): a directory that
+      // exists but refuses the file, a path SQLite cannot open. Every later
+      // statement would answer the same, so the connect fails here, naming the
+      // file — before, it logged and resolved, and the datasource counted as
+      // connected while it could not answer one query.
+      if (code === 'SQLITE_CANTOPEN') {
+        const declared = (this.config as any).connection;
+        const filename = this.sqliteFilename() ?? String(typeof declared === 'string' ? declared : declared?.filename);
+        throw new SqliteDatabaseFileError(filename, 'cannot be opened or created', e);
+      }
       const msg = e instanceof Error ? e.message : String(e);
       const isNativeLoadFailure =
         code === 'ERR_DLOPEN_FAILED' ||
@@ -7313,7 +7337,7 @@ export class SqlDriver implements IDataDriver {
 
       // WHERE
       if (query.where) {
-        this.applyFilters(b, query.where);
+        this.applyFilters(b, query.where, options);
       }
 
       // ORDER BY
@@ -10133,7 +10157,7 @@ export class SqlDriver implements IDataDriver {
       const issue = (candidate: Record<string, any>, issueOptions?: DriverOptions): Promise<number> => {
         const builder = this.getBuilder(target, issueOptions);
         this.applyTenantScope(builder, object, issueOptions);
-        if (query.where) this.applyFilters(builder, query.where);
+        if (query.where) this.applyFilters(builder, query.where, issueOptions);
         return builder.update(candidate) as unknown as Promise<number>;
       };
       total +=
@@ -10150,7 +10174,7 @@ export class SqlDriver implements IDataDriver {
     for (const target of this.rotationShardsOf(object) ?? [object]) {
       const builder = this.getBuilder(target, options);
       this.applyTenantScope(builder, object, options);
-      if (query.where) this.applyFilters(builder, query.where);
+      if (query.where) this.applyFilters(builder, query.where, options);
       total += (await builder.delete()) || 0;
     }
     return total;
@@ -10375,7 +10399,7 @@ export class SqlDriver implements IDataDriver {
     this.applyTenantScope(builder, object, options);
 
     if (query?.where) {
-      this.applyFilters(builder, query.where);
+      this.applyFilters(builder, query.where, options);
     }
 
     // [#8790] `count()` has no recovery ladder and needs none — it carries no
@@ -10638,7 +10662,7 @@ export class SqlDriver implements IDataDriver {
     this.applyTenantScope(builder, object, options);
 
     if (query.where) {
-      this.applyFilters(builder, query.where);
+      this.applyFilters(builder, query.where, options);
     }
 
     // The same coercion key `applyFilters` just used, so every part of this
@@ -11189,7 +11213,7 @@ export class SqlDriver implements IDataDriver {
     this.applyTenantScope(builder, object, options);
 
     if (filters) {
-      this.applyFilters(builder, filters);
+      this.applyFilters(builder, filters, options);
     }
 
     builder.distinct(field);
@@ -11459,7 +11483,7 @@ export class SqlDriver implements IDataDriver {
     builder.select('*');
 
     if (query.where) {
-      this.applyFilters(builder, query.where);
+      this.applyFilters(builder, query.where, options);
     }
 
     if (query.windowFunctions && Array.isArray(query.windowFunctions)) {
@@ -11591,7 +11615,7 @@ export class SqlDriver implements IDataDriver {
     }
 
     if (query.where) {
-      this.applyFilters(builder, query.where);
+      this.applyFilters(builder, query.where, options);
     }
 
     if (query.orderBy && Array.isArray(query.orderBy)) {
@@ -15344,6 +15368,33 @@ export class SqlDriver implements IDataDriver {
   // Schema Introspection
   // ===================================
 
+  /**
+   * [ADR-0131 D7 · #23429] The PHYSICAL column names of `object`'s table, as
+   * the catalog holds them — the declared ones and any a past release left
+   * behind. Read-only, one table, through the builder every read uses (so it
+   * resolves a federated object's remote table, and joins
+   * `options.transaction` like any read: a single-connection pool would
+   * otherwise wait on the connection the caller's transaction holds).
+   *
+   * A table that does not exist answers `[]`. It is not `execute()`, so a
+   * declaration boot's write guard has nothing to count: a question every
+   * boot asks (does a retired column still physically exist?) must not cost a
+   * plan its "writes nothing" claim.
+   *
+   * Built on Knex directly, not {@link getBuilder}: it reads the CATALOG and
+   * returns column names, never a row, so the tenant scope a row read must
+   * carry (`check:tenant-chokepoint`) has nothing to scope. The table is
+   * resolved as `getBuilder` resolves it.
+   */
+  async listPhysicalColumns(object: string, options?: DriverOptions): Promise<string[]> {
+    let catalog = this.knex(this.physicalTableByObject[object] ?? object);
+    const remoteSchema = this.physicalSchemaByObject[object];
+    if (remoteSchema) catalog = catalog.withSchema(remoteSchema);
+    if (options?.transaction) catalog = catalog.transacting(options.transaction as Knex.Transaction);
+    const info = (await catalog.columnInfo()) as Record<string, unknown>;
+    return Object.keys(info ?? {});
+  }
+
   async introspectSchema(): Promise<IntrospectedSchema> {
     const tables: Record<string, IntrospectedTable> = {};
     // Stamped BEFORE the reads, not after: a consumer asking "has the remote
@@ -15562,6 +15613,32 @@ export class SqlDriver implements IDataDriver {
     return builder.where((b) => {
       void b.where(field, String(tenantId)).orWhereNull(field);
     });
+  }
+
+  /**
+   * [ADR-0139 D3] The subquery a composed `ReadableIds` leaf compiles to:
+   * `SELECT id FROM P_TABLE WHERE SCOPE AND TENANT`, which the `$in` arm of
+   * {@link applyFilterCondition} embeds as `field IN (…)`.
+   *
+   * - **TENANT** is {@link applyTenantScope} on the PARENT table with the
+   *   OUTER read's options — the engine never composes the wall (D2 step 3),
+   *   so a parent row in another tenant is never readable through the leaf;
+   * - **SCOPE** is the composed scope, compiled by this same compiler against
+   *   the parent table (`undefined` is no row restriction). It arrives lowered
+   *   and `'policy'`-marked, so a refusal inside it withholds its operands
+   *   exactly as an injected RLS predicate's does.
+   *
+   * One statement, so `find`, `count` and `aggregate` agree by construction,
+   * and the subquery binds only the scope's and the wall's own parameters —
+   * no per-id parameter, whatever the parent's size. The subquery carries no
+   * transaction of its own: it is part of the outer statement, which does.
+   */
+  protected readableIdsSubquery(leaf: ComposedReadableIds, options?: DriverOptions): Knex.QueryBuilder {
+    const parent = leaf.object;
+    const sub = this.getBuilder(parent).select(this.remoteColumn(parent, 'id', 'id'));
+    this.applyTenantScope(sub, parent, options);
+    if (leaf.scope !== undefined) this.applyFilters(sub, leaf.scope, options);
+    return sub;
   }
 
   /**
@@ -16659,9 +16736,15 @@ export class SqlDriver implements IDataDriver {
    * `code` and `status` are the redacted refusal's own, and the diagnostic
    * stays on the symbol key where nothing that serialises an error can reach it.
    */
-  protected applyFilters(builder: Knex.QueryBuilder, filters: any) {
+  protected applyFilters(builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
+    // [ADR-0139 D3] A `ReadableIds` leaf this compiler will not evaluate — an
+    // UNCOMPOSED one anywhere, a composed one outside a `$in` comparand — is
+    // refused before anything compiles: INTERNAL_ERROR / 500, logged at
+    // `error` once per driver. ⛔ Never evaluated as "no restriction".
+    const misplaced = findMisplacedReadableIds(filters, true);
+    if (misplaced) throw refuseReadableIdsOnce(this.readableIdsDriverName, misplaced, this.logger, this.readableIdsRefusalLog);
     try {
-      this.compileFilters(builder, filters);
+      this.compileFilters(builder, filters, options);
     } catch (err) {
       throw this.resolveWithheldFilterRefusal(err, filters);
     }
@@ -16771,7 +16854,7 @@ export class SqlDriver implements IDataDriver {
     }
   }
 
-  private compileFilters(builder: Knex.QueryBuilder, filters: any) {
+  private compileFilters(builder: Knex.QueryBuilder, filters: any, options?: DriverOptions) {
     if (!filters) return;
 
     // [#5158] `where` is a `FilterCondition` OBJECT. It always was — the spec
@@ -16807,7 +16890,7 @@ export class SqlDriver implements IDataDriver {
       );
 
       if (hasMongoOperators) {
-        this.applyFilterCondition(builder, filters, 'and', table, filters);
+        this.applyFilterCondition(builder, filters, 'and', table, filters, options);
         return;
       }
 
@@ -17126,6 +17209,12 @@ export class SqlDriver implements IDataDriver {
     // merge boundaries actually marked. Defaults to this frame's own
     // `condition` for any direct caller compiling a standalone tree.
     rootFilter?: unknown,
+    // [ADR-0139 D3] The OUTER read's options, threaded down every combinator so
+    // a composed `ReadableIds` leaf's subquery is tenant-walled by
+    // {@link applyTenantScope} with exactly the options the outer read was
+    // scoped with — captured by the lazily invoked group callbacks below,
+    // never read from instance state.
+    options?: DriverOptions,
   ) {
     if (!condition || typeof condition !== 'object') return;
     const root = rootFilter ?? condition;
@@ -17158,7 +17247,7 @@ export class SqlDriver implements IDataDriver {
         (builder as any)[method]((qb: any) => {
           for (const sub of branches) {
             qb.where((subQb: any) => {
-              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root));
+              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
             });
           }
         });
@@ -17183,7 +17272,7 @@ export class SqlDriver implements IDataDriver {
             // read scope of the shape `{$or:[{owner,status},{shared_with}]}`
             // returned rows the scope excluded — see sql-driver-or-filter.test.ts.
             qb.orWhere((subQb: any) => {
-              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root));
+              this.withWithheldFilterLog(root, () => this.applyFilterCondition(subQb, sub, 'and', table, root, options));
             });
           }
         });
@@ -17212,7 +17301,7 @@ export class SqlDriver implements IDataDriver {
           // refusal raised inside a `$not` resolves against `root` like any
           // other; the walk-side refusals ran on the same nodes, eagerly.
           this.withWithheldFilterLog(root, () =>
-            this.applyFilterCondition(qb, value as Record<string, unknown>, 'and', table, root),
+            this.applyFilterCondition(qb, value as Record<string, unknown>, 'and', table, root, options),
           );
         });
       } else if (isFilterNode(value)) {
@@ -17241,6 +17330,15 @@ export class SqlDriver implements IDataDriver {
         const columnExpr = this.filterColumnExpr(table, localField, field);
         for (const [rawOp, opValue] of Object.entries(value as Record<string, any>)) {
           const method = logicalOp === 'or' ? 'orWhere' : 'where';
+          // [ADR-0139 D3] The composed `ReadableIds` leaf — the one non-list a
+          // `$in` may hold — compiles to the semi-join, ahead of every comparand
+          // gate below (none of which has a reading for it). Only `$in` reaches
+          // here: `applyFilters` refused it at every other position.
+          if (rawOp === '$in' && isComposedReadableIds(opValue)) {
+            const mIn = logicalOp === 'or' ? 'orWhereIn' : 'whereIn';
+            (builder as any)[mIn](field, this.readableIdsSubquery(opValue, options));
+            continue;
+          }
           // #5222 — a `{ $field }` that is the WHOLE comparand of a scalar
           // comparison compiles to a same-table column-to-column comparison
           // (or refuses inside the emitter, with the specific boundary named).
@@ -20018,15 +20116,20 @@ export class SqlDriver implements IDataDriver {
 
   protected async ensureDatabaseExists() {
     // SQLite auto-creates database files but NOT parent directories.
-    // Ensure the directory exists so better-sqlite3 can create the file.
+    // Ensure the directory exists so better-sqlite3 can create the file — with
+    // a bounded walk, never Node's recursive mkdir, which loops forever on a
+    // path like `/proc/x/` (#23696, see `makeDatabaseDirectory`).
     if (this.isSqlite) {
       const filename = this.sqliteFilename();
       if (filename) {
         const { dirname } = await import('node:path');
-        const { mkdir } = await import('node:fs/promises');
         const dir = dirname(filename);
         if (dir && dir !== '.') {
-          await mkdir(dir, { recursive: true });
+          try {
+            await makeDatabaseDirectory(dir);
+          } catch (e) {
+            throw new SqliteDatabaseFileError(filename, `cannot be created: its directory '${dir}' could not be made`, e);
+          }
         }
       }
       return;

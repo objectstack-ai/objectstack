@@ -1,0 +1,9 @@
+{
+  "file": "packages/rest/src/form-routes.ts",
+  "adrs": [
+    "ADR-0131",
+    "ADR-0056",
+    "ADR-0112"
+  ],
+  "invariant": "The public (anonymous) form REST doors, moved here whole from `rest-server.ts` (#23050 slice 11): `GET {base}/forms/:slug` and `POST {base}/forms/:slug/submit`, mounted once per base, both reading the form through ONE resolution. ADR-0131 — the metadata an anonymous form request reads is the environment's, as every metadata read is: the view list the doors judge (a withdrawal in any body of a view name closing its form) and the object schema the resolve door narrows are both the environment's, never an organization's (its D6). ADR-0056 — the doors bypass `enforceAuth` because their authorization is DERIVED from the form's own declaration (Option A): the submit runs as `publicFormGrant`, scoped to exactly the form's target object, and writes only the fields the form's sections declare, never a server-managed anchor; a form that declares no fields publishes nothing and accepts nothing. ADR-0112 — that refusal answers the standard catalog's generic 400 code, never a minted synonym. A door that reads another layer's metadata, accepts an undeclared key or an anchor, or authorizes by anything but the form's declaration is the drift these records forbid; the bodies' own comments carry each citation."
+}

@@ -14,6 +14,8 @@
     "CapabilityDeclarationSchema": "security/CapabilityDeclaration",
     "CriteriaSharingRule": "security/CriteriaSharingRule",
     "CriteriaSharingRuleSchema": "security/CriteriaSharingRule",
+    "DefaultRowScope": "security/DefaultRowScope",
+    "DefaultRowScopeSchema": "security/DefaultRowScope",
     "EffectiveObjectPermission": "security/EffectiveObjectPermission",
     "EffectiveObjectPermissionSchema": "security/EffectiveObjectPermission",
     "ExplainDecision": "security/ExplainDecision",

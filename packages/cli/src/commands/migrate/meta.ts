@@ -40,7 +40,7 @@ import { buildDataMigrationPlugins } from '../../utils/data-migration-plugins.js
 import { absentTableReads } from '../../utils/absent-table-reads.js';
 import type { StoredMigrationReport } from '@objectstack/metadata-protocol';
 import { OCCUPANCY_HINT, probeMigrationTarget } from '../../utils/migrate-occupancy-gate.js';
-import { describeOccupancy } from '../../utils/sqlite-occupancy.js';
+import { describeOccupancy, JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 import { checkProtocolCompat, type ProtocolHandshakeManifest } from '@objectstack/metadata-core';
 import {
   planAuthoredSourceWrite,
@@ -1439,8 +1439,8 @@ export default class MigrateMeta extends Command {
     if (occupancy.status === 'busy' && !flags.json) {
       printWarning(apply
         ? `--force: ${describeOccupancy(occupancy)} Rewriting anyway — the live process may save metadata mid-run.`
-        : `${describeOccupancy(occupancy)} The preview below writes nothing, but a live process may `
-          + 'be saving metadata while it runs.');
+        : `${describeOccupancy(occupancy)} The preview below writes no row or table, but a live process may `
+          + `be saving metadata while it runs. ${JOURNAL_MODE_SWITCH_NOTE}`);
     }
     if (occupancy.status === 'unknown' && !flags.json) {
       printWarning(`Could not check whether the database is in use — ${occupancy.detail}`);
@@ -1477,8 +1477,8 @@ export default class MigrateMeta extends Command {
     try {
       // `PlatformObjectsPlugin` for `sys_metadata` and its history/audit
       // siblings, plus the automation engine in INERT mode so `flow` rows are
-      // covered too (#4454) — flow-node conversions need its executor registry
-      // for the conflict guard, and `armRuntime: false` means taking it arms
+      // covered too (#4454) — a flow canonicalizes at the engine, whose
+      // registration checks need its node registry, and `armRuntime: false` means taking it arms
       // nothing. No storage adapter: unlike the file migration, nothing here
       // reads bytes.
       //
@@ -1486,7 +1486,7 @@ export default class MigrateMeta extends Command {
       // takes. A plain boot runs schema sync and the artifact's inline seed
       // loader, and the seed upserts every seeded row of the app's tables
       // (`updated_at` bumped, `organization_id` stamped, relative-date values
-      // re-evaluated) before the report says "writes nothing". `deferSchemaDdl`
+      // re-evaluated) before the report says "writes no row". `deferSchemaDdl`
       // holds the DDL back and suppresses the seed; `readOnlyProbe` keeps a
       // missing sqlite file from being created. `--apply` keeps the plain boot:
       // it is the writing mode, and its behaviour is unchanged.
@@ -1520,8 +1520,8 @@ export default class MigrateMeta extends Command {
         await import('@objectstack/metadata-protocol');
 
       // No `canonicalizeFlow` is threaded from here. The automation engine
-      // canonicalizes `flow` rows — it holds the executor registry ADR-0078's
-      // conflict guard needs (#4454) — and the protocol resolves it from the
+      // canonicalizes `flow` rows — it holds the node registry its
+      // registration checks need (#4454) — and the protocol resolves it from the
       // kernel's service table itself (#4498), which is the same table the
       // inert engine this command boots registers into. Passing it again would
       // be a second route to one capability, and the two would drift.
@@ -1591,13 +1591,14 @@ export default class MigrateMeta extends Command {
           );
         } else if (report.failed > 0) {
           // [#23391] Only what holds for every failed kind, then what does not
-          // work. The stored pass marks a row `failed` four ways: a body that is
-          // not valid JSON, a flow that does not canonicalize, a flow rename
-          // refused over a live name, and (on --apply) a rewrite the store
-          // refused. It writes none of them, so each reads as it did before the
-          // run. This line used to add "they keep reading canonically through
-          // the chain, so nothing is broken", which is false for two of the
-          // four. A body that is not valid JSON loads at no read. A flow that
+          // work. The stored pass marks a row `failed` three ways: a body that
+          // is not valid JSON, a flow that does not canonicalize, and (on
+          // --apply) a rewrite the store refused (a fourth, a flow rename
+          // refused over a live name, left with the conversion-conflict channel
+          // in protocol 18, #24001). It writes none of them, so each reads as it
+          // did before the run. This line used to add "they keep reading
+          // canonically through the chain, so nothing is broken", which is
+          // false for two of them. A body that is not valid JSON loads at no read. A flow that
           // does not canonicalize fails the same `canonicalizeFlow` parse inside
           // `AutomationEngine.registerFlow`, so no boot step registers it.
           // The report names no kind, so the flow sentence is gated on a failed

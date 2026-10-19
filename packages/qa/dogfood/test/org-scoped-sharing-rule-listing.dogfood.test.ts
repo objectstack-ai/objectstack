@@ -4,9 +4,11 @@
 //
 // ## Why this file has a history before it has a first commit
 //
-// #7676: `sys_sharing_rule` rows seeded by the package/app seeder carry
-// `organization_id = null` (`bootstrapDeclaredSharingRules` defines under
-// `SYSTEM_CTX`, before any org id exists). The admin read path scoped with a
+// #7676: `sys_sharing_rule` rows seeded by the package/app seeder carried
+// `organization_id = null` (`bootstrapDeclaredSharingRules` defined under
+// `SYSTEM_CTX`, before any org id existed; ADR-0131 D2 has since retired it,
+// and a declared rule is now read from the registry, served organization-less
+// under `single` — the same platform-global class). The admin read path scoped with a
 // strict `organization_id = <request org>` equality, so on a stock boot
 // `GET /api/v1/sharing/rules` answered `{data: []}` over four active seeded
 // rules, by-name GET and evaluate 404'd, and only the org-unfiltered by-id
@@ -45,7 +47,7 @@ const RULES = '/sharing/rules';
 const SYS = { isSystem: true } as const;
 
 /**
- * The rules `examples/app-showcase` declares, all seeded org-less.
+ * The rules `examples/app-showcase` declares, all served org-less.
  *
  * [#9237] Two of the former four were retired rather than re-homed: they sat
  * on `showcase_project` / `showcase_task`, whose `public_read_write` OWD
@@ -138,17 +140,19 @@ describe('#7676 — package-seeded (org-less) sharing rules stay visible to an O
     expect(row.organization_id).toBeNull();
   });
 
-  it('a seeded org-less rule can be EVALUATED — the half that granted access all along', async () => {
-    // Enforcement always read these rows (under SYSTEM_CTX); only the admin
+  it('a declared org-less rule can be EVALUATED by name — read from the registry, never stored', async () => {
+    // Enforcement always read these rules (under SYSTEM_CTX); only the admin
     // surface could not. "Rules that grant access but cannot be inspected or
-    // deactivated are the worst half of both properties."
-    const rule = await ql.findOne('sys_sharing_rule', {
-      where: { name: SEEDED_RULE_NAMES[0] },
+    // deactivated are the worst half of both properties." [ADR-0131 D2] The
+    // boot writes no row for a declared rule: its id is its name.
+    const stored = await ql.find('sys_sharing_rule', {
+      where: { name: { $in: SEEDED_RULE_NAMES } },
       context: SYS,
     });
-    expect(rule?.id, 'the seeded rule exists in storage').toBeTruthy();
-    const res = await stack.apiAs(admin, 'POST', `${RULES}/${rule.id}/evaluate`, {});
+    expect(stored ?? [], 'a declared rule is not written to sys_sharing_rule').toEqual([]);
+    const res = await stack.apiAs(admin, 'POST', `${RULES}/${SEEDED_RULE_NAMES[0]}/evaluate`, {});
     expect(res.status).toBeLessThan(300);
+    expect(((await res.json()) as { ruleId?: string }).ruleId).toBe(SEEDED_RULE_NAMES[0]);
   });
 
   it('the scope still SCOPES — another organization\'s rule is not listed', async () => {

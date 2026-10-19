@@ -3728,6 +3728,23 @@ jobs:
         continue-on-error: true
         run: node scripts/report-test-timings.mjs --self-test
 
+      # The test-leftover report's own instrument (#23880, ruling 乙). ci.yml's
+      # test jobs run `scripts/ci/report-test-leftovers.mjs snapshot` / `report`,
+      # which exit 0 on every path BY RULING -- report only, never a gate -- so
+      # nothing there can go red when the report stops seeing what it exists to
+      # see: an ignored path a test added. This self-test is where that breaks
+      # loudly: fixture snapshots for the diff, the closed exclusion list and the
+      # turbo.json own-build derivation, plus a real throwaway git tree that
+      # proves the listing includes IGNORED paths and that every in-job failure
+      # is a warning with exit 0. It also loads the script on every pull
+      # request, the one breakage its in-job modes cannot catch about
+      # themselves. Invoked as `node` per the GATE INVOCATION IDIOM note at the
+      # top of this file. Offline; about a second.
+      - name: Test-leftover report self-test
+        id: test-leftover-report-self-test
+        continue-on-error: true
+        run: node scripts/ci/report-test-leftovers.mjs --self-test
+
       # The per-package suite-duration ratchet's own instrument (#16468). The
       # gate runs in ci.yml's `Test Core` aggregator, where a clean tree with
       # every suite under its ceiling reads OK whether or not the over-ceiling,
@@ -4056,6 +4073,12 @@ jobs:
         id: no-committed-command-forwards-args-to-vitest
         continue-on-error: true
         run: pnpm check:agent-test-spelling
+
+      # Rationale: `scripts/check-pnpm-flag-spellings.mjs` header (#23777).
+      - name: No committed pnpm call spells a flag the pnpm 11 frontend rejects
+        id: no-committed-pnpm-call-spells-a-rejected-flag
+        continue-on-error: true
+        run: pnpm check:pnpm-flag-spellings
 
       # Every `<pkg>#<task>` override in turbo.json must name a package the
       # workspace HAS and a script that package RUNS (#12046).
@@ -5177,28 +5200,6 @@ jobs:
         id: stall-guard-budget-invariant
         continue-on-error: true
         run: pnpm check:stall-guard-budget
-
-      # The `Rerun Safety` verdict table (#18590) — self-test half only, and the
-      # asymmetry is the same one the step below explains: the measurement half
-      # takes two log paths and two exit codes that exist only inside that
-      # nightly job, so there is nothing here for a bare invocation to read.
-      #
-      # ⭐ It is wired HERE rather than left in the nightly deliberately.
-      # `rerun-safety-nightly.yml` declares `schedule` and `workflow_dispatch`
-      # and no PR-time event, so a gate family reachable only from it would be
-      # this tree's first SCHEDULED-ONLY family — which `check:pm-dispatch-gates`
-      # refuses by name, on the ground that a board sweep must not be routed into
-      # a per-PR gate list.
-      #
-      # WHAT REDDENS IT: its own script's parsing rules and verdict table. Those
-      # are matching rules, so their production verdict is identical before and
-      # after they break (see `check-self-test-wired.mjs`) — this step is the
-      # only instrument watching them. Reads nothing but its own fixtures; no
-      # build, no network, no token, sub-second.
-      - name: Rerun-safety verdict table self-test
-        id: rerun-safety-verdict-table-self-test
-        continue-on-error: true
-        run: pnpm check:rerun-safety-verdict
 
       # Rationale: `scripts/measure-stall-guard-headroom.mjs` header (#13246, #13121).
       # ⛔ `--self-test` only: never append a bare run (it needs a token).

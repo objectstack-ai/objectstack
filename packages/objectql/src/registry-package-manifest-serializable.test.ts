@@ -82,7 +82,7 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
   it('survives a plugin instance that closes a cycle through the engine', () => {
     const plugin = new FakeConnectorPlugin();
     plugin.init(makeCyclicEngine());
-    registry.installPackage(baseManifest({ plugins: [plugin] }));
+    registry.installPackage(baseManifest({ plugins: [plugin] }), 'code');
 
     // The expression every read door runs.
     expect(() => JSON.stringify(registry.getPackage('com.example.showcase'))).not.toThrow();
@@ -100,7 +100,7 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
     const manifest = baseManifest({ plugins: [plugin] });
     expect(() => JSON.stringify(manifest)).not.toThrow();
 
-    registry.installPackage(manifest);
+    registry.installPackage(manifest, 'code');
     plugin.init(makeCyclicEngine());
 
     expect(() => JSON.stringify(registry.getPackage('com.example.showcase'))).not.toThrow();
@@ -109,7 +109,7 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
   it('survives a reference cycle among PLAIN data in the manifest', () => {
     const cyclic: Record<string, unknown> = { name: 'self' };
     cyclic.self = cyclic;
-    registry.installPackage(baseManifest({ data: { node: cyclic } }));
+    registry.installPackage(baseManifest({ data: { node: cyclic } }), 'code');
 
     const record = registry.getPackage('com.example.showcase')!;
     expect(() => JSON.stringify(record)).not.toThrow();
@@ -120,7 +120,7 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
 
   it('keeps the declarative half of the manifest byte-for-byte', () => {
     const manifest = baseManifest({ plugins: [new FakeConnectorPlugin()] });
-    registry.installPackage(manifest);
+    registry.installPackage(manifest, 'code');
     const stored = registry.getPackage('com.example.showcase')!.manifest as any;
 
     for (const key of [
@@ -137,7 +137,7 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
       onEnable: () => undefined,
       registryHandle: new Map([['a', 1]]),
       publishedAt,
-    }));
+    }), 'code');
     const stored = registry.getPackage('com.example.showcase')!.manifest as any;
 
     expect(stored.onEnable).toBeUndefined();
@@ -151,7 +151,7 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
     // Projecting must therefore copy, never strip in place.
     const plugin = new FakeConnectorPlugin();
     const manifest = baseManifest({ plugins: [plugin] });
-    registry.installPackage(manifest);
+    registry.installPackage(manifest, 'code');
 
     expect(manifest.plugins).toHaveLength(1);
     expect(manifest.plugins[0]).toBe(plugin);
@@ -159,10 +159,10 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
   });
 
   it('projects on REINSTALL too (rebuild / HMR overwrite)', () => {
-    registry.installPackage(baseManifest());
+    registry.installPackage(baseManifest(), 'code');
     const plugin = new FakeConnectorPlugin();
     plugin.init(makeCyclicEngine());
-    registry.installPackage(baseManifest({ plugins: [plugin] }));
+    registry.installPackage(baseManifest({ plugins: [plugin] }), 'code');
 
     expect(() => JSON.stringify(registry.getPackage('com.example.showcase'))).not.toThrow();
   });
@@ -172,10 +172,10 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
     // caller's whole listing, not just the offending package.
     const plugin = new FakeConnectorPlugin();
     plugin.init(makeCyclicEngine());
-    registry.installPackage(baseManifest({ plugins: [plugin] }));
+    registry.installPackage(baseManifest({ plugins: [plugin] }), 'code');
     registry.installPackage({
       id: 'com.objectstack.setup', name: 'Setup', namespace: 'setup', version: '9.3.0',
-    } as any);
+    } as any, 'code');
 
     expect(() => JSON.stringify(registry.getAllPackages())).not.toThrow();
     expect(registry.getAllPackages()).toHaveLength(2);
@@ -183,7 +183,7 @@ describe('SchemaRegistry.installPackage — the record is serializable', () => {
 
   it('still records the namespace and the lifecycle state it always did', () => {
     // The projection must not cost the record its non-manifest half.
-    registry.installPackage(baseManifest({ plugins: [new FakeConnectorPlugin()] }));
+    registry.installPackage(baseManifest({ plugins: [new FakeConnectorPlugin()] }), 'code');
     const record = registry.getPackage('com.example.showcase')!;
 
     expect(record.status).toBe('installed');
@@ -227,7 +227,7 @@ describe('SchemaRegistry.installPackage — the record reports every declared fu
   });
 
   it('records BOTH spellings — the bare one as a handler-less declaration', () => {
-    registry.installPackage(baseManifest({ functions: showcaseFunctions() }));
+    registry.installPackage(baseManifest({ functions: showcaseFunctions() }), 'code');
     const stored = registry.getPackage('com.example.showcase')!.manifest as any;
 
     expect(Object.keys(stored.functions).sort()).toEqual(['summarizeCompletedTask', 'sweepProjectHealth']);
@@ -240,7 +240,7 @@ describe('SchemaRegistry.installPackage — the record reports every declared fu
   });
 
   it('⛔ mints no handler ref — an absent `handler` is the honest statement', () => {
-    registry.installPackage(baseManifest({ functions: showcaseFunctions() }));
+    registry.installPackage(baseManifest({ functions: showcaseFunctions() }), 'code');
     const stored = registry.getPackage('com.example.showcase')!.manifest as any;
 
     for (const entry of Object.values(stored.functions) as Array<Record<string, unknown>>) {
@@ -253,7 +253,7 @@ describe('SchemaRegistry.installPackage — the record reports every declared fu
     // no runtime module re-attached the callables: a bare ref and a lowered
     // record. Neither is a callable, so neither is normalised.
     const lowered = { bare: 'bare', declared: { handler: 'declared', effect: 'writes' } };
-    registry.installPackage(baseManifest({ functions: lowered }));
+    registry.installPackage(baseManifest({ functions: lowered }), 'code');
 
     expect((registry.getPackage('com.example.showcase')!.manifest as any).functions).toEqual(lowered);
   });
@@ -264,13 +264,13 @@ describe('SchemaRegistry.installPackage — the record reports every declared fu
     // default, so ⛔ nothing is written where the schema declares nothing.
     registry.installPackage(baseManifest({
       functions: [{ name: 'syncBilling', handler: () => 'billed', effect: 'writes' }],
-    }));
+    }), 'code');
     const stored = registry.getPackage('com.example.showcase')!.manifest as any;
 
     expect(stored.functions).toEqual([{ name: 'syncBilling', effect: 'writes' }]);
     const bare = new SchemaRegistry({ multiTenant: false, collisionPolicy: 'error' });
     bare.logLevel = 'silent';
-    bare.installPackage(baseManifest({ functions: [{ name: 'syncBilling', handler: () => 'billed' }] }));
+    bare.installPackage(baseManifest({ functions: [{ name: 'syncBilling', handler: () => 'billed' }] }), 'code');
     expect((bare.getPackage('com.example.showcase')!.manifest as any).functions)
       .toEqual([{ name: 'syncBilling' }]);
   });
@@ -280,7 +280,7 @@ describe('SchemaRegistry.installPackage — the record reports every declared fu
     // object. Normalising must copy, exactly as the projection does.
     const functions = showcaseFunctions();
     const manifest = baseManifest({ functions });
-    registry.installPackage(manifest);
+    registry.installPackage(manifest, 'code');
 
     expect(typeof manifest.functions.summarizeCompletedTask).toBe('function');
     expect(manifest.functions).toBe(functions);
@@ -292,7 +292,7 @@ describe('SchemaRegistry.installPackage — the record reports every declared fu
     // declared, must reach the projection as the SAME object — the normaliser
     // copies only when it really rewrote an entry.
     const untouched = baseManifest();
-    registry.installPackage(untouched);
+    registry.installPackage(untouched, 'code');
     const stored = registry.getPackage('com.example.showcase')!.manifest as any;
     expect('functions' in stored).toBe(false);
     expect(stored.objects).toEqual(untouched.objects);
@@ -307,7 +307,7 @@ describe('SchemaRegistry.installPackage — the record reports every declared fu
         { name: 'on_insert', object: 'invoice', events: ['beforeInsert'], handler: () => 'hooked' },
         { name: 'on_update', object: 'invoice', events: ['beforeUpdate'], handler: 'on_update' },
       ],
-    }));
+    }), 'code');
     const stored = registry.getPackage('com.example.showcase')!.manifest as any;
 
     expect(stored.hooks).toEqual([

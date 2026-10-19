@@ -148,10 +148,55 @@ async function boot(opts: BootOptions = {}) {
   return { engine, protocol, findData, get, importRoute, rest };
 }
 
+/**
+ * A workbook as this file reads it: sheet names and cell values, never the
+ * dropdowns. exceljs's reader expands each range-keyed `<dataValidation>` into
+ * one entry per covered cell, and the template covers `TEMPLATE_VALIDATED_ROWS`
+ * (50 000) rows per dropdown column: measured on the `deal` template, 100 000
+ * entries and 39 ms a parse in full, 4 ms with the node skipped, every sheet's
+ * values identical. No case here asserts on a dropdown; `import-template.test.ts`
+ * pins them, read in full. The one case that writes a workbook back for the
+ * import door reads it in full, so the file it imports carries its dropdowns.
+ */
+const readWorkbook = (bytes: Buffer) => loadXlsxWorkbook(bytes, { ignoreNodes: ['dataValidations'] });
+
 const headerRow = async (bytes: Buffer, sheet = 0) => {
-  const wb = await loadXlsxWorkbook(bytes);
+  const wb = await readWorkbook(bytes);
   return { wb, header: (wb.worksheets[sheet].getRow(1).values as unknown[]).slice(1) as string[] };
 };
+
+/**
+ * The process's first loads, paid during collection rather than inside the
+ * first cases' clocks (AGENTS.md: clocked windows measure behaviour, never
+ * loading). The route `import()`s `exceljs` lazily (`xlsx-module.ts`), and
+ * each path the cases take — the SQL driver, the template writer in both
+ * locales, the workbook reader and writer, both import formats, the three
+ * export formats — runs cold the first time. One throwaway engine walks each
+ * path once and is destroyed before the first case runs. No case sees its
+ * engine, its rows or its spies: every case boots an engine of its own.
+ */
+async function warmUpFirstLoads(): Promise<void> {
+  const { engine, get, importRoute } = await boot();
+  liveEngines.splice(liveEngines.indexOf(engine), 1);
+  try {
+    const bytes = (await get({ template: 'true' })).body();
+    await parseXlsxToRows(bytes);
+    const wb = await loadXlsxWorkbook(bytes);
+    const headers = (wb.worksheets[0].getRow(1).values as unknown[]).slice(1) as string[];
+    const fields = (wb.worksheets[1].getColumn(2).values as unknown[]).slice(5, 5 + headers.length) as string[];
+    const mapping = Object.fromEntries(headers.map((h, i) => [h, fields[i]]));
+    await importRows(importRoute, 'deal', { format: 'xlsx', xlsxBase64: bytes.toString('base64'), mapping });
+    await importRows(importRoute, 'deal', { format: 'json', rows: [{ title: 'warm-up' }] });
+    await wb.xlsx.writeBuffer();
+    await readWorkbook((await get({ template: 'true', locale: 'zh-CN' })).body());
+    for (const format of ['xlsx', 'csv', 'json']) await get({ format });
+  } finally {
+    await engine.destroy();
+  }
+}
+
+// At module scope, never in a hook: vitest clocks a hook as it clocks a test.
+await warmUpFirstLoads();
 
 // ---------------------------------------------------------------------------
 
@@ -175,7 +220,7 @@ describe('?template=true — the import template, through the real stack', () =>
     const schema: any = (await (protocol as any).getMetaItem({ type: 'object', name: 'deal' })).item;
     for (const f of INJECTED) expect(Object.keys(schema.fields), `${f} is injected`).toContain(f);
     const { header } = await headerRow((await get({ template: 'true' })).body());
-    const wb = await loadXlsxWorkbook((await get({ template: 'true' })).body());
+    const wb = await readWorkbook((await get({ template: 'true' })).body());
     const fieldColumn = (wb.worksheets[1].getColumn(2).values as unknown[]).slice(5).filter(Boolean);
     for (const f of INJECTED) expect(fieldColumn, f).not.toContain(f);
     expect(header).not.toContain('Owner');
@@ -193,7 +238,7 @@ describe('?template=true — the import template, through the real stack', () =>
 
   it('the lookup column names its target by the target object\'s label', async () => {
     const { get } = await boot();
-    const wb = await loadXlsxWorkbook((await get({ template: 'true' })).body());
+    const wb = await readWorkbook((await get({ template: 'true' })).body());
     const howToFill = String(wb.worksheets[1].getCell('E12').value);
     expect(wb.worksheets[1].getCell('B12').value).toBe('account');
     expect(howToFill).toContain('客户');
@@ -207,19 +252,19 @@ describe('?template=true — the import template, through the real stack', () =>
 
   it('?locale=zh-CN answers the Chinese sheets', async () => {
     const { get } = await boot();
-    const wb = await loadXlsxWorkbook((await get({ template: 'true', locale: 'zh-CN' })).body());
+    const wb = await readWorkbook((await get({ template: 'true', locale: 'zh-CN' })).body());
     expect(wb.worksheets.map((w) => w.name)).toEqual(['模板', '填写说明']);
   });
 
   it('an Accept-Language of zh-CN answers the Chinese sheets too', async () => {
     const { get } = await boot();
-    const wb = await loadXlsxWorkbook((await get({ template: 'true' }, 'deal', { 'accept-language': 'zh-CN,zh;q=0.9' })).body());
+    const wb = await readWorkbook((await get({ template: 'true' }, 'deal', { 'accept-language': 'zh-CN,zh;q=0.9' })).body());
     expect(wb.worksheets.map((w) => w.name)).toEqual(['模板', '填写说明']);
   });
 
   it('with no locale at all the sheets are English', async () => {
     const { get } = await boot();
-    const wb = await loadXlsxWorkbook((await get({ template: 'true' })).body());
+    const wb = await readWorkbook((await get({ template: 'true' })).body());
     expect(wb.worksheets.map((w) => w.name)).toEqual(['Template', 'Instructions']);
   });
 
@@ -393,7 +438,7 @@ describe('?template=true — the template filled in and imported back', () => {
     // from the header (the `*` stripped) — objectui's wizard does the same.
     const rows = await parseXlsxToRows(bytes);
     expect(rows).toHaveLength(1);
-    const wb = await loadXlsxWorkbook(bytes);
+    const wb = await readWorkbook(bytes);
     const headers = (wb.worksheets[0].getRow(1).values as unknown[]).slice(1) as string[];
     const fields = (wb.worksheets[1].getColumn(2).values as unknown[]).slice(5, 5 + headers.length) as string[];
     const mapping = Object.fromEntries(headers.map((h, i) => [h, fields[i]]));
@@ -535,7 +580,9 @@ const PARITY: Record<string, { def: Record<string, unknown>; blank: 'refused' | 
  * the workbook, and imports a row through the real import door, about a third
  * of the loop each. The engine boot is already warm at this point in the file,
  * and boot plus registering and syncing the 20 objects is 2% of the case, so
- * moving the boot into a `beforeAll` would not fix this.
+ * moving the boot into a `beforeAll` would not fix this. The parse has since
+ * stopped reading the dropdowns (`readWorkbook` above), so its share is smaller
+ * than the table measured. The budget below is unchanged.
  *
  * The budget per shape: the slowest per-shape cost measured above is 419ms
  * (8371ms / 20, at 24 busy loops). 1000ms is about 2.4x that, and about 18x the
@@ -563,7 +610,7 @@ describe('the `*` agrees with the engine: starred exactly when the import door r
       const def = served ?? authored;
       const object = objectOf(key);
       // The template's own verdict — its header, via `?fields=` so every shape is a column.
-      const wb = await loadXlsxWorkbook((await get({ template: 'true', fields: 'f' }, object)).body());
+      const wb = await readWorkbook((await get({ template: 'true', fields: 'f' }, object)).body());
       const starred = wb.worksheets[0].getCell('A1').value === 'F *';
       expect(wb.worksheets[1].getCell('D5').value, key).toBe(starred ? 'Yes' : 'No');
       expect(isTemplateRequired({ required: true, ...def }), key).toBe(starred);

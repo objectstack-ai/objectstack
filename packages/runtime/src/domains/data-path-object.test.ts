@@ -207,9 +207,14 @@ describe('POST /data/:object/query binds to the object in the path (#3946)', () 
         expect(findData.mock.calls[0][0].object).toBe('crm_account');
 
         // Addressed directly, the hidden object is still refused. The gate
-        // THROWS a `{ statusCode }` shape; the dispatcher above turns it into
-        // an envelope (`errorFromThrown`), so assert the throw here.
-        await expect(post(deps, context, 'sys_user/query', {})).rejects.toMatchObject({ statusCode: 404 });
+        // THROWS the data door's coded refusal (#23528); the dispatcher above
+        // turns it into an envelope (`errorFromThrown`), so assert the throw
+        // here, on the path object.
+        await expect(post(deps, context, 'sys_user/query', {})).rejects.toMatchObject({
+            code: 'OBJECT_API_DISABLED',
+            status: 404,
+            object: 'sys_user',
+        });
         expect(findData).toHaveBeenCalledTimes(1); // the refused call never read
     });
 
@@ -222,11 +227,18 @@ describe('POST /data/:object/query binds to the object in the path (#3946)', () 
         expect(req.query).toMatchObject({ where: { status: 'open' }, limit: 5 });
     });
 
-    it('still honours an explicit `query` envelope', async () => {
+    // [#23574] Flipped. This pinned the body's `query` key being unwrapped as
+    // the query itself, a second spelling `RestServer` never read (there the
+    // body IS the QueryAST, as the catalog declares) and one the request gate
+    // cannot see: `{ query: { limit: 'ten' } }` would pass the gate and be
+    // served as the full set. The key now reaches the protocol as the field it
+    // names, which the real protocol refuses `400 INVALID_FIELD` on both doors
+    // (`data-write-request-gate.test.ts`, on a real store).
+    it('a body `query` key is the field it names, never a second spelling of the query', async () => {
         const { deps, context, findData } = setup();
         await post(deps, context, 'crm_account/query', { query: { where: { status: 'open' } } });
 
-        expect(findData.mock.calls[0][0].query).toEqual({ where: { status: 'open' } });
+        expect(findData.mock.calls[0][0].query).toEqual({ query: { where: { status: 'open' } } });
     });
 
     it('threads the caller execution context through unchanged', async () => {
@@ -278,19 +290,23 @@ describe('[#6719] /data error exits answer in the ADR-0112 envelope', () => {
         expect(error.message).toMatch(/^Project not resolved\./);
     });
 
-    it("the exposure gate's throw reaches the wire as a conformant 404", async () => {
+    // [#23528] Flipped. The gate threw `{ statusCode, message }` with no code,
+    // so this exit derived `RESOURCE_NOT_FOUND` from the status, where
+    // `RestServer` answers the same declaration `OBJECT_API_DISABLED`. The
+    // gate now throws the data door's code, and this exit carries it.
+    it("the exposure gate's throw reaches the wire as a conformant 404 OBJECT_API_DISABLED", async () => {
         const { deps, context } = setup({ sys_user: { apiEnabled: false } });
 
         const thrown = await post(deps, context, 'sys_user/query', {}).then(
             () => undefined,
             (e: any) => e,
         );
-        expect(thrown).toMatchObject({ statusCode: 404 });
+        expect(thrown).toMatchObject({ code: 'OBJECT_API_DISABLED', status: 404 });
 
         const response = deps.errorFromThrown(thrown);
         expect(response.status).toBe(404);
         const error = expectDataErrorEnvelope(response);
-        expect(error.code).toBe('RESOURCE_NOT_FOUND');
+        expect(error.code).toBe('OBJECT_API_DISABLED');
     });
 
     it('a record miss keeps its OWN code — promoted into `error.code`, not derived from the status', async () => {

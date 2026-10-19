@@ -1,5 +1,67 @@
 # @objectstack/plugin-pinyin-search
 
+## 18.0.0-next.4
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [f5ef054]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [aa31569]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [ec749fb]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
+## 18.0.0-next.3
+
+### Patch Changes
+
+- Updated dependencies [a69a40a]
+- Updated dependencies [abb6df0]
+- Updated dependencies [a33f3d5]
+- Updated dependencies [d050a8f]
+- Updated dependencies [b25d98a]
+- Updated dependencies [4ffdebe]
+- Updated dependencies [66d2757]
+- Updated dependencies [e246f06]
+  - @objectstack/objectql@18.0.0-next.3
+  - @objectstack/core@18.0.0-next.3
+  - @objectstack/types@18.0.0-next.3
+
+## 18.0.0-next.2
+
+### Patch Changes
+
+- Updated dependencies [0d3ea29]
+- Updated dependencies [584e737]
+- Updated dependencies [0f05907]
+- Updated dependencies [086fa46]
+- Updated dependencies [1d79556]
+- Updated dependencies [dd29bbe]
+- Updated dependencies [daafae6]
+- Updated dependencies [be48c5e]
+- Updated dependencies [989aa48]
+- Updated dependencies [30c33e3]
+- Updated dependencies [462dff3]
+- Updated dependencies [8044f4d]
+- Updated dependencies [cd86e41]
+- Updated dependencies [3bc407d]
+- Updated dependencies [76560a1]
+  - @objectstack/core@18.0.0-next.2
+  - @objectstack/objectql@18.0.0-next.2
+  - @objectstack/types@18.0.0-next.2
+
 ## 18.0.0-next.1
 
 ### Patch Changes

@@ -166,10 +166,10 @@ function instrument(engine: any) {
   };
 }
 
-const arrange = async () => {
+const arrange = async (config: Record<string, unknown> = {}) => {
   const engine: any = createMemoryEngine();
   const probe = instrument(engine);
-  const manager = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine } as any);
+  const manager = new AuthManager({ secret: SECRET, baseUrl: 'http://localhost:3000', dataEngine: engine, ...config } as any);
 
   await signUp(manager, 'owner@example.com', 'Org Owner');
   await signUp(manager, 'member@example.com', 'Org Member');
@@ -210,19 +210,21 @@ const arrange = async () => {
 };
 
 /**
- * A WARM kernel: the first session read on a fresh auth instance generates the
- * JWT signing key (`sys_jwks` insert) — a write inside the request, which the
- * memo must and does decline across (pinned below). Every later request finds
- * the key, writes nothing, and is the case the count is about.
+ * A WARM kernel: the first request through the resolver registers core's write
+ * observer on the engine, and that request stores nothing for the engine (it
+ * reads twice). Every later request is the case the count is about.
+ *
+ * [#24061] An in-process session read signs no JWT any more, so it no longer
+ * mints the signing key either: the warm-up request writes nothing. A write
+ * inside the request is still declined across — pinned below with the
+ * idle-timeout heartbeat, the write a session read still makes.
  */
 const arrangeWarm = async () => {
   const a = await arrange();
-  // One request through the resolver: it generates the signing key AND
-  // registers core's write observer on the engine (that request stores nothing
-  // for the engine, and reads twice). Every later request is the warm one.
+  const observersBefore = a.probe.middlewareCount();
   const warm = await resolveRequest(a, a.bearers.owner);
-  expect(warm.writes).toContain('insert sys_jwks');
-  expect(a.probe.middlewareCount()).toBe(1);
+  expect(warm.writes).toEqual([]);
+  expect(a.probe.middlewareCount()).toBe(observersBefore + 1);
   return a;
 };
 
@@ -371,17 +373,21 @@ describe.concurrent('the real customSession hook and resolveAuthzContext resolve
     expect(countOf(reads, 'sys_user_position')).toBe(1);
   });
 
-  it('the kernel\'s first request writes its signing key inside the request: the memo declines, the envelope is unchanged', async () => {
-    const a = await arrange();
+  it('a write inside the request (the idle-timeout heartbeat): the memo declines, the envelope is unchanged', async () => {
+    // [ADR-0069 D4] With an idle timeout configured, the hook stamps the
+    // session's `last_activity_at` AFTER it resolved the grants — at most once
+    // a minute, and on a session's first request since sign-in.
+    const a = await arrange({ sessionIdleTimeoutMinutes: 30 });
     // Register core's write observer with an anonymous request first (no
-    // session, no key generated), so the ONLY reason left for the member's
+    // session, nothing written), so the ONLY reason left for the member's
     // first request to read twice is the write inside it.
+    const observersBefore = a.probe.middlewareCount();
     const anonymous = await resolveRequest(a, null);
     expect(anonymous.writes).toEqual([]);
-    expect(a.probe.middlewareCount()).toBe(1);
+    expect(a.probe.middlewareCount()).toBe(observersBefore + 1);
     const first = await resolveRequest(a, a.bearers.member);
     // The write happened between the hook's resolution and step 2…
-    expect(first.writes).toContain('insert sys_jwks');
+    expect(first.writes).toContain('update sys_session');
     // …so step 2 read afresh: two resolutions, the pre-memo count.
     expect(countOf(first.reads, 'sys_user_position')).toBe(2);
     const warm = await resolveRequestWithoutMemo(a, a.bearers.member);

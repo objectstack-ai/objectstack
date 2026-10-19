@@ -49,11 +49,11 @@
  *     and value, or no `inputs` key where the entry is `null`. A missing
  *     input, another value (`refresh_version_pr: false` on `release.yml`, the
  *     publish-repair lane) or any other input (`force`) is refused by name;
- *   - a `pr_create` may carry `assignees`, the typed list `assign` takes —
- *     judged here as every list is — and the op table turns it into a second
- *     request of the SAME action, sent by the executor at the number the
- *     create answered (`ops.mjs`, its header), so no separate assign write
- *     exists for anything to refuse.
+ *   - a `pr_create` may carry `assignees` and `labels`, the typed lists
+ *     `assign` and `labels_add` take — judged here as every list is — and the
+ *     op table turns each into a later request of the SAME action, sent by
+ *     the executor at the number the create answered (`ops.mjs`, its header),
+ *     so no separate assign or label write exists for anything to refuse.
  *
  * ## The token list and the token's grants — where a stroke widens either
  *
@@ -860,6 +860,12 @@ export async function selfTest() {
     t('…and so is one carrying a non-string login, an empty list, a login named twice, or eleven logins', [[1], [], ['u', 'u'], Array.from({ length: 11 }, (_, i) => `u${i}`)].map((assignees) => refuses(opened(assignees), 'actions[0].assignees')), [true, true, true, true]);
     t('…a login over 39 characters is refused per item, at the platform\'s own cap', refuses(opened(['x'.repeat(40)]), 'per-item cap of 39'));
     t('…and the accepted shape is the create plus a list of logins, body optional either way', [validatePayload(opened(['marchtian'])).ok, validatePayload(one({ op: 'pr_create', title: 't', head: 'h', base: 'main', body: 'b', assignees: ['a', 'b'] })).ok], [true, true]);
+    // pr_create with labels: the same typed list `labels_add` takes, judged HERE — a dev's `skip-changeset` rides the create.
+    const labelled = (labels) => one({ op: 'pr_create', title: 't', head: 'h', base: 'main', labels });
+    t('pr_create: labels that is not an array of strings is refused, naming the shape', [refuses(labelled('skip-changeset'), 'actions[0].labels must be an array of strings'), refuses(labelled({ name: 'skip-changeset' }), 'actions[0].labels must be an array of strings')], [true, true]);
+    t('…and so is one carrying a non-string name, an empty list, a name named twice, or twenty-one names', [[1], [], ['a', 'a'], Array.from({ length: 21 }, (_, i) => `l${i}`)].map((labels) => refuses(labelled(labels), 'actions[0].labels')), [true, true, true, true]);
+    t("…a name over 50 bytes is refused per item, at the platform's own cap", refuses(labelled(['x'.repeat(51)]), 'per-item cap of 50'));
+    t('…and the accepted shape is the create plus a list of names, with or without assignees and body', [validatePayload(labelled(['skip-changeset'])).ok, validatePayload(one({ op: 'pr_create', title: 't', head: 'h', base: 'main', body: 'b', assignees: ['a'], labels: ['skip-changeset', 'documentation'] })).ok], [true, true]);
     // Every op's minimal valid shape is accepted — the table and the validator agree.
     const minimal = {
       comment: { issue: 1, body: 'b' },
@@ -870,7 +876,7 @@ export async function selfTest() {
       unassign: { issue: 1, assignees: ['u'] },
       issue_patch: { issue: 1, state: 'closed', state_reason: 'completed' },
       issue_create: { title: 't', body: 'b', labels: ['l'], assignees: ['u'] },
-      pr_create: { title: 't', head: 'h', base: 'main', body: 'b', assignees: ['u'] },
+      pr_create: { title: 't', head: 'h', base: 'main', body: 'b', assignees: ['u'], labels: ['l'] },
       pr_request_reviewers: { pull: 1, reviewers: ['u'] },
       pr_update_branch: { pull: 1, expected_head_sha: SHA },
       pr_ready: { pull: 1 },
@@ -918,13 +924,15 @@ export async function selfTest() {
     t('pr_update_branch spends pull-requests — where GitHub\'s ledger lists update-branch, server-to-server, no additional permission — and carries the sha in its body', [OPS.pr_update_branch.permission, OPS.pr_update_branch.requests({ op: 'pr_update_branch', pull: 7, expected_head_sha: SHA }, 'o/r')[0].body], ['pull-requests', { expected_head_sha: SHA }]);
     t('every GraphQL descriptor names an allowed mutation and its query spells that name', everyRequest.filter((r) => r.graphql).every((r) => ALLOWED_MUTATIONS.includes(r.graphql.mutation) && r.graphql.query.includes(r.graphql.mutation)));
     t('pr_create forces draft: true whatever the action said', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r')[0].body.draft, true);
-    // The one leg that reads an earlier answer — pr_create's assignees (the ops.mjs header): pinned to that one descriptor.
+    // The legs that read an earlier answer — pr_create's assignees and labels (the ops.mjs header): pinned to those two descriptors.
     const legs = everyRequest.filter((r) => r.fromAnswer !== undefined);
-    t("⛔ exactly ONE descriptor reads an earlier answer — pr_create's assignees leg: a POST to the created pull's issue-assignees path at the placeholder the executor fills from the create's number, carrying the logins the answer must list", legs.map((r) => [r.op, r.verb, r.path, r.fromAnswer, r.body, r.assigned]), [['pr_create', 'POST', `/repos/${TARGET_OWNER}/objectstack/issues/${answerPlaceholder('number')}/assignees`, 'number', { assignees: ['u'] }, ['u']]]);
-    t('…and it is never the FIRST request of its action — the answer it reads exists before it is sent', OP_NAMES.filter((op) => { const a = { op }; for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = sample[k]; return OPS[op].requests(a, 'o/r')[0].fromAnswer !== undefined; }), []);
-    t('…its placeholder is the one spelling the executor fills, spelled once, and no path without fromAnswer carries a brace', [answerPlaceholder('number'), everyRequest.filter((r) => r.fromAnswer === undefined && /[{}]/.test(r.path)).map((r) => `${r.op} ${r.path}`)], ['{number}', []]);
+    t("⛔ exactly TWO descriptors read an earlier answer — pr_create's assignees leg, then its labels leg: a POST to the created pull's issue-assignees path and one to its issue-labels path, each at the placeholder the executor fills from the create's number, each carrying what its answer must list", legs.map((r) => [r.op, r.verb, r.path, r.fromAnswer, r.body, r.assigned ?? null, r.labelled ?? null]), [['pr_create', 'POST', `/repos/${TARGET_OWNER}/objectstack/issues/${answerPlaceholder('number')}/assignees`, 'number', { assignees: ['u'] }, ['u'], null], ['pr_create', 'POST', `/repos/${TARGET_OWNER}/objectstack/issues/${answerPlaceholder('number')}/labels`, 'number', { labels: ['a b'] }, null, ['a b']]]);
+    t('…and neither is the FIRST request of its action — the answer they read exists before either is sent', OP_NAMES.filter((op) => { const a = { op }; for (const k of [...OPS[op].required, ...OPS[op].optional]) a[k] = sample[k]; return OPS[op].requests(a, 'o/r')[0].fromAnswer !== undefined; }), []);
+    t('…every such leg is a POST to the one additive issue endpoint for its list — never a PATCH or PUT, the whole-set replaces', legs.map((r) => [r.verb, /\/(assignees|labels)$/.test(r.path)]), [['POST', true], ['POST', true]]);
+    t('…their placeholder is the one spelling the executor fills, spelled once, and no path without fromAnswer carries a brace', [answerPlaceholder('number'), everyRequest.filter((r) => r.fromAnswer === undefined && /[{}]/.test(r.path)).map((r) => `${r.op} ${r.path}`)], ['{number}', []]);
     t('every grant a row ALSO spends is a literal mint input of PERMISSIONS, never a stroke-scoped one — so the mint widens nothing for it; pr_create\'s issues write and automerge_enable\'s workflows write are the two such rows', [OP_NAMES.flatMap((op) => OPS[op].alsoSpends ?? []).every((name) => name in PERMISSIONS && !STROKE_SCOPED_PERMISSIONS.includes(name)), OP_NAMES.filter((op) => OPS[op].alsoSpends).map((op) => [op, [...OPS[op].alsoSpends]])], [true, [['pr_create', ['issues']], ['automerge_enable', ['workflows']]]]);
-    t('pr_create without assignees is the one create request it always was — no second leg', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r').length, 1);
+    t('pr_create without assignees or labels is the one create request it always was — no later leg', OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b' }, 'o/r').length, 1);
+    t('…with labels alone, the create then the labels leg; with assignees alone, the create then the assignees leg', [OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b', labels: ['skip-changeset'] }, 'o/r').map((r) => r.labelled ?? r.assigned ?? 'create'), OPS.pr_create.requests({ op: 'pr_create', title: 't', head: 'h', base: 'b', assignees: ['u'] }, 'o/r').map((r) => r.labelled ?? r.assigned ?? 'create')], [['create', ['skip-changeset']], ['create', ['u']]]);
     t('labels_remove is one directed DELETE per name, URL-encoded, idempotent on 404', OPS.labels_remove.requests({ op: 'labels_remove', issue: 1, labels: ['a b', 'c'] }, 'o/r').map((r) => [r.verb, r.path, r.idempotent404]), [['DELETE', '/repos/o/r/issues/1/labels/a%20b', true], ['DELETE', '/repos/o/r/issues/1/labels/c', true]]);
     t('every op names a permission the token is narrowed to', OP_NAMES.every((op) => OPS[op].permission in PERMISSIONS));
     // The permission map, pinned entry by entry: the auto-merge mutations need `contents: write` on the

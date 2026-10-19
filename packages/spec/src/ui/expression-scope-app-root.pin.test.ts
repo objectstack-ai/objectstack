@@ -84,14 +84,11 @@ const SURVIVING_ROOTS = ['features', 'os.user'] as const;
 describe('no UI prose face advertises `app` as an expression-scope root — the renderer no longer mounts it', () => {
   describe('published faces (read by authoring tools and republished into the reference docs)', () => {
     it('`PageComponentSchema.visibleWhen`.describe() does not name `app` among the mounted roots', () => {
-      // ⚠️ NOT `.shape` — ADR-0089 D3a made this schema a `.strict().transform(…)`
-      // pipe (see `lazySchema`'s docblock), so it is a ZodPipe and the object
-      // with the property descriptions is its INPUT side. Reaching for `.shape`
-      // here yields `undefined` and every assertion below would then throw
-      // rather than measure.
+      // Read off `.shape`: the schema is a plain closed object since its
+      // `visibility` fold (a `.transform` pipe) retired with the key (#23543 F4).
       const shape = (PageComponentSchema as unknown as {
-        def: { in: { shape: Record<string, { description?: string }> } };
-      }).def.in.shape;
+        shape: Record<string, { description?: string }>;
+      }).shape;
       const description = shape.visibleWhen.description;
 
       expect(description, 'the describe() must exist — this pin is about its content').toBeTruthy();
@@ -156,9 +153,9 @@ describe('no UI prose face advertises `app` as an expression-scope root — the 
 
   describe('probe controls — a zero above is only a reading if these hold', () => {
     /**
-     * LIT. `page.zod.ts` still says `app` twice, both times about the page
-     * TYPE (`app` vs `utility` vs `blank`) — a different word that this card
-     * deliberately did NOT touch. It is the standing proof that a bare /app/
+     * LIT. `page.zod.ts` still says `app` about the page TYPE (`home`, `app`
+     * and `utility` render alike, and the liveness list) — a different word
+     * that this card deliberately did NOT touch. It is the standing proof that a bare /app/
      * probe over this file cannot answer the scope-root question, and that the
      * anchored, sentence-scoped assertions above are the required shape.
      *
@@ -167,9 +164,9 @@ describe('no UI prose face advertises `app` as an expression-scope root — the 
      * from a file that simply stopped using the word.
      */
     it('LIT: the `app` page TYPE prose survives, so a scoped probe is still required', () => {
-      expect(pageSource).toContain('`app` is an app-level page');
-      // THREE occurrences on TWO lines — `grep -c` answers lines and reads 2,
-      // which is the whole reason this is asserted on occurrences instead.
+      expect(pageSource).toContain('`home`, `app` and `utility` render alike');
+      // THREE occurrences on THREE lines of the page-type docblock, asserted
+      // on occurrences rather than lines (`grep -c`) all the same.
       expect(pageSource.match(/`app`/g) ?? []).toHaveLength(3);
     });
 

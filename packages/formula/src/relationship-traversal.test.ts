@@ -308,12 +308,44 @@ describe('validateExpression — refuses the unserviceable traversal shapes', ()
     }
   });
 
-  // A formula `value` never hydrates either, even on an opted-in object.
-  it('checks nothing in the `value` role', () => {
-    const r = validateExpression(
-      'value', "record.account.type == 'partner' && record.account == 'acc_1'", schema,
-    );
-    expect(r.errors.map((e) => e.message).join()).not.toContain('record.account.id');
+  // [#24197] A formula `value` is the second seam that serves one hop (the
+  // engine's formula read path preloads it), so an opted-in `value` is judged
+  // too — with the prescription worded for a formula, never a rule's.
+  describe('the `value` role (a formula field expression)', () => {
+    it('accepts the plain one-hop read a composed title is written with', () => {
+      const r = validateExpression('value', "record.account.name + ' · ' + string(record.amount)", schema);
+      expect(r.errors).toEqual([]);
+    });
+
+    it('refuses a second hop, naming the field and the one-hop alternative', () => {
+      const r = validateExpression('value', 'record.account.owner.email', schema);
+      expect(r.ok).toBe(false);
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]).toMatchObject({ code: 'traversal-multi-hop', params: { root: 'record', field: 'account' } });
+      expect(r.errors[0].message).toContain('A formula resolves ONE hop (`record.account.<related field>`');
+      expect(r.errors[0].message).toContain('read null on every record');
+      expect(r.errors[0].message).not.toContain('reject the write');
+    });
+
+    it('refuses a reference read both through and bare, prescribing the optional read', () => {
+      const r = validateExpression(
+        'value', "record.account == null ? '—' : record.account.name", schema,
+      );
+      expect(r.ok).toBe(false);
+      expect(r.errors).toHaveLength(1);
+      expect(r.errors[0]).toMatchObject({ code: 'traversal-bare-and-traversed', params: { field: 'account' } });
+      expect(r.errors[0].message).toContain("`record.account.?<related field>.orValue('…')`");
+      expect(r.errors[0].message).not.toContain('`conditional` rule');
+    });
+
+    it('accepts the optional read it prescribes', () => {
+      expect(validateExpression('value', "record.account.?name.orValue('—')", schema).errors).toEqual([]);
+    });
+
+    it('checks nothing in the `value` role when the caller has not opted in', () => {
+      const optedOut = { ...schema, traversalHydration: undefined };
+      expect(validateExpression('value', 'record.account.owner.email', optedOut).ok).toBe(true);
+    });
   });
 
   it('checks nothing when the caller supplies no fieldTypes', () => {

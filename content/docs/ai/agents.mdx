@@ -65,7 +65,20 @@ SKILL.md download (`GET /api/v1/mcp/skill`), and API-key minting.
   private deployments work out of the box**. You authorize the client in the
   browser; it then acts as an **agent on your behalf** (`principalKind: 'agent'`),
   its **data access** bounded by the **intersection** of the consent scopes and
-  your own permissions/RLS — it can never exceed either. For object CRUD the
+  your own permissions/RLS — it can never exceed either. The agent acts in
+  **one organization**: the one you had selected when you consented, carried
+  in the token as its `organization_id` claim. Your grants scoped to that
+  organization count for it; grants scoped to your other organizations do not
+  (select the other organization and authorize the client again to work
+  there). Your membership is re-checked on every request by the rule a
+  browser session's organization gets: under an organization wall (`isolated`
+  or `group` tenancy) a token whose organization you no longer belong to falls
+  back to **no organization**, so only your global grants apply — under
+  `isolated`, a former member's agent gets an **empty `200`** on reads and a
+  refusal on writes to organization data. Under `single` (no wall) the
+  organization stands as consented, as a session's does. A token issued
+  before consents carried an organization holds your global grants only until
+  you re-confirm the consent once. For object CRUD the
   consent scopes (`data:read`, `data:write`) are a real ceiling, not just a
   tool-family filter: they narrow the exposed tools **and** cap what the agent
   can do at the data layer — a `data:read` token can never write a record even

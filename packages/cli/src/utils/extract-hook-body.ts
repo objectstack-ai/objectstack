@@ -529,7 +529,8 @@ const CAPABILITY_PATTERNS: Array<{ rx: RegExp; cap: 'api.read' | 'api.write' | '
   { rx: /ctx\.log\.(?:info|warn|error|debug)\b/, cap: 'log' },
   // [#11293] `ctx.title(field)` — the RELATED-record form, and only that form.
   // `ctx.title()` resolves this record's title (formula included) from the
-  // state the hook is already firing on and performs no read at all, so it
+  // state the hook is already firing on — no read over its own columns, and
+  // only its declaration's one hop through a reference otherwise — so it
   // needs no capability and inferring one for it would tax the majority case
   // with a grant it never exercises. The argument form costs exactly one
   // `findOne` through the body's own read channel, which is the same read

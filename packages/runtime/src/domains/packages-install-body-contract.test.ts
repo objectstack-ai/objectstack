@@ -526,3 +526,74 @@ describe('§8 every other declared constraint is refused, naming the path', () =
         });
     }
 });
+
+// ═══════════════════════════════════════════════════════════════════════
+// §9 — a platform scope on an authored install: refused, so it cannot self-lock
+// ═══════════════════════════════════════════════════════════════════════
+
+/**
+ * An install through this door AUTHORS a project package, and the read-only
+ * gate judges a row by its stored `manifest.scope`: `cloud` and `system` mark
+ * a package the platform ships. A manifest that declared one answered `201`
+ * and produced an authored row that `DELETE`, `PATCH …/disable` and
+ * `?overwrite=true` then refused `422` `WRITABLE_PACKAGE_REQUIRED`. The
+ * declaration now narrows the install manifest's `scope` to `project`
+ * (`PackageInstallManifestSchema`), and this door answers what it declares:
+ * `400` / `VALIDATION_ERROR`, nothing installed, on both body forms and on
+ * either overwrite spelling. The refusal says what to write instead, so its
+ * first sentence's subject — `scope: 'project'` — is asserted beside the code.
+ */
+describe('§9 an authored install declaring `scope: cloud | system` is refused, on every form', () => {
+    for (const scope of ['cloud', 'system'] as const) {
+        const forms: ReadonlyArray<readonly [string, (m: Record<string, unknown>) => unknown, Record<string, unknown>?]> = [
+            ['WRAPPED', (m) => ({ manifest: m })],
+            ['BARE', (m) => m],
+            ['WRAPPED with `overwrite: true`', (m) => ({ manifest: m, overwrite: true })],
+            ['WRAPPED with `?overwrite=true`', (m) => ({ manifest: m }), { overwrite: 'true' }],
+            ['BARE with `?overwrite=true`', (m) => m, { overwrite: 'true' }],
+        ];
+        for (const [label, wrap, query] of forms) {
+            it(`\`scope: '${scope}'\`, ${label} → 400 VALIDATION_ERROR, nothing installed, the remedy named`, async () => {
+                const m = { ...manifest(`scope.${scope}`), scope };
+                const body = wrap(m);
+                expect(PackageInstallBodySchema.safeParse(body).success, 'off-declaration by the declaration itself').toBe(false);
+                expect(
+                    PackageInstallBodySchema.safeParse(wrap({ ...m, scope: 'project' })).success,
+                    'the control differs by the scope alone',
+                ).toBe(true);
+
+                const { registry, install } = door();
+                const r = await install(body, query);
+
+                expectRefused(r);
+                expect(registry.getPackage(m.id)).toBeUndefined();
+                expect(messageOf(r)).toContain('scope');
+                expect(messageOf(r)).toContain(`"${scope}"`);
+                expect(messageOf(r)).toContain("scope: 'project'");
+            });
+        }
+    }
+
+    it('an overwrite of an AUTHORED project row that declares `scope: cloud` → 400, and the row keeps its scope', async () => {
+        const { registry, install } = door();
+        const m = manifest('scope.overwrite.existing');
+        expect((await install({ manifest: m })).response?.status).toBe(201);
+
+        const r = await install({ manifest: { ...m, name: 'Relocked', scope: 'cloud' }, overwrite: true });
+
+        expectRefused(r);
+        expect(registry.getPackage(m.id)?.manifest).toEqual(m);
+    });
+
+    it('controls — `scope: project` and an absent scope install 201, stored as sent', async () => {
+        const { registry, install } = door();
+        const explicit = { ...manifest('scope.project'), scope: 'project' };
+        const absent = manifest('scope.absent');
+
+        expect((await install({ manifest: explicit })).response?.status).toBe(201);
+        expect((await install(absent)).response?.status).toBe(201);
+        expect(registry.getPackage(explicit.id)?.manifest?.scope).toBe('project');
+        // The parse is a gate, not a normaliser: the default is not stored.
+        expect(registry.getPackage(absent.id)?.manifest).toEqual(absent);
+    });
+});

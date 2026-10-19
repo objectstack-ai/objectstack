@@ -18,6 +18,9 @@ import { retiredKey } from '../shared/retired-key';
 import { refuseRecordProtoKey } from '../shared/record-proto-key-guard';
 import { bannedKeys } from '../shared/refinement-projection';
 import { FIELD_GROUP_KEY_PATTERN } from './field-group-layout';
+// [#23809] The single-option-code types — the only ones whose options take a
+// lifecycle `kind`, and so the only option fields a `stageField` may name.
+import { SINGLE_OPTION_TYPES } from './field-value.zod';
 // The masked-on-read declaration (#20141); `warnGenericPasswordFields` reads its
 // `password` exemption rather than restating it. No runtime cycle: that module's
 // only imports are type-only.
@@ -27,6 +30,9 @@ import { isMaskedOnReadFieldType } from './masked-field-types';
 // refuse one set. Public: re-exported from `@objectstack/spec/data`, with the
 // field predicate `isControlledByParentMasterField` it counts.
 import { controlledByParentMasterRefusal } from './controlled-by-parent-master';
+// The object's default row scope: the RLS policy shape without `object`. No
+// cycle: `security/rls.zod` imports only zod and `shared/`.
+import { DefaultRowScopeSchema } from '../security/rls.zod';
 export const ApiMethod = z.enum([
   'get', 'list',                // Read
   'create', 'update', 'delete', // Write
@@ -1824,6 +1830,214 @@ function refuseNonPictureImageField(
 }
 
 /**
+ * [objectui#12489 ruling 6203737086, letter A] A field's
+ * `referenceDeletedWhen: { field, value }` names a SIBLING `select` field on
+ * this object and one of that field's declared option values — the row state
+ * in which the record the field's `referenceVia` pointer names was deleted by
+ * the platform. A renderer draws the tombstone from that option's own label,
+ * so a predicate that names a missing field, a non-`select` field, or a value
+ * the field cannot hold would parse and never mark anything (ADR-0049
+ * declared = enforced).
+ *
+ * Refused, one located issue per offending field at
+ * `['fields', <field>, 'referenceDeletedWhen', 'field' | 'value']`, when:
+ *
+ *  - `field` names the declaring field itself, or no declared field;
+ *  - the sibling is not a `select`, or is a `multiple: true` select (its row
+ *    value is an array, so "holds that value" has no single reading);
+ *  - the sibling declares no inline `options` (a `picklist`-backed select's
+ *    values live outside this object, so the option cannot be checked here);
+ *  - `value` is not one of the sibling's option values.
+ *
+ * Judged here, in the object's `superRefine` beside
+ * {@link refuseNonPictureImageField}: `FieldSchema` sees one field at a time
+ * and refuses only the half it can see (the predicate without a
+ * `referenceVia`). Judged at parse, not only in `create()`, so every door —
+ * `defineStack`, a raw `.parse()`, the save door — refuses it; the key is new,
+ * so no metadata at rest carries it. Judged against the AUTHORED field map.
+ */
+function refuseDishonestReferenceDeletedWhen(
+  ownName: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (fields === null || typeof fields !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const fieldMap = fields as Record<string, unknown>;
+  for (const [fieldName, fieldDef] of Object.entries(fieldMap)) {
+    const predicate = (fieldDef as { referenceDeletedWhen?: unknown } | null)?.referenceDeletedWhen as
+      | { field?: unknown; value?: unknown }
+      | undefined;
+    if (predicate === null || typeof predicate !== 'object') continue;
+    const sibling = predicate.field;
+    const value = predicate.value;
+    if (typeof sibling !== 'string' || typeof value !== 'string') continue;
+    const at = (leaf: 'field' | 'value') => ['fields', fieldName, 'referenceDeletedWhen', leaf];
+    const prescription =
+      '`referenceDeletedWhen.field` must name a single-value `select` field of this object that declares '
+      + 'inline `options`, and `referenceDeletedWhen.value` one of its option values (e.g. `{ field: '
+      + "'cancel_reason', value: 'record_deleted' }`).";
+    if (sibling === fieldName) {
+      ctx.addIssue({
+        code: 'custom',
+        path: at('field'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.field: `
+          + `'${sibling}'\` — itself. The predicate reads a SIBLING \`select\` field. ${prescription}`,
+      });
+      continue;
+    }
+    if (!Object.prototype.hasOwnProperty.call(fieldMap, sibling)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: at('field'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.field: `
+          + `'${sibling}'\`, but the object declares no field \`${sibling}\`. ${prescription}`,
+      });
+      continue;
+    }
+    const siblingDef = fieldMap[sibling] as
+      | { type?: unknown; multiple?: unknown; options?: unknown }
+      | null
+      | undefined;
+    const siblingType = siblingDef?.type;
+    if (siblingType !== 'select' || siblingDef?.multiple === true) {
+      const what = siblingType === 'select' ? 'a `multiple: true` `select`' : `a \`${String(siblingType)}\` field`;
+      ctx.addIssue({
+        code: 'custom',
+        path: at('field'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.field: `
+          + `'${sibling}'\`, which is ${what}, not a single-value \`select\`. ${prescription}`,
+      });
+      continue;
+    }
+    const options = Array.isArray(siblingDef?.options) ? (siblingDef.options as Array<{ value?: unknown }>) : [];
+    if (options.length === 0) {
+      ctx.addIssue({
+        code: 'custom',
+        path: at('field'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.field: `
+          + `'${sibling}'\`, a \`select\` that declares no inline \`options\` (a \`picklist\`-backed select's `
+          + `values are not declared on this object, so \`'${value}'\` cannot be checked). ${prescription}`,
+      });
+      continue;
+    }
+    const declared = options.map((o) => o?.value).filter((v): v is string => typeof v === 'string');
+    if (!declared.includes(value)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: at('value'),
+        message:
+          `Field \`${fieldName}\` on object \`${objectName}\` declares \`referenceDeletedWhen.value: `
+          + `'${value}'\`, but \`select\` field \`${sibling}\` declares no option \`${value}\`. Its option `
+          + `values: ${declared.map((v) => `\`${v}\``).join(', ')}. ${prescription}`,
+      });
+    }
+  }
+}
+
+/**
+ * [#23809, maintainer ruling on the card: 「同意」] The field an object's
+ * `stageField` names declares a `kind` on EVERY option — `open`, `won` or
+ * `lost` (`SelectOption.kind`). Every renderer of the stage field (the
+ * record path, the kanban column order, the "closed" filters, the won / lost
+ * measures) reads that kind to tell the steps from the two ends, so an option
+ * without one would be drawn by the old guess from its spelling — the defect
+ * this key exists to end. There is deliberately no default here: on a plain
+ * select an absent kind reads as `open`, but under `stageField` that reading
+ * would hand an AI that forgot the key the same wrong path, only declared.
+ *
+ * Refused, judged against the AUTHORED field map:
+ *
+ *  - one located issue per option without `kind`, at
+ *    `['fields', <field>, 'options', <i>, 'kind']`, naming the field and the
+ *    option;
+ *  - at `['stageField']`, a stage field whose options are not declared on this
+ *    object (a `picklist`-backed select): its options cannot be judged here,
+ *    and this is the one door every save passes, so it is refused rather than
+ *    let through unjudged;
+ *  - at `['stageField']`, a stage field that carries options but holds no
+ *    single option code per record (a multi-value choice, a `multiple: true`
+ *    select): a record stands at one stage.
+ *
+ * Unchanged, on purpose: `stageField: false`, a `stageField` naming no declared
+ * field (the lint `semantic-roles` rule reports it), and one naming a field
+ * with no options at all.
+ *
+ * Judged at parse, beside {@link refuseDishonestReferenceDeletedWhen}, so every
+ * door — `defineStack`, a raw `.parse()`, the metadata save door — refuses it.
+ */
+function refuseStageFieldWithoutKinds(
+  ownName: unknown,
+  stageField: unknown,
+  fields: unknown,
+  ctx: z.RefinementCtx,
+): void {
+  if (typeof stageField !== 'string') return;
+  if (fields === null || typeof fields !== 'object') return;
+  const fieldMap = fields as Record<string, unknown>;
+  if (!Object.prototype.hasOwnProperty.call(fieldMap, stageField)) return;
+  const def = fieldMap[stageField] as
+    | { type?: unknown; multiple?: unknown; options?: unknown; picklist?: unknown }
+    | null
+    | undefined;
+  if (def === null || typeof def !== 'object') return;
+  const objectName = typeof ownName === 'string' ? ownName : '<unnamed>';
+  const type = typeof def.type === 'string' ? def.type : String(def.type);
+  const hasOptionSource = Array.isArray(def.options) || typeof def.picklist === 'string';
+  const prescription =
+    'A stage field is a single-value `select` (or `radio`) whose inline `options` each declare `kind`: '
+    + "`'open'` for a step on the way, `'won'` for the successful end, `'lost'` for the unsuccessful end "
+    + "(e.g. `{ label: 'Closed Won', value: 'closed_won', kind: 'won' }`). Or set `stageField: false` if "
+    + 'this object has no linear lifecycle.';
+
+  if (!SINGLE_OPTION_TYPES.has(type) || def.multiple === true) {
+    if (!hasOptionSource) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['stageField'],
+      message:
+        `Object \`${objectName}\` declares \`stageField: '${stageField}'\`, a \`${type}\` field`
+        + `${def.multiple === true ? ' with `multiple: true`' : ''} that holds no single option code per `
+        + `record, so it cannot be a lifecycle stage. ${prescription}`,
+    });
+    return;
+  }
+
+  if (!Array.isArray(def.options)) {
+    if (typeof def.picklist !== 'string') return;
+    ctx.addIssue({
+      code: 'custom',
+      path: ['stageField'],
+      message:
+        `Object \`${objectName}\` declares \`stageField: '${stageField}'\`, a field that takes its options from `
+        + `\`picklist: '${def.picklist}'\`. Those options are not declared on this object, so whether each `
+        + `declares its lifecycle \`kind\` cannot be checked here. Declare the stage field's options inline on `
+        + `\`${stageField}\` instead of the picklist. ${prescription}`,
+    });
+    return;
+  }
+
+  def.options.forEach((option, index) => {
+    const rec = option as { value?: unknown; kind?: unknown } | null;
+    if (rec === null || typeof rec !== 'object' || rec.kind !== undefined) return;
+    const value = typeof rec.value === 'string' ? rec.value : String(rec.value);
+    ctx.addIssue({
+      code: 'custom',
+      path: ['fields', stageField, 'options', index, 'kind'],
+      message:
+        `Option '${value}' of field \`${stageField}\` declares no \`kind\`, and object \`${objectName}\` names `
+        + `\`${stageField}\` as its \`stageField\`: every option of a stage field declares its lifecycle kind, `
+        + `so the record path can tell the steps from the two ends. Add \`kind: 'open'\` (a step on the way), `
+        + `\`kind: 'won'\` (the successful end) or \`kind: 'lost'\` (the unsuccessful end) to '${value}'.`,
+    });
+  });
+}
+
+/**
  * The machine-name grammar an attached block and its leaves share with field
  * names — they are keys on the same served row (`record.<block>.<leaf>`).
  */
@@ -2673,8 +2887,17 @@ const ObjectSchemaBase = strictObject(
    * a stage field (status/stage/state/phase). Consumed by the record-detail
    * path/stepper today; kanban default grouping, list badges and report
    * bucketing are natural future consumers.
+   *
+   * [#23809] When the named field carries options, it must be a single-value
+   * `select` / `radio` whose inline options EACH declare their lifecycle `kind`
+   * (`open` / `won` / `lost`), so those consumers tell the steps from the two
+   * ends by declaration, not by the value's spelling. The parse refuses such a
+   * field with an option lacking `kind`, a `picklist`-backed one, and a
+   * multi-value one (see `refuseStageFieldWithoutKinds`). Not judged here:
+   * `false`, a name that resolves to no declared field (the lint
+   * `semantic-roles` rule reports it), and a field with no options at all.
    */
-  stageField: z.union([z.string(), z.literal(false)]).optional().describe('[ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed.'),
+  stageField: z.union([z.string(), z.literal(false)]).optional().describe("[ADR-0085] Lifecycle stage field (linear/ordered), or false to declare the status field non-linear and suppress stage heuristics. Absent = heuristic detection allowed. When the named field carries options, it must be a single-value `select` / `radio` with inline `options`, each declaring its `kind` ('open' / 'won' / 'lost'); a picklist-backed or multi-value stage field is refused. A name that resolves to no declared field, or a field with no options, is not judged at parse."),
 
   /**
    * Cross-renderer EDIT-INTERACTION intent: whether a record of this object is
@@ -2745,6 +2968,41 @@ const ObjectSchemaBase = strictObject(
    * is authored — the inheritance is derived from the relationship.
    */
   sharingModel: z.enum(['private', 'public_read', 'public_read_write', 'controlled_by_parent']).optional().describe('Org-Wide Default record visibility (OWD) for INTERNAL users. Canonical four only (legacy aliases removed, ADR-0090 D4): private (owner-only) | public_read (everyone reads, owner writes) | public_read_write (everyone reads+writes) | controlled_by_parent (derived from the master record). A CUSTOM object that omits this resolves to private at runtime (ADR-0090 D1).'),
+
+  /**
+   * The object's default row scope (#24164 ruling E′, item 1): one row-level
+   * security policy, the permission-set `rowLevelSecurity` entry shape without
+   * `object` ({@link DefaultRowScopeSchema}). Layer 1 silence on an object, no
+   * held set carrying a row policy for it, then means this policy rather than
+   * no filter.
+   *
+   * The describe states the CONTRACT, not shipped behaviour (Prime Directive
+   * #10, the claim as narrow as the enforcement): its one reader is to be
+   * plugin-security's `collectRLSPolicies`, the collection every read, write
+   * and explain door uses (#24340), and until that lands no server reads the
+   * key; its writers are to be the platform identity objects (#24341), and no
+   * object declares it yet. The liveness row is `planned` with an author
+   * warning until the reader lands.
+   *
+   * The ruling's semantics, which the reader is to meet: when no held set
+   * carries a row policy for this object, the default applies; an authored set
+   * policy is used as authored; a superuser-bypass principal is untouched (the
+   * bypass is decided before the collection); an object with no default keeps
+   * today's behaviour.
+   */
+  defaultRowScope: DefaultRowScopeSchema.optional().describe(
+    "The object's default row scope: one row-level security policy, written like a permission set's "
+    + '`rowLevelSecurity` entry without `object` (the declaring object is implied; writing `object` is '
+    + 'refused). The contract the security plugin\'s row-policy collection, the one step every read, write '
+    + 'and explain passes through, is to meet once it reads the key: when no permission set the caller '
+    + 'holds carries a row policy for this object, this policy is to apply; a policy an authored set '
+    + 'carries for the object is to be used as authored, with this default not added to it; a principal '
+    + 'whose superuser bypass skips row policies is to be unaffected; an object that declares none keeps '
+    + 'the behaviour it has without the key. The platform\'s identity objects are to declare it for their '
+    + 'own tables. Not applied yet: no server reads this key in this release, so declaring it filters no '
+    + 'rows. Until the collection applies it, restrict rows with a permission set\'s `rowLevelSecurity` '
+    + 'policy.',
+  ),
 
   /**
    * RETIRED (#23268, ADR-0049 enforce-or-remove; ruling of record 6159300530,
@@ -2930,6 +3188,14 @@ const ObjectSchemaBase = strictObject(
   // object — the same door, for the same reason: only the object holds the
   // field map the pointer resolves against.
   refuseNonPictureImageField(object.name, object.imageField, object.fields, ctx);
+  // [objectui#12489 ruling 6203737086, letter A] A `referenceDeletedWhen`
+  // predicate names a declared single-value `select` sibling and one of its
+  // options — the same door: only the object holds the sibling map.
+  refuseDishonestReferenceDeletedWhen(object.name, object.fields, ctx);
+  // [#23809] Every option of the field `stageField` names declares its
+  // lifecycle `kind` — the same door: only the object knows which field is
+  // its stage.
+  refuseStageFieldWithoutKinds(object.name, object.stageField, object.fields, ctx);
   // [#22211 ruling A] A read attachment names at least one leaf, and is not a
   // field: its block names may not repeat a declared field name.
   refuseAttachedBlockConflicts(object.attachedOnRead, object.fields, ctx);
@@ -3252,10 +3518,14 @@ function assertReferenceViaSiblingDeclared(objectName: unknown, fields: unknown)
  * master FK, the row lands with a null FK, the derived read filter
  * `masterFK IN (accessible master ids)` can never match null — the row is
  * invisible to everyone — and every later by-id write answers
- * `422 MISSING_REQUIRED_FIELD`. Today only the security gate
- * (`assertControlledByParentWrite`) closes that shape, and commit 75b7c240a records that
- * the declaration and the enforcement disagree. This makes the unsafe shape
- * impossible to NEWLY declare:
+ * `422 MISSING_REQUIRED_FIELD`. Before commit 75b7c240a only the security
+ * gate (`assertControlledByParentWrite`) closed that shape, by refusing the
+ * insert at runtime, and that commit records that the declaration and the
+ * enforcement disagreed. Since protocol 18 the parse refuses the declaration
+ * itself: {@link refuseControlledByParentWithoutOneMaster} refuses a
+ * `controlled_by_parent` object none of whose `master_detail` fields declares
+ * `required: true`. The builder makes the unsafe shape impossible to NEWLY
+ * declare:
  *
  * - omitted `required` → forced to `true` (the lint rule
  *   `relationship/master-detail-required` already computes exactly this fix);

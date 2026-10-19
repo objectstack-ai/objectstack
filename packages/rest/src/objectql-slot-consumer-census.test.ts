@@ -29,6 +29,21 @@
  * from the source text and pins the count, so a FOURTH consumer arriving
  * unexamined turns this red instead of being absorbed into a sentence.
  *
+ * [#24210] ⭐ And a FOURTH, examined on arrival rather than absorbed: `GET
+ * /meta/:type/:name/published` asks the engine registry whether a non-object
+ * item's owning package is disabled. It reaches the slot through
+ * `wiredEngineOrLoud`, so it passes the decidable test: a rejecting provider is
+ * a loud `503`, never the served answer an absent engine gets (no registry to
+ * ask, so nothing is withheld). Its behavioural pin is
+ * `meta-disabled-package-doors.test.ts`, cited in §3.
+ *
+ * [#24210] ⭐ And a FIFTH, examined on arrival the same way: the layered view
+ * (`GET /meta/:type/:name/layers` and the deprecated `?layers=true`) asks the
+ * same registry question through the shared layered chain's owner step, wired
+ * in `metaItemReadGateSources`. It too reaches the slot through
+ * `wiredEngineOrLoud` (a rejecting provider is a loud `503`, an absent engine
+ * withholds nothing), pinned in the same file, cited in §3.
+ *
  * ## What is asserted about the answers
  *
  * §2 drives the third consumer on the wiring where it decides anything, and
@@ -106,6 +121,56 @@ import { RestServer } from './rest-server.js';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SOURCE = readFileSync(resolve(HERE, 'rest-server.ts'), 'utf8');
 const PLUGIN = readFileSync(resolve(HERE, 'rest-api-plugin.ts'), 'utf8');
+/**
+ * [#23050 slice 8] The SIBLING slot's one consumer, the email send door:
+ * `RestServer#registerEmailEndpoints`' body moved, unedited, to
+ * `email-routes.ts`. §1's controls read `emailServiceProvider` there — its
+ * known-present read, and the negative for the window predicate — because that
+ * is where its two reads and its one call now are. It holds no
+ * `objectQLProvider` site, so it is not on `SLOT_FILES`.
+ */
+const EMAIL_SOURCE = readFileSync(resolve(HERE, 'email-routes.ts'), 'utf8');
+
+/**
+ * [#23050 slice 2] The files this census reads. `RestServer#registerBatchEndpoints`'
+ * body — the cross-object batch door, the THIRD consumer — moved, unedited, to
+ * `batch-routes.ts`. It still reads `this.objectQLProvider`, now off the host
+ * literal the class hands it, whose `objectQLProvider` is a getter onto the
+ * class's own field: so it is still this slot's consumer, and still this
+ * census's population. A site is identified by `file:line`, never by a line alone.
+ *
+ * [#23050 slice 13e] Two more consumers moved the same way:
+ * `GET /meta/object/:name/state/:field` (the SECOND consumer, #15405's) to
+ * `meta-object-state-routes.ts`, and `GET /meta/:type/:name/published` (the
+ * FOURTH) to `meta-item-history-routes.ts`. Each still reads
+ * `this.objectQLProvider`, off a host literal the inner `/meta` method hands it,
+ * whose `objectQLProvider` is a getter onto the class's own field. The two left
+ * in `rest-server.ts` are the authorization-input seam and the layered chain's
+ * owner step, both in the class head.
+ */
+const SLOT_FILES = [
+    'rest-server.ts',
+    'batch-routes.ts',
+    'meta-object-state-routes.ts',
+    'meta-item-history-routes.ts',
+] as const;
+const SOURCES = new Map<string, string>(SLOT_FILES.map((file) => [
+    file, file === 'rest-server.ts' ? SOURCE : readFileSync(resolve(HERE, file), 'utf8'),
+]));
+/**
+ * [#23050 slice 13e] The state-machine read's module: its retired-spelling
+ * comment, which quotes this file's subject, is what §1's comment-dropping
+ * control reads.
+ */
+const STATE_SOURCE = SOURCES.get('meta-object-state-routes.ts')!;
+
+/** Every invocation site of the slot over every censused file, keyed `file:line`. */
+function censusInvocationSites(field: string): Array<{ file: string; line: number; text: string; lines: string[] }> {
+    return [...SOURCES].flatMap(([file, source]) => {
+        const lines = source.split('\n');
+        return invocationSites(source, field).map((s) => ({ file, ...s, lines }));
+    });
+}
 
 const BATCH_PATH = '/api/v1/batch';
 
@@ -140,49 +205,62 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // sibling `emailServiceProvider` field is read too. If either came back
         // empty the scanner would be reporting silence, not absence.
         expect(invocationSites(SOURCE, 'objectQLProvider').length).toBeGreaterThan(0);
-        expect(readSites(SOURCE, 'emailServiceProvider').length).toBeGreaterThan(0);
+        expect(readSites(EMAIL_SOURCE, 'emailServiceProvider').length).toBeGreaterThan(0);
         // Negative: a field that does not exist must read ZERO. This is what
         // makes a future zero mean "gone" rather than "the regex stopped
         // matching" — the failure mode that produced the two-consumer sentence
         // this file replaces.
         expect(readSites(SOURCE, 'objectQLProviderThatDoesNotExist')).toEqual([]);
         // And the scanner really does drop comment lines: this file's own
-        // subject is quoted inside a retired-spelling comment in `rest-server.ts`.
-        expect(SOURCE).toContain('this.objectQLProvider(environmentId).catch(() => undefined)');
-        expect(invocationSites(SOURCE, 'objectQLProvider').some((s) => s.text.startsWith('//'))).toBe(false);
+        // subject is quoted inside a retired-spelling comment in the state-machine
+        // read's body. [#23050 slice 13e] That body moved to
+        // `meta-object-state-routes.ts`, so both halves read it there.
+        expect(STATE_SOURCE).toContain('this.objectQLProvider(environmentId).catch(() => undefined)');
+        expect(invocationSites(STATE_SOURCE, 'objectQLProvider').length).toBeGreaterThan(0);
+        expect(invocationSites(STATE_SOURCE, 'objectQLProvider').some((s) => s.text.startsWith('//'))).toBe(false);
     });
 
-    it('⭐ THREE consumers, not two — the count the two prose censuses got wrong', () => {
-        const sites = invocationSites(SOURCE, 'objectQLProvider');
+    it('⭐ FIVE consumers: three, not two, was the count the two prose censuses got wrong, and #24210 adds /published and the layered view', () => {
+        // [#23050 slice 2] 3 UNCHANGED, over two files: 2 in `rest-server.ts`
+        // and the batch door's 1 in `batch-routes.ts`. [#24210] 4: `/published`'s
+        // disabled-owner check joins `rest-server.ts`; 5: the layered chain's
+        // owner step (`metaItemReadGateSources`) joins it too. [#23050 slice 13e]
+        // 5 UNCHANGED, over four files: 2 in `rest-server.ts` (the class head's
+        // two), the batch door's 1, the state-machine read's 1 in
+        // `meta-object-state-routes.ts` and `/published`'s 1 in
+        // `meta-item-history-routes.ts`.
+        const sites = censusInvocationSites('objectQLProvider');
         // The message carries the sites, so a failure here hands the next
         // reader the new census instead of a bare number.
-        expect(sites.map((s) => `L${s.line}: ${s.text}`).join('\n')).toBeTruthy();
-        expect(sites).toHaveLength(3);
+        expect(sites.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBeTruthy();
+        expect(sites).toHaveLength(5);
     });
 
-    it('⭐ [#18559] ALL THREE consumers now reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
-        const sites = invocationSites(SOURCE, 'objectQLProvider');
-        const lines = SOURCE.split('\n');
+    it('⭐ [#18559] ALL FIVE consumers reach the slot through `wiredEngineOrLoud` — none reads it directly', () => {
+        const sites = censusInvocationSites('objectQLProvider');
         const viaSeam = sites.filter((s) => {
             // The helper is named on the line that OPENS the call, two lines up
-            // from the invocation in all three spellings.
-            return lines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes('wiredEngineOrLoud(');
+            // from the invocation in all three spellings — read in the site's
+            // OWN file.
+            return s.lines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes('wiredEngineOrLoud(');
         });
         const direct = sites.filter((s) => !viaSeam.includes(s));
         // The message carries the offenders, so a failure hands the next reader
         // the site rather than a bare number.
-        expect(direct.map((s) => `L${s.line}: ${s.text}`).join('\n')).toBe('');
+        expect(direct.map((s) => `${s.file}:${s.line}: ${s.text}`).join('\n')).toBe('');
         expect(direct).toHaveLength(0);
-        expect(viaSeam).toHaveLength(3);
+        expect(viaSeam).toHaveLength(5);
 
         // ⭐ CONTROL for the window predicate itself, on BOTH axes. It reads a
         // WINDOW of source text, so "3 of 3" is only a reading if the same
         // predicate can also say something else. `emailServiceProvider` is the
         // sibling slot whose one call site #15405 routed through the SWALLOWING
-        // helper instead, so it is the natural negative:
+        // helper instead, so it is the natural negative. [#23050 slice 8] Read
+        // in that slot's consumer's own file, `email-routes.ts` (`EMAIL_SOURCE`).
+        const emailLines = EMAIL_SOURCE.split('\n');
         const wrappedIn = (field: string, helper: string) =>
-            invocationSites(SOURCE, field).filter((s) =>
-                lines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes(helper));
+            invocationSites(EMAIL_SOURCE, field).filter((s) =>
+                emailLines.slice(Math.max(0, s.line - 4), s.line).join('\n').includes(helper));
         //   - the predicate must NOT claim that slot for `wiredEngineOrLoud`…
         expect(wrappedIn('emailServiceProvider', 'wiredEngineOrLoud(')).toHaveLength(0);
         //   - …and it must still FIRE for the helper that slot really uses, so
@@ -193,16 +271,37 @@ describe('[#18546] §1 the `objectQLProvider` consumer census is mechanical', ()
         // `undefined` path produces a few lines later — so "3 via the seam" is
         // pinned to include the consumer #18559 moved, not just its two siblings.
         const batch = viaSeam.filter((s) =>
-            lines.slice(s.line, s.line + 6).join('\n').includes('Transactional batch not supported by this runtime'));
+            s.lines.slice(s.line, s.line + 6).join('\n').includes('Transactional batch not supported by this runtime'));
         expect(batch).toHaveLength(1);
+        // [#23050 slice 2] …and it is the one that moved: read in `batch-routes.ts`.
+        expect(batch[0]?.file).toBe('batch-routes.ts');
     });
 
     it('⛔ the field is read only as `this.objectQLProvider` — no alias keeps a consumer out of this census', () => {
         // A dynamic read would be invisible to the scanner above, and TypeScript's
         // `private` is compile-time only, so the absence of these spellings is
         // what bounds the enumeration to what §1 can see.
-        expect(SOURCE).not.toMatch(/\[\s*['"]objectQLProvider['"]\s*\]/);
-        expect(SOURCE).not.toMatch(/as any\s*\)\s*\.objectQLProvider/);
+        //
+        // [#23050 slice 2] Over every censused file. `batch-routes.ts` spells the
+        // slot in brackets exactly ONCE, and as a TYPE that reads nothing: its
+        // host interface's member, typed `RestServer['objectQLProvider']`. That
+        // one spelling is set aside before the check and pinned at exactly one
+        // there (zero here), so setting it aside cannot grow into an exemption.
+        // [#23050 slice 13e] The same for the two `/meta` modules: each spells it
+        // once, in the one host interface of its own that hands the slot on.
+        const HOST_MEMBER_TYPE = "RestServer['objectQLProvider']";
+        for (const [file, source] of SOURCES) {
+            expect(source.split(HOST_MEMBER_TYPE).length - 1, file).toBe(file === 'rest-server.ts' ? 0 : 1);
+            const code = source.split(HOST_MEMBER_TYPE).join('');
+            expect(code, file).not.toMatch(/\[\s*['"]objectQLProvider['"]\s*\]/);
+            expect(code, file).not.toMatch(/as any\s*\)\s*\.objectQLProvider/);
+        }
+        // [#23050 slice 2] The one way the slot leaves `RestServer` for another
+        // file: a moved registrar's host literal hands it on as a GETTER onto
+        // the class's own field. One getter per censused module beyond
+        // `rest-server.ts`, so a slot handed to a module that never joined
+        // `SLOT_FILES` reds here instead of hiding its consumer from §1.
+        expect(SOURCE.match(/\bget objectQLProvider\(\)/g) ?? []).toHaveLength(SLOT_FILES.length - 1);
         // And the shipped closure reaches `RestServer` through exactly one
         // construction site, so `rest-api-plugin.ts` cannot be wiring a second
         // consumer this file never looked at.
@@ -463,13 +562,14 @@ describe('[#18559] §2b the batch door answers ONE thing for one fact, on both w
 });
 
 // ---------------------------------------------------------------------------
-// §3 — the other two consumers are covered elsewhere, by name
+// §3 — the other consumers are covered elsewhere, by name
 // ---------------------------------------------------------------------------
 
-describe('[#18546] §3 the census names where the other two consumers are pinned', () => {
+describe('[#18546] §3 the census names where the other consumers are pinned', () => {
     it.each([
         ['execctx-authz-input-seam-reachability.test.ts', 'the computeExecCtx authorization-input seam'],
         ['meta-state-route-engine-outage.test.ts', 'GET /meta/object/:name/state/:field'],
+        ['meta-disabled-package-doors.test.ts', '[#24210] GET /meta/:type/:name/published, /layers and ?layers=true'],
     ])('%s still exists and still names this slot (%s)', (file) => {
         const path = resolve(HERE, file);
         expect(existsSync(path)).toBe(true);

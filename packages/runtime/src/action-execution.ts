@@ -21,6 +21,7 @@ import { validateActionParams, type ActionSession, type ResolvedActionParam } fr
 import { EngineQueryOptionsSchema, DATA_ACTION_TO_API_OPERATION } from '@objectstack/spec/data';
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import type { IObjectQLEngine, ServiceSlotContract, ServiceSlotContracts } from '@objectstack/spec/contracts';
+import { standardErrorCodeForHttpStatus } from '@objectstack/spec/api';
 // [#15942 / #16293] The confirmation member's SPELLING is the contract, so it
 // is imported, never hand-spelled: the door that refuses and the client that
 // retries have to agree on it, and two doors each writing their own 'confirm'
@@ -240,30 +241,41 @@ async function refuseUnservedRelationTargets(
 }
 
 /**
+ * [#23528] The data door's two exposure codes, by the gate's verdict: `404
+ * OBJECT_API_DISABLED` for an object whose `apiEnabled` is `false`, and `405
+ * OBJECT_API_METHOD_NOT_ALLOWED` with the effective operation set as `allowed`
+ * for a verb its `apiMethods` leaves out. That is the pairing `RestServer`
+ * answers for the same declaration (`apiAccessDenialFromEnable`).
+ *
+ * The ONE table both exposure refusals in this file stamp: the addressed
+ * object's ({@link refuseUnexposedDataAction}) and a nested-relation
+ * condition's target's ({@link unservedRelationTargetError}). One table, so one
+ * `callData` never answers the same verdict with two codes. A denial from
+ * {@link checkApiExposure} carries exactly one of these two statuses.
+ */
+function exposureRefusalFields(gate: ApiExposureDecision):
+    | { code: 'OBJECT_API_DISABLED'; status: 404 }
+    | { code: 'OBJECT_API_METHOD_NOT_ALLOWED'; status: 405; allowed: string[] } {
+    return gate.status === 404
+        ? { code: 'OBJECT_API_DISABLED', status: 404 }
+        : { code: 'OBJECT_API_METHOD_NOT_ALLOWED', status: 405, allowed: gate.allowedOperations ?? [] };
+}
+
+/**
  * [#22823] The data door's refusal of an unserved nested-relation condition
  * target, field for field (`refuseUnservedRelationTarget`): `code` and `status`
- * by the gate's verdict, the TARGET as `object` (the route's object is not the
- * one switched off), the condition's position as `param`, and the effective
- * operation set as `allowed` on a 405.
+ * by the gate's verdict ({@link exposureRefusalFields}), the TARGET as `object`
+ * (the route's object is not the one switched off), the condition's position
+ * as `param`, and the effective operation set as `allowed` on a 405.
  */
 function unservedRelationTargetError(target: string, param: string, gate: ApiExposureDecision): Error {
     const consequence = `, so the condition on it at '${param}' was not evaluated and the query was not run. `
         + 'Filter on the lookup\'s stored id instead, or remove the condition.';
-    const disabled = gate.status === 404;
-    const err: any = new Error(disabled
+    const refusal = exposureRefusalFields(gate);
+    const message = refusal.status === 404
         ? `Object '${target}' is not exposed via the API${consequence}`
-        : `API operation '${RELATION_CONDITION_TARGET_OPERATION}' is not allowed on object '${target}'${consequence}`);
-    if (disabled) {
-        err.code = 'OBJECT_API_DISABLED';
-        err.status = 404;
-    } else {
-        err.code = 'OBJECT_API_METHOD_NOT_ALLOWED';
-        err.status = 405;
-        err.allowed = gate.allowedOperations ?? [];
-    }
-    err.object = target;
-    err.param = param;
-    return err;
+        : `API operation '${RELATION_CONDITION_TARGET_OPERATION}' is not allowed on object '${target}'${consequence}`;
+    return Object.assign(new Error(message), refusal, { object: target, param });
 }
 
 /** The engine for a schema lookup, or `undefined` — a lookup failure is judged by the caller's fail-closed branch. */
@@ -275,6 +287,53 @@ async function resolveEngineQuietly(deps: ActionExecutionDeps, requestContext: H
     }
 }
 
+/**
+ * ── Object-level API exposure gate (ADR-0049, #1889) ─────
+ * Honour the object's `apiEnabled` / `apiMethods` declarations for external
+ * traffic: throws the refusal ({@link checkApiExposure}'s `404` / `405`) when
+ * `object` does not expose `action`, and returns otherwise. System/internal
+ * contexts bypass — these flags govern API *exposure*, not internal engine
+ * self-writes.
+ *
+ * [#23574] Extracted from {@link callData}, which still asks it first for
+ * every caller, so that the runtime dispatcher's `/data` domain can ask the
+ * SAME question before its own request-schema gate (`domains/data.ts`): a
+ * caller the object refuses is answered the refusal, never a shape verdict
+ * about the body it sent. `RestServer` asks `enforceApiAccess` before its
+ * twin gate for the same reason. Moved, not copied: this is the one place the
+ * dispatcher's exposure decision is resolved.
+ *
+ * [#23528] The refusal is the data door's, as the nested-relation target's
+ * already was: an `Error` carrying `code` and `status` from
+ * {@link exposureRefusalFields}, the addressed object as `object`, and
+ * `allowed` on a 405. It used to throw `{ statusCode, message }` with no code,
+ * so the dispatcher's `/data` door answered `404 RESOURCE_NOT_FOUND` / `405
+ * METHOD_NOT_ALLOWED` (codes derived from the status) and the `/mcp` tools
+ * rendered the message alone, where `RestServer` and the MCP stdio face answer
+ * the same declaration `OBJECT_API_DISABLED` / `OBJECT_API_METHOD_NOT_ALLOWED`.
+ * The statuses do not move, and neither does the message.
+ */
+export async function refuseUnexposedDataAction(deps: ActionExecutionDeps,
+    requestContext: HttpProtocolContext,
+    action: string,
+    object: unknown,
+    scopeId?: string,
+    executionContext?: ExecutionContext,
+): Promise<void> {
+    if (executionContext?.isSystem || !object) return;
+    let def: any;
+    try {
+        const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
+        def = await (meta as any)?.getObject?.(object);
+    } catch {
+        def = undefined; // fall open to schema defaults (apiEnabled=true)
+    }
+    const gate = checkApiExposure(def, action);
+    if (!gate.allowed) {
+        throw Object.assign(new Error(gate.reason ?? 'API access denied'), exposureRefusalFields(gate), { object });
+    }
+}
+
 export async function callData(deps: ActionExecutionDeps,
     requestContext: HttpProtocolContext,
     action: string,
@@ -283,27 +342,12 @@ export async function callData(deps: ActionExecutionDeps,
     scopeId?: string,
     executionContext?: ExecutionContext,
 ): Promise<any> {
-    // ── Object-level API exposure gate (ADR-0049, #1889) ─────
-    // Honour the object's `apiEnabled` / `apiMethods` declarations for
-    // external traffic. System/internal contexts bypass — these flags
-    // govern API *exposure*, not internal engine self-writes.
+    // The object-level API exposure gate ({@link refuseUnexposedDataAction}).
     // [#22823] Decided ONCE, here: the same bypass covers each nested-relation
     // condition's target, asked below on the two arms that hand the engine a
     // caller's `where` ({@link refuseUnservedRelationTargets}).
     const exposureGated = !executionContext?.isSystem;
-    if (exposureGated && params?.object) {
-        let def: any;
-        try {
-            const meta = await deps.resolveService(requestContext, 'metadata', scopeId);
-            def = await (meta as any)?.getObject?.(params.object);
-        } catch {
-            def = undefined; // fall open to schema defaults (apiEnabled=true)
-        }
-        const gate = checkApiExposure(def, action);
-        if (!gate.allowed) {
-            throw { statusCode: gate.status ?? 403, message: gate.reason ?? 'API access denied' };
-        }
-    }
+    await refuseUnexposedDataAction(deps, requestContext, action, params?.object, scopeId, executionContext);
 
     const protocol = await deps.resolveService(requestContext, 'protocol', scopeId);
     const qlService = dataDriver ?? await deps.getObjectQL(requestContext, scopeId);
@@ -1612,16 +1656,33 @@ export function resolveDeclaredActionParams(_deps: ActionExecutionDeps, action: 
  * costs one edited call. (D1's half went the opposite way for the opposite
  * reason — it strands stored rows, which nobody can edit their way out of.)
  *
- * Actions that declare no `params` keep the pass-through — there is nothing to
- * validate against, so existing param-less actions are untouched.
+ * ## Which param-less actions keep the pass-through: those with a HANDLER
+ *
+ * A handler action that declares no `params` keeps the pass-through (ADR-0104
+ * D2's boundary, unchanged for it): its handler is the author's own code
+ * deciding what its bag means, and there is no declaration to judge the bag by.
+ *
+ * A declarative update (`operation: 'update'`, {@link isDeclarativeUpdateAction})
+ * does NOT, and the reason is what its bag is for (#24268). It has no handler:
+ * the bag is merged over `patch` and WRITTEN to the row
+ * ({@link declarativeUpdateWrite}). So its declared `params` list is its whole
+ * wire write set, and an empty or absent list is an EMPTY accept set rather
+ * than an absent contract. Without that reading, an action declaring
+ * `patch: { status }` and nothing else wrote any field the caller may write —
+ * declared one field, enforced none. Its bag is judged here by the same
+ * validator against `[]`, so every key is refused except the dispatcher
+ * built-ins: the same message, the same 400 at the REST door, the same
+ * `OS_ALLOW_LAX_ACTION_PARAMS` escape hatch a declared-params action gets. No
+ * switch of its own.
  */
-export function enforceActionParams(deps: ActionExecutionDeps, 
+export function enforceActionParams(deps: ActionExecutionDeps,
     action: any,
     obj: any,
     bag: Record<string, unknown>,
     where: { objectName?: string; actionName?: string },
 ): string | null {
-    if (!Array.isArray(action?.params) || action.params.length === 0) return null;
+    const declaresParams = Array.isArray(action?.params) && action.params.length > 0;
+    if (!declaresParams && !isDeclarativeUpdateAction(action)) return null;
     const resolved = resolveDeclaredActionParams(deps, action, obj);
     const issues = validateActionParams(resolved, bag);
     if (issues.length === 0) return null;
@@ -2140,7 +2201,11 @@ export interface DeclarativeUpdateResult {
  * Contract point 4, and the precedence is the whole content of it — the static
  * `patch` sits UNDER the values the dialog collected, so a param of the same
  * name WINS. That is the bulk def's own rule (`bulkActionDefs`), mirrored word
- * for word; the spec's `patch` describe states it too. ⛔ Nothing else from the
+ * for word; the spec's `patch` describe states it too. The collected values are
+ * the action's DECLARED params (plus the dispatcher built-ins the D2 validator
+ * allowlists): both doors run {@link enforceActionParams} first, which refuses
+ * every other wire key — on a param-less update too, whose declared accept set
+ * is empty (#24268). ⛔ Nothing else from the
  * action is merged: not `bodyExtra` (refused beside `operation`), not
  * `recordIdField`, not the route's own `objectName`/`recordId` stamps — those
  * are handler plumbing, and a declarative update has no handler.
@@ -2154,15 +2219,22 @@ export function declarativeUpdateWrite(action: any, params: Record<string, unkno
 
 /** A refusal from the declarative-update executor, carrying the ADR-0112 envelope. */
 function declarativeUpdateRefusal(message: string, status: number): Error {
-    // ⛔ No `code` literal is stamped here, deliberately. `resolveThrownHttpError`
-    // derives the STANDARD catalog member from the status
-    // (`standardErrorCodeForHttpStatus`: 400 → `VALIDATION_ERROR`), which is
-    // what ADR-0112 asks for when the condition is a generic one — and the
-    // ledger's own registration rule says so in as many words ("If the
-    // condition is generic … use the standard catalog instead of registering a
-    // synonym"). Both doors resolve the throw through that one function, so
-    // the REST envelope and the MCP bridge's tool-error agree by construction.
-    return Object.assign(new Error(message), { status });
+    // The code is the STANDARD catalog member DERIVED from the status
+    // (`standardErrorCodeForHttpStatus`: 400 → `VALIDATION_ERROR`), never a
+    // spelled literal — what ADR-0112 asks for when the condition is a generic
+    // one, and the ledger's own registration rule says so in as many words ("If
+    // the condition is generic … use the standard catalog instead of
+    // registering a synonym").
+    //
+    // [#24268] It is STAMPED on the throw, not left for each door to derive.
+    // The REST door's `resolveThrownHttpError` would derive the same member
+    // from `status` alone, but the MCP tool renderer (`@objectstack/mcp`'s
+    // `thrownRefusalEnvelope`) reads a string `code` and renders a code-less
+    // throw as its bare message — measured over the real `/mcp` bridge, where
+    // this function's refusals answered message-only while the D2 refusal one
+    // gate earlier answered `{ code, message, status }`. The two doors only
+    // agree because the code rides the throw.
+    return Object.assign(new Error(message), { code: standardErrorCodeForHttpStatus(status), status });
 }
 
 /**
@@ -2383,7 +2455,8 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // its spelling or its type. It rides at the TOP LEVEL, never inside
     // `params`: that bag is closed against the action author's own declared
     // vocabulary, so a platform member riding there is refused as an unknown
-    // param on any action that declares params, and silently accepted on one
+    // param on any action that declares params (and on a declarative update
+    // that declares none, #24268), and silently accepted on a handler action
     // that declares none — one placement, two opposite behaviours.
     input: { objectName?: string; recordId?: string; params?: Record<string, unknown> } & AIActionConfirmation,
     wiring: {
@@ -2458,8 +2531,16 @@ export async function invokeBusinessAction(deps: ActionExecutionDeps,
     // bag, and a rejection is corrective feedback the agent consumes in-loop,
     // which a server-side warning never was. Strict by default (#3438);
     // OS_ALLOW_LAX_ACTION_PARAMS=1 restores the pass-through.
+    //
+    // [#24268] Thrown with `code` + `status` — the 400 and the standard code
+    // the REST door's `deps.error(paramError, 400)` answers — so the MCP tool
+    // surface renders the same ADR-0112 envelope rather than a bare sentence
+    // (`thrownRefusalEnvelope` reads a string `code`). The code is derived
+    // from the status, never spelled, as `declarativeUpdateRefusal` does.
     const paramError = enforceActionParams(deps, action, obj, params, { objectName, actionName: name });
-    if (paramError) throw new Error(paramError);
+    if (paramError) {
+        throw Object.assign(new Error(paramError), { code: standardErrorCodeForHttpStatus(400), status: 400 });
+    }
 
     // [#15942 / #16293] CONFIRMATION GATE — the last pre-dispatch check, and
     // the first one that can refuse a well-formed, fully-entitled request.

@@ -214,3 +214,37 @@ describe('formatDestructiveDriftRefusal', () => {
         expect(text).toContain('never skipped in silence');
     });
 });
+
+describe('runArtifactBootMigrationGate — a driver that declares its report must not be acted on', () => {
+    // [#23816] The Turso REMOTE face declares `driftReportCaveat`: its schema
+    // sync does not create a declared NOT NULL, so a healthy remote database
+    // reports destructive `tighten_not_null`, and the refusal's remedy cannot
+    // run on that transport. The gate keeps its "did not run" answer there.
+    const CAVEAT = 'the transport cannot act on its own report';
+
+    it('warns with the reason, applies nothing and refuses nothing, and never reads the report', async () => {
+        const { driver, applyCalls } = fakeDriver([entry('destructive'), entry('safe')]);
+        const declared: SqlDriverLike = { ...driver, driftReportCaveat: CAVEAT };
+        const warned: string[] = [];
+
+        const verdict = await runArtifactBootMigrationGate({
+            driver: declared, artifactDisplay: ARTIFACT, warn: (m) => warned.push(m),
+        });
+
+        expect(verdict).toEqual({ ok: true, applied: [], skipped: [], destructive: [] });
+        expect(driver.detectManagedDrift).not.toHaveBeenCalled();
+        expect(applyCalls).toHaveLength(0);
+        expect(warned).toHaveLength(1);
+        expect(warned[0]).toContain(CAVEAT);
+        expect(warned[0]).toContain('Boot continues');
+    });
+
+    it('the control: a null caveat is no caveat, and the same report refuses the boot', async () => {
+        const { driver } = fakeDriver([entry('destructive')]);
+        const verdict = await runArtifactBootMigrationGate({
+            driver: { ...driver, driftReportCaveat: null }, artifactDisplay: ARTIFACT,
+        });
+        expect(verdict.ok).toBe(false);
+        expect(driver.detectManagedDrift).toHaveBeenCalledTimes(1);
+    });
+});

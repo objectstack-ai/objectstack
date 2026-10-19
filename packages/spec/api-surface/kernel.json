@@ -145,6 +145,8 @@
     "InstalledPackage (type)",
     "InstalledPackageParsed (type)",
     "InstalledPackageSchema (const)",
+    "InstalledPackageSource (type)",
+    "InstalledPackageSourceSchema (const)",
     "KernelContext (type)",
     "KernelContextParsed (type)",
     "KernelContextSchema (const)",

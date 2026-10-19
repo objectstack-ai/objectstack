@@ -93,11 +93,17 @@ const shadowRow = (name: string): Row => ({
     checksum: 'sha256_pre_fix_shadow',
 });
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 const matchesWhere = (row: Record<string, unknown>, where: Record<string, unknown>) =>
     Object.entries(where ?? {}).every(([k, v]) => {
         if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`);
         if (v === null || v === undefined) return row[k] === null || row[k] === undefined;
-        return row[k] === v;
+        return whereValueMatches(row[k], v);
     });
 
 /**
@@ -424,7 +430,7 @@ describe('[#21899] the repository delete gate lifts the origin-gated type only',
                 return { deleted: rows.delete((o as any)?.where?.id) ? 1 : 0 };
             },
         };
-        return { rows, repo: new SysMetadataRepository({ engine, organizationId: null, orgLabel: 'env' }) };
+        return { rows, repo: new SysMetadataRepository({ engine, orgLabel: 'env' }) };
     };
 
     it('removes a stored row under a code-defined datasource on the override-artifact intent', async () => {

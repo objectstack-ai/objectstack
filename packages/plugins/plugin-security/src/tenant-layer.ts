@@ -1,11 +1,7 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 
-import {
-  postureEnforcesWall,
-  postureUsesUnionScope,
-  type TenancyPosture,
-  type TenantLayer0Verdict,
-} from '@objectstack/spec/security';
+import { computeTenantLayer0Verdict, type TenantLayer0Input } from '@objectstack/core';
+import type { TenantLayer0Verdict } from '@objectstack/spec/security';
 
 import { RLS_DENY_FILTER } from './rls-compiler.js';
 
@@ -29,132 +25,17 @@ import { RLS_DENY_FILTER } from './rls-compiler.js';
  * Layer-1 business policies and is out of scope for D1).
  */
 
-/** Inputs the Layer 0 decision needs — all cheap, already-loaded facts. */
-export interface TenantLayer0Input {
-  /**
-   * [ADR-0105 D1] The tenancy posture actually IN FORCE (`tenancy.posture`) —
-   * the single fact that decides what this layer enforces:
-   *
-   * - `single`   → inert (no wall)
-   * - `group`    → `organization_id IN accessibleOrgIds` (union / MOAC)
-   * - `isolated` → `organization_id = organizationId` (the hard wall)
-   *
-   * A degraded deployment (a wall requested but not enforceable) already
-   * resolves to `single` at the service, so this layer never sees a posture it
-   * cannot honour.
-   */
-  tenancyPosture: TenancyPosture;
-  /** The resolved authz context's active organization id (`ExecutionContext.tenantId`). */
-  organizationId?: string;
-  /**
-   * [ADR-0105 D2] The caller's org access set
-   * (`ExecutionContext.accessible_org_ids`) — every organization they hold a
-   * currently-valid membership in. Read ONLY under the `group` posture, where
-   * it is the wall. An empty/absent set there denies (fail closed): a principal
-   * with no membership has no group data reach.
-   */
-  accessibleOrgIds?: readonly string[];
-  /**
-   * Whether the object carries an `organization_id` column. `undefined` = the
-   * schema/field-set could not be resolved yet (boot); treated as "assume tenant
-   * object" so a not-yet-registered object still fails safe toward isolation
-   * (parity with the pre-extraction path, which kept the wildcard tenant policy
-   * when the field set was unavailable).
-   */
-  objectHasOrgIdField?: boolean;
-  /**
-   * Whether the object opted out of tenancy (`tenancy.enabled === false` or
-   * `systemFields.tenant === false`) — a platform-global object. Such objects
-   * are NOT tenant objects; Layer 0 contributes nothing.
-   */
-  tenancyDisabled: boolean;
-  /**
-   * Whether the object's POSTURE permits a platform admin to cross the tenant
-   * wall — `private`, platform-global (`tenancy.enabled:false`), or
-   * better-auth-managed (exactly the ADR-0066 ① gate). Business (public) tenant
-   * objects do NOT permit it, so a platform admin stays org-scoped on them.
-   */
-  posturePermitsCrossTenant: boolean;
-  /**
-   * TRUE-platform-admin evidence (ADR-0095 D3 `PLATFORM_ADMIN` rung) for THIS
-   * operation side. This is the ONLY gate that lets a caller cross the tenant
-   * wall, so it MUST distinguish a PLATFORM operator from a TENANT `org_admin`.
-   *
-   * It is NOT merely the superuser bit (`viewAllRecords`/`modifyAllRecords`):
-   * `organization_admin` holds that bit via its `'*'` wildcard grant
-   * (`default-permission-sets.ts`), so gating the exemption on the superuser bit
-   * alone let an org admin cross the wall on a `private` (or platform-global /
-   * better-auth) TENANT object — the D1 "B2 posture stand-in" gap this field's
-   * former semantics carried. The caller now requires the superuser bit AND a
-   * platform-EXCLUSIVE capability (`manage_metadata`/`manage_platform_settings`/
-   * `studio.access`/`manage_users` — the caps `admin_full_access` carries and
-   * `organization_admin` deliberately withholds), i.e. the `PLATFORM_ADMIN`
-   * posture. It is NEVER the better-auth role.
-   */
-  isPlatformAdmin: boolean;
-}
-
-/** The two verdicts that carry no organization — shared, frozen, safe to hand out. */
-const LAYER0_NONE: TenantLayer0Verdict = Object.freeze({ kind: 'none' as const });
-const LAYER0_DENY: TenantLayer0Verdict = Object.freeze({ kind: 'deny' as const });
-
 /**
- * [#15813 / ADR-0131 D8] Compute the Layer 0 VERDICT — what the wall decides
- * for this operation, as a value another package can read without re-deriving
- * it (`TenantLayer0VerdictSchema`, `@objectstack/spec/security`).
- * {@link computeTenantLayer0Filter} is this verdict PROJECTED onto a `where`
- * predicate ({@link tenantLayer0FilterOf}); the two cannot disagree because
- * the filter is derived from the verdict, never computed beside it.
- *
- * The decision ladder is the wall's own, in the wall's own order: every exit
- * that answers `null` as a filter answers `none` here, every fail-closed exit
- * answers `deny`, and the two walled shapes answer the organization(s) they
- * name. The `group` set is DEDUPLICATED here (`accessible_org_ids` is a
- * membership list; a repeated membership names one organization once), so a
- * reader may test `organizationIds.length === 1` and read no further.
- *
- * - `none` → Layer 0 contributes nothing (`single` posture; non-tenant object;
- *   or an exempt platform admin). The caller applies only Layer 1.
- * - `organization` → the `isolated` wall, `organization_id = <id>`.
- * - `organizations` → the `group` union wall, `organization_id IN <set>`
- *   (ADR-0105 D2).
- * - `deny` → a walled posture on a tenant object, but the context carries no
- *   organization scope to enforce with (no active org under `isolated`, empty
- *   access set under `group`) → fail closed (zero rows / write denied).
+ * [ADR-0131 D8] The verdict and its inputs live in `@objectstack/core`, so the
+ * engine projects the SAME decision onto the driver's native scope
+ * (`DriverOptions.tenantId` / `tenantIds`) that this layer projects onto its
+ * `where` wall — one predicate, computed by one function. Re-exported here
+ * because this module is where the wall's readers already import it from.
  */
-export function computeTenantLayer0Verdict(input: TenantLayer0Input): TenantLayer0Verdict {
-  // `single` posture (incl. a degraded deployment, which resolves to `single`)
-  // → parity with today's policy stripping.
-  if (!postureEnforcesWall(input.tenancyPosture)) return LAYER0_NONE;
+export { computeTenantLayer0Verdict, type TenantLayer0Input };
 
-  // Not a tenant object: platform-global (tenancy disabled) or simply carries no
-  // `organization_id` column (e.g. better-auth identity tables like `sys_user`).
-  // Layer 0 contributes nothing — the object's own business RLS (Layer 1, e.g.
-  // `_self` carve-outs) is its only scoping.
-  if (input.tenancyDisabled) return LAYER0_NONE;
-  if (input.objectHasOrgIdField === false) return LAYER0_NONE;
-
-  // Exemption is a Layer 0 rule (W2 fix): only a TRUE PLATFORM_ADMIN caller on an
-  // object whose posture permits it crosses the wall — NOT a tenant `org_admin`
-  // that merely holds the superuser bit (Finding 2 / #2937). Layer 1's superuser
-  // bypass no longer implies Layer 0's.
-  if (input.isPlatformAdmin && input.posturePermitsCrossTenant) return LAYER0_NONE;
-
-  // [ADR-0105 D2] `group`: union access over the caller's memberships (MOAC).
-  // The ACTIVE organization no longer bounds reads here — membership does — so
-  // a group-HQ analyst sees every plant they belong to on one screen without
-  // context switching, and a plant admin still sees only their own plants.
-  // An empty access set is the fail-closed case: no membership, no reach.
-  if (postureUsesUnionScope(input.tenancyPosture)) {
-    const orgIds = input.accessibleOrgIds;
-    if (!orgIds || orgIds.length === 0) return LAYER0_DENY;
-    return { kind: 'organizations', organizationIds: [...new Set(orgIds)] };
-  }
-
-  // `isolated`: the hard wall. Missing active org → fail closed.
-  if (!input.organizationId) return LAYER0_DENY;
-  return { kind: 'organization', organizationId: input.organizationId };
-}
+/** The fail-closed verdict — shared, frozen, safe to hand out. */
+const LAYER0_DENY: TenantLayer0Verdict = Object.freeze({ kind: 'deny' as const });
 
 /**
  * Project a Layer 0 verdict onto the `where` predicate the wall AND-composes —

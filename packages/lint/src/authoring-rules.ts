@@ -246,7 +246,7 @@ export type AuthoringRuleTier = 'gating' | 'advisory';
  *
  * This tier used to be justified as "the rules that need it check keys the
  * parse strips — a flat list view in `views: []`, `userFilters` on an object
- * list view, a `visibleOn` alias — by the time `result.data` exists the
+ * list view, a `visibleOn` alias (retired at 18) — by the time `result.data` exists the
  * evidence is gone". **All three of those examples were measured false**, each
  * for its own reason, and the pins live in `authoring-rule-input-tier.test.ts`:
  *
@@ -271,7 +271,10 @@ export type AuthoringRuleTier = 'gating' | 'advisory';
  *     (`visibility-alias-deprecated`) was retired, since the D2 conversion
  *     notice already covers its whole evidence surface with better wording and
  *     a stated retirement window. The alias-KEY half of premise 3 is therefore
- *     no longer merely false — there is nothing left reading it.
+ *     no longer merely false — there is nothing left reading it. At 18 the
+ *     aliases retired as spec tombstones and the D2 conversions left the load
+ *     path (#23543 F4): the parse now refuses the alias by name before any rule
+ *     runs.
  *
  * ## What it does buy, and why the tier stays
  *
@@ -911,9 +914,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
       'saves, a rollout decision over stored tenant rows the in-repo corpus does not measure.',
     run: (stack) => validateDashboardWidgetOptions(stack),
   },
-  // #3574 — a filter value like `{current_user}` resolves in no vocabulary,
-  // reaches the data engine as a literal and matches nothing. The surface
-  // renders empty with no error, and a silent zero is indistinguishable from a
+  // #3574 — a filter value like `{current_user}` resolves in no vocabulary. The
+  // data engine refuses a query carrying it (`FILTER_TOKEN_UNKNOWN`, 400). When
+  // #3574 was filed it reached the engine as a literal and matched nothing: the
+  // surface rendered empty with no error, a silent zero indistinguishable from a
   // genuine one at review time.
   {
     name: 'validateFilterTokens',
@@ -1149,11 +1153,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   //
   // `normalized` for a reason worth stating, since the props bag survives the
   // Zod parse UNCHANGED and both tiers would otherwise carry the same data: the
-  // ADR-0087 conversion layer runs inside `normalizeStackInput`, so a converted
-  // alias (`page-header-subtitle-alias` rewrites `properties.description` →
-  // `subtitle`) is already canonical here and is never reported as undeclared —
-  // while a schema error elsewhere in the stack cannot take these findings down
-  // with it.
+  // ADR-0087 conversion layer runs inside `normalizeStackInput`, so a prop
+  // spelling a live D2 conversion still rewrites on the load path is already
+  // canonical here and is never reported as undeclared — while a schema error
+  // elsewhere in the stack cannot take these findings down with it.
   //
   // Gating: every finding is an `error`, so `os validate`, `os build` and
   // `os lint` refuse an undeclared prop, a value the props schema rejects, a
@@ -1172,7 +1175,15 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-component-props.ts',
-    surfaces: CLI_ONLY,
+    // On the runtime door by the ruling of record on #23388 (record
+    // 6161173492, letter B), which replaced, for this rule and
+    // `validateComponentTypes`, the #4716 discipline both entries were held
+    // on (a gating rule reaches the Studio/REST/MCP door only behind a
+    // measured false-refusal budget over stored tenant page rows — a
+    // discipline a dispatch seat set, not a maintainer ruling). The ruling's
+    // principle: a page with a finding is fixed, then saved. No stored-row
+    // replay came first, by that ruling.
+    //
     // Page-local, MEASURED (#23147): the rule reads `stack.pages` and nothing
     // else — each page's components through `walkPageComponents`, judged
     // against the static `ComponentPropsMap` — and a `page` write's per-write
@@ -1180,16 +1191,12 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     // the showcase's 28 pages, the rule's findings through that snapshot were
     // identical to the whole-stack run's findings on the same page, as
     // authored (0 = 0) and with an undeclared key and a wrong-typed prop
-    // planted (19 = 19). So RUNTIME_NEEDS_FULL_SNAPSHOT, which this entry
-    // carried until then, was false here. What holds the rule off the runtime
-    // door is the `validateComponentTypes` discipline: a measured false-refusal
-    // budget over STORED tenant page rows, which no population measured so far
-    // is. Crossing is its own rollout decision.
-    surfaceReason:
-      'Gating rule held off the runtime door pending the crossing discipline the gating object rules ' +
-      'went through: a measured false-refusal budget, here over stored tenant page rows. The rule is ' +
-      'page-local and a page write\'s snapshot carries everything it reads; the 0-finding inventories ' +
-      'cover authored config-file metadata only. Crossing is its own rollout card.',
+    // planted (19 = 19). So the crossing is this `surfaces`/`runtimeTypes`
+    // pair and nothing else. Stored pages keep loading and serving: the gate
+    // judges writes, never the read path, so only the next save of a page
+    // with a finding is refused, with the fix the finding carries.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
     run: (stack) => validateComponentProps(stack),
   },
   // The TYPE half of the same door (#12183's ruling): a component `type` inside
@@ -1204,29 +1211,29 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     input: 'normalized',
     commands: ALL,
     source: 'packages/lint/src/validate-component-types.ts',
-    surfaces: CLI_ONLY,
-    // Page-local judgment, so the per-write snapshot IS sufficient — what the
-    // crossing owes is not a wider snapshot but the #4716 discipline: a gating
-    // rule reaches the Studio/REST/MCP door only behind a measured
-    // false-refusal budget over REAL stored page rows, and the population this
-    // rule was measured on (the in-repo corpus, 0 findings) is authored
-    // config-file metadata, not tenant rows. A tenant page carrying a
-    // reserved-namespace type their own plugin registers would be refused at
-    // the only door that tenant has. Crossing is its own rollout decision with
-    // that replay as its evidence, not a bare `runtimeTypes` edit.
-    surfaceReason:
-      'Gating rule held off the runtime door pending the crossing discipline the gating object rules ' +
-      'went through: a measured false-refusal budget, here over stored tenant page rows (the in-repo ' +
-      '0-finding measurement covers ' +
-      'authored config-file metadata only). Crossing is its own rollout card.',
+    // On the runtime door by the same ruling of record as
+    // `validateComponentProps` above (#23388, record 6161173492, letter B),
+    // which crossed this rule in the same change: the #4716 stored-row
+    // false-refusal budget it was held on was seat-set, and the maintainer's
+    // principle — fix the page, then save it — applies unchanged. A page
+    // carrying a type inside a spec-reserved namespace the platform does not
+    // declare ships a placeholder to end users, and the refusal names the fix
+    // (a declared type, or a type outside the reserved namespaces). Page-local
+    // judgment, so the per-write snapshot IS sufficient: the crossing is this
+    // `surfaces`/`runtimeTypes` pair and nothing else. Stored pages keep
+    // loading and serving; only their next save is judged.
+    surfaces: CLI_AND_RUNTIME,
+    runtimeTypes: ['page'],
     run: (stack) => validateComponentTypes(stack),
   },
   // #22158, card ① of the ruling of record on #8346 (letter B′): a page that
   // declares `print` is a document, and every block in it must come from the
   // spec's printable block subset (`PRINTABLE_PAGE_COMPONENT_TYPES`). Gating,
-  // and on the runtime door from birth — the rule's header says why the
-  // false-refusal budget `validateComponentTypes` is held on is zero here by
-  // construction: no page could carry `print` before this rule landed.
+  // and on the runtime door from birth — the rule's header says why a
+  // stored-row false-refusal budget was zero here by construction: no page
+  // could carry `print` before this rule landed. (Its siblings
+  // `validateComponentProps` and `validateComponentTypes` crossed later, on
+  // the ruling of record on #23388, record 6161173492.)
   {
     name: 'validatePrintPageBlocks',
     tier: 'gating',
@@ -1253,7 +1260,7 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
     surfaceReason: RUNTIME_NEEDS_FULL_SNAPSHOT,
     run: (stack) => validateResponsiveStyles(stack),
   },
-  // ADR-0080 — a `kind:'jsx'` page's `source` is parsed (never executed) and
+  // ADR-0080 — a `kind:'html'` page's `source` is parsed (never executed) and
   // compiled to the SDUI tree at save time, so malformed source must fail loudly
   // here (ADR-0078) instead of being stored and breaking only at render.
   {
@@ -1517,8 +1524,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // gate and (#6253) the syntax gate. This entry used to read "pre-parse: the
   // schema folds `visibleOn`/`visibility` into `visibleWhen` during parse, so
   // the alias the author wrote is gone from `result.data`". Measured false at
-  // #6073: the ADR-0087 D2 conversions do that fold INSIDE
-  // `normalizeStackInput`, one layer BEFORE this tier, so on every spec-valid
+  // #6073: the ADR-0087 D2 conversions did that fold INSIDE
+  // `normalizeStackInput` (until both aliases retired at 18, #23543 F4), one
+  // layer BEFORE this tier, so on every spec-valid
   // alias site the alias-KEY rule reported zero here too.
   //
   // #6318 closed that: `visibility-alias-deprecated` was RETIRED rather than
@@ -1572,10 +1580,10 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // when nobody measured, which is the #4409/#4463 defect one layer in.
   //
   // Runtime input tier: the gate hands the rules the body as persisted, without
-  // `normalizeStackInput`, so the ADR-0087 D2 alias fold does NOT run at this
-  // door. That costs the family nothing — `validateVisibilityPredicates` reads
-  // `visibleWhen ?? visibleOn ?? visibility` itself, canonical-first, precisely
-  // so a caller handing it a raw authored object still gets a verdict.
+  // `normalizeStackInput`. That costs the family nothing: the door parses the
+  // body against the spec first (a 422 on refusal), and since the ADR-0089
+  // aliases retired at 18 (#23543 F4) an accepted body spells the predicate
+  // `visibleWhen` only, the one key the family reads.
   {
     name: 'validateVisibilityPredicates',
     tier: 'gating',
@@ -2079,9 +2087,9 @@ export const AUTHORING_RULES: readonly AuthoringRule[] = [
   // sharing rule where the predicate is EXACT rather than inferred.
   //
   //  - `condition` has a single runtime consumer
-  //    (`bootstrapDeclaredSharingRules`) whose only use of the key is
+  //    (`createDeclaredSharingRuleSource`) whose only use of the key is
   //    `compileCelToFilter(condition, { variables: {} })`; a condition that
-  //    does not lower means the rule is SKIPPED at boot.
+  //    does not lower means the rule is SKIPPED by enforcement.
   //  - `object` decides whether the grant is refused outright: reconcile hands
   //    each row to `SharingService.grant`, whose ADR-0111 D7 pre-flight THROWS
   //    `SHARING_NOT_ENABLED` when the anchor's effective sharing model is

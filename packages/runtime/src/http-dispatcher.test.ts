@@ -334,7 +334,9 @@ describe('HttpDispatcher', () => {
                 getSuspendedScreen: vi.fn().mockResolvedValue({ nodeId: 'collect', fields: [] }),
                 getActionDescriptors: vi.fn().mockReturnValue([
                     { type: 'decision', name: 'Decision', category: 'logic', paradigms: ['flow'], source: 'builtin' },
-                    { type: 'http_request', name: 'HTTP Request', category: 'io', paradigms: ['flow', 'approval'], source: 'builtin' },
+                    // The canonical callout: `http_request` is a reserved retired name
+                    // since 18 (#23543 F5-http), so no registry can list it.
+                    { type: 'http', name: 'HTTP', category: 'io', paradigms: ['flow', 'approval'], source: 'builtin' },
                     { type: 'send_sms', name: 'Send SMS', category: 'io', paradigms: ['flow'], source: 'plugin' },
                 ]),
                 // [#4127] Typed as `ConnectorDescriptor[]` now that the contract
@@ -757,7 +759,7 @@ describe('HttpDispatcher', () => {
             expect(mockAutomationService.getActionDescriptors).toHaveBeenCalled();
             expect(result.response?.body?.data?.total).toBe(3);
             expect(result.response?.body?.data?.actions.map((a: any) => a.type)).toEqual(
-                ['decision', 'http_request', 'send_sms'],
+                ['decision', 'http', 'send_sms'],
             );
         });
 
@@ -780,7 +782,7 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handleAutomation('actions', 'GET', {}, AUTHED_CALLER(), { paradigm: 'approval' });
             expect(result.handled).toBe(true);
             expect(result.response?.body?.data?.total).toBe(1);
-            expect(result.response?.body?.data?.actions[0].type).toBe('http_request');
+            expect(result.response?.body?.data?.actions[0].type).toBe('http');
         });
 
         it('should return an empty registry when the service lacks getActionDescriptors', async () => {
@@ -2445,7 +2447,7 @@ describe('HttpDispatcher', () => {
             const result = await dispatcher.handlePackages('', 'POST', { manifest }, {}, PKG_ADMIN());
 
             expect(result.response?.status).toBe(201);
-            expect(mockRegistry.installPackage).toHaveBeenCalledWith(manifest, undefined);
+            expect(mockRegistry.installPackage).toHaveBeenCalledWith(manifest, 'authored', undefined);
             expect((result.response as any)?.body?.data?.manifest?.id).toBe('app.fb');
         });
     });

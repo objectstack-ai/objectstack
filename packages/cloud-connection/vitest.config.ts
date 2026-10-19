@@ -90,7 +90,7 @@ export default defineConfig({
   // answers stayed green: `canonical-expression-envelopes.test.ts` (#11480) —
   // the one suite the alias exists for — reads its population from disk, by
   // scanning `src/` for `export const X: Page =` and flooring the count, so it
-  // would keep auditing this package's two pages and reporting green while
+  // would keep auditing this package's pages and reporting green while
   // every other suite here, discovered by vitest, simply stopped running.
   //
   // The two claims this paragraph replaces — that this file carried no `test`

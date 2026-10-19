@@ -19,9 +19,8 @@
  *
  * ## The defect this file closes
  *
- * Each member is read with a fixed shape (measured at the `.objectui-sha` pin
- * `2e818d0b51ec`, unchanged at objectui `main` `2abec3a96`; the read points are
- * in the schemas' docblocks), and the rows declared them `z.unknown()` /
+ * Each member is read with a fixed shape (read points recorded in
+ * `liveness/page.json`, row `regions`), and the rows declared them `z.unknown()` /
  * open records. So a drill report with no `dataset` or a bare report name, a
  * gantt row on a feed timeline (or a feed entry with no `title`), and an
  * action member keyed `actionType`, `endpoint` or a misspelling all passed the
@@ -430,9 +429,9 @@ describe('§3 each shape is the declaration the ruling names', () => {
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * objectui `plugin-dashboard/src/DrillDownDrawer.tsx:92-99` at the
- * `.objectui-sha` pin `2e818d0b51ec`, restated: the drawer draws a drill report
- * as a report exactly when it holds, and lists the records otherwise. The
+ * objectui's drill drawer predicate (`isDatasetBoundReport`, recorded in
+ * `liveness/page.json`, row `regions`), restated: the drawer draws a drill
+ * report as a report exactly when it holds, and lists the records otherwise. The
  * drawer reads the value as written — a page component's `properties` is
  * never parsed on the way.
  */

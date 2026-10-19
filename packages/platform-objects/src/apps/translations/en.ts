@@ -134,9 +134,11 @@ export const en: TranslationData = {
 
         // Diagnostics
         nav_sessions: { label: 'Sessions' },
-        nav_audit_logs: { label: 'Audit Logs' },
-        // The console's Audit Log page, beside the object view (#20142).
-        nav_audit_log_browser: { label: 'Audit Log Browser' },
+        // The one audit entry: the console's audit browser (`audit:log`),
+        // contributed by @objectstack/plugin-audit. The `sys_audit_log` list is
+        // reached from that page's "Open as list" link, not from this menu, and
+        // the page's former id `nav_audit_log_browser` is tombstoned (#23890).
+        nav_audit_logs: { label: 'Audit Log' },
         nav_notifications: { label: 'Notifications' },
 
         // Integrations — every entry here is contributed at RUNTIME by the
@@ -155,12 +157,12 @@ export const en: TranslationData = {
         // no browse entry for them (#2266). Nor `nav_jwks` — `sys_jwks` is
         // `apiEnabled: false`, so its list 404s for EVERY persona and the entry
         // was removed (#7544). Nor `nav_metadata` — that entry moved to Studio
-        // as `nav_metadata_directory`. Re-adding a label here means re-adding
-        // the nav item first; the tombstone in
+        // as `nav_metadata_directory`. Nor `nav_accounts` /
+        // `nav_user_preferences` — both left the menu for the User record
+        // page's tabs (#23803). Re-adding a label here means re-adding the nav
+        // item first; the tombstone in
         // `setup-nav-dead-key-tombstone.test.ts` states the whole rule (#6660).
         nav_oauth_apps: { label: 'OAuth Applications' },
-        nav_accounts: { label: 'Identity Links' },
-        nav_user_preferences: { label: 'User Preferences' },
       },
     },
     studio: {
@@ -256,10 +258,6 @@ export const en: TranslationData = {
   // (@objectstack/cloud-connection, @objectstack/mcp) and exist so the other
   // locales have a complete key set to translate against.
   pages: {
-    marketplace_installed: {
-      label: 'Installed Apps',
-      subtitle: "Marketplace packages currently installed into this runtime's kernel.",
-    },
     cloud_connection_settings: {
       label: 'Cloud Connection',
       subtitle:
@@ -269,7 +267,7 @@ export const en: TranslationData = {
     connect_agent: {
       label: 'Connect an Agent',
       subtitle:
-        'Give any MCP-capable AI client governed access to this environment — '
+        'Give any MCP-capable AI client governed access to this system — '
         + "every call runs under the caller's own permissions and row-level security.",
     },
 

@@ -89,6 +89,15 @@ const FAMILY: Record<string, string[]> = {
   // emit paths and therefore the one worth pinning: every driver and kernel
   // diagnostic the failed scan produces is emitted before it.
   'migrate account-issuer': [],
+  // A dry run is its DEFAULT and the only form driven here: without `--apply`
+  // it boots read-only (plugin-audit's objects registered), reads
+  // `sys_activity` and writes nothing. Its backfill logs through a sink of its
+  // own, which `--json` points at stderr, as `audit-metadata-bodies` does.
+  'migrate activity-changed-fields': [],
+  // [ADR-0139 E7] The same shape: a dry run by default, reading `sys_comment`
+  // and writing nothing, its backfill logging through a sink `--json` points at
+  // stderr.
+  'migrate comment-parent-pair': [],
   'migrate apply': [],
   // A dry run is its DEFAULT and the only form driven here: without `--apply`
   // it boots (plugin-audit's objects registered), reads `sys_audit_log` /

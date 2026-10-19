@@ -21,8 +21,9 @@ import {
     type ScreenFieldVisibility,
 } from './screen-input-contract.js';
 import type { Logger } from '@objectstack/spec/contracts';
+import type { FlowUnboundCause } from '@objectstack/spec/contracts';
 import { FLOW_HOOK_SECRET_KEY, flowCredentialClassLabel, flowCredentialPositions } from './flow-credential-projection.js';
-import { FlowSchema, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor, DecisionConfigSchema } from '@objectstack/spec/automation';
+import { FlowSchema, FLOW_RESERVED_NODE_TYPES, FLOW_STRUCTURAL_NODE_TYPES, validateControlFlow, collectFlowGraphs, findRegionEntry, defineActionDescriptor, DecisionConfigSchema } from '@objectstack/spec/automation';
 // [#14328] The ONE answer to "which trigger kind does this flow ask for?" —
 // shared with `defineStack`'s trigger-capability refusal and `@objectstack/lint`'s
 // `validate-flow-trigger-readiness`, so the runtime cannot drift from what
@@ -66,7 +67,7 @@ import { builtinNodeConfigKeysJudged } from '@objectstack/spec/automation';
 // hand-written `trim()` here is exactly the drift the #15662 campaign built the
 // shared refusal to prevent. See `checkStructuralCondition` in `registerFlow`.
 import { EvaluatedExpressionInputSchema, EVALUATED_EXPRESSION_SOURCE_REQUIRED } from '@objectstack/spec';
-import { applyConversionsToFlow, CONVERSION_TODO_CODE, type ConversionNotice, type ConversionConflictNotice, type ConversionTodoNotice } from '@objectstack/spec';
+import { applyConversionsToFlow, CONVERSION_TODO_CODE, type ConversionNotice, type ConversionTodoNotice } from '@objectstack/spec';
 // [ADR-0126 §7.3, #20761] "Does a code package ship this flow?" is NOT read
 // off a definition here. The subflow guards, the arming gate and the
 // activation door ask {@link AutomationEngine.packagedFlowOwner} — the loader's
@@ -3485,8 +3486,29 @@ export class AutomationEngine implements IAutomationService {
 
     // ── Plugin Extension API ──────────────────────────────
 
-    /** Register a node executor (called by plugins) */
+    /**
+     * Register a node executor (called by plugins).
+     *
+     * [#23543 F5-http] Refuses a type — the executor's or its descriptor's —
+     * that is one of the retired callout names reserved inside the open node
+     * namespace ({@link FLOW_RESERVED_NODE_TYPES}). No node could ever reach
+     * such an executor: the flow parse refuses an authored node typed with the
+     * name, and flow rehydration rewrites a stored one to `http` before it
+     * parses. Refused loudly here, at the plugin's own registration call, so
+     * the author hears it at boot instead of shipping a node type that is dead
+     * on arrival. Nothing is registered on a refusal.
+     */
     registerNodeExecutor(executor: NodeExecutor): void {
+        for (const type of new Set([executor.type, executor.descriptor?.type])) {
+            if (typeof type !== 'string' || !Object.prototype.hasOwnProperty.call(FLOW_RESERVED_NODE_TYPES, type)) continue;
+            throw new Error(
+                `Node executor type '${type}' is reserved: it is a retired official flow node name, superseded by `
+                + `'${FLOW_RESERVED_NODE_TYPES[type]}' (@objectstack/spec 18, ADR-0018). No node can reach an executor `
+                + `registered under it — the flow parse refuses an authored node typed '${type}', and a stored one is `
+                + `rewritten to '${FLOW_RESERVED_NODE_TYPES[type]}' before it parses. Register the executor under a `
+                + `type of your own (for example a namespaced 'acme_${type}').`,
+            );
+        }
         if (this.nodeExecutors.has(executor.type)) {
             this.logger.warn(`Node executor '${executor.type}' replaced`);
         }
@@ -3581,9 +3603,11 @@ export class AutomationEngine implements IAutomationService {
      * `aliasOf` so the designer palette can hide or mark it while the canonical
      * type is the one offered for new authoring.
      *
-     * This is how ADR-0018 collapses the five outbound verbs onto `http` /
-     * `notify`: `http_request` / `http_call` / `webhook` become aliases of
-     * `http`.
+     * ADR-0018 M3 first collapsed the outbound verbs onto `http` / `notify`
+     * this way: `http_request` / `http_call` / `webhook` were aliases of `http`
+     * until 11.0 removed them. Since 18 those three names are reserved
+     * (#23543 F5-http), so {@link registerNodeExecutor} refuses an alias under
+     * one of them too.
      */
     registerNodeAlias(
         alias: string,
@@ -4485,15 +4509,25 @@ export class AutomationEngine implements IAutomationService {
      * none (the save door, a package duplication, the sync's comparison of a
      * held flow) does no more work than before. `registerFlow` reads none
      * either: it runs the same checks itself and throws the first refusal.
+     *
+     * [#23775, ADR-0087 addendum 2026-07-31] `options.includeRetired` — whether
+     * the chain replays the entries retired from the authoring funnel
+     * (`retiredFromLoadPath`). Omitted, it is `true`: a body at rest has no
+     * author to teach, so every caller that hands this method a stored row, a
+     * copied row or a built artifact passes nothing. `false` is the AUTHORING
+     * posture `normalizeStackInput` takes: the metadata save door passes it for
+     * a flow with no stored row at the save's address, so a retired spelling is
+     * left in place and meets the parse refusal, with its prescription, instead
+     * of being lifted. {@link registerFlow}, the rehydration seam, never passes
+     * it. The default-flip ids stay excluded either way.
      */
-    canonicalizeStoredFlow(name: string, definition: unknown): {
+    canonicalizeStoredFlow(name: string, definition: unknown, options: { includeRetired?: boolean } = {}): {
         parsed: FlowParsed;
         storable: unknown;
         notices: ConversionNotice[];
-        conflicts: ConversionConflictNotice[];
         todos: ConversionTodoNotice[];
     } {
-        const { parsed, storable, notices, conflicts, todos: chainTodos } = this.canonicalizeFlow(name, definition);
+        const { parsed, storable, notices, todos: chainTodos } = this.canonicalizeFlow(name, definition, options);
         // The registration checks run when `todos` is first READ, once: the
         // stored pass reads it, and the doors that only want `parsed` or
         // `storable` (the save door, a package duplication, the sync's
@@ -4518,7 +4552,6 @@ export class AutomationEngine implements IAutomationService {
             parsed,
             storable,
             notices,
-            conflicts,
             get todos(): ConversionTodoNotice[] {
                 listedTodos ??= listRegistrationRefusals();
                 return listedTodos;
@@ -4530,13 +4563,13 @@ export class AutomationEngine implements IAutomationService {
      * {@link canonicalizeStoredFlow}'s pass without the registration checks:
      * convert, parse, and refuse what the parse, the cycle check and the
      * region validator refuse. {@link registerFlow} calls this and then runs
-     * the checks itself, so registration judges a flow once.
+     * the checks itself, so registration judges a flow once. `options` is
+     * {@link canonicalizeStoredFlow}'s, and only that method passes it.
      */
-    private canonicalizeFlow(name: string, definition: unknown): {
+    private canonicalizeFlow(name: string, definition: unknown, options: { includeRetired?: boolean } = {}): {
         parsed: FlowParsed;
         storable: unknown;
         notices: ConversionNotice[];
-        conflicts: ConversionConflictNotice[];
         todos: ConversionTodoNotice[];
     } {
         // ADR-0087 D2 — the runtime load seam. A stored flow authored against an
@@ -4544,10 +4577,11 @@ export class AutomationEngine implements IAutomationService {
         // with `config.filters`) is canonicalized on rehydration, BEFORE parse +
         // execution, so the executor only ever sees the canonical shape and a
         // dropped-alias upgrade never silently changes behavior (e.g. an empty
-        // `filter` deleting a whole table). `reservedNodeTypes` is this engine's
-        // live executor registry: an open-namespace node-type rename over a type
-        // a custom executor owns becomes a loud, refused conflict — never a
-        // silent clobber of the third party's node.
+        // `filter` deleting a whole table). No live executor registry is handed
+        // to the pass: the one open-namespace rename, the callout rename,
+        // reserves its old names instead (#23543 F5-http), and
+        // `registerNodeExecutor` refuses an executor under one, so (#24001) the
+        // conversion-conflict channel it used to feed is gone.
         //
         // `includeRetired` (#3903): this seam rehydrates DATA AT REST — flows
         // stored in `sys_metadata` outlive any load window, and a row written
@@ -4558,6 +4592,10 @@ export class AutomationEngine implements IAutomationService {
         // exact hazard this seam exists to prevent. Authored sources keep
         // window semantics at their own seam (`normalizeStackInput` applies
         // live-window entries only; the schema tombstones the retired shape).
+        // [#23775] The one caller that closes the window is the metadata save
+        // door, for a flow with no stored row (an authored body, not one at
+        // rest), through `canonicalizeStoredFlow`'s option; the rehydration
+        // passes none and replays the full chain, as it always has.
         //
         // `excludeConversionIds`: the retired window is opened for a CLASS of
         // caller, and one kind of entry inside it is not a rescue but a
@@ -4565,25 +4603,14 @@ export class AutomationEngine implements IAutomationService {
         // now means something else. This seam cannot say a body predates such
         // a flip, so it refuses those entries by id, each with its reason on
         // `CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION`.
-        const reservedNodeTypes = new Set<string>([
-            ...FLOW_STRUCTURAL_NODE_TYPES,
-            ...this.nodeExecutors.keys(),
-            ...this.actionDescriptors.keys(),
-        ]);
         const notices: ConversionNotice[] = [];
-        const conflicts: ConversionConflictNotice[] = [];
         const todos: ConversionTodoNotice[] = [];
         const converted = applyConversionsToFlow(definition, {
-            reservedNodeTypes,
-            includeRetired: true,
+            includeRetired: options.includeRetired ?? true,
             excludeConversionIds: CONVERSIONS_NOT_REPLAYED_AT_REHYDRATION,
             onNotice: (n) => {
                 notices.push(n);
                 this.logger.warn(`[flow '${name}'] ${n.code}: ${n.message}`);
-            },
-            onConflict: (c) => {
-                conflicts.push(c);
-                this.logger.warn(`[flow '${name}'] ${c.code}: ${c.message}`);
             },
             // Collected, not logged: a site listed here is one `registerFlow`
             // refuses below with its own located message.
@@ -4613,7 +4640,6 @@ export class AutomationEngine implements IAutomationService {
             parsed,
             storable: graftConditionEnvelopes(converted, parsed),
             notices,
-            conflicts,
             todos,
         };
     }
@@ -4850,6 +4876,7 @@ export class AutomationEngine implements IAutomationService {
         triggerType?: string;
         object?: string;
         reason?: string;
+        unboundCause?: FlowUnboundCause;
         armedFrom?: FlowContender;
         shadowed?: FlowContender[];
     }> {
@@ -4859,7 +4886,7 @@ export class AutomationEngine implements IAutomationService {
             // reads. This map holds ONE entry per bare name, so without these
             // two fields a displaced contender leaves no trace on this surface.
             const shadowing = this.flowShadowing.get(name);
-            const reason = this.describeUnboundReason(name, resolved);
+            const unbound = this.describeUnboundReason(name, resolved);
             return {
                 name,
                 enabled: this.isFlowEnabled(name),
@@ -4870,7 +4897,11 @@ export class AutomationEngine implements IAutomationService {
                 // Absent, not `undefined`-valued: a row that is bound, disabled
                 // or trigger-less has no reason to carry, and `reason: null` on
                 // the wire would read as "we looked and found nothing".
-                ...(reason === undefined ? {} : { reason }),
+                // [#23842] `unboundCause` rides the SAME spread, so the pair is
+                // present together or absent together by construction.
+                ...(unbound === undefined
+                    ? {}
+                    : { reason: unbound.reason, unboundCause: unbound.cause }),
                 ...(shadowing
                     ? { armedFrom: shadowing.armed, shadowed: shadowing.shadowed }
                     : {}),
@@ -4885,6 +4916,11 @@ export class AutomationEngine implements IAutomationService {
      * sentence an operator sees in Studio and the one the CLI prints cannot
      * drift apart. `undefined` means this flow has no unbound reason to report:
      * it is bound, it is disabled, or it declares no trigger at all.
+     *
+     * [#23842] Each branch answers its sentence AND its closed
+     * `FlowUnboundCause` together, so the status door can let a consumer
+     * classify a row without parsing the sentence — one value per branch,
+     * stamped where the branch is decided, never inferred from the text.
      *
      * The POLICY branch outranks both binding branches, and deliberately so.
      * When package-authored scheduled work is off, neither of the other two
@@ -4912,21 +4948,27 @@ export class AutomationEngine implements IAutomationService {
     private describeUnboundReason(
         name: string,
         resolved: { triggerType: string } | undefined,
-    ): string | undefined {
+    ): { reason: string; cause: FlowUnboundCause } | undefined {
         if (!resolved) return undefined; // manual / screen flow — nothing to bind
         if (!this.isFlowEnabled(name)) return undefined;
         if (this.boundFlowTriggers.has(name)) return undefined;
         const policyReason = this.policyDisabledFlows.get(name);
-        if (policyReason !== undefined) return policyReason;
+        if (policyReason !== undefined) return { reason: policyReason, cause: 'deployment_policy' };
         // [#20725, ADR-0126 §7.3] The arming gate declined it onto a disabled
         // packaged subflow — read from the record, for the policy line's
         // reason, and ahead of the trigger branches for the gate's: with the
         // child off, the trigger would not arm it either.
         const declined = this.subflowDeclinedFlows.get(name);
-        if (declined !== undefined) return declined;
+        if (declined !== undefined) return { reason: declined, cause: 'disabled_subflow' };
         return this.triggers.has(resolved.triggerType)
-            ? `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`
-            : `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`;
+            ? {
+                reason: `trigger '${resolved.triggerType}' is registered but binding failed — see earlier warnings`,
+                cause: 'binding_failure',
+            }
+            : {
+                reason: `no '${resolved.triggerType}' trigger is registered — add requires: ['triggers'] (record_change/schedule/time_relative/api ship in @objectstack/trigger-*)`,
+                cause: 'missing_trigger',
+            };
     }
 
     /**
@@ -4946,9 +4988,9 @@ export class AutomationEngine implements IAutomationService {
             // trigger) and the three-branch vocabulary both live in
             // `describeUnboundReason` now, so this audit and the status door
             // report the SAME sentence for the same flow by construction.
-            const reason = this.describeUnboundReason(name, resolved);
-            if (reason === undefined || !resolved) continue;
-            audit.push({ flowName: name, triggerType: resolved.triggerType, reason });
+            const unbound = this.describeUnboundReason(name, resolved);
+            if (unbound === undefined || !resolved) continue;
+            audit.push({ flowName: name, triggerType: resolved.triggerType, reason: unbound.reason });
         }
         return audit;
     }
@@ -7729,13 +7771,24 @@ export class AutomationEngine implements IAutomationService {
             // which of the three causes it was, verbatim on the wire. A distinct
             // code would be vocabulary nothing reads — add one the day a caller
             // needs to branch on the difference.
+            //
+            // [#23963] And the verdict is carried onto the RUN, not only onto
+            // the answer: both exits go through
+            // {@link settleUnresumableSuspension}, which moves the parked row to
+            // `failed` with this same text in `error`. Answering "gone for
+            // good" while the row kept `status: 'paused'` left it resumable on
+            // every surface that reads the row, and outside retention, whose
+            // scope is terminal statuses only.
             const flow = this.flows.get(run.flowName);
             if (!flow) {
-                return { success: false, code: 'RUN_NOT_FOUND', error: `Flow '${run.flowName}' not found for run '${runId}'` };
+                return this.settleUnresumableSuspension(run, `Flow '${run.flowName}' not found for run '${runId}'`);
             }
             const node = flow.nodes.find(n => n.id === run.nodeId);
             if (!node) {
-                return { success: false, code: 'RUN_NOT_FOUND', error: `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'` };
+                return this.settleUnresumableSuspension(
+                    run,
+                    `Suspended node '${run.nodeId}' no longer exists in flow '${run.flowName}'`,
+                );
             }
 
             // #4354 — up-bubble: the child that just finished did work this run
@@ -8897,6 +8950,108 @@ export class AutomationEngine implements IAutomationService {
             steps: run.steps,
             error,
         }, run.context, consumed?.run);
+    }
+
+    /**
+     * [#23963] Answer a resume refused as GONE FOR GOOD, and settle the run it
+     * names in the same act.
+     *
+     * {@link resumeInternal} reaches this from its two never-dispatched exits:
+     * the run's flow is no longer registered, or the node it parked on was
+     * edited away. Both are the terminal `RUN_NOT_FOUND` class (#8684). The
+     * answer is unchanged, and the run now moves to the state the answer
+     * describes: the parked row is consumed and a `failed` history row records
+     * `cause`, the same text the caller is answered. `failed` and not
+     * `cancelled`, for {@link failSuspendedRun}'s reason: nobody decided to end
+     * this run (ADR-0044's `cancelled`, which a restore refuses as a deliberate
+     * act). It can never continue, and `error` is the column that says why.
+     * Retention's `onlyWhen` scope already holds `failed`, so the row ages out
+     * like any other history row and nothing there changes.
+     *
+     * Three guards, each against a different way the verdict could be wrong:
+     *
+     *  - **The boot is still filling the flow registry.** Before the host
+     *    seals the boot, an absent flow means "not registered YET": the plugin
+     *    re-arms overdue wait timers in its `start()`, and those resume runs
+     *    before its `kernel:ready` handler binds the inline app flows they
+     *    belong to. Recording the verdict there would kill a run whose flow
+     *    arrives a moment later (AGENTS.md "Startup registry reads"). The host
+     *    declares the boot complete with {@link sealNodeTypeVocabulary}, which
+     *    `AutomationServicePlugin` calls at `kernel:bootstrapped`, strictly
+     *    after every flow bind of the boot. Before the seal this answers the
+     *    refusal and records nothing, which is exactly what shipped before.
+     *    After it, a flow can leave only by an explicit withdrawal. An
+     *    embedded host that never seals keeps the pre-#23963 behaviour.
+     *  - **Another consumer got there first.** The row is consumed through
+     *    {@link claimAdvance}, the compare-and-set the resume path takes: the
+     *    store removes the row only while it is still parked where this
+     *    replica read it. `lost` means a concurrent resume or cancel already
+     *    consumed it and wrote its own outcome, so nothing is written here.
+     *    The answer stays the refusal this replica reached.
+     *  - **The store cannot say whether the row was consumed.** A claim that
+     *    throws answers `STORE_UNAVAILABLE`, as the resume path's claim does.
+     *    That tells the caller the row may still read `paused`, and a retry
+     *    settles it. Answering `RUN_NOT_FOUND` there would tell the caller the
+     *    matter is closed while the row it describes stayed parked.
+     *
+     * The history write is guarded the way the completion paths guard theirs
+     * (#16274): the run is already consumed when it runs, so a throw out of
+     * it must not turn the refusal into a rejected promise.
+     */
+    private async settleUnresumableSuspension(run: SuspendedRun, cause: string): Promise<AutomationResult> {
+        const refusal: AutomationResult = { success: false, code: 'RUN_NOT_FOUND', error: cause };
+        if (!this.nodeTypeVocabularySealed) return refusal;
+        const claim = await this.claimAdvance(run);
+        if (claim.kind === 'lost') {
+            // [#15832] The store answered and holds no row where this replica
+            // read one, so whatever snapshot this process still holds is stale.
+            this.evictConsumedSuspension(run.runId);
+            return refusal;
+        }
+        if (claim.kind === 'unavailable') {
+            return {
+                success: false,
+                code: 'STORE_UNAVAILABLE',
+                error:
+                    `Run '${run.runId}' can never continue (${cause}), but the durable suspended-run store was ` +
+                    `unreachable while settling it, and whether the store consumed the suspension is UNKNOWN (a ` +
+                    `failure can arrive after a committed delete), so its record may still read paused. Retry once ` +
+                    `the store is available: a retry that finds the run still parked settles it, and one that finds ` +
+                    `the suspension gone answers RUN_NOT_FOUND: ${claim.message}`,
+            };
+        }
+        await this.forgetSuspendedRun(run, 'failed', claim.kind === 'claimed');
+        try {
+            this.recordLog({
+                id: run.runId,
+                flowName: run.flowName,
+                flowVersion: run.flowVersion,
+                status: 'failed',
+                startedAt: run.startedAt,
+                completedAt: new Date().toISOString(),
+                durationMs: Date.now() - run.startTime,
+                trigger: buildRunTrigger(run.context),
+                steps: run.steps,
+                error: cause,
+            }, run.context);
+        } catch (bookkeeping) {
+            // #4632 verdict: DURABILITY, so `error`. The suspension is consumed
+            // and the caller is answered the truthful refusal, so nothing reads
+            // as wrong from the outside. But the `failed` row that says why
+            // never landed, and nothing retries it. Same sink and same level as
+            // the #16274 completion guard. THIRD argument per
+            // `error(message, error?, meta?)`; the `Error` slot stays empty
+            // (#5575) and the thrown text rides the structured slot (#6499).
+            this.logger.error(
+                `[Automation] run '${run.runId}' of flow '${run.flowName}' can never continue and its suspension ` +
+                    `was consumed, but recording its terminal 'failed' history threw, so no history row says why: ` +
+                    `the caller was answered RUN_NOT_FOUND, the run no longer reads as paused, and nothing retries ` +
+                    `the write. Fix the history failure in this record's meta.`,
+                undefined,
+                describeThrownForLog(bookkeeping),
+            );
+        }
+        return refusal;
     }
 
     /**

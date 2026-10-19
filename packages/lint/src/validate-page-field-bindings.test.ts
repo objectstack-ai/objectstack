@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
-  validatePageFieldBindings,
+  validatePageFieldBindings as validatePageFieldBindingsUnrecorded,
   checkFieldRefs,
   componentSectionGroupRefs,
   indexObjectFields,
@@ -14,6 +14,23 @@ import {
 } from './validate-page-field-bindings.js';
 import { indexUnprovisionedAnchors } from './system-fields.js';
 import { validateReferenceIntegrity } from './reference-integrity-suite.js';
+import { explainRule } from './rule-explanations.js';
+
+// [#22161] Slice 19: every finding of the two ids whose `fix:` line this file
+// shortened is recorded, and the hint block at the foot of the file holds each
+// recorded `fix:` line to one line of at most 200 characters.
+const firedHints: Array<{ rule: string; hint: string }> = [];
+// [#22161] Slice 21: the same, for the two ids whose `fix:` line slice 21
+// shortened; their block sits at the foot of the file too.
+const firedSlice21: Array<{ rule: string; hint: string }> = [];
+const validatePageFieldBindings: typeof validatePageFieldBindingsUnrecorded = (...args) => {
+  const findings = validatePageFieldBindingsUnrecorded(...args);
+  for (const f of findings) {
+    if (f.rule === PAGE_FIELD_UNKNOWN || f.rule === PAGE_SECTION_COUNT_NOT_MULTI_VALUE) firedHints.push(f);
+    if (f.rule === PAGE_FIELD_UNPROVISIONED || f.rule === PAGE_SECTION_GROUP_UNKNOWN) firedSlice21.push(f);
+  }
+  return findings;
+};
 
 const baseStack = () => ({
   objects: [
@@ -173,7 +190,13 @@ describe('validatePageFieldBindings — dangling `section.group` (#13855)', () =
     expect(findings[0].path).toBe('pages[0].regions[0].components[0].properties.sections[1].group');
     expect(findings[0].message).toContain('field group "contact_info"');
     expect(findings[0].message).toContain('silently does not render');
-    expect(findings[0].hint).toContain('Declared groups on crm_lead: money, overview.');
+    // [#22161] Slice 21: one remedy line; the declared groups are no longer
+    // echoed (no declared key is close to `contact_info`, so no "Did you mean").
+    expect(findings[0].hint).toBe(
+      "Fix the key, or declare 'contact_info' in crm_lead's `fieldGroups` and set `group: 'contact_info'` on its " +
+        'member fields.',
+    );
+    expect(findings[0].hint).not.toContain('Declared groups');
   });
 
   it('reports the group miss alongside — not instead of — a field miss in a sibling section', () => {
@@ -196,7 +219,12 @@ describe('validatePageFieldBindings — dangling `section.group` (#13855)', () =
       pages: [pageWith(detailsWith([{ group: 'overview' }]))],
     });
     expect(findings).toHaveLength(1);
-    expect(findings[0].hint).toContain('declares no field groups at all');
+    // [#22161] Slice 21: the one remedy line for an object with no groups yet —
+    // declare one, or enumerate the section's `fields`.
+    expect(findings[0].hint).toBe(
+      "Declare `fieldGroups: [{ key: 'overview', label: '…' }]` on crm_lead and `group: 'overview'` on its member " +
+        "fields, or enumerate the section's `fields`.",
+    );
   });
 
   it('says nothing about an object this stack does not define', () => {
@@ -807,5 +835,115 @@ describe('validatePageFieldBindings — unprovisioned injected anchors (#8340)',
       'queried',
     );
     expect(findings).toEqual([]);
+  });
+});
+
+// [#22161] Slice 19: the `fix:` line of `page-field-unknown` and
+// `page-section-count-not-multi-value`. One remedy line each; the object's
+// field list is no longer echoed (the nearest declared field is named instead),
+// and the reasoning is each id's `os explain` entry.
+describe('[#22161] one-line fix — the page field ids whose `fix:` line this file shortened', () => {
+  it('an unknown field names the nearest declared field, not the field list', () => {
+    const findings = validatePageFieldBindings({
+      ...baseStack(),
+      pages: [pageWith([{ type: 'record:highlights', properties: { fields: ['statsu'] } }])],
+    });
+    expect(findings.map((f) => f.hint)).toEqual(['Fix the field name, or add "statsu" to crm_lead. Did you mean "status"?']);
+    expect(findings[0]!.hint).not.toContain('Object fields:');
+  });
+
+  it('a counted single-value field prints the one remedy line', () => {
+    const findings = validatePageFieldBindings({
+      ...baseStack(),
+      pages: [pageWith([{
+        type: 'record:details',
+        properties: { sections: [{ name: 's', label: '{{ count }} items', fields: ['status'], count: { field: 'status' } }] },
+      }])],
+    });
+    expect(findings.map((f) => f.hint)).toEqual([
+      'Count a multi-value field (`multiselect`, `checkboxes`, `tags`, or one declared with `multiple: true`), or ' +
+        'list this field in the section\'s `fields` to show its value.',
+    ]);
+  });
+
+  it('every `fix:` line the cases above fired for those ids is one line of at most 200 characters', () => {
+    expect([...new Set(firedHints.map((f) => f.rule))].sort()).toEqual([PAGE_FIELD_UNKNOWN, PAGE_SECTION_COUNT_NOT_MULTI_VALUE].sort());
+    for (const f of firedHints) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, f.rule).not.toContain('Object fields:');
+      expect(f.hint, f.rule).not.toContain('References must match');
+    }
+  });
+
+  const MOVED_FROM_HINT: Record<string, readonly string[]> = {
+    [PAGE_FIELD_UNKNOWN]: ['exactly', 'nearest declared field', 'dotted relationship path'],
+    [PAGE_SECTION_COUNT_NOT_MULTI_VALUE]: ['`select`, `lookup`, `user`, `file` or `image`', '`multiple: true`', '0 or 1'],
+  };
+  it.each(Object.keys(MOVED_FROM_HINT))('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explainRule(rule)!.paragraphs.join('\n');
+    for (const fact of MOVED_FROM_HINT[rule]!) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
+  });
+});
+
+// [#22161] Slice 21: the `fix:` line of `page-field-unprovisioned` and
+// `page-section-group-unknown`. One remedy line each: the anchor id prints the
+// shared one-line anchor fix, and the group id names the nearest declared group
+// instead of echoing the object's whole group list. How to vouch for or opt out
+// of an anchor, and how a section inherits a group's members, are each id's
+// `os explain` entry.
+describe('[#22161] one-line fix — the page ids whose `fix:` line slice 21 shortened', () => {
+  it('a misspelt group key names the nearest declared group', () => {
+    const stack = baseStack();
+    (stack.objects[0] as Record<string, unknown>).fieldGroups = [
+      { key: 'overview', label: 'Overview' },
+      { key: 'money', label: 'Money' },
+    ];
+    const findings = validatePageFieldBindings({
+      ...stack,
+      pages: [pageWith([{ type: 'record:details', properties: { sections: [{ group: 'overveiw' }] } }])],
+    });
+    expect(findings.map((f) => f.hint)).toEqual([
+      "Fix the key, or declare 'overveiw' in crm_lead's `fieldGroups` and set `group: 'overveiw'` on its member " +
+        'fields. Did you mean "overview"?',
+    ]);
+  });
+
+  it('an unprovisioned anchor prints the shared one-line anchor fix', () => {
+    const findings = validatePageFieldBindings({
+      objects: [{ name: 'ext_customer', external: { remoteName: 'customers' }, fields: { email: { type: 'text' } } }],
+      pages: [{
+        name: 'customer_detail',
+        object: 'ext_customer',
+        regions: [{ name: 'main', components: [{ type: 'record:highlights', properties: { fields: ['owner_id'] } }] }],
+      }],
+    });
+    expect(findings.map((f) => [f.rule, f.hint])).toEqual([[
+      PAGE_FIELD_UNPROVISIONED,
+      "If the remote table carries 'owner_id', declare it in ext_customer's own fields (mapped through " +
+        'columnMap); otherwise drop the reference or opt the object out of the injection',
+    ]]);
+  });
+
+  it('every `fix:` line the cases in this file fired for those ids is one line of at most 200 characters', () => {
+    expect([...new Set(firedSlice21.map((f) => f.rule))].sort()).toEqual(
+      [PAGE_FIELD_UNPROVISIONED, PAGE_SECTION_GROUP_UNKNOWN].sort(),
+    );
+    for (const f of firedSlice21) {
+      expect(f.hint, f.rule).not.toContain('\n');
+      expect(f.hint.length, `${f.rule}: ${f.hint}`).toBeLessThanOrEqual(200);
+      expect(f.hint, f.rule).not.toContain('Declared groups');
+      expect(f.hint, f.rule).not.toContain('vouch for');
+      expect(f.hint, f.rule).not.toContain('systemFields');
+    }
+  });
+
+  const MOVED_FROM_HINT: Record<string, readonly string[]> = {
+    [PAGE_FIELD_UNPROVISIONED]: ['columnMap', "`ownership: 'none'`", '`systemFields: { audit: false }`', 'vouch for'],
+    [PAGE_SECTION_GROUP_UNKNOWN]: ['inherits its members', 'membership is declared on the FIELD', '`record:details`'],
+  };
+  it.each(Object.keys(MOVED_FROM_HINT))('`os explain %s` carries what its `fix:` line no longer says', (rule) => {
+    const text = explainRule(rule)!.paragraphs.join('\n');
+    for (const fact of MOVED_FROM_HINT[rule]!) expect(text, `${rule} explanation names ${fact}`).toContain(fact);
   });
 });

@@ -98,9 +98,9 @@ export interface AdminStandingTable {
  * ADMISSION path (`resolveApiKeyAdmission`) is outside it on purpose: it
  * authenticates a principal and seeds `permissions` with the key's scopes, and
  * confers no administrator standing of its own — `hasPlatformAdminGrant` is set
- * from the catalog's `admin_full_access` set reached through an UNSCOPED
- * `sys_user_permission_set` grant (§6b, on a NON-WALLED posture only since
- * #11663 L5) or from the deployment config matched against the caller's own
+ * from the catalog's `admin_full_access` set reached through the anchoring
+ * `sys_user_permission_set` grant (§6b — the Default Organization's or an
+ * organization-less one, on a NON-WALLED posture only since #11663 L5) or from the deployment config matched against the caller's own
  * STORED `sys_user` row (§6b-config, on every posture), never from a scope
  * string and never from the caller-seedable `grants.email`.
  */
@@ -126,14 +126,17 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
   sys_user_permission_set: {
     role: 'derives',
     reason:
-      'The grant that makes a user a platform admin UNDER A NON-WALLED POSTURE: an UNSCOPED, '
-      + 'in-window (ADR-0091) grant of `admin_full_access` (§6b). Re-pointing it, scoping it to an '
-      + 'organization or moving it out of its window revokes the standing while leaving the row in '
-      + 'place. ⚠️ Under a WALLED posture (`group`/`isolated`) it confers NOTHING: the walled half '
+      'The grant that makes a user a platform admin UNDER A NON-WALLED POSTURE: an in-window '
+      + '(ADR-0091) grant of `admin_full_access` owned by the Default Organization (ADR-0131 D5, the '
+      + 'row the first-user promotion writes) or by no organization (the row it wrote before) — §6, '
+      + '`grantAnchorsPlatformStanding`. Re-pointing it, scoping it to another organization or moving '
+      + 'it out of its window revokes the standing while leaving the row in place. ⚠️ Under a '
+      + 'WALLED posture (`group`/`isolated`) it confers NOTHING: the walled half '
       + 'of this legacy anchor is retired, so standing there comes from `OS_PLATFORM_OWNER_EMAIL` '
       + '(§6b-config) and from nothing else, and this row is read only for the permission set it '
-      + 'names. Under `single` — the default — the row is unchanged and still the anchor that '
-      + "rig's zero-config first-user promotion mints. [ADR-0131 D4] The grant holds its set BY "
+      + 'names. Under `single` — the default — the row is still the anchor that rig\'s '
+      + 'zero-config first-user promotion mints, owned by the Default Organization (see '
+      + '`sys_organization`). [ADR-0131 D4] The grant holds its set BY '
       + 'NAME (`permission_set`): a grant that names nothing confers nothing, and its '
       + '`permission_set_id` is not read here.',
     columns: [
@@ -145,6 +148,21 @@ export const ADMIN_STANDING_SURFACE: Readonly<Record<string, AdminStandingTable>
       'validFrom',
       'valid_until',
       'validUntil',
+    ],
+  },
+
+  sys_organization: {
+    role: 'derives',
+    reason:
+      '[ADR-0131 D5] Names the Default Organization — `slug = \'default\'`, else the only '
+      + 'organization (`readDefaultOrganizationId`) — whose `admin_full_access` grant anchors '
+      + 'platform standing under `single` (§6). Read only for a principal holding an '
+      + 'organization-owned grant of that set, and never under a wall. Re-slugging the Default '
+      + 'Organization while several organizations exist, or deleting it, moves the anchor off its '
+      + 'grant and revokes that standing with no grant row touched.',
+    columns: [
+      'id',
+      'slug',
     ],
   },
 

@@ -218,7 +218,7 @@ async function persistOverlayRow(name: string, packageId?: string): Promise<any[
 
 /** The installed-package record `registerApp` writes before it registers the objects. */
 const installPackage = (registry: SchemaRegistry, id: string) =>
-    registry.installPackage({ id, name: 'My App', version: '1.0.0' } as any);
+    registry.installPackage({ id, name: 'My App', version: '1.0.0' } as any, 'code');
 
 const ownerPackageId = (registry: SchemaRegistry, name: string) =>
     registry.getObjectOwner(name)?.packageId;

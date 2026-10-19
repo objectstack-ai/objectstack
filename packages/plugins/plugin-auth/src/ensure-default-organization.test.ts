@@ -154,6 +154,40 @@ describe('ensureDefaultOrganization (plugin-auth home)', () => {
     expect(res.memberCreated).toBe(true);
   });
 
+  it('[ADR-0131 D5] binds the holder of the Default Organization\'s admin grant — the row the single promotion writes', async () => {
+    const ql = makeQl({
+      sys_organization: [{ id: 'org_default', slug: 'default', name: 'Default Organization' }],
+      sys_user_permission_set: [
+        { id: 'ups_d', user_id: 'u_promoted', permission_set: 'admin_full_access', organization_id: 'org_default' },
+      ],
+    });
+    const res = await ensureDefaultOrganization(ql);
+    expect(res).toMatchObject({ defaultOrgCreated: false, defaultOrgId: 'org_default', memberCreated: true });
+    expect(ql.tables.sys_member).toEqual([expect.objectContaining({ user_id: 'u_promoted', role: 'owner', organization_id: 'org_default' })]);
+  });
+
+  it('[ADR-0131 D5] ⛔ another organization\'s admin grant is an organization administrator\'s, never the anchor', async () => {
+    const ql = makeQl({
+      sys_organization: [{ id: 'org_default', slug: 'default' }, { id: 'org_b', slug: 'b' }],
+      sys_user_permission_set: [
+        { id: 'ups_b', user_id: 'u_org_admin', permission_set: 'admin_full_access', organization_id: 'org_b' },
+      ],
+    });
+    expect(await ensureDefaultOrganization(ql)).toMatchObject({ memberCreated: false, reason: 'no_admin' });
+  });
+
+  it('[ADR-0131 D3/D5] a sole organization with another slug IS the Default Organization: the admin is bound there, no second one is minted', async () => {
+    const ql = makeQl({
+      sys_organization: [{ id: 'org_acme', slug: 'acme', name: 'Acme' }],
+      sys_user_permission_set: [
+        { id: 'ups_a', user_id: 'u1', permission_set: 'admin_full_access', organization_id: 'org_acme' },
+      ],
+    });
+    const res = await ensureDefaultOrganization(ql);
+    expect(res).toMatchObject({ defaultOrgCreated: false, defaultOrgId: 'org_acme', memberCreated: true });
+    expect(ql.tables.sys_organization).toHaveLength(1);
+  });
+
   it('picks the OLDEST cross-tenant admin grant', async () => {
     const ql = makeQl({
       sys_user_permission_set: [

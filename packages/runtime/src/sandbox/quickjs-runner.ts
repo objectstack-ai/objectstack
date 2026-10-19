@@ -38,7 +38,7 @@ import {
   type QuickJSDeferredPromise,
   type QuickJSHandle,
 } from 'quickjs-emscripten';
-import { resolveSandboxTimeoutMs, sandboxBusinessMessage } from '@objectstack/types';
+import { resolveSandboxTimeoutMs, sandboxBusinessMessage, isEngineDuplicateRecordEnvelope, INTERNAL_ERROR_MESSAGE } from '@objectstack/types';
 import type { HookBody, ScriptBody, ExpressionBody, HookBodyCapability } from '@objectstack/spec/data';
 import type {
   ScriptContext,
@@ -65,6 +65,11 @@ const DEFAULT_MEMORY_MB = 32;
 // interrupt handler can't fire while no VM code runs — so a separate, generous
 // wall ceiling cuts it off. 30s matches the spec cap on `ScriptBody.timeoutMs`.
 const DEFAULT_WALL_CEILING_MS = 30_000;
+// [#23723] What the wrapper's reject handler records for a rejection no read
+// can flatten (see REJECT_HANDLER), so the run still ends at once on the
+// "threw" path instead of at the wall ceiling. A fixed sentence: it names no
+// host detail and no stack, because there is nothing readable to name.
+const UNREADABLE_REJECTION_SENTENCE = 'the script threw a value that could not be read';
 
 export interface QuickJSScriptRunnerOptions {
   /** Default per-invocation **CPU-time** budget for hooks (ms). */
@@ -259,6 +264,11 @@ export class QuickJSScriptRunner implements ScriptRunner {
     // never-settling host call). We track them and dispose any survivors in the
     // finally, before `vm.dispose()`.
     const deferreds = new Set<QuickJSDeferredPromise>();
+    // [#23702] The L2 body's OWN promise — the wrapper's completion value. The
+    // pump loop reads its rejection reason to ask whether the body let an
+    // engine refusal leave unchanged ({@link relayedEngineRefusal}). Held, so
+    // it is disposed in the finally, before `vm.dispose()`.
+    let bodyPromise: QuickJSHandle | undefined;
 
     try {
       this.installCtx(vm, args.ctx, new Set(args.capabilities), args.origin, txState, deferreds);
@@ -306,9 +316,49 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // [#22588] `__errorRefusal` is the third channel, and as additive as the
       // second: a NESTED refusal's sentence, relayed only when the body
       // re-threw that error unchanged (see SANDBOX_REFUSAL_PROP).
+      //
+      // [#23718] A thrown value that is NOT an `Error` — the plain
+      // `{ code, message }` object metadata app bodies throw — has no class
+      // name, so `<name>: <message>` flattened it to `undefined: <message>`,
+      // and with no `message` `String(e)` gave `[object Object]`; both became
+      // the `innerMessage` every door serves as the caller's sentence. Such a
+      // value is flattened under the default name `Error` (the one
+      // `userFacingMessage` strips), so its `message` is the sentence byte for
+      // byte; a `name` on it is a field, never a frame. With no usable
+      // `message` and no `toString` of its own, the sentence is
+      // `INTERNAL_ERROR_MESSAGE`, what every door answers for a fault with no
+      // business message. `code` and the rest still ride `__errorInfo`. An
+      // `Error`, a primitive, and a value whose reads throw keep the
+      // flattening below unchanged.
+      //
+      // [#23723] …and every rejection is RECORDED, even one no read can
+      // flatten. The pump loop ends the run only when `__error` is a
+      // non-empty string; a `message` getter that throws, a null-prototype
+      // object whose `String()` throws, or a read that yields `''`
+      // (`throw ''`) used to leave it unset or empty, so the run waited out
+      // the wall-clock ceiling and every door answered a `500` naming no
+      // refusal. Such a value is recorded as the fixed
+      // {@link UNREADABLE_REJECTION_SENTENCE} instead, through the same
+      // "threw" path as any other rejection. It names no host detail and no
+      // stack. Every value a read can flatten keeps its flattening byte for
+      // byte: the fallback expression is unchanged, only guarded.
       const REJECT_HANDLER =
         `function(e){
-              globalThis.__error = (e && e.message) ? (e.name + ': ' + e.message) : String(e);
+              var flat;
+              try {
+                if (e !== null && typeof e === 'object' && !(e instanceof Error)) {
+                  var m = e.message;
+                  if (typeof m === 'string' && m.trim() !== '') flat = 'Error: ' + m;
+                  else {
+                    var s = String(e);
+                    flat = (s !== '' && s !== Object.prototype.toString.call(e)) ? s : ${JSON.stringify(`Error: ${INTERNAL_ERROR_MESSAGE}`)};
+                  }
+                }
+              } catch (_) { flat = undefined; }
+              try {
+                if (flat === undefined) flat = (e && e.message) ? (e.name + ': ' + e.message) : String(e);
+              } catch (_) { flat = undefined; }
+              globalThis.__error = (typeof flat === 'string' && flat !== '') ? flat : ${JSON.stringify(`Error: ${UNREADABLE_REJECTION_SENTENCE}`)};
               try {
                 globalThis.__errorInfo = (e && (e.code || e.fields || e.status || e.userMessage || e['${SANDBOX_FAULT_PROP}']))
                   ? JSON.stringify({ code: e.code, fields: e.fields, status: e.status, userMessage: e.userMessage, sandboxFault: e['${SANDBOX_FAULT_PROP}'] === true })
@@ -323,14 +373,22 @@ export class QuickJSScriptRunner implements ScriptRunner {
       // A job body takes the hook's `(ctx)` wrapper (#21489): it has no input to
       // hand in as a first parameter, and `JobSchema.body` documents `ctx` as
       // the whole surface. Only an action body is `(input, ctx)`.
+      //
+      // [#23702] `SETTLE` attaches the same two handlers the bare `.then(…)`
+      // did and hands back the BODY's own promise as the script's completion
+      // value, so the host holds that promise ({@link relayedEngineRefusal}
+      // reads its rejection reason). The arrow is evaluated before the body is
+      // called and is no binding the body can name; the body source stays on
+      // the wrapper's second line.
+      const SETTLE = '((p, onOk, onErr) => (p.then(onOk, onErr), p))';
       const wrapped = args.origin.kind !== 'action'
         ? `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined;
-            (async (ctx) => { ${args.source} })(globalThis.__ctx).then(
+            ${SETTLE}((async (ctx) => { ${args.source} })(globalThis.__ctx),
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
               ${REJECT_HANDLER}
             );`
         : `globalThis.__result = undefined; globalThis.__error = undefined; globalThis.__errorInfo = undefined; globalThis.__errorRefusal = undefined;
-            (async (input, ctx) => { ${args.source} })(globalThis.__input, globalThis.__ctx).then(
+            ${SETTLE}((async (input, ctx) => { ${args.source} })(globalThis.__input, globalThis.__ctx),
               function(v){ globalThis.__result = JSON.stringify(v === undefined ? null : v); },
               ${REJECT_HANDLER}
             );`;
@@ -351,7 +409,7 @@ export class QuickJSScriptRunner implements ScriptRunner {
           userFacingMessage(formatErr(err)),
         );
       }
-      evalRes.value.dispose();
+      bodyPromise = evalRes.value;
 
       // Drive the script's async continuations to completion. Each iteration
       // yields to the host event loop (so in-flight host promises settle and
@@ -431,6 +489,15 @@ export class QuickJSScriptRunner implements ScriptRunner {
           if (info?.sandboxFault) {
             throw new SandboxError(withoutSandboxErrorPrefix(String(errStr)));
           }
+          // [#23702] The body let an ENGINE refusal leave unchanged — the very
+          // error a host call rejected with, nothing that crosses the VM
+          // rewritten — so what leaves this runner is the engine's own error,
+          // not a `SandboxError` speaking its code. Every door keys that class
+          // by its declared contract and answers it with the ruled wire
+          // spelling; a body that threw its own error carrying the code is
+          // never matched here and keeps the relay below.
+          const engineRefusal = relayedEngineRefusal(vm, bodyPromise);
+          if (engineRefusal !== undefined) throw engineRefusal;
           // [#17265] The `.message` wrapper keeps the WHOLE flattened chain for
           // the log — `action 'x' threw: SandboxError: hook 'g' threw: <msg>`
           // names every frame that refused. The client-facing sentence drops the
@@ -523,6 +590,11 @@ export class QuickJSScriptRunner implements ScriptRunner {
         }
       }
       deferreds.clear();
+      // [#23702] The body promise and every held engine-refusal handle, under
+      // the same rule: no handle may outlive the context. Synchronous from here
+      // to `vm.dispose()`, so no late host rejection can register a new one in
+      // between.
+      releaseEngineRefusalHandles(vm, bodyPromise);
       // Dispose the context — this frees its runtime + all QuickJS allocations
       // (QuickJSWASMModule.newContext: "the runtime will be disposed when the
       // context is disposed"). The sync `QuickJSWASMModule` has no dispose();
@@ -786,7 +858,10 @@ export class QuickJSScriptRunner implements ScriptRunner {
     //
     //   ctx.title()             → this record. Resolved from the record state
     //                             the hook is already firing on, formula title
-    //                             included. NO read, so no `api.read`.
+    //                             included. No `api.read`: no read over the
+    //                             record's own columns, and [#24197] the hop a
+    //                             title formula reads through a reference is
+    //                             the declaration's, read on the body's channel.
     //   ctx.title('account_id') → a related record. Exactly one `findOne`
     //                             through the body's own read channel, so
     //                             `api.read` — the same token the equivalent
@@ -1384,7 +1459,155 @@ function hostErrorToVm(vm: QuickJSContext, err: unknown): QuickJSHandle {
   } catch {
     /* keep the bare name/message error */
   }
+  // [#23702] An engine refusal is remembered by the VM object it became, so
+  // the pump loop can tell it leaving unchanged from a body's own throw.
+  holdEngineRefusal(vm, errH, err);
   return errH;
+}
+
+/**
+ * [#23702] An ENGINE refusal a host call handed into the VM, held so the pump
+ * loop can recognise it if the body lets it leave unchanged.
+ *
+ * ## The defect it closes
+ *
+ * A sandboxed body that calls `ctx.api.object(o).insert(…)` with a value a
+ * unique key already holds, and does not catch, is refused by the engine's
+ * `DuplicateRecordError` (`@objectstack/objectql`): `409`, `DUPLICATE_RECORD`.
+ * The engine raises it on the HOST side of the bridge; {@link hostErrorToVm}
+ * marshals it in; the body lets it propagate; and the pump loop rebuilt it as a
+ * `SandboxError`, lifting `code` and `status` and dropping the class. Every
+ * door keys the engine's class by its declared contract, the registered code
+ * AND the class name (`isEngineDuplicateRecordEnvelope`, `@objectstack/types`),
+ * so none recognised the relay: `POST /api/v1/actions/:object/:action` on a
+ * `type: 'script'` action answered `409 DUPLICATE_RECORD` with the message
+ * `DuplicateRecordError: Duplicate record refused …`, where the maintainer
+ * ruling recorded in commit 65846bc46 gives one wire spelling on every route,
+ * `UNIQUE_VIOLATION`.
+ *
+ * ## The line, and why it is drawn on the OBJECT
+ *
+ * The ruling's own docblock (`metadata-protocol`'s `protocol.ts`) keeps the
+ * code for "a producer that merely SPEAKS `DUPLICATE_RECORD`". So the relay
+ * answers one question — is what left the body the engine's error, or a value
+ * the body made? — and answers it by identity, never by text: the flattened
+ * `<name>: <message>` string and every field are things a body can write
+ * (`e.name = 'DuplicateRecordError'` included), while the VM object a host call
+ * rejected with is something only the host can hand out. Read against the
+ * body's own promise, which the host holds, so no global a body can write is
+ * consulted.
+ *
+ *  - uncaught, `catch (e) { throw e }`, or caught and thrown later — the same
+ *    object, unchanged: the engine's refusal. The first two are not even
+ *    distinguishable, being the same object in the same state;
+ *  - a body that rewrote anything that crosses the VM boundary on that object
+ *    (`name`, `message`, or a {@link SANDBOX_ERROR_PASSTHROUGH} field) before
+ *    throwing it is speaking for itself — the "re-thrown unchanged" line the
+ *    nested-refusal relay ({@link SANDBOX_REFUSAL_OF_PROP}) already draws —
+ *    and keeps today's relay;
+ *  - a body that constructs its own error carrying the code, whatever its
+ *    `name`, is a different object: a speaker, relayed as before.
+ *
+ * Held only for the class a door keys by its contract, asked through that same
+ * shared predicate on the HOST-side error, so the runner and the doors cannot
+ * disagree about which errors are the engine's. Every other host error crosses
+ * exactly as it did.
+ */
+interface HeldEngineRefusal {
+  /** A dup of the VM error {@link hostErrorToVm} built; released before `vm.dispose()`. */
+  readonly handle: QuickJSHandle;
+  /** The host-side error the engine raised — what leaves the runner when the body re-throws it unchanged. */
+  readonly host: unknown;
+  /** {@link crossingSnapshot} of the VM error as it was handed in. */
+  readonly snapshot: string;
+}
+
+/** [#23702] Per invocation: a VM is created and disposed by one `execute()`. */
+const HELD_ENGINE_REFUSALS = new WeakMap<QuickJSContext, HeldEngineRefusal[]>();
+
+/**
+ * [#23702] Remember `errH` when `err` is the engine's unique-constraint
+ * envelope. Best-effort: a failure leaves the error crossing as it always did.
+ */
+function holdEngineRefusal(vm: QuickJSContext, errH: QuickJSHandle, err: unknown): void {
+  if (!isEngineDuplicateRecordEnvelope(err)) return;
+  try {
+    const snapshot = crossingSnapshot(vm, errH);
+    if (snapshot === undefined) return;
+    const held = HELD_ENGINE_REFUSALS.get(vm) ?? [];
+    held.push({ handle: errH.dup(), host: err, snapshot });
+    HELD_ENGINE_REFUSALS.set(vm, held);
+  } catch {
+    /* not held — the relay below answers it, as before this card */
+  }
+}
+
+/**
+ * [#23702] Everything about a VM error that crosses OUT of the VM — the `name`
+ * and `message` the reject handler flattens into `__error`, and the
+ * {@link SANDBOX_ERROR_PASSTHROUGH} fields it carries in `__errorInfo` — as one
+ * comparable string, or `undefined` when a read fails (a getter that throws).
+ */
+function crossingSnapshot(vm: QuickJSContext, h: QuickJSHandle): string | undefined {
+  try {
+    const read = (key: string): unknown => {
+      const p = vm.getProp(h, key);
+      try {
+        return vm.dump(p);
+      } finally {
+        p.dispose();
+      }
+    };
+    return JSON.stringify(['name', 'message', ...SANDBOX_ERROR_PASSTHROUGH].map(read));
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * [#23702] The engine's own error, when the body's promise rejected with an
+ * engine refusal {@link holdEngineRefusal} held and nothing that crosses the
+ * VM changed on it; otherwise `undefined`, and the caller relays as before.
+ */
+function relayedEngineRefusal(vm: QuickJSContext, bodyPromise: QuickJSHandle | undefined): unknown {
+  const held = HELD_ENGINE_REFUSALS.get(vm);
+  if (!held || held.length === 0 || !bodyPromise?.alive) return undefined;
+  let state: ReturnType<QuickJSContext['getPromiseState']>;
+  try {
+    state = vm.getPromiseState(bodyPromise);
+  } catch {
+    return undefined;
+  }
+  if (state.type !== 'rejected') {
+    // `__error` without a rejected body promise is a body writing the global
+    // itself: never the engine's refusal. A non-promise answers with the SAME
+    // handle, which is not this function's to dispose.
+    if (state.type === 'fulfilled' && !state.notAPromise) state.value.dispose();
+    return undefined;
+  }
+  const reason = state.error;
+  try {
+    for (const h of held) {
+      if (vm.eq(reason, h.handle) && crossingSnapshot(vm, reason) === h.snapshot) return h.host;
+    }
+    return undefined;
+  } finally {
+    reason.dispose();
+  }
+}
+
+/** [#23702] Release the handles the engine-refusal relay holds for `vm`. */
+function releaseEngineRefusalHandles(vm: QuickJSContext, bodyPromise: QuickJSHandle | undefined): void {
+  const handles = [...(HELD_ENGINE_REFUSALS.get(vm) ?? []).map((h) => h.handle), ...(bodyPromise ? [bodyPromise] : [])];
+  HELD_ENGINE_REFUSALS.delete(vm);
+  for (const h of handles) {
+    if (!h.alive) continue;
+    try {
+      h.dispose();
+    } catch {
+      /* already gone / VM aborted — ignore */
+    }
+  }
 }
 
 /**

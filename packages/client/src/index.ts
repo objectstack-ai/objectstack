@@ -163,6 +163,7 @@ import type {
   AudienceBindingSuggestionSync,
   AutomationResult,
   DelegableScope,
+  FlowRuntimeState,
   ImportObjectResult,
   ObjectDraft,
   RecordShare,
@@ -2235,14 +2236,61 @@ export class ObjectStackClient {
      * effect ran, and each reports its own `success`: a 200 here means the
      * draft was promoted, NOT that a seed load or a data-plane projection
      * caught up.
+     *
+     * @param type - Metadata type (e.g., 'view', 'flow')
+     * @param name - Item name (snake_case identifier)
+     * @param opts - The publish `message`, which rides the request body, and
+     *   the package whose draft the publish promotes (`packageId`).
+     *
+     * NAME THE PACKAGE when the draft you mean is not the one a publish naming
+     * none promotes. A publish that names no package promotes the draft a
+     * draft save naming no package writes, and is refused in two states, each
+     * prescribing `?package=` and publishing nothing: `409 RESOURCE_CONFLICT`,
+     * naming the packages, when two or more packages hold the item; and `404
+     * NO_DRAFT`, naming the drafts that remain, when the item's one package
+     * holds no draft and another package's draft is stored. Pass the package
+     * whose draft you mean as `opts.packageId` (`?package=` on the wire), as
+     * `saveItem` and `deleteItem` name the row they act on.
      */
     publishItem: async (
         type: string,
         name: string,
-        opts?: { message?: string },
+        opts?: {
+            message?: string;
+            /**
+             * `?package=<id>` — the software package whose pending draft this
+             * publish promotes (`sys_metadata.package_id`, ADR-0048), into
+             * that package's active row, and no other package's draft.
+             *
+             * Omit to name no package: the door then promotes the draft a
+             * draft save naming no package writes, and refuses the two states
+             * the method's docblock names. Naming the package is what both
+             * refusals prescribe.
+             *
+             * Same member name, same `package` query key and same truthy guard
+             * as {@link SaveMetaItemOptions.packageId} and
+             * {@link DeleteMetaItemOptions.packageId}: only a non-empty id
+             * reaches the wire, and `undefined` and `''` both send nothing.
+             * The door reads the value through the same function as the save
+             * and delete doors, so it reads `all` as naming no package too;
+             * this client forwards the id verbatim and decides nothing about
+             * it.
+             */
+            packageId?: string;
+        },
     ): Promise<PublishMetaItemResponse> => {
         const route = this.getRoute('metadata');
-        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/publish`, {
+        // [#23658] `metaSaveQuery`'s spelling and guard: an empty id names no
+        // package, so it is never put on the wire, and an options-less publish
+        // stays byte-identical to what this method sent before. `set`, never
+        // `append`: the door refuses a repeated `?package=` with a 400.
+        const params = new URLSearchParams();
+        if (opts?.packageId) params.set('package', opts.packageId);
+        const search = params.toString();
+        // `query`, not `qs` — it carries its own `?`; see `saveItem`'s note on
+        // the three meanings `qs` holds in this file.
+        const query = search ? `?${search}` : '';
+        const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(type)}/${encodeURIComponent(name)}/publish${query}`, {
             method: 'POST',
             body: JSON.stringify(opts?.message ? { message: opts.message } : {}),
         });
@@ -2534,11 +2582,16 @@ export class ObjectStackClient {
      * SAME envelope for this route, which is what makes it bindable:
      * `runtime`'s `/packages` domain sends `success({ packages, total:
      * packages.length })` and `rest`'s `GET {base}/packages` sends
-     * `sendOk(res, { packages, total: packages.length })`. The REST rows carry
-     * an extra `source: 'database' | 'registry' | 'both'` discriminator that is
-     * deliberately NOT declared here — the dispatcher rows have no such key, so
-     * declaring it would be false on that surface. #8140 bound the identical
-     * scoped sibling (`ScopedEnvironmentClient.packages.list`) the same way.
+     * `sendOk(res, { packages, total: packages.length })`. #8140 bound the
+     * identical scoped sibling (`ScopedEnvironmentClient.packages.list`) the
+     * same way. (The REST rows' `source: 'database' | 'registry' | 'both'`
+     * stamp left with those routes in #14503.)
+     *
+     * [#23972] Every row carries two declared keys besides the record's own:
+     * `source` (`'code' | 'marketplace' | 'authored'`, where the package came
+     * from, stamped by the door that registered it) and `writable` (the
+     * server's writability verdict, computed per read). Read the origin from
+     * `source`; ⛔ do not reconstruct it from `writable` or from a second list.
      *
      * ⚠️ [#17536] The ROW type moved, the envelope did not. #11925 bound the
      * element to `InstalledPackage` — the AUTHORING stage — and PR #17517 then
@@ -2649,9 +2702,8 @@ export class ObjectStackClient {
      * manifest stages. It was a COMMENT and never a binding, which is why the
      * disagreement it describes could sit here unread by any gate.
      *
-     * `source` stays undeclared because there is no longer anything that
-     * emits it on this route; `writable` stays undeclared for the reason
-     * `list` leaves it undeclared.
+     * [#23972] The row carries the declared `source` and `writable`, as on
+     * `list`.
      *
      * ⚠️ Clause-② narrowing (#12034). `{ package: any }` is what let
      * `(await client.packages.get(id)).package` compile, and on the only
@@ -2843,8 +2895,17 @@ export class ObjectStackClient {
      * `unhiddenApps` / `unhideError` / `rebindError`) each report their own
      * outcome: a 200 does not mean the data plane or the visibility flip
      * caught up. `probes` is deliberately opaque in the contract (#9406).
+     *
+     * `opts.backfill` (#24253) names fields this publish adds whose literal
+     * `defaultValue` is written into the object's existing rows, as the
+     * signed-in caller; `backfillApplied` reports the rows written per field.
+     * A field that is not new, or declares no literal default, refuses the
+     * whole request with a 400 before anything is published.
      */
-    publishDrafts: async (id: string, opts?: { actor?: string }): Promise<PublishPackageDraftsResponse> => {
+    publishDrafts: async (
+        id: string,
+        opts?: { actor?: string; backfill?: Array<{ object: string; field: string }> },
+    ): Promise<PublishPackageDraftsResponse> => {
         const route = this.getRoute('packages');
         const res = await this.fetch(`${this.baseUrl}${route}/${encodeURIComponent(id)}/publish-drafts`, {
             method: 'POST',
@@ -5617,8 +5678,13 @@ export class ObjectStackClient {
       /**
        * Runtime enable/bound state for every flow — engine state, not
        * persisted metadata (backs the Studio's Automations status badges).
+       *
+       * [#23859] Each row is the declared contract `FlowRuntimeState`: the
+       * route serves `getFlowRuntimeStates()` rows unchanged, so the optional
+       * `status` / `triggerType` / `object` / `reason` / `unboundCause` reach
+       * the caller. A hand-typed `{ name, enabled, bound }` hid them.
        */
-      getRuntimeStatus: async (): Promise<{ flows: Array<{ name: string; enabled: boolean; bound: boolean }>; total: number }> => {
+      getRuntimeStatus: async (): Promise<{ flows: FlowRuntimeState[]; total: number }> => {
           const route = this.getRoute('automation');
           const res = await this.fetch(`${this.baseUrl}${route}/_status`);
           return this.unwrapResponse(res);

@@ -330,6 +330,28 @@ const WIDGET_LEGACY_ANALYTICS_UNRENDERABLE_EXPLANATION: RuleExplanation = {
   ],
 };
 
+const WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION: RuleExplanation = {
+  rule: 'widget-legacy-analytics-shape',
+  covers: 'why the legacy analytics keys are ignored',
+  paragraphs: [
+    'The ADR-0021 single-form cutover removed the inline analytics shape — `categoryField`, ' +
+      '`valueField`, `xAxisField`, `yAxisFields`, `aggregate`, `aggregation`, `rowField` and ' +
+      '`columnField`. Dataset-bound widgets render through DatasetWidget, which reads only the ' +
+      'semantic dataset: pivot rows and columns come from `dimensions`, cell values from `values`. ' +
+      'These inline keys are a no-op.',
+    'This id is the warning case: the widget also has a data source (`dataset`, `object`, or inline ' +
+      '`data`, top-level or under `options`), so it still renders and the legacy keys are only ignored ' +
+      'noise. With no data source the widget renders nothing, and that is the error ' +
+      '`widget-legacy-analytics-unrenderable`.',
+    'On the schema-parsed paths (`compile`, `validate`) the strict widget schema refuses these keys as ' +
+      'a parse error before this rule runs; the rule is the steer on the raw-config paths (`lint`, ' +
+      '`doctor`).',
+    'To fix it, delete the legacy keys and select fields by name through the widget\'s dataset. ' +
+      'Suppress with `suppressWarnings: [\'widget-legacy-analytics-shape\']` if the keys are ' +
+      'intentional.',
+  ],
+};
+
 const DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
   rule: 'dashboard-filter-field-unknown',
   covers: 'how a dashboard filter reaches every widget',
@@ -348,6 +370,12 @@ const DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'a typo to correct, an inherited default is one the widget may opt out of. Not reported: a ' +
       'widget that opts out, an object this stack does not define, and an object with no readable ' +
       'field map (an ADR-0015 external object, an introspected datasource).',
+    'A re-target may be a field of the dataset\'s object or a `relationship[.relationship].field` ' +
+      'path. Every hop of such a path must be a relationship field (lookup, master_detail, user or ' +
+      'tree; ADR-0021 derives every join from the object graph, so there is no ON clause to write), ' +
+      'and its prefix must be declared in the dataset\'s `include` ' +
+      '(`dashboard-filter-field-not-included` otherwise). The verdict\'s "Did you mean" names the ' +
+      'nearest field of the object the miss landed on.',
   ],
 };
 
@@ -371,8 +399,10 @@ const DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION: RuleExplanation = {
 /**
  * What an unprovisioned anchor is — the cause half of every read-side anchor
  * id (`dashboard-filter-field-unprovisioned`, `react-chart-field-unprovisioned`,
- * `sort-field-unprovisioned`, `searchable-field-unprovisioned`).
- * The rule files share its verdict clause, `unprovisionedAnchorVerdict()`.
+ * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
+ * `page-field-unprovisioned`, `flow-template-field-unprovisioned`).
+ * The rule files share its verdict clause, `unprovisionedAnchorVerdict()`, or
+ * its long form, `unprovisionedAnchorCause()`.
  */
 const UNPROVISIONED_ANCHOR_CAUSE =
   'The registry injects system columns — the ownership and audit anchors such as `owner_id`, ' +
@@ -384,8 +414,9 @@ const UNPROVISIONED_ANCHOR_CAUSE =
  * The three ways out of an unprovisioned anchor, which the one-line `fix:` of
  * the converted anchor ids (`unprovisionedAnchorFix()`) names without the how:
  * `sort-field-unprovisioned`, `searchable-field-unprovisioned`,
- * `react-chart-field-unprovisioned` and the hook, action and flow-node
- * write-anchor ids write it out.
+ * `react-chart-field-unprovisioned`, `dashboard-filter-field-unprovisioned`,
+ * `page-field-unprovisioned`, `flow-template-field-unprovisioned` and the hook,
+ * action and flow-node write-anchor ids write it out.
  */
 const UNPROVISIONED_ANCHOR_REMEDY =
   'To fix it, check the remote table. If it really carries the column, declare it in the object\'s ' +
@@ -409,6 +440,7 @@ const DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
       '`filterBindings: { NAME: false }`, or suppress with ' +
       '`suppressWarnings: [\'dashboard-filter-field-unprovisioned\']` if the remote schema resolves ' +
       'the column some other way.',
+    UNPROVISIONED_ANCHOR_REMEDY,
   ],
 };
 
@@ -424,6 +456,11 @@ const WIDGET_FILTER_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'columns — and the verdict names the hop that failed. This rule judges the KEYS; ' +
       '`filter-token-unknown` judges the values in the same subtree. Not reported: an object this ' +
       'stack does not define, or one with no readable field map.',
+    'To fix it, filter on a field of the dataset\'s object, or on a `relationship[.relationship].field` ' +
+      'path: every hop must be a relationship field (lookup, master_detail, user or tree; ADR-0021 ' +
+      'derives every join from the object graph), and the prefix must be declared in the dataset\'s ' +
+      '`include` (`widget-filter-field-not-included` otherwise). The verdict\'s "Did you mean" names ' +
+      'the nearest field of the object the miss landed on.',
   ],
 };
 
@@ -476,6 +513,11 @@ const CHART_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
       'refused on a dataset-bound widget (ADR-0021). Post-cutover data is keyed by the dataset\'s ' +
       'measure NAME, not the base column. Suppress with `suppressWarnings: [\'chart-field-unknown\']` ' +
       'if the inert key is intentional.',
+    'What replaces each key: the x-axis is the widget\'s first `dimensions` entry; the y-axis ' +
+      'bindings come from `values`, one entry per mark; series membership follows `values` (and a ' +
+      'second `dimensions` entry to split). A measure named by a refused key that the dataset declares ' +
+      'but the widget does not select is plotted by adding it to `values`. ' +
+      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ],
 };
 
@@ -490,7 +532,8 @@ const CHART_MEASURES_MISSING_EXPLANATION: RuleExplanation = {
       'tabular widget. A chart with no measures is reported once, here, even when it also selects no ' +
       'dimensions: the placeholder returns before the renderer ever tests for dimensions. A chart ' +
       'family still needs a dimension to plot against (`chart-dimensions-missing`).',
-    'To fix it, select at least one measure of the dataset by name in `values`. Suppress with ' +
+    'To fix it, select at least one measure of the dataset by name in `values` (the `fix:` line ' +
+      'names up to three the dataset declares). Suppress with ' +
       '`suppressWarnings: [\'chart-measures-missing\']` while the widget is still being authored.',
   ],
 };
@@ -505,8 +548,9 @@ const WIDGET_MEASURES_MISSING_EXPLANATION: RuleExplanation = {
       '`kpi`, `gauge`, `solid-gauge`, `bullet`) loses the one KPI number the tile exists to show; a ' +
       'tabular one (`table`, `pivot`) loses its grid.',
     'Such a widget needs no `dimensions`, so measures are the whole fix: select at least one measure ' +
-      'of the dataset by name in `values`. Suppress with `suppressWarnings: [\'widget-measures-missing\']` ' +
-      'while the widget is still being authored.',
+      'of the dataset by name in `values` (the `fix:` line names up to three the dataset declares). ' +
+      'Suppress with `suppressWarnings: [\'widget-measures-missing\']` while the widget is still being ' +
+      'authored.',
   ],
 };
 
@@ -518,9 +562,27 @@ const CHART_DIMENSIONS_MISSING_EXPLANATION: RuleExplanation = {
       'a chart-family widget that selects measures but no dimensions draws a single KPI number instead ' +
       'of its declared chart. The number is real, so nothing looks broken — the declared chart family ' +
       'is simply gone.',
-    'To fix it, plot the chart against a dataset dimension (`dimensions`), or, if a single value IS ' +
-      'what the tile should show, declare it as a `metric` or `kpi` widget so the type matches what ' +
-      'renders. Suppress with `suppressWarnings: [\'chart-dimensions-missing\']`.',
+    'To fix it, plot the chart against a dataset dimension (`dimensions`; the `fix:` line names up to ' +
+      'three the dataset declares), or, if a single value IS what the tile should show, declare it as ' +
+      'a `metric` or `kpi` widget so the type matches what renders. Suppress with ' +
+      '`suppressWarnings: [\'chart-dimensions-missing\']`.',
+  ],
+};
+
+const TABLE_COUNT_ONLY_EXPLANATION: RuleExplanation = {
+  rule: 'table-count-only',
+  covers: 'why a count-only table renders one summary row',
+  paragraphs: [
+    'A `table` or `pivot` widget bound to a dataset runs an analytics query: rows are the groups of ' +
+      'its `dimensions`, cells the aggregates of its `values`. With no dimensions and only count ' +
+      'measures (a derived measure is never counted as one), there is nothing to group by, so the ' +
+      'widget renders a single summary row — not a per-record list.',
+    'A flat record listing is not an analytics dataset. Model it as an object-bound ListView ' +
+      '(ADR-0017) surfaced through app navigation, and use a `metric` widget on the dashboard if only ' +
+      'the count is needed. If a single-row table is intentional, add an explicit dimension or ' +
+      'suppress with `suppressWarnings: [\'table-count-only\']`.',
+    'Not reported: a widget that selects a dimension, selects no measures (`widget-measures-missing`), ' +
+      'or names a measure the dataset does not declare (`widget-measure-unknown`).',
   ],
 };
 
@@ -1399,12 +1461,12 @@ const RLS_PREDICATE_UNKNOWN_USER_VARIABLE_EXPLANATION: RuleExplanation = {
 
 /** What happens to a declared sharing rule whose `condition` does not lower — the two condition ids. */
 const SHARING_RULE_SKIPPED =
-  'A declared sharing rule\'s `condition` is compiled ONCE, at boot: `bootstrapDeclaredSharingRules` lowers it ' +
-  'to a static `criteria_json` filter with no variables bound. A condition that does not lower is not ' +
-  'degraded, partially applied or deferred — the rule is SKIPPED: it is never written to `sys_sharing_rule`, ' +
-  'no `sys_record_share` grant is ever materialised, and the only signal is one WARN line in the boot log. An ' +
-  'unlowerable condition is never seeded as a permissive match-all (ADR-0049), so the rule is declared and ' +
-  'grants nothing.';
+  'A declared sharing rule\'s `condition` is compiled where enforcement reads the rule from the registry: ' +
+  '`createDeclaredSharingRuleSource` lowers it to a static `criteria` filter with no variables bound. A ' +
+  'condition that does not lower is not degraded, partially applied or deferred — the rule is SKIPPED: ' +
+  'enforcement never serves it, no `sys_record_share` grant is ever materialised, and the only signal is one ' +
+  'WARN line in the log, once per process. An unlowerable condition is never served as a permissive match-all ' +
+  '(ADR-0049), so the rule is declared and grants nothing.';
 
 /** Why a grant on the rule's anchor object can be refused outright — the two anchor ids. */
 const SHARING_INERT_GRANT =
@@ -1439,7 +1501,7 @@ const SHARING_RULE_UNLOWERABLE_CONDITION_EXPLANATION: RuleExplanation = {
     CROSS_CLASS_LISTING,
     'To keep the rule without a second column, compare with a literal — "one of these values" is ' +
       '`record.status in [\'open\', \'pending\']` — or test a file field with `!= null`.',
-    'Such a comparison lowers, so the rule IS seeded into `sys_sharing_rule`, but every criteria query it runs ' +
+    'Such a comparison lowers, so the rule IS served to enforcement, but every criteria query it runs ' +
       'is refused on the SQL drivers (`INVALID_FILTER` / 400: driver-sql refuses the comparison by the ' +
       'columns\' declared types), and `SharingRuleService` reads a refused query as matching no record. No ' +
       '`sys_record_share` grant is ever materialised, at boot or on any later write, and the only signal is a ' +
@@ -1453,7 +1515,7 @@ const SHARING_RULE_RUNTIME_VARIABLE_CONDITION_EXPLANATION: RuleExplanation = {
   rule: 'sharing-rule-runtime-variable-condition',
   covers: 'why a sharing condition cannot read current_user',
   paragraphs: [
-    'A criteria sharing rule is MATERIALISED: the seeder compiles one static `criteria_json` per rule and the ' +
+    'A criteria sharing rule is MATERIALISED: its registry read compiles one static `criteria` filter per rule and the ' +
       'evaluator writes `sys_record_share` rows from it, so there is no "current user" at compile time and the ' +
       'compiler refuses a `current_user.*` read.',
     SHARING_RULE_SKIPPED,
@@ -2129,7 +2191,7 @@ const SEARCHABLE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
 
 /** Which predicates the three ids judge, and the oracle they ask (all three). */
 const PREDICATE_FORM_SCOPE =
-  'Judged: the `visibleWhen` (or `visibleOn`) predicates on a metadata-editing form — a `views[]` ' +
+  'Judged: the `visibleWhen` predicates on a metadata-editing form — a `views[]` ' +
   'form, its default `form` or a `formViews` entry whose data source is `{ provider: \'schema\', ' +
   'schemaId }` — on its sections and fields, nested repeater rows included, where `data` is rebound ' +
   'to the ROW. A path is resolved against the Zod schema of the metadata type the form edits ' +
@@ -2276,6 +2338,62 @@ const COMPONENT_TYPE_UNKNOWN_EXPLANATION: RuleExplanation = {
   ],
 };
 
+// ── Page component props and print pages (`validate-component-props.ts`, `validate-print-page-blocks.ts`) ──
+
+const COMPONENT_PROPS_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'component-props-invalid',
+  covers: 'why a page component\'s props are refused',
+  paragraphs: [
+    'A page component\'s `properties` is an untyped bag at the parse, and the renderer spreads whatever ' +
+      'it carries. Each type\'s typed props schema is its row in `ComponentPropsMap` ' +
+      '(`@objectstack/spec/ui`), and this rule judges the bag against that row: a value the schema ' +
+      'rejects is refused at the value\'s own path, and the verdict carries the schema\'s own account of ' +
+      'what it expected. A key the schema does not declare at all is `component-props-unknown-key`\'s ' +
+      'finding, not this one.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the metadata ' +
+      'save door (Studio, REST, MCP), judged page by page — so the stack does not pass and the page does ' +
+      'not save until its props are ones the schema accepts. A stored page keeps loading and serving: ' +
+      'only its next save is judged.',
+    'The fix belongs to the PAGE in almost every case: write the value the verdict asks for. Correct ' +
+      'the schema instead only when the component really does honour what is written — then the ' +
+      'declaration is what is wrong, and the change makes the declaration and the renderer agree.',
+    'Two verdicts of this id carry their own fix. A RETIRED key is refused with its retirement\'s ' +
+      'prescription, and the fix is the rename or removal it names, never a schema change: the props ' +
+      'schema keeps a retired key only to refuse it, so re-declaring it would undo the retirement. And a ' +
+      'block that reads its records from the node-level `dataSource` binding (`element:record_picker`, ' +
+      '`element:number`, `element:repeater`) must name its object there — `dataSource: { object: NAME }`, ' +
+      'a sibling of `type`, not a key inside `properties`, where a flat `object` is retired and read by ' +
+      'nothing.',
+  ],
+};
+
+const PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION: RuleExplanation = {
+  rule: 'print-page-block-unprintable',
+  covers: 'which blocks a print page may hold',
+  paragraphs: [
+    'A page that declares `print` is a document, and a document prints only what it draws in full. So ' +
+      'every block in it, at any depth — every region, a container\'s `children`, a card\'s `footer`, a ' +
+      'tab or accordion panel — must come from the printable block subset the spec declares ' +
+      '(`PRINTABLE_PAGE_COMPONENT_TYPES`, `@objectstack/spec/ui`). The subset is an allow list: a type ' +
+      'the platform vocabulary does not declare at all, such as a plugin widget or an SDUI layout block, ' +
+      'is refused too, because nothing answers for how it prints.',
+    // Held equal to `PRINTABLE_PAGE_COMPONENT_TYPES` (`@objectstack/spec/ui`) by the rule's test.
+    'The printable blocks: `page:section`, `page:card`, `page:footer`, `record:details`, ' +
+      '`record:highlights`, `record:line_items`, `element:text`, `element:image`, `element:divider`, ' +
+      '`element:definition-list`, `element:repeater`, `element:number`, `object-metric`.',
+    'Every other declared type is refused for one of three reasons, and the verdict names the one for ' +
+      'the block it reports: the block draws a window of its rows (a page, a `limit`, the nodes a viewer ' +
+      'expanded), so a printed copy carries only part of the data; it lays itself out to the screen ' +
+      '(docked panels, boards, canvases sized to the viewport); or it has no printable content of its ' +
+      'own (a control, an input, shell chrome, a panel switcher, per-viewer state). A retired type is ' +
+      'refused by name at the parse and reported by `component-type-unknown`, not here.',
+    'It is an error on every authoring door — `os validate`, `os build`, `os lint` and the metadata ' +
+      'save door (Studio, REST, MCP) — so the page does not validate or save until the block is ' +
+      'replaced with a printable one or removed. A page that is not a document should not declare ' +
+      '`print`: delete the declaration and the subset no longer applies.',
+  ],
+};
+
 // ── Filter comparands (`validate-preset-comparands.ts`) ────────────────────
 
 const FILTER_PRESET_COMPARAND_EXPLANATION: RuleExplanation = {
@@ -2304,6 +2422,43 @@ const FILTER_PRESET_COMPARAND_EXPLANATION: RuleExplanation = {
     'Not judged: a filter no ancestor binds to an object, an object or dataset the stack does not ' +
       'declare, a `time` field, and a field the object does not declare (the `*-filter-field-unknown` ' +
       'rules\' finding).',
+  ],
+};
+
+// ── Filter placeholders (`validate-filter-tokens.ts`) ──────────────────────
+
+const FILTER_TOKEN_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'filter-token-unknown',
+  covers: 'which placeholders a filter value resolves',
+  paragraphs: [
+    'A filter value travels as JSON, so a user- or time-scoped filter writes a placeholder that is ' +
+      'resolved just before the query: `{ owner_id: \'{current_user_id}\', created_at: { $gte: ' +
+      '\'{week_start}\' } }`. Only a whole-string placeholder counts (`{token}`, or `${token}`); a value ' +
+      'that merely contains braces is left alone.',
+    // The context tokens are held equal to `CONTEXT_TOKENS` (`@objectstack/spec/data`) by the rule's test.
+    'Exactly two vocabularies resolve in a filter value. The context tokens: `{current_user_id}`, ' +
+      '`{current_org_id}`. The date macros: the instants `{today}`, `{yesterday}`, `{tomorrow}` and ' +
+      '`{now}`; the start and end of the current, last or next week, month, quarter or year ' +
+      '(`{current_quarter_start}`, `{last_year_end}`), with bare aliases for the current period ' +
+      '(`{week_start}`, `{month_end}`); and counted offsets in minutes, hours, days, weeks, months or ' +
+      'years (`{30_days_ago}`, `{2_weeks_from_now}`).',
+    'Anything else does not resolve: the data engine refuses the query (`FILTER_TOKEN_UNKNOWN`, 400) ' +
+      'rather than compare the placeholder as a literal string, so the surface never shows the data the ' +
+      'filter meant. The rule makes that an error at build time, where an author — or an AI correcting ' +
+      'from `os validate` — sees it before anyone opens the surface. A near miss spelled the way ' +
+      'another part of the platform spells it (`{current_user}`, `{user_id}`, ' +
+      '`{current_organization_id}`) gets a "Did you mean" naming the token meant. A literal value that ' +
+      'really looks like a placeholder cannot be filtered on: rename the value.',
+    'The record-context token `{record_id}` is the id of the record a `type: \'record\'` page shows, ' +
+      'so it resolves only in a filter on a component of such a page. Every other surface this rule ' +
+      'walks — list views and the rest of an object definition, dashboard widgets, reports, datasets, ' +
+      'apps, and `home`, `app`, `utility` and `list` pages — has no record in context, and there the ' +
+      'server refuses the query rather than count every record or none. Move the filter onto a record ' +
+      'page\'s component, filter on a concrete id, or scope to the signed-in user with ' +
+      '`{current_user_id}`.',
+    'Walked: the `filter`, `filters` and `runtimeFilter` subtrees of dashboards, objects, views, ' +
+      'reports, datasets, pages and apps. Not walked: navigation `recordId` and `params`, which resolve ' +
+      'the app-context selector vocabulary, not a filter\'s.',
   ],
 };
 
@@ -2516,7 +2671,12 @@ const UNIQUE_LEGACY_ORGANIZATION_COMPOSITE_EXPLANATION: RuleExplanation = {
       'row.',
     'Respelled `unique: \'organization\'`, the NULL rows become one platform bucket ' +
       '(`COALESCE(organization_id, \'__global__\')`) that is unique among themselves, which is what ' +
-      'closes the hole.',
+      'closes the hole. The respelling keeps `fields` exactly as they are: the driver makes the listed ' +
+      'organization column NULL-safe in place rather than prepending a second organization key part, ' +
+      'so `[organization_id, email]` then really is "one email per organization".',
+    'Opting in is a physical tightening. It surfaces as a `recreate_index` drift op gated by the ' +
+      'duplicate pre-flight probe (ADR-0120 D4), so pre-existing duplicate NULL-organization rows ' +
+      'block it with a report rather than failing a boot.',
     'Advisory, and never auto-fixed (ADR-0120 D5c): the legacy spelling stays valid indefinitely ' +
       'and forces no drift, and opting in is a real physical tightening that goes through the D4 ' +
       'ceremony, because rows the void constraint admitted may still be there. Not reported: ' +
@@ -2541,6 +2701,10 @@ const UNIQUE_UNSCOPED_DECLARED_INDEX_EXPLANATION: RuleExplanation = {
       '`ObjectSchema.create` and the runtime save door — and this rule refuses it where nothing ' +
       'parses: `os lint`, which judges the normalized stack. Stored metadata that still carries it ' +
       'converts to `unique: \'global\'`, which builds the same physical index.',
+    'Either word is a complete fix. `\'global\'` keeps the index exactly as bare `true` built it; ' +
+      '`\'organization\'` makes the driver prepend the NULL-safe organization key part at ' +
+      'registration, so each organization may hold the value once. ' +
+      'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ],
 };
 
@@ -2556,6 +2720,9 @@ const UNIQUE_DOUBLE_DECLARATION_EXPLANATION: RuleExplanation = {
       'the per-organization constraint can never be tripped and one of the two declared intents is ' +
       'silently dead. The same scope on both sides is REDUNDANT — the same index declared twice — ' +
       'and dropping one gives the intent a single home.',
+    'Either way the fix leaves one spelling. Installation-wide uniqueness is `unique: \'global\'`, on ' +
+      'the field or on the declared index; per-organization uniqueness is `unique: \'organization\'`, ' +
+      'preferably field-level on the column, or on the declared index.',
     'A composite declared index is not judged here: listing the organization column is the legacy ' +
       'organization spelling, `unique/legacy-organization-composite`\'s question. Advisory: the ' +
       'stack is well-defined, and the cost is an intent that never takes effect.',
@@ -3326,7 +3493,479 @@ const CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION: RuleExplanation = {
       '`list`\'s and each `listViews` entry\'s, on views and on objects) and a dashboard\'s.',
     'A warning, not an error: one package\'s lint cannot see the capabilities other installed ' +
       'packages declare, and the reference fails closed anyway, so a dangling one is almost ' +
-      'certainly a typo to surface, not a build to break.',
+      'certainly a typo to surface, not a build to break. If another installed package declares the ' +
+      'capability, the warning is expected: leave the reference as it is.',
+  ],
+};
+
+// ── Object list view mode (`validate-list-view-mode.ts`) ─────────────────────
+
+const LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION: RuleExplanation = {
+  rule: 'list-view-filters-in-views-mode',
+  covers: 'why page filter controls do nothing on an object view',
+  paragraphs: [
+    'An object\'s list views render in "views" mode: the ViewTabBar owns navigation, one segmented ' +
+      'tab per named `listViews` entry. Two page filters-mode controls collide with it and are ignored ' +
+      'there (ADR-0047): `quickFilters`, and `userFilters` with `element: "tabs"` or a `tabs` list.',
+    'To fix it, pick what the control was for. Named presets on the object are `listViews` entries, ' +
+      'each one a tab of the bar; value chips over a field are `userFilters` with `element: ' +
+      '"dropdown"`, which an object view does allow; and quick filters or a filters-mode tab strip ' +
+      'belong on a page list (InterfaceListPage, "filters" mode), where no ViewTabBar is drawn.',
+  ],
+};
+
+// ── Liveness ledgers (`lint-liveness-properties.ts`) ─────────────────────────
+
+const LIVENESS_LEDGER_UNREADABLE_EXPLANATION: RuleExplanation = {
+  rule: 'liveness-ledger-unreadable',
+  covers: 'why a missing liveness ledger switches warnings off',
+  paragraphs: [
+    'A metadata type\'s author warnings about declared-but-inert properties are read from its ' +
+      'liveness ledger, the `TYPE.json` file `@objectstack/spec` ships in its `liveness/` directory. ' +
+      'When that file is missing, or does not parse as a ledger, every such warning for the type is ' +
+      'switched off, and this finding is reported once per run for the type.',
+    'This is a packaging fault in the platform, not an authoring error: nothing in the metadata being ' +
+      'linted caused it, and the rule\'s silence about that type means nothing until it is fixed. ' +
+      'Reinstall or repair `@objectstack/spec` so its `liveness/` directory ships intact.',
+  ],
+};
+
+// ── Page field bindings (`validate-page-field-bindings.ts`) ──────────────────
+
+const PAGE_FIELD_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'page-field-unknown',
+  covers: 'how a page binding names a field',
+  paragraphs: [
+    'A page component binds fields by name, and each name must match one of the bound object\'s ' +
+      'declared fields, or a system field, exactly: a misspelt or renamed field resolves to nothing, ' +
+      'at the cost the message names.',
+    'To fix it, correct the name (the `fix:` line names the nearest declared field when one is ' +
+      'close) or add the field to the object. Not judged here: a dotted relationship path ' +
+      '(`account.name`), which the query engine resolves, and an object this stack does not define.',
+  ],
+};
+
+const PAGE_SECTION_COUNT_NOT_MULTI_VALUE_EXPLANATION: RuleExplanation = {
+  rule: 'page-section-count-not-multi-value',
+  covers: 'which fields a section heading can count',
+  paragraphs: [
+    'A section heading\'s `{{ count }}` counts the values of the field the section is bound to. On a ' +
+      'single-value field it can only ever read 0 or 1: a number that looks like a count and is not one.',
+    'A multi-value field is `multiselect`, `checkboxes` or `tags`, or a `select`, `lookup`, `user`, ' +
+      '`file` or `image` field declared with `multiple: true`. Count one of those; to show a single ' +
+      'value, list the field in the section\'s `fields` instead. Not reported: a dotted relationship ' +
+      'path, or a field whose type this stack cannot resolve.',
+  ],
+};
+
+const PAGE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
+  rule: 'page-field-unprovisioned',
+  covers: 'why a page binding on an unprovisioned anchor is blank',
+  paragraphs: [
+    UNPROVISIONED_ANCHOR_CAUSE,
+    'A page component that binds such an anchor reads a column that holds nothing, at the cost the ' +
+      'message names for its position: a display binding renders blank on every record, a query ' +
+      'predicate can never match a real value (on SQLite it degrades to constant-false and the ' +
+      'surface reads as "there is no data"), and a field a section heading counts reads 0 on every ' +
+      'record. A `kind: \'react\'` page\'s blocks are judged the same way, under the same id.',
+    'Only a name that resolved BECAUSE it is injected is judged — an author-declared column of the ' +
+      'same name is one the author vouches for — and a dotted relationship path is not judged. The rule ' +
+      'is a warning in every position, the query one included, where a genuinely missing field is an ' +
+      'error: it cannot see the remote table, only that the platform provisions no storage.',
+    UNPROVISIONED_ANCHOR_REMEDY,
+  ],
+};
+
+/**
+ * What a section's `group` reference is, the half the two section-group ids
+ * (`page-section-group-unknown`, `form-section-group-unknown`) share. Their
+ * one-line `fix:` comes from one helper, `checkSectionGroupRefs()`.
+ */
+const SECTION_GROUP_REFERENCE: readonly string[] = [
+  'A layout section may name one of its object\'s declared field groups instead of listing its ' +
+    'members: `{ group: \'contact_info\' }`. The section then inherits its members and presentation ' +
+    'from the object\'s `fieldGroups` entry with that key (ADR-0085 §5). A section either names a ' +
+    'group or enumerates `fields`, never both, so a key that matches no declared group leaves it with ' +
+    'no members, and the whole section silently does not render.',
+  'The key is judged against the groups the bound object DECLARES (`fieldGroups[].key`), not the ' +
+    'ones the layout derives: a declared group no visible field joins is a different question. An ' +
+    'object this stack does not define is not judged. The rule is a warning: the section is missing ' +
+    'on screen, and no query reads the key.',
+  'To fix it, correct the key (the `fix:` line names the nearest declared group when one is close), ' +
+    'or declare the group on the object — `fieldGroups: [{ key, label }]` — and set `group` to that ' +
+    'key on each field that belongs in it: membership is declared on the FIELD, never on the group. ' +
+    'An object with no field groups yet can take the members as the section\'s `fields` list instead.',
+];
+
+const PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'page-section-group-unknown',
+  covers: 'how a page section inherits a field group',
+  paragraphs: [
+    ...SECTION_GROUP_REFERENCE,
+    'On a page the reference is a `record:details` section\'s `group`, resolved against the object ' +
+      'the component binds (its `dataSource.object`, then `properties.object`, then the binding it ' +
+      'inherits from its container, then the page\'s `object`).',
+  ],
+};
+
+const FORM_SECTION_GROUP_UNKNOWN_EXPLANATION: RuleExplanation = {
+  rule: 'form-section-group-unknown',
+  covers: 'how a form section inherits a field group',
+  paragraphs: [
+    ...SECTION_GROUP_REFERENCE,
+    'On a form view the reference is a section\'s `group`, in `sections` and in the legacy `groups` ' +
+      'alias alike, resolved against the object the form binds (its own `objectName`, `object` or ' +
+      '`data.object`, else its container\'s, else the container\'s list binding).',
+  ],
+};
+
+// ── Flow template paths (`validate-flow-template-paths.ts`) ───────────────────
+
+const FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-template-field-unprovisioned',
+  covers: 'why a template hole on an unprovisioned anchor is empty',
+  paragraphs: [
+    UNPROVISIONED_ANCHOR_CAUSE,
+    'A `{{ record.<anchor> }}` hole in a flow node\'s text — a notify title or body, an http body — on ' +
+      'a flow triggered by such an object renders from the flow record, where the anchor carries no ' +
+      'value: the hole renders an empty string on every run, and nothing reports it.',
+    'Only the trigger root is judged: the injected columns are read off the start node\'s object, and ' +
+      'a flow variable a `get_record` node binds has no counterpart. A CRUD node\'s `filter` operand is ' +
+      'a value slot, not a template, and is not scanned. The rule is a warning because it cannot see ' +
+      'the remote table, only that the platform provisions no storage.',
+    UNPROVISIONED_ANCHOR_REMEDY,
+  ],
+};
+
+const FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION: RuleExplanation = {
+  rule: 'flow-template-lookup-traversal',
+  covers: 'why a lookup hop in a template renders empty',
+  paragraphs: [
+    'A flow record carries a relationship field (`lookup`, `master_detail`, `user` or `tree`) as its ' +
+      'foreign-key id, a scalar, not as the related record, so a `{{ record.<lookup>.<field> }}` hole ' +
+      'walks `.<field>` on a string id and renders an empty string at run time, with no error. The same ' +
+      'holds for a record a `get_record` node reads into a flow variable. A trailing numeric segment ' +
+      '(`{{ record.target_channels.0 }}`) indexes a `multiple` lookup and is not a hop, and a sub-path ' +
+      'on any other field type is left alone.',
+    'On the trigger root the start node can opt in: `config.expand` names relations (a string or a ' +
+      'list), and the engine re-reads the triggering record with those relations expanded, one hop ' +
+      'deep, as the run\'s identity, so the related object\'s record and field access rules apply as ' +
+      'the run. A hop through a relation named there resolves and is not reported.',
+    '`config.expand` is the start node\'s opt-in and covers the trigger record alone: a record read ' +
+      'into a flow variable is never expanded, so the `fix:` line on a variable root does not ' +
+      'prescribe it.',
+    'To fix it, reference the foreign-key id itself (`{{ record.<lookup> }}`), project the related ' +
+      'value onto this object with a formula field and reference that, read the related record with a ' +
+      '`get_record` node and reference its fields, or — on the trigger root — add the relation to the ' +
+      'start node\'s `config.expand`. The rule is a warning: the run completes, with a blank where the ' +
+      'value should be.',
+  ],
+};
+
+// ── Flow reference syntax (`lint-flow-patterns.ts`) ──────────────────────────
+
+/** Where a flow node reads `{{ }}`, shared by the two wrong-syntax entries. */
+const FLOW_TEXT_SLOTS =
+  'Double-brace `{{ }}` is the template dialect of a flow\'s text slots only: a notify `title` / ' +
+  '`message` / `actionUrl`, an http `url` and `headers` values, a screen `title` / `description`, an ' +
+  '`end` `message`.';
+
+/** The literals and every other config value, shared by the two wrong-syntax entries. */
+const FLOW_LITERALS =
+  'A node\'s literals (a notify `sourceObject`, `actorId` and `payload`; an http `method`, `durable`, ' +
+  '`timeoutMs` and `signingSecret`) and every config value outside the text and value slots are read as ' +
+  'written: neither `{var}` nor `{{ }}` resolves there, and nothing evaluates a reference, braced or ' +
+  'bare. A brace token in a literal is refused at `objectstack validate` and `registerFlow`, and in ' +
+  '`signingSecret`, whose secret the flow credential store may hold, by the executor\'s parse. Write ' +
+  'the value itself.';
+
+/** What the spelling on the `fix:` line does not show, shared by the two wrong-syntax entries. */
+const FLOW_CEL_CAVEATS =
+  'Two CEL facts the spelling does not show. CEL refuses an absent variable or key where the template ' +
+  'wrote nothing, so guard one that may be absent with `has()`, a step at a time from `vars`, which ' +
+  'holds only the variables the run has bound: `has(vars.a) && has(vars.a.b) ? vars.a.b : null`, which ' +
+  'writes (or, to a callee, hands) `null` where the template wrote nothing. And text with holes is one ' +
+  'CEL concatenation: wrap a hole that is not a string in `string(…)`, and one that may be null in ' +
+  '`coalesce(…, \'\')`, because CEL refuses `+ null`.';
+
+/** A CRUD node's filter operand, shared by the two wrong-syntax entries. */
+const FLOW_FILTER_OPERAND =
+  'A filter operand envelope is evaluated before the query. One that evaluates to `null` refuses the ' +
+  'node, because an absent condition does not narrow a query, it widens it; so where the value may be ' +
+  'absent, route around the node with a `decision` rather than guarding it.';
+
+/** Where an envelope at the string's place would not evaluate, shared by the two wrong-syntax entries. */
+const FLOW_NO_ENVELOPE_POSITIONS =
+  'Where an envelope at the string\'s own place would not evaluate, the `fix:` line names none. A ' +
+  'string inside an object or list literal is stored as the object it spells, so compute the whole ' +
+  'value as one CEL envelope that builds a CEL map or list literal with this string\'s spelling at its ' +
+  'place (wrap each entry in `dyn(…)` where literal and computed values mix). A legacy `assignment` ' +
+  'shape (the `assignments: [{ variable, value }]` array, or variables written as the config\'s own ' +
+  'keys) evaluates nothing, so move the assignments into the canonical `assignments: { … }` map and ' +
+  'write the envelope there.';
+
+const FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION: RuleExplanation = {
+  rule: 'flow-double-brace-interpolation',
+  covers: 'where `{{ }}` is a template, and what replaces it',
+  paragraphs: [
+    FLOW_TEXT_SLOTS + ' Anywhere else in a node\'s config a `{{ }}` renders nothing: the string is stored ' +
+      'or sent as the literal text it spells.',
+    'A value slot (a record write\'s `fields`, an `assignment` value, a filter operand, a callee\'s ' +
+      'input map, a screen\'s prefill or record id, an http `body`) reads a CEL value envelope, ' +
+      '`{ dialect: \'cel\', source: \'…\' }`, and no template: the value-slot refusal reads a `{{ }}` ' +
+      'string\'s outer braces as literal text, so the build refuses it, and the spelling that refusal ' +
+      'gives keeps the braces as text. The `fix:` line names the value-slot judge\'s own spelling of ' +
+      'the holes the string means instead: each `{{ x }}` hole is the CEL path `x`.',
+    FLOW_NO_ENVELOPE_POSITIONS,
+    FLOW_CEL_CAVEATS,
+    FLOW_FILTER_OPERAND,
+    FLOW_LITERALS,
+  ],
+};
+
+const FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION: RuleExplanation = {
+  rule: 'flow-bare-dollar-reference',
+  covers: 'how a bare `$` reference is written in each slot',
+  paragraphs: [
+    'A bare `$name.path` in a flow node\'s config is never resolved: it is stored or sent as the ' +
+      'literal text it spells. How to write the reference depends on the slot the string sits in.',
+    'In a text slot (where `{{ }}` is the template; `os explain flow-double-brace-interpolation` ' +
+      'lists them) it becomes a hole, `{{ $error.message }}`, when the flow engine binds its `$` root. ' +
+      'A hole over any other `$` name is refused: a variable the flow binds itself (a declared ' +
+      'variable, an `assignment` target, an `outputVariable`, a `try_catch` `errorVariable`) is ' +
+      'written without the `$`, and any other value is computed into a variable with an `assignment` ' +
+      'node and written `{{ v }}`.',
+    'In a value slot (a record write\'s `fields`, an `assignment` value, a filter operand, a ' +
+      'callee\'s input map, a screen\'s prefill or record id, an http `body`) the reference is the CEL ' +
+      'value envelope the spec\'s value-slot judge spells for the `{…}` token it names, and the ' +
+      '`fix:` line carries that spelling: a `$` root the engine binds reads as that variable ' +
+      '(`$error.message` is `vars["$error"].message`), and any other `$` root names the flow\'s own ' +
+      'variable, written without the `$` (`$source.id` is `source.id`).',
+    'The run user, `$User.Id`, is `current_user.id`. In a flow that can run without a user (a ' +
+      'schedule, or a record change made by a system write) `current_user` is `null` and that read ' +
+      'fails the run, so write `current_user != null ? current_user.id : null` there; the guarded form ' +
+      'writes `null` where the template wrote nothing, which on `update_record` clears a stored value ' +
+      'the template left alone. In a text slot, compute it into a variable with an `assignment` node ' +
+      '(`assignments: { v: { dialect: \'cel\', source: \'current_user.id\' } }`) and write `{{ v }}`. ' +
+      'Any other `$User` path never resolved: `current_user` carries only `id`, `positions`, ' +
+      '`organizationId` and `isPlatformAdmin`, so read the user record by `current_user.id` with a ' +
+      '`get_record` node (`objectName: \'sys_user\'`) and read the field off its `outputVariable`.',
+    FLOW_NO_ENVELOPE_POSITIONS,
+    FLOW_CEL_CAVEATS,
+    FLOW_FILTER_OPERAND,
+    FLOW_LITERALS,
+  ],
+};
+
+// ── Flow anti-patterns (`lint-flow-patterns.ts`) ─────────────────────────────
+
+/** The minimal `catch` region, shared by the two containment entries; its `fix:` lines spell the same region. */
+const FLOW_MINIMAL_CATCH =
+  'A `catch` region cannot be empty: its `nodes` is `.min(1)`, so `catch: {}` and `catch: { nodes: [] }` are ' +
+  'both refused by the parse. The shortest handler that works is one bare `assignment` node with no `config`, ' +
+  '`catch: { nodes: [ { id: \'handled\', type: \'assignment\', label: \'Handled\' } ] }`; the region\'s `edges` ' +
+  'may be omitted, and so may the `try_catch` node\'s `errorVariable`, which defaults to `$error`.';
+
+/** Where the containment pattern is written out, shared by the two containment entries. */
+const FLOW_CONTAINMENT_DOCS =
+  'The pattern is written out in content/docs/automation/flows.mdx §"Per-iteration containment".';
+
+const FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-loop-body-uncontained',
+  covers: 'why a loop body needs its own `try_catch`',
+  paragraphs: [
+    'A node counts as one that can fail when its executor can end a run for a reason not knowable at ' +
+      'authoring time (an absent row, a refused write, a 500, a connector outage, a child flow that died): ' +
+      '`get_record`, `create_record`, `update_record`, `delete_record`, `http`, `notify`, ' +
+      '`connector_action`, `script`, `subflow`, `map` and `approval`. A node type outside that list, a ' +
+      'plugin\'s included, is not judged.',
+    'Containment is judged by ancestry, not depth: a `try_catch` anywhere between the loop and the node ' +
+      'contains it, a `parallel` branch is walked through, and a nested `loop` is judged on its own, so each ' +
+      'node is reported once, against its innermost loop. A `try_catch` with no `catch` counts as containment ' +
+      'here, because `flow-try-catch-without-catch` reports it and names the missing key. A `loop` with no ' +
+      '`body` (the legacy flat-graph form) is not judged.',
+    FLOW_MINIMAL_CATCH + ' Measured with that handler, a 5-item sweep whose 3rd item fails processes all 5 ' +
+      'items and the run completes.',
+    'A loop that is meant to stop at its first failure is a legitimate reading, so this is a warning and ' +
+      'never fails a build. ' + FLOW_CONTAINMENT_DOCS,
+  ],
+};
+
+const FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION: RuleExplanation = {
+  rule: 'flow-try-catch-without-catch',
+  covers: 'why a `try_catch` with no `catch` contains nothing',
+  paragraphs: [
+    'Reported wherever the node sits, at any depth of the flow. A `catch` that is present but malformed is ' +
+      'refused by the parse itself, with the schema\'s own message, so it is not reported here. Inside a ' +
+      '`loop` body, `flow-loop-body-uncontained` counts any enclosing `try_catch` as containment, so a ' +
+      'catch-less one is reported once, here, where the missing key can be named.',
+    FLOW_MINIMAL_CATCH,
+    'If failing loudly is the intent, a `try_catch` with only `try` (and optionally `retry`) is a legitimate ' +
+      'retry-then-fail shape, so this is a warning and never fails a build. ' + FLOW_CONTAINMENT_DOCS,
+  ],
+};
+
+const FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-multi-write-unfiltered',
+  covers: 'when a bulk write is bounded by nothing',
+  paragraphs: [
+    'A filter carries no condition when the key is absent, when it is `{}`, or when the Filter Protocol\'s ' +
+      'identity reduction (the one the SQL, MongoDB and memory drivers execute) resolves it to true, such as ' +
+      '`{ $and: [] }`; a filter the reduction cannot resolve is not reported. Only `multi: true` itself ' +
+      'declares bulk intent: a `multi: \'true\'` string is refused by the parse.',
+    'The worked example is examples/app-showcase `showcase_inquiry_purge`, whose bulk delete is bounded by ' +
+      'a predicate. If emptying or rewriting the whole object really is the intent, keep the node: ' +
+      '`multi: true` is how a flow declares bulk intent, and the engine admits a whole-object write declared ' +
+      'that way, so this is a warning, not a gate, and the run-time path stays open.',
+    'Distinct from the run-time erased-condition guard, which REFUSES this node at run time when a condition ' +
+      'you WROTE evaluated to nothing: that guard is keyed on "a written condition is gone" and deliberately ' +
+      'not on "the filter is empty", which is the fact this rule judges at authoring time.',
+  ],
+};
+
+const FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION: RuleExplanation = {
+  rule: 'flow-decision-inclusive-overlap',
+  covers: 'when an inclusive decision runs more than one branch',
+  paragraphs: [
+    'An edge-branched decision is exclusive by default: with `mode` omitted, the first out-edge whose ' +
+      'condition holds, in declaration order, wins, and an `isDefault: true` edge runs only when none did. ' +
+      'Keep `mode: \'inclusive\'` only where running every matching branch is the intent. The rule cannot ' +
+      'prove the conditions disjoint over CEL, so it is a warning and never fails a build.',
+    'Counted over conditioned out-edges only: a `fault` edge is error routing, and an `isDefault` edge opens ' +
+      'only when nothing else did, so one conditioned edge beside a default is not reported (there the two ' +
+      'modes cannot differ).',
+    // Named as the bare command, the way descriptive prose names it: a quoted
+    // `--from N` marker is judged as a prescription by the spec class pin
+    // `shared/retired-key-migrate-sentence.test.ts`, and this is not one.
+    'A flow authored against protocol major 17 and converted by `os migrate meta` carries ' +
+      '`mode: \'inclusive\'` wherever two or more conditioned out-edges left a decision (the ' +
+      '`flow-decision-mode-inclusive-explicit` conversion writes it so the run does not change ' +
+      'silently): delete it where the branches partition.',
+  ],
+};
+
+const FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-approval-revise-target-not-service-owned',
+  covers: 'why the revise window is an `approval_revise` node',
+  paragraphs: [
+    'The revise window is ended by `POST /api/v1/approvals/requests/:id/resubmit`, not by a signal, so a ' +
+      '`waitEventConfig` on it has nothing to wait for: drop it when retyping the node.',
+    'ADR-0044 D3 originally said `wait` here; its 2026-07-28 amendment reversed that, because a `wait` is ' +
+      'resumable by anyone with the run id, while the run-resume route continues a pause on a service-owned ' +
+      'node type only through the service that owns it. `sendBack` refuses any other target before it ' +
+      'changes anything, which is why this fails the build.',
+    'The whole loop: the `revise` edge reaches the `approval_revise` node, whose resubmit edge returns to ' +
+      'the approval marked `type: \'back\'`, and `maxRevisions` bounds it. examples/app-showcase ' +
+      '`showcase_budget_approval` is the reference shape.',
+  ],
+};
+
+const FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION: RuleExplanation = {
+  rule: 'flow-time-relative-antipattern',
+  covers: 'why a date equality on a record trigger misfires',
+  paragraphs: [
+    'Reported on a `record-*` trigger whose start condition puts a time function (`daysFromNow`, `daysAgo`, ' +
+      '`today`, `now`, `date`, `datetime`) beside `==` or `!=`, on either side. Range comparisons (`>=`, ' +
+      '`<=`) are not reported: they are the building block of the correct shape. A `schedule` trigger is not ' +
+      'judged.',
+    'The robust shape is a daily sweep. Declared, it is a `schedule` flow whose start node carries a ' +
+      '`config.timeRelative` descriptor (the object, the date field, and `withinDays` or `offsetDays`): it is ' +
+      'swept daily and runs once per record whose date falls in the window. Hand-written, it is a daily ' +
+      '`schedule` flow whose `get_record` filters the date field with a range (`$gte` / `$lt`), never an ' +
+      'equality (`os explain flow-date-equality-filter`).',
+    'Either way the run has no trigger user, so a sweep that reads or writes records declares ' +
+      '`runAs: \'system\'` (`os explain flow-runas-unscoped`).',
+  ],
+};
+
+const FLOW_DATE_EQUALITY_FILTER_EXPLANATION: RuleExplanation = {
+  rule: 'flow-date-equality-filter',
+  covers: 'why a date filter needs a window, not an equality',
+  paragraphs: [
+    'Reported for a field bound directly to a time-function value (an implicit equality), or through `$eq` ' +
+      'or `$in`, inside `$and` / `$or` too. Range operators (`$gte`, `$gt`, `$lte`, `$lt`) and `$ne` are the ' +
+      'correct shape and are never reported.',
+    'A one-day window, `{ $gte: daysFromNow(N), $lt: daysFromNow(N+1) }`, matches the whole day, and ' +
+      'abutting windows tile the timeline, so with several tiers wrapped in `$or` each row matches exactly ' +
+      'once.',
+    'A T-minus rule can declare the sweep instead: a `schedule` flow whose start node carries a ' +
+      '`config.timeRelative` descriptor with `offsetDays` runs once per record on each offset day.',
+  ],
+};
+
+const FLOW_RUNAS_UNSCOPED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-runas-unscoped',
+  covers: 'why a flow with no trigger user runs as `system`',
+  paragraphs: [
+    '`runAs` is enforced (ADR-0049, ADR-0073 D5): `\'user\'`, the default when none is declared, scopes each ' +
+      'data operation to the triggering user\'s grants, and with no trigger user the runtime refuses the ' +
+      'operation rather than run it unscoped. A schedule, time-relative or api trigger provably resolves no ' +
+      'user, so a flow with a data node anywhere in it, a `loop` body included, can never complete; that is ' +
+      'why this fails the build. A flow with no data node is not reported.',
+    '`runAs: \'system\'` makes the elevation explicit: the run reads and writes every record. Except behind an ' +
+      'anonymous door: publish refuses `system` on a flow that an `authRequired: false` endpoint of type ' +
+      '`flow` triggers (ADR-0138 D2b); serve that caller through an authenticated endpoint, the flow\'s ' +
+      'signed inbound hook, or a public form.',
+    'A record-change flow fired by a write that carried no user meets the same refusal, but whether a write ' +
+      'carries a user is not knowable at authoring time, so that case is refused at run time only.',
+  ],
+};
+
+const FLOW_DECISION_MODE_INVALID_EXPLANATION: RuleExplanation = {
+  rule: 'flow-decision-mode-invalid',
+  covers: 'which `mode` a decision takes',
+  paragraphs: [
+    'With `mode` omitted, an edge-branched decision is exclusive: the first out-edge whose condition holds, ' +
+      'in declaration order, wins. `mode: \'inclusive\'` takes every out-edge whose condition holds. A ' +
+      '`conditions` list is first-match on its own and takes no `mode`, so a legal `mode` beside a non-empty ' +
+      '`conditions` list is refused as well: it would be accepted and never read.',
+    'The finding is the spec\'s own `DecisionConfigSchema` issue, and `registerFlow` refuses this flow with ' +
+      'the same sentence, so it can never arm; that is why this fails the build. Fix the node in the flow ' +
+      'definition.',
+  ],
+};
+
+const FLOW_DECISION_UNCONDITIONAL_BRANCH_EXPLANATION: RuleExplanation = {
+  rule: 'flow-decision-unconditional-branch',
+  covers: 'how a decision gates its out-edges',
+  paragraphs: [
+    'An out-edge is gated by a `condition`, by `isDefault: true` (taken only when no sibling condition ' +
+      'matched, the BPMN default flow), or by a `label` the decision selects through a matching ' +
+      '`config.conditions[].label`. Declare the branching one way and one way only.',
+    'If the unconditional fan-out is what you meant, drop `type: \'decision\'` and use the node it already ' +
+      'behaves as. Both shapes stay warnings: one guarded and one unconditional out-edge is a legal "maybe ' +
+      'notify, always continue" fan-out, and an all-unconditional decision is that same fan-out under a ' +
+      'mis-chosen node type.',
+    'Not reported here: a decision routing by `config.conditions[]` labels alone has declared its branching ' +
+      'on the node, and a declared label no out-edge carries is `flow-branch-label-unmatched`. A `fault` edge ' +
+      'is error routing and never counts as a branch.',
+  ],
+};
+
+const FLOW_ERROR_LABEL_NOT_FAULT_EXPLANATION: RuleExplanation = {
+  rule: 'flow-error-label-not-fault',
+  covers: 'which failures a `fault` edge routes',
+  paragraphs: [
+    'Only runtime failures route through a `fault` edge. A guard refusal (a filter token that resolved to ' +
+      'nothing, a missing required config key, an unscoped run) stays fatal by design and must be fixed in ' +
+      'the metadata, not handled.',
+    'The labels read as an error path are `error`, `fault`, `failure`, `failed`, `catch`, `on_error`, ' +
+      '`onerror` and `on error`, compared trimmed and case-insensitively. Not reported: an edge that is ' +
+      'already `type: \'fault\'`, an edge with a `condition`, and an edge out of a `decision`, `approval`, ' +
+      '`screen` or `try_catch` node, which picks its out-edge by label, so the label is load-bearing there.',
+  ],
+};
+
+const FLOW_BRANCH_LABEL_UNMATCHED_EXPLANATION: RuleExplanation = {
+  rule: 'flow-branch-label-unmatched',
+  covers: 'how a decision label selects its out-edge',
+  paragraphs: [
+    'Labels are compared trimmed and case-insensitively. Use one mechanism per decision, never both: ' +
+      '`config.conditions[]` with an out-edge whose `label` matches each declared branch, or branching on the ' +
+      'out-edges themselves (a `condition` per branch plus `isDefault: true` on the fallback).',
+    'No reading of this metadata routes what it says, on any run, and the run completes green having taken ' +
+      'the wrong path, so this fails the build. A stored flow authored before the rule still reaches run ' +
+      'time, where the engine warns when it meets the shape.',
   ],
 };
 
@@ -3433,7 +4072,7 @@ const PAGE_SOURCE_CLASSNAME_TAILWIND_EXPLANATION: RuleExplanation = {
   rule: 'page-source-className-tailwind',
   covers: 'why Tailwind classes in page source produce no CSS',
   paragraphs: [
-    'A `kind: \'html\'`, `\'react\'` or `\'jsx\'` page\'s `source` is runtime metadata, and the ' +
+    'A `kind: \'html\'` or `\'react\'` page\'s `source` is runtime metadata, and the ' +
       'Console\'s Tailwind build scans only the renderer\'s own source, never an authored page string. ' +
       'So a Tailwind `className` in page source produces no CSS (ADR-0065): it styles the page only by ' +
       'coincidence, when the class happens to be one the renderer already ships.',
@@ -4009,6 +4648,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [VIEW_ROW_COLOR_UNRESOLVABLE_VALUE_EXPLANATION.rule]: VIEW_ROW_COLOR_UNRESOLVABLE_VALUE_EXPLANATION,
   [WEBHOOK_WITHOUT_TRIGGERS_EXPLANATION.rule]: WEBHOOK_WITHOUT_TRIGGERS_EXPLANATION,
   [WIDGET_LEGACY_ANALYTICS_UNRENDERABLE_EXPLANATION.rule]: WIDGET_LEGACY_ANALYTICS_UNRENDERABLE_EXPLANATION,
+  [WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION.rule]: WIDGET_LEGACY_ANALYTICS_SHAPE_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNKNOWN_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_NOT_INCLUDED_EXPLANATION,
   [DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION.rule]: DASHBOARD_FILTER_FIELD_UNPROVISIONED_EXPLANATION,
@@ -4019,6 +4659,7 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [CHART_MEASURES_MISSING_EXPLANATION.rule]: CHART_MEASURES_MISSING_EXPLANATION,
   [WIDGET_MEASURES_MISSING_EXPLANATION.rule]: WIDGET_MEASURES_MISSING_EXPLANATION,
   [CHART_DIMENSIONS_MISSING_EXPLANATION.rule]: CHART_DIMENSIONS_MISSING_EXPLANATION,
+  [TABLE_COUNT_ONLY_EXPLANATION.rule]: TABLE_COUNT_ONLY_EXPLANATION,
   [DATASET_INCLUDE_UNKNOWN_EXPLANATION.rule]: DATASET_INCLUDE_UNKNOWN_EXPLANATION,
   [DATASET_FIELD_UNKNOWN_EXPLANATION.rule]: DATASET_FIELD_UNKNOWN_EXPLANATION,
   [DATASET_FIELD_NOT_INCLUDED_EXPLANATION.rule]: DATASET_FIELD_NOT_INCLUDED_EXPLANATION,
@@ -4085,7 +4726,10 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [PREDICATE_RHS_PATH_SHAPED_EXPLANATION.rule]: PREDICATE_RHS_PATH_SHAPED_EXPLANATION,
   [ACTION_DISPATCH_CONTRACT_MISMATCH_EXPLANATION.rule]: ACTION_DISPATCH_CONTRACT_MISMATCH_EXPLANATION,
   [COMPONENT_TYPE_UNKNOWN_EXPLANATION.rule]: COMPONENT_TYPE_UNKNOWN_EXPLANATION,
+  [COMPONENT_PROPS_INVALID_EXPLANATION.rule]: COMPONENT_PROPS_INVALID_EXPLANATION,
+  [PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION.rule]: PRINT_PAGE_BLOCK_UNPRINTABLE_EXPLANATION,
   [FILTER_PRESET_COMPARAND_EXPLANATION.rule]: FILTER_PRESET_COMPARAND_EXPLANATION,
+  [FILTER_TOKEN_UNKNOWN_EXPLANATION.rule]: FILTER_TOKEN_UNKNOWN_EXPLANATION,
   [APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION.rule]: APPROVAL_APPROVERS_MAY_RESOLVE_EMPTY_EXPLANATION,
   [APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION.rule]: APPROVAL_APPROVER_NOT_MEMBERSHIP_TIER_EXPLANATION,
   [APPROVAL_EXPRESSION_INVALID_EXPLANATION.rule]: APPROVAL_EXPRESSION_INVALID_EXPLANATION,
@@ -4121,6 +4765,29 @@ export const RULE_EXPLANATIONS: Readonly<Record<string, RuleExplanation>> = Obje
   [OBJECT_REFERENCE_UNKNOWN_EXPLANATION.rule]: OBJECT_REFERENCE_UNKNOWN_EXPLANATION,
   [OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION.rule]: OBJECT_REFERENCE_UNREGISTERED_PLATFORM_EXPLANATION,
   [CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION.rule]: CAPABILITY_REFERENCE_UNKNOWN_EXPLANATION,
+  [LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION.rule]: LIST_VIEW_FILTERS_IN_VIEWS_MODE_EXPLANATION,
+  [LIVENESS_LEDGER_UNREADABLE_EXPLANATION.rule]: LIVENESS_LEDGER_UNREADABLE_EXPLANATION,
+  [PAGE_FIELD_UNKNOWN_EXPLANATION.rule]: PAGE_FIELD_UNKNOWN_EXPLANATION,
+  [PAGE_SECTION_COUNT_NOT_MULTI_VALUE_EXPLANATION.rule]: PAGE_SECTION_COUNT_NOT_MULTI_VALUE_EXPLANATION,
+  [PAGE_FIELD_UNPROVISIONED_EXPLANATION.rule]: PAGE_FIELD_UNPROVISIONED_EXPLANATION,
+  [PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: PAGE_SECTION_GROUP_UNKNOWN_EXPLANATION,
+  [FORM_SECTION_GROUP_UNKNOWN_EXPLANATION.rule]: FORM_SECTION_GROUP_UNKNOWN_EXPLANATION,
+  [FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION.rule]: FLOW_TEMPLATE_FIELD_UNPROVISIONED_EXPLANATION,
+  [FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION.rule]: FLOW_TEMPLATE_LOOKUP_TRAVERSAL_EXPLANATION,
+  [FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION.rule]: FLOW_DOUBLE_BRACE_INTERPOLATION_EXPLANATION,
+  [FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION.rule]: FLOW_BARE_DOLLAR_REFERENCE_EXPLANATION,
+  [FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION.rule]: FLOW_LOOP_BODY_UNCONTAINED_EXPLANATION,
+  [FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION.rule]: FLOW_TRY_CATCH_WITHOUT_CATCH_EXPLANATION,
+  [FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION.rule]: FLOW_MULTI_WRITE_UNFILTERED_EXPLANATION,
+  [FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION.rule]: FLOW_DECISION_INCLUSIVE_OVERLAP_EXPLANATION,
+  [FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION.rule]: FLOW_APPROVAL_REVISE_TARGET_NOT_SERVICE_OWNED_EXPLANATION,
+  [FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION.rule]: FLOW_TIME_RELATIVE_ANTIPATTERN_EXPLANATION,
+  [FLOW_DATE_EQUALITY_FILTER_EXPLANATION.rule]: FLOW_DATE_EQUALITY_FILTER_EXPLANATION,
+  [FLOW_RUNAS_UNSCOPED_EXPLANATION.rule]: FLOW_RUNAS_UNSCOPED_EXPLANATION,
+  [FLOW_DECISION_MODE_INVALID_EXPLANATION.rule]: FLOW_DECISION_MODE_INVALID_EXPLANATION,
+  [FLOW_DECISION_UNCONDITIONAL_BRANCH_EXPLANATION.rule]: FLOW_DECISION_UNCONDITIONAL_BRANCH_EXPLANATION,
+  [FLOW_ERROR_LABEL_NOT_FAULT_EXPLANATION.rule]: FLOW_ERROR_LABEL_NOT_FAULT_EXPLANATION,
+  [FLOW_BRANCH_LABEL_UNMATCHED_EXPLANATION.rule]: FLOW_BRANCH_LABEL_UNMATCHED_EXPLANATION,
   [ACTION_NAME_UNDEFINED_EXPLANATION.rule]: ACTION_NAME_UNDEFINED_EXPLANATION,
   [MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION.rule]: MAPPING_TARGET_FIELD_UNKNOWN_EXPLANATION,
   [VIEW_CONTAINER_SHAPE_EXPLANATION.rule]: VIEW_CONTAINER_SHAPE_EXPLANATION,

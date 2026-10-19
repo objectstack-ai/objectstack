@@ -38,6 +38,9 @@ const OBJECT = {
  * `app-shell/src/views/metadata-admin/anchors.ts`, `createSeed`). The
  * Attachments tab is the synthesizer's `buildDefaultAttachments()`, a bare
  * `{ type: 'record:attachments' }` at `components[2].properties.items[1]`.
+ * The synthesizer still names the retired `full-width` template, a second
+ * name for `default` (#23610); the seed is spelled here as the closed
+ * template set requires.
  */
 const seededRecordPage = (extraTabs: unknown[] = []): AnyRec => ({
   name: 'invoice_record',
@@ -45,7 +48,7 @@ const seededRecordPage = (extraTabs: unknown[] = []): AnyRec => ({
   type: 'record',
   object: 'invoice',
   kind: 'full',
-  template: 'full-width',
+  template: 'default',
   regions: [
     {
       name: 'main',

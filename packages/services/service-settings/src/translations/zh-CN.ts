@@ -20,7 +20,7 @@ export const zhCN: PlatformTranslationData = {
       title: '邮件投递',
       description: 'SMTP 与事务性邮件服务商配置。',
       groups: {
-        provider: { title: '服务商', description: '选择此工作区如何发送邮件。' },
+        provider: { title: '服务商', description: '选择本系统如何发送邮件。' },
         smtp: { title: 'SMTP' },
         api_key: { title: 'API 密钥' },
         from_address: { title: '发件地址' },
@@ -60,7 +60,7 @@ export const zhCN: PlatformTranslationData = {
       title: '短信投递',
       description: '用于 OTP 登录、邀请与通知的短信服务商配置。',
       groups: {
-        provider: { title: '服务商', description: '选择此工作区如何发送外发短信。' },
+        provider: { title: '服务商', description: '选择本系统如何发送外发短信。' },
         aliyun: { title: '阿里云短信' },
         twilio: { title: 'Twilio' },
         limits: { title: '发送额度', description: '限制本部署的外发短信量。短信是付费通道,每一条都产生真实费用。' },
@@ -100,13 +100,13 @@ export const zhCN: PlatformTranslationData = {
 
     branding: {
       title: '品牌',
-      description: '工作区名称、Logo 与主题色。',
+      description: '组织名称、Logo 与主题色。',
       groups: {
         identity: { title: '身份' },
         appearance: { title: '外观' },
       },
       keys: {
-        workspace_name: { label: '工作区名称' },
+        workspace_name: { label: '组织名称' },
         support_email: { label: '客服邮箱', help: '示例:support@example.com' },
         theme_mode: {
           label: '默认主题',
@@ -126,7 +126,7 @@ export const zhCN: PlatformTranslationData = {
         contact: { title: '联系方式' },
       },
       keys: {
-        legal_name: { label: '法定名称', help: '注册的法定名称(可能与工作区名称不同)。' },
+        legal_name: { label: '法定名称', help: '注册的法定名称(可能与「品牌」中的组织名称不同)。' },
         registration_number: { label: '注册号', help: '公司注册/工商登记号(如 EIN、统一社会信用代码)。' },
         tax_id: { label: '税号 / VAT', help: '发票上显示的税务标识(如 VAT、GST、ABN)。' },
         address_line1: { label: '地址行 1' },
@@ -234,7 +234,7 @@ export const zhCN: PlatformTranslationData = {
         },
         audience: {
           title: '注册受众',
-          description: '谁可以成为本环境应用的用户。「邮箱域名」口径始终强制开启邮箱验证。「开放」口径也会强制开启，除非部署方关闭它；在此控制台保存的值无法关闭。邀请、管理员创建、SCIM 开通和企业 SSO 在任何口径下都可进入。',
+          description: '谁可以成为本系统应用的用户。「邮箱域名」口径始终强制开启邮箱验证。「开放」口径也会强制开启，除非部署方关闭它；在此控制台保存的值无法关闭。邀请、管理员创建、SCIM 开通和企业 SSO 在任何口径下都可进入。',
         },
         password_policy: {
           title: '密码策略',
@@ -271,7 +271,7 @@ export const zhCN: PlatformTranslationData = {
         require_email_verification: { label: '要求邮箱验证' },
         membership_policy: {
           label: '新用户的成员归属',
-          help: '「自动加入」会把每个新用户绑定到本部署的默认组织；「仅限邀请」只在用户显式行动后才授予成员身份——自行创建工作区、接受邀请、被管理员添加，或由 SSO 即时开通。',
+          help: '「自动加入」会把每个新用户绑定到本部署的默认组织；「仅限邀请」只在用户显式行动后才授予成员身份——自行创建组织、接受邀请、被管理员添加，或由 SSO 即时开通。',
           options: {
             auto: '自动加入默认组织',
             'invite-only': '仅限邀请——绝不自动加入',
@@ -391,7 +391,7 @@ export const zhCN: PlatformTranslationData = {
 
     feature_flags: {
       title: '功能开关',
-      description: '为当前工作区开启实验性与测试功能。',
+      description: '为当前组织开启实验性与测试功能。',
       groups: {
         productivity: { title: '生产力' },
         collaboration: { title: '协作' },
@@ -405,13 +405,15 @@ export const zhCN: PlatformTranslationData = {
         realtime_cursors: { label: '实时光标' },
         inline_comments: { label: '行内评论' },
       },
+      banners: {
+        beta_notice: { title: '注意',
+          text: 'Beta 功能可能随时变更,恕不另行通知。可通过环境变量固定(例如 `OS_FEATURE_FLAGS_AI_ENABLED=true`),对整个部署生效。' },
+      },
     },
 
     storage: {
       title: '文件存储',
-      description:
-        '附件、导出文件与用户上传所使用的存储后端。' +
-        '⚠ 切换适配器不会迁移已有文件 —— 通过旧适配器上传的文件，在新适配器中将不可访问。',
+      description: '附件、导出文件与用户上传所使用的存储后端。',
       groups: {
         adapter: { title: '存储后端', description: '选择上传文件的存放位置。' },
         local: { title: '本地' },
@@ -441,6 +443,10 @@ export const zhCN: PlatformTranslationData = {
       },
       actions: {
         test: { label: '测试连接' },
+      },
+      banners: {
+        adapter_switch_warning: { title: '已有文件不会迁移',
+          text: '切换适配器不会迁移已有文件 —— 通过旧适配器上传的文件，在新适配器中将不可访问。' },
       },
     },
 
@@ -506,7 +512,7 @@ export const zhCN: PlatformTranslationData = {
         max_tokens: { label: '最大输出 tokens', help: '单次响应生成的硬上限。' },
         request_timeout_ms: { label: '请求超时(毫秒)' },
         trace_enabled: { label: '记录 Trace', help: '将 prompt/response 落入 sys_ai_trace,便于调试与回放。' },
-        log_prompts: { label: '记录完整 Prompt', help: '在 trace 行中包含完整 prompt 而非仅元数据。⚠ 可能泄露 PII,合规场景请关闭。' },
+        log_prompts: { label: '记录完整 Prompt', help: '在 trace 行中包含完整 prompt 而非仅元数据。' },
         embedder_provider: {
           label: '提供商',
           options: {
@@ -532,11 +538,14 @@ export const zhCN: PlatformTranslationData = {
         test: { label: '测试连接' },
         test_embedder: { label: '测试 Embedder' },
       },
+      banners: {
+        log_prompts_warning: { title: 'Prompt 可能含有 PII', text: '可能泄露 PII,合规场景请关闭。' },
+      },
     },
 
     knowledge: {
       title: '知识库',
-      description: 'RAG / 知识源使用的向量存储后端。⚠ 切换适配器不会迁移已有索引。',
+      description: 'RAG / 知识源使用的向量存储后端。',
       groups: {
         adapter: { title: '后端', description: '选择文档分块及其向量的存储位置。' },
         turso: { title: 'Turso / libSQL', description: '支持托管 Turso、本地文件、内存三种模式。' },
@@ -561,10 +570,14 @@ export const zhCN: PlatformTranslationData = {
         chunk_target: { label: '目标 chunk 大小(字符)', help: '在按 token 切分之前的软上限。' },
         chunk_overlap: { label: 'Chunk 重叠(字符)', help: '保留上一个 chunk 末尾的字符,以保证跨界上下文。' },
         over_fetch: { label: '过取倍数', help: '内部按 topK × overFetch 拉取候选,以便 JS 端元数据过滤仍有行可返回。' },
-        enforce_rls: { label: '搜索时强制 RLS', help: '对每条命中通过 IDataEngine 再次校验调用方的行级权限。⚠ 关闭将跳过平台对向量存储数据外泄的独有防护。' },
+        enforce_rls: { label: '搜索时强制 RLS', help: '对每条命中通过 IDataEngine 再次校验调用方的行级权限。' },
       },
       actions: {
         test: { label: '测试连接' },
+      },
+      banners: {
+        adapter_switch_warning: { title: '已有索引不会迁移', text: '切换适配器不会迁移已有索引。' },
+        enforce_rls_warning: { title: '生产环境请保持开启', text: '关闭将跳过平台对向量存储数据外泄的独有防护。' },
       },
     },
   },

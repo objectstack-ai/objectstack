@@ -187,13 +187,16 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
         expect(insert('g4', 'view', 'lead.g', 'org1', 'pkg1', 'active').ok).toBe(true);
     });
 
-    it('keeps distinct types, names and organizations independent', async () => {
+    it('keeps distinct types and names independent; a legacy organization is no key part (ADR-0131 C7b)', async () => {
         await ensureMetadataOverlayIndexes(exec);
 
         expect(insert('i1', 'view', 'lead.x', 'org1', null, 'active').ok).toBe(true);
         expect(insert('i2', 'flow', 'lead.x', 'org1', null, 'active').ok).toBe(true);
         expect(insert('i3', 'view', 'lead.y', 'org1', null, 'active').ok).toBe(true);
-        expect(insert('i4', 'view', 'lead.x', 'org2', null, 'active').ok).toBe(true);
+        // The TIGHTENING: a second organization's row of the same key, or the
+        // environment's, collides — an overlay is the environment's.
+        expect(insert('i4', 'view', 'lead.x', 'org2', null, 'active').ok).toBe(false);
+        expect(insert('i5', 'view', 'lead.x', null, null, 'active').ok).toBe(false);
     });
 
     // ── Idempotence ───────────────────────────────────────────────────────
@@ -523,28 +526,28 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
     /**
      * The key spelling is pinned as a literal, so a later "while we are in
      * here" re-keying cannot ride in unnoticed: re-partitioning a live unique
-     * index needs its own ADR-0120 D4 ceremony. The member part is the one
-     * re-keying since #6418 (#22877, ruled), and both NULL-folded parts use the
-     * spelling that shipped for `package_id`.
+     * index needs its own ADR-0120 D4 ceremony. The member part (#22877,
+     * ruled) and the organization's departure (ADR-0131 C7b) are the two
+     * re-keyings since #6418, and both NULL-folded parts use the spelling that
+     * shipped for `package_id`.
      */
     it('pins the key spelling — the member part folded the way package_id is', () => {
-        expect(OVERLAY_INDEX_COLUMNS).toEqual(['type', 'name', 'organization_id', 'package_id', 'bundle_member']);
+        expect(OVERLAY_INDEX_COLUMNS).toEqual(['type', 'name', 'package_id', 'bundle_member']);
         expect(OVERLAY_NULL_SENTINELS).toEqual({ package_id: '', bundle_member: '' });
         expect(overlayIndexKeyParts()).toEqual([
             'type',
             'name',
-            'organization_id',
             "COALESCE(package_id, '')",
             "COALESCE(bundle_member, '')",
         ]);
         expect(buildOverlayIndexSql(OVERLAY_INDEX_NAMES.active, 'active')).toEqual(
             'CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active '
-            + "ON sys_metadata (type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, '')) "
+            + "ON sys_metadata (type, name, COALESCE(package_id, ''), COALESCE(bundle_member, '')) "
             + "WHERE state = 'active'",
         );
         expect(buildOverlayIndexSql(OVERLAY_INDEX_NAMES.draft, 'draft')).toEqual(
             'CREATE UNIQUE INDEX IF NOT EXISTS idx_sys_metadata_overlay_draft '
-            + "ON sys_metadata (type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, '')) "
+            + "ON sys_metadata (type, name, COALESCE(package_id, ''), COALESCE(bundle_member, '')) "
             + "WHERE state = 'draft'",
         );
     });
@@ -557,7 +560,7 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
         const sql = buildOverlayFallbackIndexSql(OVERLAY_INDEX_NAMES.active);
         expect(sql).toEqual(
             'CREATE INDEX IF NOT EXISTS idx_sys_metadata_overlay_active '
-            + 'ON sys_metadata (type, name, organization_id, package_id, bundle_member)',
+            + 'ON sys_metadata (type, name, package_id, bundle_member)',
         );
         expect(sql.toUpperCase()).not.toContain('UNIQUE');
         expect(sql).toContain('IF NOT EXISTS');
@@ -572,11 +575,11 @@ describe('sys_metadata overlay uniqueness (#6418)', () => {
     it('the duplicate-listing query is groupable on PostgreSQL, not only SQLite', () => {
         const sql = buildOverlayDuplicateProbeSql('active');
         expect(sql).toEqual(
-            'SELECT type, name, organization_id, '
+            'SELECT type, name, '
             + "COALESCE(package_id, '') AS package_id_key, "
             + "COALESCE(bundle_member, '') AS bundle_member_key, COUNT(*) AS duplicate_rows "
             + "FROM sys_metadata WHERE state = 'active' "
-            + "GROUP BY type, name, organization_id, COALESCE(package_id, ''), COALESCE(bundle_member, '') "
+            + "GROUP BY type, name, COALESCE(package_id, ''), COALESCE(bundle_member, '') "
             + 'HAVING COUNT(*) > 1',
         );
         // Every bare projection is a bare GROUP BY term; the folded ones are

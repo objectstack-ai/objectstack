@@ -8,10 +8,16 @@
  *     2026-08-23; re-anchored by #11663, maintainer acceptance 2026-08-25,
  *     leg L4 = #11974):
  *       - `single`: promote the first registered human user by inserting a
- *         `sys_user_permission_set` row pointing at `admin_full_access` with
- *         `organization_id = NULL`. Unchanged — Choice 4A keeps first-user
- *         promotion and its grant row for this posture (4B is the sequenced
- *         follow-up, not dropped). [#14348] "First user" means the oldest
+ *         `sys_user_permission_set` row pointing at `admin_full_access`,
+ *         **owned by the Default Organization** (ADR-0131 D5; #11979 under the
+ *         maintainer's ruling A on #18707): the zero-config promotion stays,
+ *         and ⛔ no NULL-organization grant row is written. The holder scan
+ *         and the derivation site (`resolve-authz-context.ts` §6) read that
+ *         row — and the organization-less row an earlier release wrote, until
+ *         D10's ceremony attributes it to the same organization. A deployment
+ *         whose Default Organization cannot be named is not promoted: it says
+ *         so, loudly, rather than writing the row without an owner.
+ *         [#14348] "First user" means the oldest
  *         human that can AUTHENTICATE (holds a `sys_account`), not the oldest
  *         `sys_user` row: an app declaring people in `defineStack({ data })`
  *         stores credential-less directory rows that are always older than any
@@ -76,6 +82,7 @@ import {
   serializePlatformAdminStandingSnapshot,
 } from './platform-admin-standing-audit.js';
 import { GRANT_SET_NAME_FIELD, grantSetNameOf } from './grant-permission-set-name.js';
+import { resolveDefaultOrganizationId } from './suggested-audience-bindings.js';
 
 /**
  * The order the standing-audit read states TO THE DRIVER.
@@ -234,6 +241,16 @@ interface BootstrapOptions {
    * which the claim reports as `unattested` rather than guessing.
    */
   seedSettlement?: SeedSettlementSnapshot | undefined;
+  /**
+   * [#23354] The rows this process's boot seed landed on, per object — the
+   * `seed-settlement` contract's `seededRecordIds`, bound by the caller.
+   *
+   * Handed straight to {@link claimSeedOwnership} and used for nothing else: it
+   * is the claim's NULL-arm selection, so the promotion hands over the seed's
+   * unowned rows and leaves a guest's or a form's as their writer left them
+   * (ADR-0138 D1). Absent, the claim re-owns no NULL-owner row and says so.
+   */
+  seededRecordIds?: ((objectName: string) => readonly string[]) | undefined;
 }
 
 const SYSTEM_CTX = { isSystem: true };
@@ -443,16 +460,33 @@ export function shouldReplayBootstrapFor(opCtx: {
 }
 
 /**
- * The permission set whose unscoped grant makes a user the platform admin under
- * `single`. Named once so the bootstrap's guard and
+ * The permission set whose anchoring grant makes a user the platform admin under
+ * `single` (the Default Organization's, ADR-0131 D5). Named once so the bootstrap's guard and
  * {@link findExistingPlatformAdmin} cannot ask about two different sets.
  */
 const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
 
 /**
- * Who ALREADY holds the unscoped platform-admin grant (commit 1c83ca226) — the
+ * Who ALREADY holds the platform-admin grant (commit 1c83ca226) — the
  * one rule both {@link bootstrapPlatformAdmin}'s `already_have_admin` guard and
  * {@link findExistingPlatformAdmin} answer with.
+ *
+ * ## Whose grant is the anchor ([ADR-0131] D5)
+ *
+ * Under `single` the promotion writes its grant OWNED BY THE DEFAULT
+ * ORGANIZATION (`defaultOrganizationId`), so that row is a holder; so is the
+ * organization-less row an earlier release's promotion wrote, until D10's
+ * ceremony attributes it to the same organization. The derivation site reads
+ * the same two (`grantAnchorsPlatformStanding`, `resolve-authz-context.ts`),
+ * so the holder this scan finds is the account the resolver grades
+ * PLATFORM_ADMIN — ⛔ a scan reading only the NULL row would find nobody on a
+ * promoted deployment the ceremony has run on and mint a SECOND grant on every
+ * boot. A user holding both rows is one holder; whichever row sorts first by
+ * `id` answers. Any other organization's grant of the set is an organization
+ * administrator's and never a holder. `defaultOrganizationId` is `undefined`
+ * under a wall, where only the legacy organization-less row is asked about (and
+ * only to report it — it anchors nothing there), and where the Default
+ * Organization cannot be named.
  *
  * The read was once `tryFind(ql, 'sys_user_permission_set', {
  * permission_set_id: adminPsId }, 50)` — no `orderBy`, cap 50 — with the
@@ -505,7 +539,7 @@ const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
  * ## Several holders
  *
  * Leg A's rows arrive ordered by grant-row `id` ({@link ADMIN_GRANT_SCAN_ORDER})
- * and the FIRST unscoped human row wins, so with two platform admins the answer
+ * and the FIRST anchoring human row wins, so with two platform admins the answer
  * is the holder of the grant row whose `id` sorts first — deterministic on every
  * driver that honours the order, and the same answer for every caller.
  *
@@ -525,7 +559,7 @@ const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
  * --apply`, ADR-0131 D10). A by-name scan alone would answer "nobody" for such
  * a grant, promote the oldest user and hand them the seeded records: the
  * second grant this function exists to refuse. So leg C, only when A and B
- * found nobody, reaches the unscoped human grants that name NOTHING, and one
+ * found nobody, reaches the anchoring human grants that name NOTHING, and one
  * comes back as `unnamedHolder`. It only ever RESTRICTS: the bootstrap
  * withholds the promotion on it, and it is never a holder — never an
  * `adminUserId`, never a claim target ({@link findExistingPlatformAdmin}).
@@ -540,15 +574,17 @@ const PLATFORM_ADMIN_PERMISSION_SET_NAME = 'admin_full_access';
 async function findPlatformAdminGrantHolder(
   ql: any,
   reachUnnamed: boolean,
+  defaultOrganizationId: string | undefined,
 ): Promise<{
   holder: any | undefined;
-  /** Leg C: an unscoped human grant that names no set yet (restricts only). */
+  /** Leg C: an anchoring human grant that names no set yet (restricts only). */
   unnamedHolder: any | undefined;
   adminGrantRowsExamined: number;
   truncated: boolean;
 }> {
-  const isUnscopedHumanHolder = (r: any) =>
-    !r.organization_id && r.user_id !== SystemUserId.SYSTEM;
+  const isAnchorHumanHolder = (r: any) =>
+    (!r.organization_id || (defaultOrganizationId !== undefined && r.organization_id === defaultOrganizationId))
+    && r.user_id !== SystemUserId.SYSTEM;
 
   // Counted by row IDENTITY, not by read: the two legs overlap by construction
   // (leg A's rows are a subset of leg B's population), and a number that
@@ -564,16 +600,22 @@ async function findPlatformAdminGrantHolder(
   };
   let truncated = false;
 
-  // Leg A — the narrow question, asked of the driver.
-  const unscopedGrantRows = await tryFind(
-    ql,
-    'sys_user_permission_set',
-    { [GRANT_SET_NAME_FIELD]: PLATFORM_ADMIN_PERMISSION_SET_NAME, organization_id: null },
-    PLATFORM_ADMIN_GRANT_PAGE_SIZE,
-    ADMIN_GRANT_SCAN_ORDER,
-  );
-  countExamined(unscopedGrantRows);
-  let holder: any | undefined = unscopedGrantRows.find(isUnscopedHumanHolder);
+  // Leg A — the narrow question, asked of the driver: once per anchoring owner
+  // (the organization-less row, and the Default Organization's), each answer
+  // ordered by `id`, and the row whose `id` sorts first of the two wins.
+  let holder: any | undefined;
+  for (const organizationId of defaultOrganizationId === undefined ? [null] : [null, defaultOrganizationId]) {
+    const anchorGrantRows = await tryFind(
+      ql,
+      'sys_user_permission_set',
+      { [GRANT_SET_NAME_FIELD]: PLATFORM_ADMIN_PERMISSION_SET_NAME, organization_id: organizationId },
+      PLATFORM_ADMIN_GRANT_PAGE_SIZE,
+      ADMIN_GRANT_SCAN_ORDER,
+    );
+    countExamined(anchorGrantRows);
+    const found = anchorGrantRows.find(isAnchorHumanHolder);
+    if (found && (!holder || String(found.id) < String(holder.id))) holder = found;
+  }
 
   /**
    * The ordered, bounded scan of one grant population, stopping at the first
@@ -597,7 +639,7 @@ async function findPlatformAdminGrantHolder(
 
   // Leg B — the ordered, bounded scan that still applies the exact predicate.
   if (!holder) {
-    holder = await scan({ [GRANT_SET_NAME_FIELD]: PLATFORM_ADMIN_PERMISSION_SET_NAME }, isUnscopedHumanHolder);
+    holder = await scan({ [GRANT_SET_NAME_FIELD]: PLATFORM_ADMIN_PERMISSION_SET_NAME }, isAnchorHumanHolder);
   }
 
   // Leg C — the grants that name nothing yet; it restricts only (see the
@@ -606,7 +648,7 @@ async function findPlatformAdminGrantHolder(
   if (!holder && reachUnnamed) {
     unnamedHolder = await scan(
       { [GRANT_SET_NAME_FIELD]: null },
-      (r) => grantSetNameOf(r) === undefined && isUnscopedHumanHolder(r),
+      (r) => grantSetNameOf(r) === undefined && isAnchorHumanHolder(r),
     );
   }
 
@@ -630,9 +672,9 @@ async function findPlatformAdminGrantHolder(
  *    the bootstrap never promotes, so no claim ever ran under a wall;
  *  - no {@link PLATFORM_ADMIN_PERMISSION_SET_NAME} among the sets this plugin
  *    ships (`admin_permission_set_missing`);
- *  - nobody holds the unscoped grant yet — a first boot, where the promotion
+ *  - nobody holds the anchoring grant yet — a first boot, where the promotion
  *    that follows does its own claim;
- *  - [ADR-0131 D4] the only unscoped grant of the set names nothing yet
+ *  - [ADR-0131 D4] the only anchoring grant of the set names nothing yet
  *    (`unnamedHolder`): it restricts the promotion and confers nothing, so it
  *    names no claim target — the claim of a later boot, once the backfill has
  *    named the grant, hands the rows over.
@@ -651,8 +693,29 @@ export async function findExistingPlatformAdmin(
   }
   // [ADR-0131 D4] By name alone: leg C (the legacy id reach) only restricts
   // and never names a holder, so this question needs no catalog row.
-  const { holder } = await findPlatformAdminGrantHolder(ql, false);
+  const { holder } = await findPlatformAdminGrantHolder(ql, false, await readPromotionGrantOwner(ql));
   return holder?.user_id ? String(holder.user_id) : undefined;
+}
+
+/**
+ * [ADR-0131 D5] The owner of the grant the `single` promotion writes, and of
+ * the grant the holder scan reads beside the organization-less one: the
+ * Default Organization, by the definition plugin-auth's boot invariant creates
+ * it by (`resolveDefaultOrganizationId` — `slug = 'default'`, else the only
+ * organization) and the derivation site reads it by (`resolve-authz-context.ts`
+ * `readDefaultOrganizationId`), so the row written is the row that confers.
+ *
+ * `undefined` when it cannot be named — no organization, several and none of
+ * them `default`, a composition that registers no organization object, or a
+ * read that failed. A failed read names nothing rather than guessing: the
+ * promotion then withholds and says why, and its next pass reads again.
+ */
+async function readPromotionGrantOwner(ql: any): Promise<string | undefined> {
+  try {
+    return await resolveDefaultOrganizationId(ql);
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -721,7 +784,8 @@ export async function bootstrapPlatformAdmin(
   //    verbatim: 「1509 选择 env 指定 owner 邮箱」; re-anchored by #11663 L4):
   //
   //   - `single`: first human user is promoted — ruled reasonable, unchanged
-  //     (Choice 4A keeps first-user promotion and its grant row). [#14348]
+  //     (Choice 4A keeps first-user promotion and its grant row, which ADR-0131
+  //     D5 has owned by the Default Organization). [#14348]
   //     "first human user" = the oldest one that can authenticate.
   //   - walled (`group` / `isolated`): NO grant row is written. Standing is
   //     config-derived at the one derivation site (`resolve-authz-context.ts`
@@ -735,6 +799,12 @@ export async function bootstrapPlatformAdmin(
   // promotion even while running degraded (OS_ALLOW_DEGRADED_TENANCY=1) —
   // fail toward the stricter reading, same direction ADR-0093 D5 fails.
   const walled = postureEnforcesWall(resolveTenancyPosture());
+
+  // [ADR-0131 D5] Under `single` the promotion's grant is the Default
+  // Organization's, so that is the owner the holder scan asks about beside the
+  // organization-less row and the owner a promotion writes. Under a wall no
+  // grant anchors standing and none is written, so nothing is asked.
+  const defaultOrganizationId = walled ? undefined : await readPromotionGrantOwner(ql);
 
   // [ADR-0131 D4] The grant names `admin_full_access`; the set is the catalog
   // definition this plugin ships, so no `sys_permission_set` row is needed to
@@ -751,11 +821,11 @@ export async function bootstrapPlatformAdmin(
   // ({@link findExistingPlatformAdmin}). Why it is two legs and why each is
   // bounded and ordered is on the function.
   const {
-    holder: unscopedHolder,
+    holder: anchorHolder,
     unnamedHolder,
     adminGrantRowsExamined,
     truncated: adminGrantScanTruncated,
-  } = await findPlatformAdminGrantHolder(ql, true);
+  } = await findPlatformAdminGrantHolder(ql, true, defaultOrganizationId);
 
   // ⛔ The truncation is never silent (commit 1c83ca226). Reaching the ceiling is the one
   // way this scan still answers "no platform admin yet" while one exists, and
@@ -763,13 +833,13 @@ export async function bootstrapPlatformAdmin(
   // grant and hands it the seeded business records. So it says the number it
   // examined rather than letting the promotion below read as a statement about
   // the whole table.
-  if (adminGrantScanTruncated && !unscopedHolder && !unnamedHolder) {
+  if (adminGrantScanTruncated && !anchorHolder && !unnamedHolder) {
     const truncation =
       '[security] the existing-platform-admin check stopped at its ceiling of '
       + `${PLATFORM_ADMIN_GRANT_SCAN_CEILING} admin_full_access grant row(s) `
-      + `(${adminGrantRowsExamined} examined) without finding an unscoped human grant — rows beyond `
+      + `(${adminGrantRowsExamined} examined) without finding a human platform-admin grant — rows beyond `
       + 'that point were NOT examined, so this deployment may ALREADY have a platform administrator '
-      + 'this boot did not see. Promoting now would mint a SECOND unscoped grant and re-own the seeded '
+      + 'this boot did not see. Promoting now would mint a SECOND platform-admin grant and re-own the seeded '
       + `business records to it. Name the intended administrator with ${PLATFORM_OWNER_EMAIL_ENV} rather `
       + 'than leaving the answer to a scan bound.';
     if (logger?.warn) logger.warn(truncation);
@@ -785,7 +855,7 @@ export async function bootstrapPlatformAdmin(
   // Under walled postures the same row is no longer an anchor at all, so the
   // walled branch below does not take this early exit: it goes on to report
   // config-derived standing, or to refuse fail-closed when nobody is declared.
-  if (!walled && unscopedHolder) {
+  if (!walled && anchorHolder) {
     return {
       adminPromoted: false,
       reason: 'already_have_admin',
@@ -793,7 +863,7 @@ export async function bootstrapPlatformAdmin(
       // re-run hands rows to this name — or, when it fires before this pass
       // has run at all, asks {@link findExistingPlatformAdmin}, which answers
       // with this same holder (see `adminUserId` above).
-      ...(unscopedHolder.user_id ? { adminUserId: String(unscopedHolder.user_id) } : {}),
+      ...(anchorHolder.user_id ? { adminUserId: String(anchorHolder.user_id) } : {}),
       ...grantScanCounts,
     };
   }
@@ -834,7 +904,7 @@ export async function bootstrapPlatformAdmin(
     // posture, so on these rigs standing is CONFIG-DERIVED and nothing else.
     //
     // ⛔ Nothing here writes, deletes or re-owns that row — its ownership is
-    // ADR-0131 C3's, on the v18 line. `unscopedHolder` therefore still means
+    // ADR-0131 C3's, on the v18 line. `anchorHolder` therefore still means
     // exactly what it meant: a row exists. What changed is what the row BUYS,
     // which under a wall is now nothing.
 
@@ -869,9 +939,9 @@ export async function bootstrapPlatformAdmin(
         // be administered through it; under a wall that row stopped conferring
         // when the dual read retired, so saying only "declare somebody" would hide
         // the fact that somebody has just lost standing.
-        (unscopedHolder
+        (anchorHolder
           ? " This deployment also holds a legacy unscoped 'admin_full_access' grant row" +
-            ` (user ${String(unscopedHolder.user_id)}). Under a walled posture that row is NO LONGER` +
+            ` (user ${String(anchorHolder.user_id)}). Under a walled posture that row is NO LONGER` +
             ` an anchor for platform admin standing — the migration window announced since 17.3.0 has` +
             ` closed — so declaring that account's verified address in ${PLATFORM_OWNER_EMAIL_ENV} is` +
             ' what restores it. The row itself is left exactly as it is.'
@@ -1009,12 +1079,37 @@ export async function bootstrapPlatformAdmin(
     chosen: any,
     audit: { basis: 'declared-owner' | 'oldest-authenticable'; pool: string; candidatePoolSize: number },
   ) => {
+    // [ADR-0131 D5] ⛔ Never a NULL-organization grant: the row is the Default
+    // Organization's, and a deployment whose Default Organization cannot be
+    // named is not promoted. Writing the row without an owner would hand out
+    // the highest-privilege grant in the system as the one shape D5 retires;
+    // guessing an owner would hand it to an organization the derivation site
+    // does not read as the anchor. So it withholds and says why — at `error`,
+    // because the deployment boots on looking healthy with no administrator —
+    // and the next pass (every `kernel:ready`, every sign-up) promotes once the
+    // organization can be named.
+    if (defaultOrganizationId === undefined) {
+      const message =
+        `[security] platform-admin promotion WITHHELD for ${chosen.email ?? chosen.id}: the grant it writes `
+        + 'is owned by the Default Organization (ADR-0131 D5), and this deployment names none — no '
+        + "sys_organization row with slug 'default' and not exactly one organization (or the read was "
+        + 'refused). Under the single tenancy posture the auth plugin creates the Default Organization at '
+        + 'boot; with several organizations, give the intended one the slug \'default\'. This deployment has '
+        + 'NO platform administrator until then.';
+      if (logger?.error) logger.error(message);
+      else logger?.warn?.(message);
+      return {
+        adminPromoted: false,
+        reason: 'default_organization_unresolved',
+        ...grantScanCounts,
+      };
+    }
     const inserted = await tryInsert(ql, 'sys_user_permission_set', {
       id: genId('ups'),
       user_id: chosen.id,
       // [ADR-0131 D4] The grant names its set; no id is written (D10).
       permission_set: PLATFORM_ADMIN_PERMISSION_SET_NAME,
-      organization_id: null,
+      organization_id: defaultOrganizationId,
       granted_by: null,
     });
     if (!inserted) {
@@ -1031,8 +1126,9 @@ export async function bootstrapPlatformAdmin(
       { basis: audit.basis, candidatePoolSize: audit.candidatePoolSize, userId: String(chosen.id) },
     );
 
-    // Hand seeded business records (owner_id NULL / usr_system) to the freshly
-    // promoted admin so owner-keyed UX works out of the box. Best-effort and
+    // Hand seeded business records (the seed's NULL-owner rows, and usr_system
+    // rows) to the freshly promoted admin so owner-keyed UX works out of the
+    // box — and no other unowned row (ADR-0138 D1). Best-effort and
     // idempotent — failures here must not undo the promotion above.
     //
     // ⚠️ This pass is NOT the last word, and does not pretend to be. The
@@ -1046,6 +1142,7 @@ export async function bootstrapPlatformAdmin(
       const claims = await claimSeedOwnership(ql, chosen.id, {
         logger,
         seedSettlement: options.seedSettlement,
+        seededRecordIds: options.seededRecordIds,
       });
       ownershipClaimed = claims.reduce((sum, c) => sum + c.count, 0);
     } catch (e) {

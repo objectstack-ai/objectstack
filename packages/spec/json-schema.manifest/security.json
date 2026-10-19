@@ -8,6 +8,7 @@
     "security/AuthzPosture",
     "security/CapabilityDeclaration",
     "security/CriteriaSharingRule",
+    "security/DefaultRowScope",
     "security/EffectiveObjectPermission",
     "security/ExplainDecision",
     "security/ExplainLayer",

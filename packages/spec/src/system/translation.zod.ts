@@ -155,10 +155,10 @@ const actionTranslationSchema = (surface: string) => strictObject({
   },
 }, {
   label: z.string().optional().describe('Translated action label'),
-  // The address `useObjectLabel.actionDescription` already resolves —
-  // `objects.{object}._actions.{action}.description`, falling back to
-  // `globalActions.{action}.description` (objectui
-  // packages/i18n/src/useObjectLabel.ts:463). Declared here with #7367's
+  // The address objectui's `actionDescription` resolver already reads —
+  // `objects.{object}._actions.{action}.description` for an action bound to an
+  // object, `globalActions.{action}.description` for an object-less one (read
+  // points recorded in `liveness/action.json`, row `description`). Declared here with #7367's
   // `ActionSchema.description`: a bundle could not carry the string the
   // resolver was already looking for.
   description: z.string().optional().describe('Translated action description — the explanatory line under the title in the action\'s param dialog'),
@@ -392,9 +392,19 @@ export const ObjectTranslationDataSchema = lazySchema(() => strictObject({
    * Section translations keyed by section name (snake_case).
    * Convention:
    *   objects.<object>._sections.<section_name>.label
-   * Used by `record:details` to translate per-section labels on detail pages
-   * (e.g. "Opportunity Information" → "商机信息"). Each section in the
-   * page schema must declare a stable `name` for the lookup to fire.
+   *   objects.<object>._sections.<section_name>.description
+   * Three authoring surfaces name a section under this key (e.g.
+   * "Opportunity Information" → "商机信息"): an object-bound form view's
+   * `sections[].name` (`FormSectionSchema.name`), a `record:details`
+   * component's `sections[].name` on a record page, and an object's
+   * `fieldGroups[].key`. A section without a stable name has no key here.
+   *
+   * Read by the i18n extractor (`walkObjectSections`, which scaffolds the key
+   * from all three surfaces), the translation linter (`collectViewRecord`,
+   * which accepts the names a form view declares) and `translateView` (which
+   * overlays a served form view's `config.sections`). A metadata-editing
+   * form's sections are keyed elsewhere, at
+   * `metadataForms.<type>.sections.<section_name>`.
    */
   _sections: z.record(z.string(), strictObject({
     surface: 'this section translation',
@@ -1616,11 +1626,20 @@ const platformSettingsShape = () => ({
    *   settings.<namespace>.actions.<action_id>.label
    *   settings.<namespace>.actions.<action_id>.confirmText
    *   settings.<namespace>.actions.<action_id>.successMessage
+   *   settings.<namespace>.banners.<banner_id>.title
+   *   settings.<namespace>.banners.<banner_id>.text
+   *
+   * `banners` is keyed by an `info_banner` specifier's `id`, as `groups` is
+   * keyed by a `group` specifier's. Its leaves follow the nearest sibling:
+   * the specifier's `label` translates as `title` (the heading spelling
+   * `groups` already uses for the same field), and its `bannerText` as
+   * `text`. A banner without an `id` has no address here and renders its
+   * manifest literals.
    */
   settings: z.record(z.string(), strictObject({
     surface: 'this settings manifest translation',
     history: TRANSLATION_HISTORY,
-    aliases: { label: 'title', name: 'title', sections: 'groups', fields: 'keys', settings: 'keys' },
+    aliases: { label: 'title', name: 'title', sections: 'groups', fields: 'keys', settings: 'keys', banner: 'banners', notices: 'banners', alerts: 'banners' },
   }, {
     title: z.string().optional().describe('Translated settings manifest title'),
     description: z.string().optional().describe('Translated settings manifest description'),
@@ -1659,6 +1678,17 @@ const platformSettingsShape = () => ({
       confirmText: z.string().optional().describe('Translated confirmation prompt'),
       successMessage: z.string().optional().describe('Translated success toast/message'),
     })).optional().describe('Action button translations keyed by action id'),
+    banners: z.record(z.string(), strictObject({
+      surface: 'this settings banner translation',
+      history: TRANSLATION_HISTORY,
+      // The specifier's own spellings (`label`, `bannerText`) and the group
+      // body's (`description`) are the likely borrowings; each names the leaf
+      // that holds the same string here.
+      aliases: { label: 'title', name: 'title', heading: 'title', bannerText: 'text', body: 'text', description: 'text', message: 'text' },
+    }, {
+      title: z.string().optional().describe('Translated banner title (the info_banner specifier label)'),
+      text: z.string().optional().describe('Translated banner body, markdown (the info_banner specifier bannerText)'),
+    })).optional().describe('Info banner translations keyed by the info_banner specifier id'),
   })).optional().describe('Settings manifest translations keyed by namespace'),
 });
 

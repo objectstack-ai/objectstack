@@ -145,10 +145,30 @@ describe('the population is derived from Setup and Account navigation (#21972)',
   // Non-vacuity control, not the population: the objects this card reordered
   // must still be judged by both pins, or a green run says nothing about them.
   it('judges every object whose caller-scoped first view this card moved', () => {
-    for (const name of ['sys_user', 'sys_api_key', 'sys_session', 'sys_oauth_application', 'sys_account', 'sys_user_preference']) {
+    for (const name of ['sys_user', 'sys_api_key', 'sys_session', 'sys_oauth_application', 'sys_account']) {
       expect(JUDGED_BY_A, `(a) no longer judges ${name}`).toContain(name);
       expect(JUDGED_BY_B.map((e) => e.objectName), `(b) no longer judges an entry naming ${name}`).toContain(name);
     }
+  });
+
+  // The sixth object #21972 reordered left this population with Setup's "User
+  // Preferences" entry (#23803): no nav entry of either app names it now, so
+  // neither pin above reaches it, and (b) has nothing to judge. (a)'s concern
+  // does not leave with the entry — a preference row opened from the User
+  // record page's Preferences tab still has an object breadcrumb, a door that
+  // names no view — so (a) is held for it here, by name. Should an entry name
+  // it again, the first assertion goes red: put it back in the list above.
+  it('holds (a) for sys_user_preference, which no nav entry names any more', () => {
+    expect(NAMED_OBJECTS, 'an entry names sys_user_preference again — judge it in the loop above').not.toContain(
+      'sys_user_preference',
+    );
+    expect(CATALOGUE.has('sys_user_preference'), 'control: the object is read from this package').toBe(true);
+    const [firstName, firstView] = Object.entries(listViewsOf('sys_user_preference'))[0] ?? [];
+    expect(firstName).toBeTypeOf('string');
+    expect(
+      isCallerScoped(firstView),
+      `sys_user_preference declares the caller-scoped list view "${firstName}" first`,
+    ).toBe(false);
   });
 
   it('cannot read exactly these named objects from this package', () => {

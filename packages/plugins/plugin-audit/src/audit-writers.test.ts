@@ -687,14 +687,16 @@ describe('audit writers — enable.activities opt-out gate (#2707)', () => {
 });
 
 /**
- * [#22961] A user's own write to their own per-user UI-state row writes the
- * ledger row and no activity row. Every other writer keeps today's rows.
+ * [#22961, #23804 (ruling record 6212163130)] A user's own write to their own
+ * per-user UI-state row writes neither the ledger row nor the activity row.
+ * Every other writer keeps both rows.
  *
  * The rows below are the console's "recently visited" write as the real engine
  * hands it to this hook: the session subject is the owner, and both `result`
- * and the bound `previous` carry the full row with its `user_id`.
+ * and the bound `previous` carry the full row with its `user_id`. The real
+ * engine's own shapes are pinned in `audit-writers.own-ui-state.integration.test.ts`.
  */
-describe('audit writers — a user\'s own per-user UI-state write is not mirrored (#22961)', () => {
+describe('audit writers — a user\'s own per-user UI-state write is not recorded (#22961, #23804)', () => {
   const SCHEMA = {
     sys_audit_log: SINGLE_TENANT.sys_audit_log,
     sys_activity: SINGLE_TENANT.sys_activity,
@@ -717,17 +719,13 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
   ] as const;
 
   for (const w of OWN_WRITES) {
-    it(`the owner's own ${w.action} writes the sys_audit_log row and no sys_activity row`, async () => {
+    it(`the owner's own ${w.action} writes no sys_audit_log row and no sys_activity row`, async () => {
       const { engine, fire, created } = makeEngine(SCHEMA);
       installAuditWriters(engine as any, 'test.audit');
 
       await fire(w.event, { object: 'sys_user_preference', ...w.ctx, session: { userId: OWNER } });
 
-      const ledger = rowsOn(created, 'sys_audit_log', 'sys_user_preference');
-      expect(ledger).toHaveLength(1);
-      expect(ledger[0].row.action).toBe(w.action);
-      expect(ledger[0].row.user_id).toBe(OWNER);
-      expect(ledger[0].row.record_id).toBe(PREF.id);
+      expect(created.filter((c) => c.object === 'sys_audit_log')).toHaveLength(0);
       expect(created.filter((c) => c.object === 'sys_activity')).toHaveLength(0);
     });
   }
@@ -766,7 +764,7 @@ describe('audit writers — a user\'s own per-user UI-state write is not mirrore
   ] as const;
 
   for (const w of OTHER_WRITERS) {
-    it(`CONTROL: on a user's preference row, ${w.who} keeps its activity row`, async () => {
+    it(`CONTROL: on a user's preference row, ${w.who} keeps its ledger row and its activity row`, async () => {
       const { engine, fire, created } = makeEngine(SCHEMA);
       installAuditWriters(engine as any, 'test.audit');
 
@@ -1087,6 +1085,70 @@ describe('audit writers — localized activity summaries (framework#3039)', () =
     await fire('afterInsert', insertCtx());
     await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
     expect(localeCalls()).toBe(1);
+  });
+
+  // [#24235] The held locale is retired by a write to either settings store;
+  // the real-engine pin is `audit-write-locale-settings-seam.integration.test.ts`.
+  // These two hold what it cannot reach: the global rung's own store, and a
+  // write landing while a lookup is still in flight.
+  const settingsWrite = (object: string) => ({
+    object,
+    input: {},
+    result: { id: 's-1', namespace: 'localization', key: 'locale' },
+    previous: { id: 's-1', namespace: 'localization', key: 'locale' },
+    session: {},
+  });
+  const summaryOf = (created: CapturedRow[], name: string) =>
+    created.find((c) => c.object === 'sys_activity' && c.row.record_label === name)?.row.summary;
+
+  it('[#24235] a write to either settings store retires the held locale; without one it is held', async () => {
+    for (const store of [undefined, 'sys_setting', 'sys_platform_setting']) {
+      const { engine, fire, created } = makeEngine(WITH_QUALIFICATION);
+      let locale: string | undefined;
+      installAuditWriters(engine as any, 'test.audit', { getI18n: () => makeI18n() as any, getLocale: async () => locale });
+      await fire('afterInsert', insertCtx());
+      locale = 'zh-CN';
+      if (store) await fire('afterUpdate', settingsWrite(store));
+      await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
+      expect(summaryOf(created, 'OC-00001'), String(store)).toBe('Created person_qualification "OC-00001"');
+      // The control (`undefined`: no settings write) still answers from the held locale.
+      expect(summaryOf(created, 'OC-00002'), String(store)).toBe(
+        store ? '创建了 人员资质 "OC-00002"' : 'Created person_qualification "OC-00002"',
+      );
+    }
+  });
+
+  it('[#24235] a settings write landing while the lookup is in flight leaves the pre-write answer unheld', async () => {
+    const { engine, fire, created } = makeEngine(WITH_QUALIFICATION);
+    let entered!: () => void;
+    const lookupStarted = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let release!: () => void;
+    const inFlight = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let calls = 0;
+    installAuditWriters(engine as any, 'test.audit', {
+      getI18n: () => makeI18n() as any,
+      getLocale: async () => {
+        calls += 1;
+        if (calls === 1) {
+          entered();
+          await inFlight; // read before the write below, answered after it
+          return undefined;
+        }
+        return 'zh-CN';
+      },
+    });
+    const first = fire('afterInsert', insertCtx());
+    await lookupStarted;
+    await fire('afterUpdate', settingsWrite('sys_setting'));
+    release();
+    await first;
+    await fire('afterInsert', { ...insertCtx(), result: { id: 'q-2', name: 'OC-00002' } });
+    expect(summaryOf(created, 'OC-00001')).toBe('Created person_qualification "OC-00001"');
+    expect(summaryOf(created, 'OC-00002')).toBe('创建了 人员资质 "OC-00002"');
   });
 
   // Collaboration notification titles (assignment / @mention) are localized to
@@ -2500,5 +2562,80 @@ describe('[#21207] stored metadata copies carry no content hash', () => {
     });
     const audit = created.find((c) => c.object === 'sys_audit_log');
     expect(JSON.parse(audit!.row.new_value).checksum).toBe(HASH);
+  });
+});
+
+/**
+ * [ADR-0131 D9] An activity row about a record with no organization of its own
+ * (a `sys_user`, a platform setting), written with no session organization (a
+ * sign-up), takes the one the host derives — the `tenancy` service's Default
+ * Organization under `single`. Under a wall none is derivable, and then no
+ * activity row is written at all — never a NULL one (ruling 6257510973 item 3,
+ * Q3 A); the ledger row still is. The ledger row's `tenant_id` is an
+ * attribution of what the row is ABOUT (D7) and is not touched; a known
+ * organization is never overridden.
+ */
+describe('audit writers — the activity row of an org-less record names the derivable organization (ADR-0131 D9)', () => {
+  const ORG_LESS = { ...MULTI_TENANT, sys_user: ['id', 'name', 'email'] };
+  const signUp = {
+    object: 'sys_user',
+    input: { id: 'usr-1' },
+    result: { id: 'usr-1', name: 'Ada', email: 'ada@example.com' },
+    session: {},
+  };
+
+  it('stamps the Default Organization under single, and leaves the ledger attribution alone', async () => {
+    const { engine, fire, created } = makeEngine(ORG_LESS);
+    installAuditWriters(engine as any, 'test.audit', { getDefaultOrganizationId: async () => 'org-default' });
+    await fire('afterInsert', signUp);
+
+    expect(created.find((c) => c.object === 'sys_activity')?.row.organization_id).toBe('org-default');
+    expect(created.find((c) => c.object === 'sys_audit_log')?.row.tenant_id).toBeNull();
+  });
+
+  it('writes no activity row under a wall, nor when the host derives nothing or cannot answer — the ledger row still lands', async () => {
+    for (const getDefaultOrganizationId of [async () => null, undefined, async () => { throw new Error('no tenancy'); }]) {
+      const { engine, fire, created } = makeEngine(ORG_LESS);
+      installAuditWriters(engine as any, 'test.audit', getDefaultOrganizationId ? { getDefaultOrganizationId } : {});
+      await fire('afterInsert', signUp);
+      expect(created.filter((c) => c.object === 'sys_activity')).toEqual([]);
+      const ledger = created.filter((c) => c.object === 'sys_audit_log');
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0]!.row).toMatchObject({ object_name: 'sys_user', record_id: 'usr-1', tenant_id: null });
+    }
+  });
+
+  it('a record that names its organization still has its activity row under a wall, with that organization', async () => {
+    const { engine, fire, created } = makeEngine({ ...ORG_LESS, crm_lead: ['id', 'name', 'organization_id'] });
+    installAuditWriters(engine as any, 'test.audit', { getDefaultOrganizationId: async () => null });
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: {},
+    });
+    expect(created.filter((c) => c.object === 'sys_activity').map((c) => c.row.organization_id)).toEqual(['org-A']);
+  });
+
+  it('never overrides a known organization — the record\'s, then the session\'s — nor asks for one', async () => {
+    let asked = 0;
+    const getDefaultOrganizationId = async () => { asked += 1; return 'org-default'; };
+    const { engine, fire, created } = makeEngine({ ...MULTI_TENANT, crm_lead: ['id', 'name', 'organization_id'] });
+    installAuditWriters(engine as any, 'test.audit', { getDefaultOrganizationId });
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: { organizationId: 'org-B', userId: 'user-1' },
+    });
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-2' },
+      result: { id: 'lead-2', name: 'Beta', organization_id: null },
+      session: { organizationId: 'org-B', userId: 'user-1' },
+    });
+    const activities = created.filter((c) => c.object === 'sys_activity').map((c) => c.row.organization_id);
+    expect(activities).toEqual(['org-A', 'org-B']);
+    expect(asked).toBe(0);
   });
 });

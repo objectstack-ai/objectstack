@@ -28,6 +28,7 @@ import type { TenancyPosture } from '@objectstack/spec/security';
 import type { ApiKeyLifecyclePolicy } from '@objectstack/spec/contracts';
 
 import { accountScopeAuthGate, type AuthGate, type UserAuthGateSource } from './auth-gate.js';
+import { isMissingTableError } from '@objectstack/types';
 import { AuthzStoreUnavailableError } from './authz-store-unavailable.js';
 
 /** Default visible prefix for generated keys (helps users identify a key). */
@@ -306,7 +307,23 @@ function lifecycleRefusalOf(
   if (row.revoked === true || row.revoked === 1) {
     return {
       code: API_KEY_REVOKED_REFUSAL.code,
-      message: `${label} was revoked, and a revoked key never works again. ${API_KEY_REMEDY}`,
+      // Revocation is the `revoked` flag, and `restore_api_key` clears it again
+      // (`sys_api_key`'s own row action): the key works at once, no re-issue.
+      // Who may clear it depends on why it was set, read off the row's
+      // `revoked_reason`: a key an administrator's forced password reset
+      // revoked (`admin_password_reset`) is restored by a platform
+      // administrator only (plugin-auth `api-key-restore-guard.ts` refuses its
+      // owner); any other revoked key by its owner or a platform administrator.
+      // The text names exactly those restorers and never claims the key is
+      // gone for good. Rotation stays the other road, for a key that should
+      // not come back.
+      message: row.revoked_reason === 'admin_password_reset'
+        ? `${label} was revoked by an administrator's forced password reset. Only a platform administrator can `
+          + 'restore it (the Restore API Key action on the API Keys list); otherwise create a new key '
+          + '(POST /api/v1/keys, or the API Keys page) and replace this one wherever it is configured.'
+        : `${label} was revoked. Its owner or a platform administrator can restore it (the Restore API Key action `
+          + 'on the API Keys list); otherwise create a new key (POST /api/v1/keys, or the API Keys page) and replace '
+          + 'this one wherever it is configured.',
       ...ids,
     };
   }
@@ -571,10 +588,12 @@ export function effectiveTenancyPosture(
  * the verdict of {@link resolveApiKeyAdmission}, collapsed to a principal.
  *
  * Fail-closed: returns `undefined` for a missing key, an unusable data engine,
- * a lookup error, a key that is unknown / owner-less, a key its own lifecycle
+ * a key that is unknown / owner-less, a key its own lifecycle
  * refuses (revoked / expired / inactive — `lifecycle`), a key the tenancy
  * posture refuses, and a key whose OWNER holds an `account`-scope ADR-0069
- * posture (`held`).
+ * posture (`held`). A `sys_api_key` read that THROWS is no answer at all: it
+ * raises the branded `AuthzStoreUnavailableError` (#24299), as an unreadable
+ * lifecycle-policy or posture source already does.
  *
  * ⚠️ The collapse is lossy by construction: a principal-or-nothing answer cannot
  * carry the posture's code, so a host that admits keys through this function
@@ -680,8 +699,22 @@ export async function resolveApiKeyAdmission(
       limit: 1,
       context: { isSystem: true },
     });
-  } catch {
-    return { outcome: 'none' };
+  } catch (err) {
+    // [#24299] A read that was ISSUED and THREW is the branded store outage,
+    // never "no key". `none` here sent a key holder the anonymous floor's
+    // `401` where a session caller got `503`, and let the request fall on to
+    // the session arm, so a cookie sent beside the key answered for a
+    // credential the caller did not lead with (measured: served as the
+    // cookie's user on the REST data door and the runtime dispatcher).
+    //
+    // The one read failure that IS a true "no key" is a `sys_api_key` table
+    // that was never provisioned: no key can exist there, so nothing was
+    // withheld. That is the boundary the 2026-08-30 ruling (option A) draws
+    // for `resolveAuthzContext`'s `tryFind`, asked through the same
+    // `isMissingTableError` predicate — ⛔ never a second classifier here;
+    // its signed-off false-positive risk is written beside `tryFind`.
+    if (isMissingTableError(err, 'sys_api_key')) return { outcome: 'none' };
+    throw new AuthzStoreUnavailableError('sys_api_key', err);
   }
   if (rows && (rows as any).value) rows = (rows as any).value;
   const row = Array.isArray(rows) ? rows[0] : undefined;

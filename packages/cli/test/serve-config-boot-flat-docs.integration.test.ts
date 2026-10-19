@@ -57,12 +57,11 @@ import { join } from 'node:path';
 import {
   CLI,
   E2E_SECRET_KEY,
+  KERNEL_ASSIGNED_PORT,
   TSX,
   childEnv,
-  portContentionError,
-  portDriftError,
   probeThroughChild,
-  randomPort,
+  readKernelAssignedPort,
 } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
@@ -138,13 +137,15 @@ function project(prefix: string, config: string, serviceDocs: boolean): string {
 
 interface LiveServe {
   child: ChildProcessWithoutNullStreams;
+  /** The port the child bound: kernel-assigned, read back off its own banner (#24342). */
+  port: number;
   output: () => string;
 }
 
 /** Boot `os serve objectstack.config.ts --dev` and keep it running; `--dev` seeds the admin. */
-function bootServe(dir: string, port: string): Promise<LiveServe> {
+function bootServe(dir: string): Promise<LiveServe> {
   return new Promise((resolveBoot, rejectBoot) => {
-    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', port, '--dev'], {
+    const child = spawn(TSX, [CLI, 'serve', 'objectstack.config.ts', '-p', KERNEL_ASSIGNED_PORT, '--dev'], {
       cwd: dir,
       stdio: ['pipe', 'pipe', 'pipe'],
       // `childEnv`, never a bare `...process.env` — see its header (commit 1ddda1d00).
@@ -161,12 +162,12 @@ function bootServe(dir: string, port: string): Promise<LiveServe> {
     const what = `os serve --dev in ${dir}`;
     let out = '';
     let settled = false;
-    const settle = (err: Error | null) => {
+    const settle = (verdict: Error | number) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (err) rejectBoot(err);
-      else resolveBoot({ child, output: () => out });
+      if (verdict instanceof Error) rejectBoot(verdict);
+      else resolveBoot({ child, port: verdict, output: () => out });
     };
     const timer = setTimeout(
       () => settle(new Error(`${what} never printed ${READY}\n--- output ---\n${out.slice(-4000)}`)),
@@ -175,15 +176,12 @@ function bootServe(dir: string, port: string): Promise<LiveServe> {
     const onData = (d: unknown) => {
       out += String(d);
       // The child is the authority on the port it bound (#12525).
-      if (READY.test(out)) settle(portDriftError(out, what, port));
+      if (READY.test(out)) settle(readKernelAssignedPort(out, what));
     };
     child.stdout.on('data', onData);
     child.stderr.on('data', onData);
     child.on('exit', (code) =>
-      settle(
-        portContentionError(out, what, port)
-          ?? new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`),
-      ),
+      settle(new Error(`${what} exited ${String(code)} before ${READY}\n--- output ---\n${out.slice(-4000)}`)),
     );
   });
 }
@@ -243,9 +241,8 @@ interface Reading {
 
 /** Boot `dir`, sign in as the seeded admin, read `GET /api/v1/meta/doc` and every doc it lists, stop. */
 async function readDocs(dir: string): Promise<Reading> {
-  const port = randomPort();
-  const base = `http://localhost:${port}/api/v1`;
-  const serve = await bootServe(dir, port);
+  const serve = await bootServe(dir);
+  const base = `http://localhost:${serve.port}/api/v1`;
   try {
     const signIn = await request(serve, 'the sign-in probe', `${base}/auth/sign-in/email`, {
       method: 'POST',

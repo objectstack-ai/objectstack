@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 import { CreateRecordConfigSchema } from '../automation/builtin-node-config.zod.js';
 import { FlowSchema } from '../automation/flow.zod.js';
+import { FLOW_RESERVED_NODE_TYPES } from '../automation/flow-reserved-node-types.js';
 import { ScriptConfigSchema } from '../automation/schemaless-node-config.zod.js';
 import { DatasourceSchema } from '../data/datasource.zod.js';
 import {
@@ -14,9 +15,10 @@ import {
 import { normalizeStackInput } from '../shared/metadata-collection.zod.js';
 import { ElementButtonPropsSchema, PageHeaderProps, PageTabsProps } from '../ui/component.zod.js';
 import { PageSchema } from '../ui/page.zod.js';
+import { JobSchema, RetryPolicySchema } from '../system/job.zod.js';
 import { defineStack } from '../stack.zod.js';
 import { applyMetaMigrations } from '../migrations/chain.js';
-import { applyConversions, collectConversionNotices } from './apply.js';
+import { applyConversions, applyConversionsToFlow, collectConversionNotices } from './apply.js';
 import { ALL_CONVERSIONS, CONVERSIONS_BY_MAJOR } from './registry.js';
 import { applyConversionsToStoredItem } from './stored.js';
 import { renameConfigKey, renameKey } from './walk.js';
@@ -106,12 +108,16 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(applyConversions(clean)).toBe(clean);
     });
 
+    // The data-at-rest posture (`includeRetired`): since #23543 F5-http no
+    // entry is live on the default path, and a pass that converts nothing
+    // would hold both claims below vacuously.
     it('never mutates the caller input', () => {
       const before = {
         flows: [{ name: 'f', nodes: [{ id: 'n', type: 'http_request', config: { url: 'x' } }] }],
       };
       const snapshot = structuredClone(before);
-      applyConversions(before);
+      const out = applyConversions(before, { includeRetired: true });
+      expect((out.flows as any[])[0].nodes[0].type, 'premise: the pass converted').toBe('http');
       expect(before).toEqual(snapshot);
     });
 
@@ -119,14 +125,18 @@ describe('conversion layer (ADR-0087 D2)', () => {
       const plugin = { onEnable() {} }; // non-clonable value that must be preserved by reference
       const stack: Record<string, unknown> = {
         plugins: [plugin],
-        pages: [{ name: 'p', kind: 'jsx', source: '<div/>' }],
+        flows: [{ name: 'f', nodes: [{ id: 'n', type: 'http_request', config: { url: 'x' } }] }],
       };
-      const out = applyConversions(stack);
+      const out = applyConversions(stack, { includeRetired: true });
       expect(out).not.toBe(stack);
       expect((out.plugins as unknown[])[0]).toBe(plugin); // same reference, untouched
     });
   });
 
+  // `flow-node-http-callout-rename` left the load path at 18 (#23543 F5-http):
+  // the rewrite cases run the data-at-rest posture (`includeRetired`) — the
+  // replay stored flows still get — and the retirement itself is pinned in the
+  // load-path retirement block.
   describe('flow-node-http-callout-rename', () => {
     it('rewrites http_request / http_call / webhook → http, leaving http untouched', () => {
       const { stack, notices } = collectConversionNotices({
@@ -140,7 +150,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
             ],
           },
         ],
-      });
+      }, { includeRetired: true });
       const nodes = (stack.flows as any[])[0].nodes;
       expect(nodes.map((n: any) => n.type)).toEqual(['http', 'http', 'http']);
       expect(notices).toHaveLength(2); // 'http' was already canonical
@@ -148,33 +158,37 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
-  describe('flow-node-http-callout-rename — reserved-name conflict guard', () => {
-    it('refuses to rewrite an alias a live executor owns, reporting a conflict', () => {
+  /**
+   * The ADR-0078 conflict guard this entry carried until 18 is gone (#23543
+   * F5-http): it skipped a node whose old name a live executor owned. The
+   * engine now refuses to register an executor under a reserved name
+   * (`AutomationEngine.registerNodeExecutor`), so no live owner can exist, and
+   * the rewrite is unconditional. Protocol 18 removed the conflict channel with
+   * it (#24001): a pass has no live-name set to consult and no conflict sink.
+   */
+  describe('flow-node-http-callout-rename — the rewrite is unconditional', () => {
+    it('rewrites a reserved name with one notice and nothing else', () => {
       const notices: ConversionNotice[] = [];
-      const conflicts: { token: string; path: string; conversionId: string }[] = [];
       const out = applyConversions(
         { flows: [{ name: 'f', nodes: [{ id: 'a', type: 'webhook' }] }] },
         {
+          includeRetired: true,
           onNotice: (n) => notices.push(n),
-          onConflict: (c) => conflicts.push({ token: c.token, path: c.path, conversionId: c.conversionId }),
-          reservedNodeTypes: new Set(['webhook']), // a third-party custom node owns this name
         },
       );
-      // Not rewritten — the custom node is preserved.
-      expect((out.flows as any[])[0].nodes[0].type).toBe('webhook');
-      expect(notices).toHaveLength(0);
-      expect(conflicts).toEqual([
-        { token: 'webhook', path: 'flows[0].nodes[0].type', conversionId: 'flow-node-http-callout-rename' },
-      ]);
+      expect((out.flows as any[])[0].nodes[0].type).toBe('http');
+      expect(notices.map((n) => n.conversionId)).toEqual(['flow-node-http-callout-rename']);
     });
 
-    it('converts normally when the alias is not a live type (build/validate seam)', () => {
-      // No reservedNodeTypes → the historical alias converts as usual.
-      const { stack, notices } = collectConversionNotices({
-        flows: [{ name: 'f', nodes: [{ id: 'a', type: 'webhook' }] }],
-      });
-      expect((stack.flows as any[])[0].nodes[0].type).toBe('http');
-      expect(notices).toHaveLength(1);
+    it('reads the reserved-name table the flow parse refuses with', () => {
+      const types = Object.keys(FLOW_RESERVED_NODE_TYPES);
+      expect([...types].sort()).toEqual(['http_call', 'http_request', 'webhook']);
+      const { stack, notices } = collectConversionNotices(
+        { flows: [{ name: 'f', nodes: types.map((type, i) => ({ id: `n${i}`, type })) }] },
+        { includeRetired: true },
+      );
+      expect((stack.flows as any[])[0].nodes.map((n: any) => n.type)).toEqual(types.map((t) => FLOW_RESERVED_NODE_TYPES[t]));
+      expect(notices).toHaveLength(types.length);
     });
   });
 
@@ -392,23 +406,15 @@ describe('conversion layer (ADR-0087 D2)', () => {
     /**
      * The family closed at 18 (#23487): every entry whose window ran out
      * before 18 has a verdict. Seven left the load path (with #23421's two,
-     * nine of the family); the eight below stay, each with the reason written
-     * into its own docblock and what would have to change for it to retire.
+     * nine of the family); eight stayed, each with the reason written into its
+     * own docblock and what would have to change for it to retire. The
+     * #23543 rulings retired all eight (F1–F5, listed below), so none is kept.
      * A new entry below 18 that is neither retired nor listed here is an
      * entry nobody judged.
      */
     it('every entry whose window ran out before 18 is retired or kept by name', () => {
       const kept = ALL_CONVERSIONS.filter((c) => c.toMajor < 18 && !c.retiredFromLoadPath).map((c) => c.id).sort();
-      expect(kept).toEqual([
-        'datasource-driver-mongo-to-mongodb',
-        'flow-node-connector-config-lift',
-        'flow-node-http-callout-rename',
-        'flow-node-wait-event-config-lift',
-        'page-component-visibility-to-visibleWhen',
-        'page-kind-jsx-to-html',
-        'retry-policy-converged',
-        'view-visibleOn-to-visibleWhen',
-      ]);
+      expect(kept).toEqual([]);
       for (const id of [
         'flow-node-crud-filter-alias',
         'flow-node-crud-object-alias',
@@ -417,6 +423,25 @@ describe('conversion layer (ADR-0087 D2)', () => {
         'flow-node-subflow-flow-alias',
         'flow-node-script-config-aliases',
         'sharing-rule-access-level-full-to-edit',
+        // #23543 F1: retired once `mongo` itself was retired as a value.
+        'datasource-driver-mongo-to-mongodb',
+        // #23543 F5-jsx: retired once `jsx` itself was retired as a page kind.
+        'page-kind-jsx-to-html',
+        // #23543 F3: retired once the flow parse refused the loose `config`
+        // keys and each lift deleted the keys its block shadows.
+        'flow-node-wait-event-config-lift',
+        'flow-node-connector-config-lift',
+        // #23543 F2: retired once the job parse refused a `retryPolicy` block
+        // whose `maxRetries` is omitted or 0.
+        'retry-policy-converged',
+        // #23543 F4: retired once the view form's `visibleOn` and the page
+        // component's `visibility` were themselves retired as keys.
+        'view-visibleOn-to-visibleWhen',
+        'page-component-visibility-to-visibleWhen',
+        // #23543 F5-http: retired once the three names were reserved inside
+        // the open node namespace — refused by the flow parse and by the
+        // engine's executor registration.
+        'flow-node-http-callout-rename',
       ]) {
         expect(ALL_CONVERSIONS.find((c) => c.id === id), id).toMatchObject({ retiredFromLoadPath: true, retiredAfter: '17.7.0' });
       }
@@ -448,21 +473,38 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(issues[0]!.message).toContain('Use `objectName`');
     });
 
-    it('a live-window conversion still applies at load (protocol-15 aliases)', () => {
-      const { stack, notices } = collectConversionNotices({
-        pages: [
-          {
-            name: 'p',
-            regions: [{ name: 'main', components: [{ type: 'record:list', visibility: 'true' }] }],
-          },
-        ],
-      });
-      const component = (stack.pages as any[])[0].regions[0].components[0];
-      expect(component.visibleWhen).toBe('true');
-      expect(component.visibility).toBeUndefined();
-      expect(notices).toHaveLength(1);
-      expect(notices[0]!.conversionId).toBe('page-component-visibility-to-visibleWhen');
+    it('a reserved callout node type reaches defineStack as authored and is refused naming http and the release', () => {
+      const authored = {
+        flows: [{
+          name: 'f',
+          label: 'F',
+          type: 'autolaunched',
+          nodes: [
+            { id: 's', type: 'start', label: 'S' },
+            { id: 'h', type: 'http_request', label: 'H', config: { url: 'https://example.com' } },
+          ],
+          edges: [],
+        }],
+      };
+      let refusal: unknown;
+      try {
+        defineStack(authored as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['flows.0.nodes.1.type']);
+      expect(issues[0]!.message).toContain("Flow node `type: 'http_request'` was removed in @objectstack/spec 18");
+      expect(issues[0]!.message).toContain("Use `type: 'http'`");
     });
+
+    // Until #23543 F5-http this block also held 'a live-window conversion still
+    // applies at load', driven by the callout rename, the last entry below 18
+    // left live. With it retired no real entry is live on the default path, so
+    // that claim (and the `normalizeStackInput` sink cases below that rode the
+    // same entry) moved to `apply-live-window.test.ts`, which owns a test-only
+    // live entry and so does not depend on any real entry's lifecycle.
   });
 
   /**
@@ -611,30 +653,21 @@ describe('conversion layer (ADR-0087 D2)', () => {
   });
 
   describe('normalizeStackInput integration (the load seam)', () => {
-    it('converts at load and surfaces notices through the sink', () => {
+    // The three sink / map-collection cases that stood here moved to
+    // `apply-live-window.test.ts` with #23543 F5-http: they need a LIVE entry,
+    // and the callout rename that drove them was the last one below 18.
+    it('a retired callout name passes the authoring funnel as written, while the stored-row door converts it', () => {
       const notices: ConversionNotice[] = [];
-      const out = normalizeStackInput(
-        { pages: [{ name: 'p', kind: 'jsx', source: '<div/>' }] },
-        { onConversionNotice: (n) => notices.push(n) },
-      );
-      expect((out.pages as any[])[0].kind).toBe('html');
-      expect(notices).toHaveLength(1);
-      expect(notices[0]!.message).toContain("'jsx' → 'html'");
-    });
-
-    it('still converts silently when no sink is provided (zero consumer action)', () => {
-      const out = normalizeStackInput({ pages: [{ name: 'p', kind: 'jsx', source: '<div/>' }] });
-      expect((out.pages as any[])[0].kind).toBe('html');
-    });
-
-    it('normalizes map collections and converts in one pass', () => {
-      const out = normalizeStackInput({
-        flows: { my_flow: { nodes: [{ id: 'n', type: 'webhook' }] } } as any,
-      });
+      const authored = { flows: { my_flow: { nodes: [{ id: 'n', type: 'webhook' }] } } as any };
+      const out = normalizeStackInput(structuredClone(authored), { onConversionNotice: (n) => notices.push(n) });
       const flows = out.flows as any[];
-      expect(Array.isArray(flows)).toBe(true);
-      expect(flows[0].name).toBe('my_flow'); // map key injected
-      expect(flows[0].nodes[0].type).toBe('http'); // converted
+      expect(flows[0].name).toBe('my_flow'); // the map is still normalized
+      expect(flows[0].nodes[0].type).toBe('webhook'); // …but not converted: the parse refuses it
+      expect(notices).toEqual([]);
+      const stored = applyConversionsToStoredItem('flow', { name: 'my_flow', nodes: [{ id: 'n', type: 'webhook' }] }) as {
+        nodes: Array<{ type: string }>;
+      };
+      expect(stored.nodes[0]!.type).toBe('http');
     });
 
     /**
@@ -849,6 +882,10 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
+  // #23543 F3 retired both sibling-block lifts at 18. Every lift case below
+  // replays the chain the way a stored flow meets it (`includeRetired`, the
+  // automation engine's rehydration seam); the last describe pins the three
+  // claims the retirement makes together.
   describe('flow-node-wait-event-config-lift (PD #12 retirement)', () => {
     /**
      * One `wait` node in a flow that `FlowSchema` can actually parse — `label` is
@@ -870,45 +907,55 @@ describe('conversion layer (ADR-0087 D2)', () => {
       ],
     });
     const waitNodeOf = (stack: Record<string, unknown>) => (stack.flows as any[])[0].nodes[1];
+    const stored = (stack: Record<string, unknown>) => collectConversionNotices(stack, { includeRetired: true });
 
     it('lifts the undeclared `duration` / `signal` spellings onto the declared block', () => {
-      const { stack, notices } = collectConversionNotices(waitFlow({ config: { duration: 'PT1M' } }));
+      const { stack, notices } = stored(waitFlow({ config: { duration: 'PT1M' } }));
       expect(waitNodeOf(stack).waitEventConfig).toEqual({ timerDuration: 'PT1M', eventType: 'timer' });
       expect(waitNodeOf(stack).config).toEqual({});
       expect(notices).toHaveLength(1);
 
-      const sig = collectConversionNotices(waitFlow({ config: { eventType: 'signal', signal: 'order_paid' } }));
+      const sig = stored(waitFlow({ config: { eventType: 'signal', signal: 'order_paid' } }));
       expect(waitNodeOf(sig.stack).waitEventConfig).toEqual({ eventType: 'signal', signalName: 'order_paid' });
       expect(sig.notices).toHaveLength(2);
     });
 
-    it('lets a declared value win and leaves its loose counterpart shadowed in place', () => {
-      const { stack, notices } = collectConversionNotices(
+    it('lets a declared value win and deletes its shadowed loose counterpart', () => {
+      const { stack, notices } = stored(
         waitFlow({
           waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
-          config: { duration: 'PT9M', timeoutMs: 60_000 },
+          // (Not `timeoutMs` as the second key: with the full chain replayed,
+          // protocol 17's `flow-node-wait-timeout-keys-removed` deletes it
+          // from the block again.)
+          config: { duration: 'PT9M', signalName: 'order_paid' },
         }),
       );
       expect(waitNodeOf(stack).waitEventConfig).toEqual({
         eventType: 'timer',
         timerDuration: 'PT5M',
-        timeoutMs: 60_000,
+        signalName: 'order_paid',
       });
-      // The loose counterpart is not deleted. NOTE this is the wait-node LIFT
-      // (a loose key into a declared block), not a `renameKey` alias pair, so
-      // #4923's by-value split does not reach it — see the comment on
-      // WAIT_EVENT_CONFIG_LIFTS.
-      expect(waitNodeOf(stack).config).toEqual({ duration: 'PT9M' });
-      expect(notices).toHaveLength(1);
+      // #23543 F3: the shadowed loose key is deleted, not left in place — the
+      // flow parse refuses every named loose key since 18, so a kept one would
+      // stop the stored flow loading. One notice per key: the lift and the drop.
+      expect(waitNodeOf(stack).config).toEqual({});
+      expect(notices.map((n) => n.to)).toEqual([
+        '(removed — `waitEventConfig.timerDuration` already set, so it was never read)',
+        'waitEventConfig.signalName',
+      ]);
     });
 
-    it('prefers the declared spelling over the undeclared one among loose keys', () => {
-      const { stack } = collectConversionNotices(
-        waitFlow({ config: { timerDuration: 'PT1H', duration: 'PT2H' } }),
-      );
+    it('prefers the declared spelling over the undeclared one among loose keys, and drops the loser', () => {
+      const { stack } = stored(waitFlow({ config: { timerDuration: 'PT1H', duration: 'PT2H' } }));
       expect(waitNodeOf(stack).waitEventConfig.timerDuration).toBe('PT1H');
-      // `duration` was never reachable past the `??` chain either — left as-is.
-      expect(waitNodeOf(stack).config).toEqual({ duration: 'PT2H' });
+      // `duration` was never reachable past the `??` chain either — deleted.
+      expect(waitNodeOf(stack).config).toEqual({});
+    });
+
+    it('a loose `null` is skipped by the precedence and deleted, as the `??` chain skipped it', () => {
+      const { stack } = stored(waitFlow({ config: { timerDuration: null, duration: 'PT2H', note: 'keep me' } }));
+      expect(waitNodeOf(stack).waitEventConfig).toEqual({ timerDuration: 'PT2H', eventType: 'timer' });
+      expect(waitNodeOf(stack).config).toEqual({ note: 'keep me' });
     });
 
     /**
@@ -917,9 +964,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
      * the combination the ledger's candidate order has to get right.
      */
     it('lifts the showcase shape: declared key names in a loose `config`', () => {
-      const { stack, notices } = collectConversionNotices(
-        waitFlow({ config: { eventType: 'signal', signalName: 'budget_revision' } }),
-      );
+      const { stack, notices } = stored(waitFlow({ config: { eventType: 'signal', signalName: 'budget_revision' } }));
       expect(waitNodeOf(stack).waitEventConfig).toEqual({
         eventType: 'signal',
         signalName: 'budget_revision',
@@ -931,13 +976,13 @@ describe('conversion layer (ADR-0087 D2)', () => {
 
     it('leaves a wait node with nothing to lift completely untouched', () => {
       const before = waitFlow({ waitEventConfig: { eventType: 'manual' }, config: { note: 'keep me' } });
-      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      const { stack, notices } = stored(structuredClone(before));
       expect(waitNodeOf(stack)).toEqual(waitNodeOf(before as any));
       expect(notices).toHaveLength(0);
     });
 
     it('only touches `wait` — the same keys on another node type are not its surface', () => {
-      const { stack, notices } = collectConversionNotices({
+      const { stack, notices } = stored({
         flows: [{ name: 'f', nodes: [{ id: 'a', type: 'custom', config: { duration: 'PT1M' } }] }],
       });
       expect((stack.flows as any[])[0].nodes[0].config).toEqual({ duration: 'PT1M' });
@@ -952,7 +997,7 @@ describe('conversion layer (ADR-0087 D2)', () => {
      * default does not.
      */
     it('produces a flow the loader can still parse (negative control: no eventType would not)', () => {
-      const { stack } = collectConversionNotices(waitFlow({ config: { duration: 'PT1M' } }));
+      const { stack } = stored(waitFlow({ config: { duration: 'PT1M' } }));
       const converted = (stack.flows as any[])[0];
       expect(() => FlowSchema.parse(converted)).not.toThrow();
 
@@ -962,11 +1007,238 @@ describe('conversion layer (ADR-0087 D2)', () => {
     });
   });
 
-  // Commit e2798fab7 — the `mongo` → `mongodb` canonical-id rename. Two claims have to hold
-  // together, and only together: the stored value CONVERGES, and a deployment
-  // that never runs the conversion is NOT broken. Either alone would be the
-  // wrong shape — a rename that breaks old rows, or a rename that leaves one
-  // deployment holding two spellings of one driver forever.
+  describe('flow-node-connector-config-lift (stored rows)', () => {
+    const connectorFlow = (node: Record<string, unknown>) => ({
+      flows: [
+        {
+          name: 'notify_slack',
+          label: 'Notify Slack',
+          type: 'autolaunched',
+          edges: [],
+          nodes: [
+            { id: 'n1', type: 'start', label: 'Start' },
+            { id: 'c', type: 'connector_action', label: 'Call', ...node },
+          ],
+        },
+      ],
+    });
+    const nodeOf = (stack: Record<string, unknown>) => (stack.flows as any[])[0].nodes[1];
+    const stored = (stack: Record<string, unknown>) => collectConversionNotices(stack, { includeRetired: true });
+
+    it('lifts the mis-taught trio into the block', () => {
+      const { stack, notices } = stored(
+        connectorFlow({ config: { connectorId: 'slack', actionId: 'chat.postMessage', input: { text: 'Hi' } } }),
+      );
+      expect(nodeOf(stack).connectorConfig).toEqual({ connectorId: 'slack', actionId: 'chat.postMessage', input: { text: 'Hi' } });
+      expect(nodeOf(stack).config).toEqual({});
+      expect(notices).toHaveLength(3);
+      expect(FlowSchema.safeParse((stack.flows as any[])[0]).success).toBe(true);
+    });
+
+    it('deletes a loose key the complete block shadows, and lifts the one it does not', () => {
+      const { stack, notices } = stored(
+        connectorFlow({
+          connectorConfig: { connectorId: 'rest', actionId: 'get' },
+          config: { connectorId: 'ignored', input: { path: '/health' }, note: 'keep me' },
+        }),
+      );
+      expect(nodeOf(stack).connectorConfig).toEqual({ connectorId: 'rest', actionId: 'get', input: { path: '/health' } });
+      expect(nodeOf(stack).config).toEqual({ note: 'keep me' });
+      expect(notices.map((n) => n.from).sort()).toEqual(['config.connectorId', 'config.input']);
+    });
+
+    it('the completeness guard leaves a node it cannot complete untouched — it fails to load either way', () => {
+      const before = connectorFlow({ config: { connectorId: 'slack' } });
+      const { stack, notices } = stored(structuredClone(before));
+      expect(nodeOf(stack)).toEqual(nodeOf(before));
+      expect(notices).toHaveLength(0);
+      const parsed = FlowSchema.safeParse((stack.flows as any[])[0]);
+      expect(parsed.success).toBe(false);
+      expect(parsed.error!.issues.map((i) => i.path.join('.'))).toEqual(['nodes.1.connectorConfig', 'nodes.1.config.connectorId']);
+    });
+  });
+
+  // #23543 F3 — the retirement's three claims, for both node types: a STORED
+  // flow (the `includeRetired` seams) still loads, shadowed loose key and all;
+  // the authoring funnel no longer rewrites an authored loose key; and an
+  // authored loose key meets the prescription naming its block key instead.
+  describe('the sibling-block lifts are retired (#23543 F3)', () => {
+    const flowOf = (node: Record<string, unknown>) => ({
+      name: 'settle',
+      label: 'Settle',
+      type: 'autolaunched',
+      edges: [],
+      nodes: [
+        { id: 'n1', type: 'start', label: 'Start' },
+        { label: 'Step', ...node },
+      ],
+    });
+    const LOOSE_WAIT = { id: 'w', type: 'wait', config: { eventType: 'signal', signal: 'order_paid' } };
+    const SHADOWED_WAIT = {
+      id: 'w',
+      type: 'wait',
+      waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
+      config: { duration: 'PT9M' },
+    };
+    const LOOSE_CONNECTOR = { id: 'c', type: 'connector_action', config: { connectorId: 'slack', actionId: 'chat.postMessage' } };
+    const SHADOWED_CONNECTOR = {
+      id: 'c',
+      type: 'connector_action',
+      connectorConfig: { connectorId: 'slack', actionId: 'chat.postMessage', input: { text: 'Hi' } },
+      config: { input: { text: 'stale' } },
+    };
+
+    it.each([
+      ['a loose-only wait row', LOOSE_WAIT, { waitEventConfig: { eventType: 'signal', signalName: 'order_paid' }, config: {} }],
+      ['a wait row whose block shadows a loose key', SHADOWED_WAIT, { waitEventConfig: SHADOWED_WAIT.waitEventConfig, config: {} }],
+      ['a loose-only connector row', LOOSE_CONNECTOR, { connectorConfig: LOOSE_CONNECTOR.config, config: {} }],
+      ['a connector row whose block shadows a loose key', SHADOWED_CONNECTOR, { connectorConfig: SHADOWED_CONNECTOR.connectorConfig, config: {} }],
+    ])('%s still loads at the rehydration seam, with the block alone', (_name, node, expected) => {
+      const raw = flowOf(node);
+      // The stored row as written is what the parse now refuses …
+      expect(FlowSchema.safeParse(raw).success).toBe(false);
+      // … and the seam's replay (the automation engine's call) makes it load.
+      const converted = applyConversionsToFlow(structuredClone(raw), { includeRetired: true }) as ReturnType<typeof flowOf>;
+      expect(converted.nodes[1]).toMatchObject(expected);
+      expect(FlowSchema.safeParse(converted).success).toBe(true);
+    });
+
+    it('is retired from the load path — the authoring funnel no longer lifts an authored loose key', () => {
+      for (const node of [LOOSE_WAIT, SHADOWED_WAIT, LOOSE_CONNECTOR, SHADOWED_CONNECTOR]) {
+        const before = { flows: [flowOf(node)] };
+        const { stack, notices } = collectConversionNotices(structuredClone(before));
+        expect(stack, node.type).toEqual(before);
+        expect(notices, node.type).toHaveLength(0);
+      }
+    });
+
+    it.each([
+      ['wait', SHADOWED_WAIT, 'nodes.1.config.duration', "A `wait` node's `config.duration` was removed in @objectstack/spec 18", '`waitEventConfig.timerDuration`'],
+      ['connector_action', SHADOWED_CONNECTOR, 'nodes.1.config.input', "A `connector_action` node's `config.input` was removed in @objectstack/spec 18", '`connectorConfig.input`'],
+    ])('an authored loose key on a %s node reaches defineStack as written and is refused naming its block key', (_type, node, path, first, target) => {
+      let refusal: unknown;
+      try {
+        defineStack({ flows: [flowOf(node)] } as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      // The loose key is the ONE issue: the block is complete, so the refusal
+      // is about the location alone.
+      expect(issues.map((i) => i.path.join('.'))).toEqual([`flows.0.${path}`]);
+      expect(issues[0]!.message.startsWith(first)).toBe(true);
+      expect(issues[0]!.message).toContain(`Move it to ${target}`);
+    });
+
+    it('refuses every named loose key and no other — the table is the lifts\' own', () => {
+      const parsed = FlowSchema.safeParse(flowOf({
+        id: 'w',
+        type: 'wait',
+        waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' },
+        config: { eventType: 'timer', timerDuration: 'PT1M', duration: 'PT1M', signalName: 's', signal: 's', timeoutMs: 1, note: 'not a lifted key' },
+      }));
+      expect(parsed.success).toBe(false);
+      expect(parsed.error!.issues.map((i) => i.path.slice(3).join('.')).sort()).toEqual(
+        ['duration', 'eventType', 'signal', 'signalName', 'timeoutMs', 'timerDuration'],
+      );
+      // CONTROL — the declared blocks alone parse, and the same keys under
+      // another node type's `config` are not this refusal's.
+      expect(FlowSchema.safeParse(flowOf({ id: 'w', type: 'wait', waitEventConfig: { eventType: 'timer', timerDuration: 'PT5M' } })).success).toBe(true);
+      expect(FlowSchema.safeParse(flowOf({ id: 'c', type: 'connector_action', connectorConfig: SHADOWED_CONNECTOR.connectorConfig })).success).toBe(true);
+      const other = FlowSchema.safeParse(flowOf({ id: 'a', type: 'assignment', config: { input: 1, duration: 'PT1M' } }));
+      expect(other.success ? [] : other.error.issues.map((i) => i.message)).not.toContainEqual(expect.stringContaining('was removed in @objectstack/spec 18'));
+    });
+  });
+
+  // #23543 F2 — the job half of `retry-policy-converged` was the only reason
+  // it stayed on the load path. The retirement's claims: an AUTHORED block with
+  // no attempts meets the prescription instead of a silent `maxRetries: 3`; a
+  // STORED row still loads with the numbers it ran with (the data-at-rest seams
+  // replay the entry); the flow half needed nothing beyond the retirement,
+  // because the `retryDelayMs` tombstone already carries its rename.
+  describe('retry-policy-converged is retired (#23543 F2)', () => {
+    const jobOf = (retryPolicy: Record<string, unknown>) => ({
+      name: 'nightly_sync',
+      schedule: { type: 'cron', expression: '0 0 * * *' },
+      handler: 'syncOrders',
+      retryPolicy,
+    });
+    const refusalOf = (authored: Record<string, unknown>) => {
+      let refusal: unknown;
+      try {
+        defineStack(authored as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      return (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+    };
+
+    it.each([
+      ['omits `maxRetries`', { backoffMs: 5000 }],
+      ['writes `maxRetries: 0`', { maxRetries: 0, backoffMs: 5000 }],
+    ])('an authored job block that %s reaches defineStack as written and is refused at the key', (_name, policy) => {
+      const issues = refusalOf({ jobs: [jobOf(policy)] });
+      // The count is the ONE issue: the job is otherwise complete.
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['jobs.0.retryPolicy.maxRetries']);
+      expect(issues[0]!.message.startsWith(
+        'A retry block with no attempts is no retry block: state `maxRetries` ≥ 1, for example 3, or delete the block.',
+      )).toBe(true);
+    });
+
+    it('is retired from the load path — the authoring funnel writes no count into an authored block', () => {
+      const before = { jobs: [jobOf({ backoffMs: 5000 })] };
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('a stored job row with no count still loads at the rehydration seam, with the pre-17 numbers', () => {
+      const raw = jobOf({ backoffMs: 5000 });
+      // The row as written is what the parse now refuses …
+      expect(JobSchema.safeParse(raw).success).toBe(false);
+      // … and the seam's replay (stored-row rehydration) makes it load, three retries and all.
+      const converted = applyConversionsToStoredItem('job', structuredClone(raw));
+      expect(converted.retryPolicy).toEqual({ backoffMs: 5000, maxRetries: 3, backoffMultiplier: 2 });
+      expect(JobSchema.safeParse(converted).success).toBe(true);
+    });
+
+    it('the flow half needed nothing more: an authored `retryDelayMs` meets its tombstone naming `backoffMs`', () => {
+      const issues = refusalOf({
+        flows: [{
+          name: 'sync_orders',
+          label: 'Sync',
+          type: 'autolaunched',
+          errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 },
+          nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+          edges: [{ id: 'e1', source: 'start', target: 'end' }],
+        }],
+      });
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['flows.0.errorHandling.retryDelayMs']);
+      expect(issues[0]!.message).toContain('Rename the key to `backoffMs`');
+    });
+
+    it('CONTROL — a job with no block, and a block stating `maxRetries: 1`, both parse; an omitted multiplier keeps its default', () => {
+      const { retryPolicy: _none, ...bare } = jobOf({});
+      expect(JobSchema.safeParse(bare).success).toBe(true);
+      const one = JobSchema.safeParse(jobOf({ maxRetries: 1 }));
+      expect(one.success).toBe(true);
+      expect(one.data!.retryPolicy).toMatchObject({ maxRetries: 1, backoffMultiplier: 1 });
+      expect(() => defineStack({ jobs: [jobOf({ maxRetries: 1 }), { ...bare, name: 'weekly_purge' }] } as never)).not.toThrow();
+    });
+
+    it('the same block on a `try_catch` node\'s `retry` is not this rule\'s — the shared schema is unchanged', () => {
+      expect(RetryPolicySchema.safeParse({ backoffMs: 5000 }).success).toBe(true);
+    });
+  });
+
+  // Commit e2798fab7 renamed the canonical id `mongo` → `mongodb`; #23543 F1
+  // retired `mongo` as a value at 18. Three claims hold together: the stored
+  // value still CONVERGES (the data-at-rest seams replay the retired entry), an
+  // AUTHORED `mongo` meets the prescription instead of a silent rewrite, and a
+  // stored row the chain has not reached keeps its contract — the half that
+  // keeps its credential redaction (`DriverVocabularyEntry.retiredAliases`).
   describe('datasource-driver-mongo-to-mongodb', () => {
     const convert = (datasources: unknown[]) =>
       collectConversionNotices({ datasources }, { includeRetired: true });
@@ -975,6 +1247,8 @@ describe('conversion layer (ADR-0087 D2)', () => {
       const row = { name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' }, origin: 'runtime' };
       const out = applyConversionsToStoredItem('datasource', row) as { driver: string };
       expect(out.driver).toBe('mongodb');
+      // …and the converted row parses: the refusal below is never what a stored row meets.
+      expect(DatasourceSchema.safeParse(out).success).toBe(true);
     });
 
     it('converts case- and whitespace-insensitively, exactly as the resolver reads it', () => {
@@ -997,23 +1271,88 @@ describe('conversion layer (ADR-0087 D2)', () => {
       expect(notices.filter((n) => n.conversionId === 'datasource-driver-mongo-to-mongodb')).toHaveLength(0);
     });
 
-    // THE other half of the migration proof. A deployment that upgrades without
-    // replaying the chain still holds `driver: 'mongo'` rows, and they must keep
-    // working: `mongo` stays an accepted alias on purpose, so it resolves the
-    // same config contract and builds the same driver as before the rename.
-    // This is why the rename is a `minor` on `@objectstack/spec` and not a
-    // boot-breaking change — the conversion converges a spelling, it does not
-    // rescue one.
-    it('an UNCONVERTED `mongo` row is not left broken — same contract, same driver', () => {
+    it('is retired from the load path — the authoring funnel no longer rewrites an authored `mongo`', () => {
+      const before = { datasources: [{ name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' } }] };
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('an authored `mongo` reaches defineStack as written and is refused naming `mongodb` and the release', () => {
+      let refusal: unknown;
+      try {
+        defineStack({
+          datasources: [{ name: 'events', label: 'Events', driver: 'mongo', config: { url: 'mongodb://db/x' } }],
+        } as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      // The driver is the ONE issue: the config is a valid mongodb config, so
+      // the refusal is about the spelling alone.
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['datasources.0.driver']);
+      expect(issues[0]!.message).toMatch(/^Datasource `driver: 'mongo'` was removed in @objectstack\/spec 18 \(ADR-0087 D2\)/);
+      expect(issues[0]!.message).toContain("Use `driver: 'mongodb'`");
+      // Case and whitespace do not slip past it, and the canonical id is untouched.
+      for (const driver of ['Mongo', ' MONGO ']) {
+        const parsed = DatasourceSchema.safeParse({ name: 'events', driver, config: { url: 'mongodb://db/x' } });
+        expect(parsed.success, driver).toBe(false);
+        expect(parsed.error!.issues.map((i) => i.path.join('.')), driver).toEqual(['driver']);
+      }
+      expect(DatasourceSchema.safeParse({ name: 'events', driver: 'mongodb', config: { url: 'mongodb://db/x' } }).success).toBe(true);
+    });
+
+    // The other half of the migration proof. A stored row the chain has not
+    // reached (a raw body served by the read-path redactor, say) still resolves
+    // the mongodb contract: deleting the spelling outright was measured to
+    // serve every mongodb passthrough secret of such a row in cleartext.
+    it('an UNCONVERTED stored `mongo` row keeps its contract — same schema, same validation', () => {
       expect(resolveDriverId('mongo')).toBe('mongodb');
       expect(getDriverConfigSchema('mongo')).toBe(getDriverConfigSchema('mongodb'));
       expect(validateDriverConfig('mongo', { url: 'mongodb://db/x' })).toEqual({ known: true, issues: [] });
-      // And it still parses as a datasource — the authoring gate never stopped
-      // accepting the alias, which is the whole reason nothing breaks.
-      const parsed = DatasourceSchema.safeParse({
-        name: 'events', driver: 'mongo', config: { url: 'mongodb://db/x' },
-      });
-      expect(parsed.success, JSON.stringify(parsed.error?.issues)).toBe(true);
+    });
+  });
+
+  // #23543 F5-jsx retired `jsx` as a page kind at 18. Three claims hold
+  // together: a STORED `jsx` page still converges to `html` and parses (the
+  // data-at-rest seams replay the retired entry), the authoring funnel no
+  // longer rewrites an authored `jsx`, and an authored `jsx` meets the
+  // prescription naming `html` instead.
+  describe('page-kind-jsx-to-html', () => {
+    const page = (kind: string) => ({ name: 'landing', label: 'Landing', kind, source: '<div>hi</div>' });
+
+    it('a stored `jsx` page row still converges to `html`, and the converted row parses', () => {
+      const out = applyConversionsToStoredItem('page', page('jsx')) as { kind: string };
+      expect(out.kind).toBe('html');
+      expect(PageSchema.safeParse(out).success).toBe(true);
+    });
+
+    it('is retired from the load path — the authoring funnel no longer rewrites an authored `jsx`', () => {
+      const before = { pages: [page('jsx')] };
+      const { stack, notices } = collectConversionNotices(structuredClone(before));
+      expect(stack).toEqual(before);
+      expect(notices).toHaveLength(0);
+    });
+
+    it('an authored `jsx` reaches defineStack as written and is refused naming `html` and the release', () => {
+      let refusal: unknown;
+      try {
+        defineStack({ pages: [page('jsx')] } as never);
+      } catch (error) {
+        refusal = error;
+      }
+      expect(refusal).toMatchObject({ code: 'STACK_SCHEMA_INVALID', status: 422 });
+      const issues = (refusal as { issues: { path: PropertyKey[]; message: string }[] }).issues;
+      // The kind is the ONE issue: the page is otherwise a complete html page.
+      expect(issues.map((i) => i.path.join('.'))).toEqual(['pages.0.kind']);
+      expect(issues[0]!.message).toMatch(/^Page `kind: 'jsx'` was removed in @objectstack\/spec 18 \(ADR-0087 D2\)/);
+      expect(issues[0]!.message).toContain("Use `kind: 'html'`");
+      // The canonical kind is untouched, and so is a misspelling's own message.
+      expect(PageSchema.safeParse(page('html')).success).toBe(true);
+      const typo = PageSchema.safeParse(page('htm'));
+      expect(typo.success).toBe(false);
+      expect(typo.error!.issues[0]!.message).not.toContain('was removed');
     });
   });
 
@@ -1740,8 +2079,8 @@ describe('conversion layer (ADR-0087 D2)', () => {
 
     /**
      * ⭐ FIRING CONTROL for the refusal above — it excludes ONE id, not the
-     * window. `page-kind-jsx-to-html` (not retired) and the retired app entry
-     * are driven through the SAME call: the named one is refused, the other
+     * window. `page-kind-jsx-to-html` (retired too, at 18) and the retired app
+     * entry are driven through the SAME call: the named one is refused, the other
      * still fires.
      */
     it('refuses only the named id — the rest of the chain still runs', () => {

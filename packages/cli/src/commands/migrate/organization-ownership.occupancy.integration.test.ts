@@ -6,8 +6,9 @@
  * holding the SQLite file open, `--apply` is refused before the boot, inside
  * the command's own refusal envelope, and the refusal names the stop remedy
  * alone: the ceremony takes no `--force`, so a hint prescribing one would send
- * the operator to a flag the command rejects. The plan writes nothing, so it
- * warns and runs, as every sibling's read-only arm does.
+ * the operator to a flag the command rejects. The plan writes no row or table,
+ * so it warns and runs, as every sibling's read-only arm does, and the warning
+ * names what its connect can still change on a SQLite file: the journal mode.
  *
  * The holder is the one `plan.reads-env-files.integration.test.ts` uses: a
  * better-sqlite3 connection on a WAL database, attached and idle, which is
@@ -24,6 +25,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isExitSignal } from '../../utils/format.js';
 import { OCCUPANCY_STOP_HINT } from '../../utils/migrate-occupancy-gate.js';
+import { JOURNAL_MODE_SWITCH_NOTE } from '../../utils/sqlite-occupancy.js';
 
 // Pay the first transform of the dist-resolved workspace deps the probe and
 // the plan reach through dynamic `import()`s at MODULE LOAD, not inside a case.
@@ -189,6 +191,13 @@ describe('os migrate organization-ownership (plan) — the occupancy gate', () =
     expect(boot).toHaveBeenCalledTimes(1);
     expect(lines).toContain(file);
     expect(existsSync(out)).toBe(true);
+    // The warning claims no row or table, and names the journal-mode switch the
+    // boot's connect can still make; it never says the plan writes nothing.
+    const warning = lines.split('\n').find((line) => line.includes(`${file} is in use`));
+    expect(warning, lines).toBeDefined();
+    expect(warning).toContain('The plan below writes no row or table');
+    expect(warning).toContain(JOURNAL_MODE_SWITCH_NOTE);
+    expect(lines).not.toContain('writes nothing');
   }, CASE_TIMEOUT_MS);
 
   it('beside a holder, --json: the plan document is unchanged — no warning, no occupancy field', async () => {

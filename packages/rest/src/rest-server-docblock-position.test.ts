@@ -55,6 +55,7 @@
 
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
+import { REST_SERVER_REGISTRAR_FILES, type RestServerRegistrarFile } from './rest-server-registrar-files.js';
 
 const FILE = 'rest-server.ts';
 const SOURCE = readFileSync(new URL('./rest-server.ts', import.meta.url), 'utf8');
@@ -133,10 +134,124 @@ describe('rest-server.ts docblock position', () => {
  * docblock), so it is read under the same rule rather than leaving that block
  * outside every pin. Its floor is its own measured count: the module header,
  * the moved alias's block, the host interface's and the function's.
+ *
+ * [#23050 slice 3] Every module on THE list of the files `RestServer`'s
+ * registrars live in is read under the same rule, imported rather than spelt
+ * here, so a registrar body the split moves next stays inside this pin. Each
+ * floor is that module's own measured count — the batch and approval modules
+ * carry three apiece (the module header, the host interface's block and the
+ * function's) — and a module added to the list needs one here before it reads.
+ * The case below the loop pins the list's length and the sum of the floors.
+ *
+ * [#23050 slice 4] `sharing-routes.ts` carries eight: the module header, two
+ * host interfaces' blocks and two functions' (it holds two registrars' bodies),
+ * plus the three blocks that moved with the record-share body (`respondError`'s,
+ * `sharingDeclaredExtra`'s and `sharingFaultMessage`'s), which `rest-server.ts`
+ * therefore no longer holds (three fewer there, still far above its floor).
+ *
+ * [#23050 slice 5] `analytics-routes.ts` carries three, as the batch and
+ * approval modules do: the module header, the host interface's block and the
+ * function's. The analytics body held no TSDoc block of its own, so
+ * `rest-server.ts` keeps every block it had.
+ *
+ * [#23050 slice 6] `security-routes.ts` carries eight: the module header, two
+ * host interfaces' blocks and two functions' (it holds two registrars' bodies),
+ * plus the three blocks that moved with those bodies (the explain family's
+ * `respondError` and `delegableHandler` blocks, and the suggested-binding
+ * family's `respondError` block), which `rest-server.ts` therefore no longer
+ * holds (167 → 164 there, still far above its floor).
+ *
+ * [#23050 slice 7] `discovery-routes.ts` carries five: the module header, two
+ * host interfaces' blocks and two functions' (it holds two registrars' bodies).
+ * Neither the discovery body nor the OpenAPI body held a TSDoc block of its
+ * own, so `rest-server.ts` keeps every block it had (164).
+ *
+ * [#23050 slice 8] `email-routes.ts` carries three, as the batch, approval and
+ * analytics modules do: the module header, the host interface's block and the
+ * function's. The email send body held no TSDoc block of its own, so
+ * `rest-server.ts` keeps every block it had.
+ *
+ * [#23050 slice 9] `search-routes.ts` carries three, as the email module does:
+ * the module header, the host interface's block and the function's. The global
+ * search body held no TSDoc block of its own, so `rest-server.ts` keeps every
+ * block it had (164).
+ *
+ * [#23050 slice 10] `ui-routes.ts` carries four, as `data-action-routes.ts`
+ * does: the module header, the moved alias's block (`TransportScopedMetaRequest`
+ * went with the UI view body, as `ServerScopedDataRequest` went with slice 1's),
+ * the host interface's block and the function's. The UI view body held no TSDoc
+ * block of its own, so `rest-server.ts` gives up only the alias's block
+ * (164 → 163 there, still far above its floor).
+ *
+ * [#23050 slice 11] `form-routes.ts` carries three, as the search module does:
+ * the module header, the host interface's block and the function's. The public
+ * form body held no TSDoc block of its own, so `rest-server.ts` keeps every
+ * block it had (163).
+ *
+ * [#23050 slice 12] `crud-routes.ts` carries three, as the form module does:
+ * the module header, the host interface's block and the function's. The CRUD
+ * body held no TSDoc block of its own, so `rest-server.ts` keeps every block it
+ * had (163).
+ *
+ * [#23050 slice 13a] `meta-collection-routes.ts` carries five: the module
+ * header, the moved alias's block (`TransportScopedMetaRequest` moved on to it
+ * from `ui-routes.ts`, the `/meta` doors' envelope joining the first `/meta`
+ * module), `MetaRouteScope`'s block, the host interface's block and the
+ * function's. `ui-routes.ts` therefore gives up that block (4 → 3). The moved
+ * `/meta` groups held no TSDoc block of their own, so `rest-server.ts` keeps
+ * every block it had (163).
+ *
+ * [#23050 slice 13b] `meta-item-read-routes.ts` carries five: the module
+ * header, the host interface's block, the function's, and the blocks of the two
+ * module-level helpers only the per-item reads called, which moved with them
+ * (the reference sweep's declared-refusal re-dresser and the intake reasons'
+ * ETag dimension). The moved `/meta` group held no TSDoc block of its own, so
+ * `rest-server.ts` gives up exactly those two (163 → 161), still far above its
+ * floor.
+ *
+ * [#23050 slice 13c] `meta-item-write-routes.ts` carries three, as the form and
+ * CRUD modules do: the module header, the host interface's block and the
+ * function's. The moved per-item writes held no TSDoc block of their own and
+ * took no module-level helper with them, so `rest-server.ts` keeps every block
+ * it had (161).
+ *
+ * [#23050 slice 13d] `meta-item-history-routes.ts` carries three, as the
+ * per-item writes' module does: the module header, the host interface's block
+ * and the function's. The moved history family held no TSDoc block of its own
+ * and took no module-level helper with it (the authoring-door refusal it calls
+ * stays, exported, and only gained a paragraph in its own block), so
+ * `rest-server.ts` keeps every block it had (161).
+ *
+ * [#23050 slice 13e] `meta-object-state-routes.ts` carries three: the module
+ * header, the host interface's block and the function's. The published read
+ * joined `meta-item-history-routes.ts` with two more, its own host interface's
+ * block and its function's (3 → 5). Neither moved group held a TSDoc block of
+ * its own or took a module-level helper with it, and the inner head's
+ * per-item-registrar block was only re-worded, so `rest-server.ts` keeps every
+ * block it had (161).
  */
-const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = [
-    { file: 'data-action-routes.ts', minBlocks: 4 },
-];
+const MOVED_FILE_FLOORS: Readonly<Record<Exclude<RestServerRegistrarFile, typeof FILE>, number>> = {
+    'data-action-routes.ts': 4,
+    'batch-routes.ts': 3,
+    'approvals-routes.ts': 3,
+    'sharing-routes.ts': 8,
+    'analytics-routes.ts': 3,
+    'security-routes.ts': 8,
+    'discovery-routes.ts': 5,
+    'email-routes.ts': 3,
+    'search-routes.ts': 3,
+    'ui-routes.ts': 3,
+    'form-routes.ts': 3,
+    'crud-routes.ts': 3,
+    'meta-collection-routes.ts': 5,
+    'meta-item-read-routes.ts': 5,
+    'meta-item-write-routes.ts': 3,
+    'meta-item-history-routes.ts': 5,
+    'meta-object-state-routes.ts': 3,
+};
+const MOVED_FILES: ReadonlyArray<{ file: string; minBlocks: number }> = REST_SERVER_REGISTRAR_FILES
+    .filter((file): file is Exclude<RestServerRegistrarFile, typeof FILE> => file !== FILE)
+    .map((file) => ({ file, minBlocks: MOVED_FILE_FLOORS[file] }));
 
 for (const { file, minBlocks } of MOVED_FILES) {
     describe(`${file} docblock position (moved out of ${FILE})`, () => {
@@ -155,3 +270,34 @@ for (const { file, minBlocks } of MOVED_FILES) {
         });
     });
 }
+
+describe('[#23050 slice 3] the registrar list this pin reads', () => {
+    it('reads every module on it, each against its own floor — the length and the floors\' sum are pinned', () => {
+        // A module added to the list makes this re-read its numbers rather than
+        // widening unnoticed: 4 + 3 + 3 = 10 blocks over the three modules.
+        // [#23050 slice 4] 4 + 3 + 3 + 8 = 18 over four, length 4 → 5.
+        // [#23050 slice 5] 4 + 3 + 3 + 8 + 3 = 21 over five, length 5 → 6.
+        // [#23050 slice 6] 4 + 3 + 3 + 8 + 3 + 8 = 29 over six, length 6 → 7.
+        // [#23050 slice 7] 4 + 3 + 3 + 8 + 3 + 8 + 5 = 34 over seven, length 7 → 8.
+        // [#23050 slice 8] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 = 37 over eight, length 8 → 9.
+        // [#23050 slice 9] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 = 40 over nine, length 9 → 10.
+        // [#23050 slice 10] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 = 44 over ten, length 10 → 11.
+        // [#23050 slice 11] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 + 3 = 47 over eleven, length 11 → 12.
+        // [#23050 slice 12] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 4 + 3 + 3 = 50 over twelve, length 12 → 13.
+        // [#23050 slice 13a] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 = 54 over
+        // thirteen, length 13 → 14 (`ui-routes.ts` 4 → 3: the alias's block moved on).
+        // [#23050 slice 13b] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 = 59 over
+        // fourteen, length 14 → 15.
+        // [#23050 slice 13c] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 + 3 = 62
+        // over fifteen, length 15 → 16.
+        // [#23050 slice 13d] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 + 3 + 3 = 65
+        // over sixteen, length 16 → 17.
+        // [#23050 slice 13e] 4 + 3 + 3 + 8 + 3 + 8 + 5 + 3 + 3 + 3 + 3 + 3 + 5 + 5 + 3 + 5 + 3 = 70
+        // over seventeen, length 17 → 18 (`meta-item-history-routes.ts` 3 → 5: the
+        // published read's host interface and function).
+        expect(REST_SERVER_REGISTRAR_FILES).toHaveLength(18);
+        expect(Object.keys(MOVED_FILE_FLOORS).sort())
+            .toEqual(REST_SERVER_REGISTRAR_FILES.filter((file) => file !== FILE).sort());
+        expect(MOVED_FILES.reduce((n, { minBlocks }) => n + minBlocks, 0)).toBe(70);
+    });
+});

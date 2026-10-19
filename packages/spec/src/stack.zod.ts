@@ -37,6 +37,7 @@ import { lintUnknownAuthoringKeys, lintUnknownStackKeys } from './kernel/metadat
 import { ObjectSchema, ObjectExtensionSchema } from './data/object.zod';
 import { controlledByParentMasterRefusal } from './data/controlled-by-parent-master';
 import { InlineGridColumnSchema } from './data/field.zod';
+import { pageComponentSlotPositions } from './ui/component.zod';
 import { SeedSchema } from './data/seed.zod';
 
 // UI Protocol
@@ -527,6 +528,41 @@ export type ArtifactPackageEntry = z.input<typeof ArtifactPackageEntrySchema>;
 export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySchema>;
 
 /**
+ * The datasource name the HOST owns (#3826, #23634): the runtime declares and
+ * connects `default` itself (`DefaultDatasourcePlugin`, from `OS_DATABASE_URL`
+ * or the dev fallback), and `AppPlugin` refuses a stack that declares it in
+ * every boot posture — with a URL, with `--dev`, and on the standalone path.
+ * The comparison is the runtime's: the entry's `name` equals `default` exactly
+ * (the map form arrives here already normalized, key → `name`; every other
+ * spelling of the word is already refused by `DatasourceSchema.name`'s
+ * snake_case pattern).
+ *
+ * The refusal lives on the STACK's collection, ⛔ never on
+ * {@link DatasourceSchema}: that schema also documents the host's own
+ * `default` row (the registry, the admin list, the metadata door), which must
+ * keep parsing. Saying it here moves the runtime's refusal to the authoring
+ * doors — `defineStack`, `os validate` and publish — with the same sentence
+ * and the remedy, instead of after the boot's earlier plugins have started.
+ */
+const HOST_RESERVED_DATASOURCE_NAME = 'default';
+
+function refuseHostReservedDatasourceName(datasources: readonly { name?: unknown }[], ctx: z.RefinementCtx): void {
+  datasources.forEach((datasource, index) => {
+    if (datasource?.name !== HOST_RESERVED_DATASOURCE_NAME) return;
+    ctx.addIssue({
+      code: 'custom',
+      path: [index, 'name'],
+      message:
+        `This stack declares a datasource named '${HOST_RESERVED_DATASOURCE_NAME}' — that name is reserved for ` +
+        `the host's primary datasource, and every boot refuses a stack that declares it. To give the project ` +
+        `its own primary database, set OS_DATABASE_URL and omit this entry. To add a datasource of the stack's ` +
+        `own, declare it under another name (e.g. 'app_primary') and route objects to it explicitly (an ` +
+        `object's \`datasource\`, or a \`datasourceMapping\` rule).`,
+    });
+  });
+}
+
+/**
  * Every metadata COLLECTION `ObjectStackDefinitionSchema` declares, as one
  * named shape.
  *
@@ -560,7 +596,10 @@ export type ArtifactPackageEntryParsed = z.infer<typeof ArtifactPackageEntrySche
  * @internal
  */
 const STACK_DEFINITION_COLLECTIONS_SHAPE = {
-  datasources: z.array(DatasourceSchema).optional().describe('External Data Connections'),
+  datasources: z.array(DatasourceSchema)
+    .superRefine(refuseHostReservedDatasourceName)
+    .optional()
+    .describe('External Data Connections'),
 
   /**
    * Datasource Mapping Configuration
@@ -2349,11 +2388,12 @@ const isComponentNode = (value: unknown): value is Record<string, unknown> =>
 /**
  * Visit every component a page carries, with its locatable path, parent before
  * children — the one traversal of a page's component tree the cross-reference
- * checks share (inline actions, #6889; master-detail detail columns, #20928).
+ * checks share (inline actions, #6889; master-detail detail columns, #20928;
+ * line-items columns, #24190).
  * `visit` receives the node and its `properties` record; a node without one is
  * not visited, since every check here reads under `properties`.
  *
- * Two traversal facts make this a walk rather than a loop:
+ * Three traversal facts make this a walk rather than a loop:
  *
  * - **Roots are plural.** Components hang off `regions[].components[]` AND off
  *   `slots.<name>`, where each slot is one component *or* an array of them.
@@ -2362,12 +2402,28 @@ const isComponentNode = (value: unknown): value is Record<string, unknown> =>
  *   children as `z.array(z.unknown())` (`children`, plus a card's `footer`), so
  *   a button nested inside a container survives parse as raw data. We recurse
  *   into any array under `properties` whose entries are component-shaped, which
- *   reaches every container spelling without this walk enumerating them.
+ *   reaches a child list directly under `properties` without this walk naming
+ *   its key.
+ * - **Panels nest one record deeper.** A `page:tabs` or `page:accordion` node
+ *   carries its components as `properties.items[].children`, and each item is
+ *   a panel record (`{ label, value?, children }`), not a component, so the
+ *   shape rule above stops at it. Where panels hang is not this walk's to
+ *   list: it descends the panel positions of `pageComponentSlotPositions`
+ *   (`ui/component.zod.ts`), the one list the component rows derive and the
+ *   other page walks read (the exported `walkAddressedPageComponents`, the
+ *   ADR-0087 conversion walker, lint's `walkPageComponents`), authorable
+ *   spellings only, matched by shape on every component as they match it. A
+ *   record under a key no row declares a panel list is not descended, nor is
+ *   a key of a panel record no row declares: the renderer draws nothing from
+ *   either, so nothing there is a component of the page.
  */
 function forEachPageComponent(
   page: Record<string, unknown>,
   visit: (node: Record<string, unknown>, props: Record<string, unknown>, path: string) => void,
 ): void {
+  const panelPositions = pageComponentSlotPositions().flatMap(({ key, panelKey, retired }) =>
+    panelKey !== undefined && !retired ? [{ key, panelKey }] : []);
+
   const visitComponent = (node: unknown, path: string): void => {
     if (!isComponentNode(node)) return;
     const props = isRecord(node.properties) ? node.properties : undefined;
@@ -2379,6 +2435,20 @@ function forEachPageComponent(
       if (!Array.isArray(value)) continue;
       value.forEach((child, index) => {
         if (isComponentNode(child)) visitComponent(child, `${path}.properties.${key}.${index}`);
+      });
+    }
+
+    // A panel list: only each panel's child list is descended, never the
+    // panel record itself.
+    for (const { key, panelKey } of panelPositions) {
+      const panels = props[key];
+      if (!Array.isArray(panels)) continue;
+      panels.forEach((panel, index) => {
+        const children = isRecord(panel) ? panel[panelKey] : undefined;
+        if (!Array.isArray(children)) return;
+        children.forEach((child, childIndex) => {
+          visitComponent(child, `${path}.properties.${key}.${index}.${panelKey}.${childIndex}`);
+        });
       });
     }
   };
@@ -2417,7 +2487,8 @@ function forEachPageComponent(
  * with its behaviour written right there — so it is the surface that most needs
  * authoring-time rejection.
  *
- * The traversal is {@link forEachPageComponent}'s: every root, every nesting.
+ * The traversal is {@link forEachPageComponent}'s: every root, every nesting,
+ * a `page:tabs` or `page:accordion` item's `children` included.
  *
  * Candidates are normalized by parsing with `InlineActionSchema` rather than
  * read key-by-key: that schema's preprocess is what canonicalizes the legacy
@@ -3513,13 +3584,13 @@ const hasOwnKey = (record: object, key: string): boolean => Object.prototype.has
  * raises is reported, with the schema's own message. A column is judged only
  * once it is a valid column WITHOUT the type, so an issue here is one the
  * resolved type brings. On the two carriers the stack's parse reaches, it
- * already passed that parse; on the page carrier, whose `properties` the
+ * already passed that parse; on the two page carriers, whose `properties` the
  * stack's parse never reaches, the column is parsed alone first and a column
  * that fails is left to the component-props gate (`@objectstack/lint`'s
  * `validateComponentProps`), which reports its own defects against
  * `ComponentPropsMap`.
  *
- * All three carriers of the column are walked:
+ * All four carriers of the column are walked:
  *
  * - a relationship field's `inlineColumns` — the field sits on the CHILD
  *   object, so a column names a field of the object that owns the field;
@@ -3528,7 +3599,13 @@ const hasOwnKey = (record: object, key: string): boolean => Object.prototype.has
  *   `childObject`;
  * - [#20928] an `object-master-detail-form` page block's `details[].columns`,
  *   wherever the block sits on a page ({@link forEachPageComponent}) — a column
- *   names a field of the detail entry's `childObject`.
+ *   names a field of the detail entry's `childObject`;
+ * - [#24190] a `record:line_items` page block's `columns`, wherever the block
+ *   sits on a page ({@link forEachPageComponent}) — a region's components, a
+ *   container's component children, a `page:tabs` or `page:accordion` item's
+ *   `children`, a slot — a column names a field of the child object the panel
+ *   lists, resolved the way the renderer resolves it
+ *   ({@link lineItemsChildObject}).
  *
  * Resolution is against the stack's own `objects`: a `childObject` this stack
  * does not declare, or a column naming no field of it, is not judged here — an
@@ -3592,24 +3669,60 @@ function collectHydratedInlineColumnErrors(config: ObjectStackDefinition): strin
     }
   }
 
-  // [#20928] The page carrier: `properties` is an open record the stack's parse
-  // never reaches, so `details` is read raw, entry by entry.
+  // [#20928] The page carriers: `properties` is an open record the stack's
+  // parse never reaches, so `details` and `columns` are read raw.
   for (const page of config.pages ?? []) {
     if (!isRecord(page)) continue;
     const pageName = typeof page.name === 'string' ? page.name : '(unnamed)';
     forEachPageComponent(page, (node, props, path) => {
-      if (node.type !== 'object-master-detail-form' || !Array.isArray(props.details)) return;
-      props.details.forEach((detail: unknown, j: number) => {
-        if (!isRecord(detail) || typeof detail.childObject !== 'string') return;
-        judge(
-          detail.columns,
-          detail.childObject,
-          `Page '${pageName}' (${path}) object-master-detail-form details[${j}].columns`,
-        );
-      });
+      if (node.type === 'object-master-detail-form' && Array.isArray(props.details)) {
+        props.details.forEach((detail: unknown, j: number) => {
+          if (!isRecord(detail) || typeof detail.childObject !== 'string') return;
+          judge(
+            detail.columns,
+            detail.childObject,
+            `Page '${pageName}' (${path}) object-master-detail-form details[${j}].columns`,
+          );
+        });
+        return;
+      }
+      // [#24190] The fourth carrier: one grid per block, over the child object
+      // the panel lists.
+      if (node.type === 'record:line_items') {
+        const childObject = lineItemsChildObject(node, props);
+        if (childObject === undefined) return;
+        judge(props.columns, childObject, `Page '${pageName}' (${path}) record:line_items columns`);
+      }
     });
   }
   return errors;
+}
+
+/**
+ * [#24190] The child object a `record:line_items` block lists, resolved the
+ * way objectui resolves it before `LineItemsPanel` hydrates its columns from
+ * that object's schema — so the column is judged against the field it will
+ * render.
+ *
+ * The block's `childObject` is optional because the node's object
+ * `dataSource` binding can supply the object instead (`RecordLineItemsProps`),
+ * and the block's binding mapping writes the binding's `object` onto
+ * `childObject`: a binding that names an object wins over an authored
+ * `childObject`. An API binding (`provider: 'api'`) names no object, and the
+ * panel then reads `childObject` as authored. The `isRecord` / `typeof`
+ * guards are this rule's own type guards, as in the rest of this page walk:
+ * the stack's parse has already judged the node's `dataSource`, and it never
+ * reaches `properties`.
+ */
+function lineItemsChildObject(
+  node: Record<string, unknown>,
+  props: Record<string, unknown>,
+): string | undefined {
+  const binding = node.dataSource;
+  if (isRecord(binding) && typeof binding.object === 'string' && binding.object.length > 0) {
+    return binding.object;
+  }
+  return typeof props.childObject === 'string' ? props.childObject : undefined;
 }
 
 /**
@@ -3746,8 +3859,8 @@ function validateCrossReferences(
   }
 
   // Validate identity-only inline grid columns against the child field's type
-  // (#20901) — every carrier (#20928 added the page block's), the column
-  // schema's own verdict.
+  // (#20901) — every carrier (#20928 added the master-detail page block's,
+  // #24190 the line-items block's), the column schema's own verdict.
   errors.push(...collectHydratedInlineColumnErrors(config));
 
   // Validate seed data → object references. ARTIFACT-SCOPED (#18202).

@@ -361,9 +361,24 @@ describe('DatasourceAdminServicePlugin: runtime datasource durability', () => {
         const w = q.where ?? {};
         return rows.find((r) => Object.entries(w).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
       },
+      // [ADR-0131 D7] The engine shapes a read to the declared columns, and the
+      // family declares no `organization_id`: the key never comes back. A row
+      // stored with one (a database the ceremony has not migrated) is told
+      // apart through the driver below, off the physical column.
       find: async (_o: string, q: { where?: Record<string, unknown> }) => {
         const w = q.where ?? {};
-        return rows.filter((r) => Object.entries(w).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }));
+        return rows
+          .filter((r) => Object.entries(w).every(([k, v]) => { if (k.startsWith('$')) throw new Error(`fake driver: unsupported operator ${k}`); return r[k] === v; }))
+          .map(({ organization_id: _physical, ...declared }) => declared);
+      },
+      getDriverForObject: (object: string) => object !== 'sys_metadata' ? undefined : {
+        dialectName: 'sqlite',
+        async execute(sql: string) {
+          return /column_name/.test(sql)
+            ? [{ column_name: 'id' }, { column_name: 'organization_id' }]
+            : rows.filter((r) => r.organization_id != null && r.organization_id !== '')
+              .map((r) => ({ id: r.id, organization_id: r.organization_id }));
+        },
       },
       insert: async (_o: string, row: Record<string, unknown>) => { rows.push({ ...row }); },
       update: async (_o: string, row: Record<string, unknown>, opts: { where: Record<string, unknown> }) => {

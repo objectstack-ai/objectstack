@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { SnakeCaseIdentifierSchema } from '../shared/identifiers.zod';
 import { EvaluatedExpressionInputSchema } from '../shared/expression.zod';
 import { I18nLabelSchema } from './i18n.zod';
+import { ElementApiDataSourceSchema } from './page.zod';
 import { retiredKey } from '../shared/retired-key';
 import { strictObject, type StrictObjectOptions } from '../shared/strict-object';
 import { lazySchema } from '../shared/lazy-schema';
@@ -156,7 +157,7 @@ const SEPARATOR_NAV_ITEM_ALIASES: Readonly<Record<string, string>> = {
  * of answering with one).
  */
 const SEPARATOR_NAV_ITEM_GUIDANCE: Readonly<Record<string, string>> = Object.fromEntries(
-  ['label', 'title', 'icon', 'badge', 'badgeVariant', 'visible', 'requiredPermissions', 'requiresObject', 'requiresService']
+  ['label', 'title', 'icon', 'badge', 'badgeVariant', 'visible', 'dataSource', 'requiredPermissions', 'requiresObject', 'requiresService']
     .map((key) => [
       key,
       `\`${key}\` is not a separator key — a separator is a divider and declares only `
@@ -357,8 +358,67 @@ const BaseNavItemSchema = z.object({
    * Visibility condition. 
    * Formula expression returning boolean. 
    * e.g. "user.is_admin || user.department == 'sales'"
+   *
+   * An entry that declares `dataSource` (the next key) reads that
+   * binding's selected value here as `data` (`data.total == 1`) — the page
+   * element's own reading of its API binding in its `visibleWhen`, one dialect
+   * (CEL, the bare string normalised to `{ dialect: 'cel', source }`) and one
+   * root name. PLANNED, not yet rendered: see that key. An entry with no
+   * `dataSource` has no `data` to read.
    */
-  visible: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL). e.g. P`\'org_admin\' in current_user.positions`'),
+  visible: EvaluatedExpressionInputSchema.optional().describe('Visibility predicate (CEL). e.g. P`\'org_admin\' in current_user.positions`. An entry that declares `dataSource` reads that binding\'s selected value here as `data`, e.g. `data.total == 1` (planned: no console renders `dataSource` yet); an entry with no `dataSource` has no `data` to read.'),
+
+  /**
+   * One API data source for this entry — the page element's API binding,
+   * {@link ElementApiDataSourceSchema}, BY REFERENCE (#24332 shape 1, the spec
+   * half of the objectstack-ai/cloud#3002 letter A sidebar row):
+   * `{ provider: 'api', read: { url }, path? }` reads one same-origin endpoint
+   * with the console's signed-in fetch and binds the value `path` selects, which
+   * this entry's `visible` reads as `data`.
+   *
+   * ## One binding, not a second one
+   *
+   * Referenced, never restated: the accept set and every refusal are the page
+   * element's — `read.url` a same-origin API path (an absolute URL of any
+   * scheme, `//host`, a backslash read as a slash and a relative path are
+   * refused at parse), `method` `GET` alone, no credential key (`headers`,
+   * `token`, … are refused with the prescription to delete them), no `write`
+   * block, and an unknown key refused rather than dropped. The refusal text is
+   * therefore the binding's own, which names a page element; that wording is
+   * `page.zod.ts`'s to change, for both doors at once.
+   *
+   * The object binding (`ElementDataSourceSchema`, `page.zod.ts`) is NOT admitted: the
+   * pull is one control-plane reading (how many environments the active
+   * organisation has), which is an API answer, and no ruled consumer binds a
+   * navigation entry to an object query.
+   *
+   * ## What reads `data`, and what does not
+   *
+   * Only this entry's `visible` (see that key). `label` and the target keys
+   * (`recordId`, `filters`, `params`) take no `data` read: a data-bearing label
+   * meets the bundle rung `translateApp` applies by entry id, and a data-bearing
+   * target meets the `{current_user_id}` template vocabulary `recordId` already
+   * has, and both are open questions on #24332 rather than dialects declared
+   * here. The binding is not published to `children`: a `group` that declares
+   * one reads it in its own `visible`, and each child declares its own.
+   *
+   * Declared on the shared base, so all nine branches that spread it carry the
+   * key (a separator spreads nothing and refuses it with its own prescription):
+   * `visible` is a base key, and the console's item guard asks it of every
+   * branch, a `group` included.
+   *
+   * ## Planned, not yet rendered
+   *
+   * No console reads this key: objectui's navigation gates evaluate `visible`
+   * against the shell's ambient scope, with no `data` in it. The reader is the
+   * objectui renderer half, filed when this lands; the liveness row is
+   * `liveness/app.json` → `navigation.children.dataSource` (`planned`, with an
+   * author warning). When that half ships, the `[PLANNED — not yet rendered]`
+   * marker leaves this describe and the row flips to `live`.
+   */
+  dataSource: ElementApiDataSourceSchema.optional().describe(
+    '[PLANNED — not yet rendered] One API data source for this navigation entry, the page element\'s API binding by reference: `{ provider: \'api\', read: { url }, path? }` reads one same-origin endpoint with the console\'s signed-in fetch and binds the value `path` selects, which this entry\'s `visible` reads as `data` (e.g. `data.total == 1`). Only `visible` reads it: `label` and the target keys (`recordId`, `filters`, `params`) take no `data` read, and the binding is not published to `children`. The same refusals as the page element\'s binding apply: `read.url` must be a same-origin API path, `method` is `GET` alone, and no credential key is written. No console renders it yet, so until the navigation renderer reads it, a `visible` that reads `data` has nothing to read.',
+  ),
 
   /** Permissions required to see/access this navigation item */
   requiredPermissions: z.array(z.string()).optional().describe('Permissions required to access this item'),
@@ -430,8 +490,8 @@ export const ObjectNavItemSchema = lazySchema(() => strictObject(navItemSurface(
   type: z.literal('object'),
   objectName: z.string().describe('Target object name'),
   /**
-   * The rule this sentence states is the console's, read at the objectui commit
-   * `.objectui-sha` pins: an entry with no `viewName` links to the bare object
+   * The rule this sentence states is the console's (read points recorded in
+   * `liveness/app.json`, row `navigation.viewName`): an entry with no `viewName` links to the bare object
    * route, where `ObjectView` opens `defaultViewId || views[0]` — the view
    * `buildViewTabs` marks `isDefault` (the default `list`), else the first
    * declared list view. Its `all` tab is the fallback `buildViewTabs` adds only
@@ -1620,11 +1680,12 @@ export const AppSchema = lazySchema(() => strictObject(
     'only thing that opens anonymous access, and ADR-0121 D6 then requires an armed ' +
     '`rateLimit: { enabled: true, windowMs, maxRequests }`. Read the ' +
     '`declarative-apis-endpoints-live` entry of the protocol upgrade guide first; it is a ' +
-    'security review, not a rename. A route that genuinely needs handler CODE is mounted ' +
-    'imperatively instead: resolve the `http.server` service from your plugin context and ' +
-    'register the route on `kernel:ready` (NOT the manifest `contributes.routes` key — ' +
-    'removed in @objectstack/spec 17: nothing ever read it, and authoring it is ' +
-    'now rejected with its own prescription). ' +
+    'security review, not a rename. An endpoint whose work needs CODE still lands here: ' +
+    'compute in a flow and register the code as a stack function ' +
+    '(`defineStack({ functions })`) or a connector — an app does not mount routes on ' +
+    '`http.server`, and the manifest `contributes.routes` key was removed in ' +
+    '@objectstack/spec 17 (nothing ever read it; authoring it is now rejected with its ' +
+    'own prescription). ' +
     'Run `os migrate meta --from 16` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.',
   ),
 

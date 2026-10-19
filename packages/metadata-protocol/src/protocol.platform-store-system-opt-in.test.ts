@@ -308,7 +308,7 @@ describe('[#21908] row 23 — the repository reads the engine-lane slice left ca
         expect(historyRows.length).toBeGreaterThan(0);
         const hash = String(historyRows[0].checksum);
         const ref = { type: 'view', name: 'proj_task_grid' } as any;
-        const repo = new SysMetadataRepository({ engine, organizationId: null });
+        const repo = new SysMetadataRepository({ engine });
 
         await expectSystemOptIn(calls, 'getByHash', async () => {
             expect(await repo.getByHash(ref, hash)).not.toBeNull();

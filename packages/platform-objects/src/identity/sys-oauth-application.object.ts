@@ -231,6 +231,10 @@ export const SysOauthApplication = ObjectSchema.create({
       columns: ['name', 'client_id', 'type', 'disabled', 'created_at'],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No OAuth applications yet',
+        message: 'Register an application to let its clients sign users in with this system.',
+      },
     },
     mine: {
       type: 'grid',
@@ -245,6 +249,10 @@ export const SysOauthApplication = ObjectSchema.create({
       filter: [{ field: 'user_id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'You have no OAuth applications yet',
+        message: 'Applications you register are listed here.',
+      },
     },
     active: {
       type: 'grid',
@@ -255,6 +263,10 @@ export const SysOauthApplication = ObjectSchema.create({
       filter: [{ field: 'disabled', operator: 'equals', value: false }],
       sort: [{ field: 'name', order: 'asc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No active OAuth applications',
+        message: 'An application stays active until it is disabled; disabled applications are listed under Disabled.',
+      },
     },
     disabled_apps: {
       type: 'grid',
@@ -265,6 +277,10 @@ export const SysOauthApplication = ObjectSchema.create({
       filter: [{ field: 'disabled', operator: 'equals', value: true }],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 50 },
+      emptyState: {
+        title: 'No disabled OAuth applications',
+        message: 'An application moves here when it is disabled; its clients cannot sign in until it is enabled again.',
+      },
     },
   },
 

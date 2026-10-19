@@ -1,0 +1,10 @@
+{
+  "file": "packages/rest/src/meta-item-history-routes.ts",
+  "adrs": [
+    "ADR-0067",
+    "ADR-0106",
+    "ADR-0066",
+    "ADR-0131"
+  ],
+  "invariant": "The `/meta` history family, moved here whole from `rest-server.ts` (#23050 slice 13d): the change log (`GET {metaPath}/:type/:name/history`), the audit trail (`/audit`), the publish (`POST /publish`), the rollback (`POST /rollback`) and the version comparison (`GET /diff`), registered through the inner method's per-item registrar, under the per-item switch and inside the umbrella's guarded registration. ADR-0067 — `sys_metadata_history` is the authoring commit log, and a draft save appends to it exactly as an active save does, so the change log, the audit trail and the comparison are AUTHORING doors: each asks the authoring-trail admission first, before the protocol is resolved, and refuses a caller it does not admit in the drafts list's 403 shape. ADR-0106 — D4 is why those logs are admin-gated (a draft read is an authoring read), and the comparison owes the plain read's mask: the caller's posture is resolved before any fetch and the object mask projects the emitted values on both sides, so a field the caller may not read is not served as a diff value. ADR-0066 — the publish and the rollback are authoring writes: each asks the shared write-capability verdict FIRST, before the protocol is resolved, so nothing is promoted or restored before a refusal and the 501-vs-200 answer is no probe. ADR-0131 — no door names an organization: the change log reads the environment's partition, every write the publish or the rollback admits lands environment-wide, and each of the two asks the walled refusal after its capability gate and before the protocol is resolved. A door that reads or writes before its gate, serves a log entry or a diff value its caller may not read, threads an organization into a write, or runs past the walled refusal is the drift these records forbid; the bodies' own comments carry each citation."
+}

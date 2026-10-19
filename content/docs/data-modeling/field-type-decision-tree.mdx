@@ -143,7 +143,7 @@ flowchart TD
 | Type | Use When | Example |
 |:---|:---|:---|
 | `number` | Any numeric value (set `precision`/`scale` for decimals) | `price`, `weight`, `quantity` |
-| `currency` | Money amounts with currency code | `amount`, `total_price` |
+| `currency` | Money amounts, stored as a bare number (currency: fixed on the field, or the tenant default) | `amount`, `total_price` |
 | `percent` | Percentage values, stored as fractions 0–1 (`0.85` = 85%) | `completion`, `discount` |
 | `rating` | Star ratings (typically 1–5) | `satisfaction`, `difficulty` |
 | `slider` | Numeric value via slider UI | `volume`, `priority_level` |

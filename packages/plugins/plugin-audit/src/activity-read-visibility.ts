@@ -12,61 +12,76 @@
  * module a principal holding object-level `sys_activity` read read every row
  * of its environment, including rows about records it cannot open.
  *
- * This is `installCommentReadVisibility` (`comment-access-hooks.ts`) applied to
- * the activity stream, and the two gates share ONE answer to "can this caller
- * read that record": {@link resolveReadableParentIds}, a caller-scoped engine
- * read per parent object, so the parent's own OWD/sharing, RLS and object-level
- * CRUD decide. ⛔ Nothing here derives readability a second way.
+ * The rule is the comment gate's (`comment-access-hooks.ts`) applied to the
+ * activity stream, and it is decided where every parent-record gate decides
+ * it: the engine and the security service answer "can this caller read that
+ * record", so the parent's own OWD/sharing, RLS and object-level CRUD decide.
+ * ⛔ Nothing here derives readability a second way.
  *
- * Mechanism, as for comments, and shared with the compliance ledger's gate
+ * Mechanism, shared with the compliance ledger's gate
  * (`audit-log-read-visibility.ts`) through `parent-record-read-gate.ts`: a data
  * middleware (not a find-hook) on `find`, `findOne`, `count` and `aggregate`,
- * so a list's `total` and a grouped count
- * are narrowed exactly like its rows. For each read it pre-scans the parent
- * pairs the query would touch under SYSTEM context, asks which of those parents
- * the caller can read (one read per parent object, never one per row), and ANDs
- * one branch per parent object into `ctx.ast.where`:
+ * so a list's `total` and a grouped count are narrowed exactly like its rows.
+ * For each read it ANDs into `ctx.ast.where` one branch per parent object the
+ * registry holds — only those the read names, when its own `where` names them
+ * (`namedParentObjects`) — (ADR-0139 D4):
  *
- *     { $or: [ { object_name: OBJECT, record_id: { $in: READABLE_IDS } }, ... ] }
+ *     { $or: [ { object_name: P, record_id: { $in: ReadableIds.of(P) } }, ... ] }
+ *
+ * which the engine composes from the caller's read scope of each `P` and the
+ * driver evaluates as one subquery per branch: no pre-scan, no candidate
+ * window. D5's three classes — a delegated caller, a parent an object-scoped
+ * read middleware narrows, a parent on another datasource — are routed to the
+ * bounded probe up front, by name (the gate module's header).
  *
  * Everything fails CLOSED, row classes exactly as the comment gate treats its
  * threads:
  *  - a row naming no parent (no `object_name` or no `record_id`, or an
  *    `object_name` that is not a machine name) is excluded;
- *  - a row whose parent record no longer exists is excluded: the parent read
- *    finds nothing, so there is nothing to judge readability on;
- *  - a row whose parent object the caller cannot read, or that the engine does
- *    not know, is excluded: that parent read refuses or throws;
- *  - a row naming `sys_activity` itself is excluded: probing it would re-enter
- *    this gate.
+ *  - a row whose parent record no longer exists is excluded: the subquery
+ *    finds no such id;
+ *  - a row whose parent object the caller cannot read, or that the registry
+ *    does not hold, is excluded: the engine answers that leaf `$in: []`, or no
+ *    leaf is written;
+ *  - a row naming `sys_activity` itself is excluded: no leaf is written for the
+ *    gated object.
  * A platform object is a parent like any other: its rows are kept exactly when
  * the caller can read that platform record. The stream declares no row class
  * outside the gate: its one platform producer is the CRUD mirror, and every
  * row it writes is about a record.
  *
+ * [ADR-0139 D3] A composition or driver refusal of a leaf is this read's own
+ * failure: it reaches the caller and says why, and this gate does not turn it
+ * into its deny-all sentinel.
+ *
  * System-context reads (the audit writer, engine self-reads) and context-less
  * programmatic calls on bare kernels are not narrowed, as for comments: every
  * real transport carries a context.
  *
- * [#21388] One more per-reader ROW rule rides this mechanism: an update row
- * whose stored change is withheld whole from the reader is withheld as a row,
- * by a WHERE built from a SYSTEM pre-scan on the same four reads, so a list's
- * total, its pages and a grouped count agree with the rows served. It judges by
- * the security service's field answer, so it lives with the field redaction
- * (`activity-field-redaction.ts`, `computeWithheldUpdateFilter`), whose
- * middleware `AuditPlugin` registers after this one: its pre-scan reads the
- * WHERE this gate has already narrowed.
+ * [#21388, #22786] One more per-reader ROW rule rides this mechanism: an
+ * update row whose recorded change is withheld whole from the reader, and a
+ * fired milestone row whose watched fields it is not served, are withheld as
+ * rows, on the same four reads, so a list's total, its pages and a grouped
+ * count agree with the rows served. It judges by the security service's field
+ * answer, so it lives with the field redaction (`activity-field-redaction.ts`,
+ * `computeWithheldUpdateFilter`), whose middleware `AuditPlugin` registers after
+ * this one. [ADR-0139 E6] It is a predicate over two writer-stamped columns
+ * (`changed_fields`, `milestone_key`), one branch per parent object this gate
+ * enumerates ({@link ACTIVITY_GATE}): it reads no row and composes no leaf, so
+ * nothing bounds a broad read of this stream but this gate's own leaves.
  */
 
-import type { CommentAccessEngine, CommentAccessLogger, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
+import type { CommentAccessLogger, CommentReadMiddlewareCtx } from './comment-access-hooks.js';
 import {
   PARENT_GATE_READ_OPS,
   andIntoWhere,
   computeParentRecordFilter,
+  type ParentObjectReadAdmissionSource,
   parseParentObject,
   parseParentRecord,
   type ParentRecord,
   type ParentRecordGate,
+  type ParentRecordGateEngine,
 } from './parent-record-read-gate.js';
 
 const ACTIVITY_OBJECT = 'sys_activity';
@@ -76,7 +91,7 @@ const ACTIVITY_OBJECT = 'sys_activity';
  * caller is exempt. The compliance ledger's audit capability exempts its holder
  * from the ledger's gate only (#21260: the ruling names the ledger).
  */
-const ACTIVITY_GATE: ParentRecordGate = {
+export const ACTIVITY_GATE: ParentRecordGate = {
   object: ACTIVITY_OBJECT,
   seam: 'activity read visibility',
   denyAll: { id: '__activity_parent_denied__' },
@@ -117,11 +132,15 @@ export function parseActivityParent(row: Record<string, unknown> | null | undefi
  * Install the `sys_activity` read-visibility middleware.
  *
  * Inert on an engine without the middleware seam; `AuditPlugin` says so out
- * loud when that happens.
+ * loud when that happens. `getAdmission` resolves, on every read, the security
+ * service whose object-level read admission is asked before a parent object is
+ * read as the caller (`parent-record-read-gate.ts`, "A skipped object is not
+ * an access attempt").
  */
 export function installActivityReadVisibility(
-  engine: CommentAccessEngine,
+  engine: ParentRecordGateEngine,
   logger: CommentAccessLogger,
+  getAdmission: ParentObjectReadAdmissionSource,
 ): void {
   if (typeof engine.registerMiddleware !== 'function') return;
 
@@ -132,16 +151,13 @@ export function installActivityReadVisibility(
       if (!PARENT_GATE_READ_OPS.has(ctx.operation) || !ctx.ast || !ctx.context || ctx.context.isSystem) {
         return next();
       }
-      try {
-        const filter = await computeParentRecordFilter(engine, ctx, logger, ACTIVITY_GATE);
-        if (filter) andIntoWhere(ctx, filter);
-      } catch (err) {
-        // A filter-compute failure must never fall open into a leak.
-        logger.warn(
-          `[audit] activity read visibility: filter failed, denying all (${(err as Error)?.message ?? err})`,
-        );
-        andIntoWhere(ctx, ACTIVITY_GATE.denyAll);
-      }
+      // [ADR-0139 D3] No catch: the gate answers its own probe's failure with
+      // the deny-all sentinel, and a `ReadableIds` leaf is composed by the
+      // engine after `next()`, so a composition or driver refusal is this
+      // read's own failure and reaches the caller saying why — ⛔ never
+      // turned into the deny-all sentinel here.
+      const filter = await computeParentRecordFilter(engine, ctx, logger, ACTIVITY_GATE, getAdmission);
+      if (filter) andIntoWhere(ctx, filter);
       return next();
     },
     { object: ACTIVITY_OBJECT },

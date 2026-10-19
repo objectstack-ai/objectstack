@@ -35,6 +35,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Source",
         help: "Origin of the request — `flow:<flowName|nodeId>` for node-driven approvals"
       },
+      process_label: {
+        label: "Flow",
+        help: "Label of the flow that opened this request, as it stood when the request was opened"
+      },
       object_name: {
         label: "Object"
       },
@@ -70,6 +74,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Current Step",
         help: "Machine name of the step awaiting approval"
       },
+      current_step_label: {
+        label: "Approval Step",
+        help: "Label of the step awaiting approval, as it stood when the request reached it"
+      },
       current_step_index: {
         label: "Current Step Index"
       },
@@ -77,21 +85,25 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Pending Approvers",
         help: "Comma-separated user ids who can act on the current step"
       },
+      pending_approver_labels: {
+        label: "Waiting On",
+        help: "Who the request is waiting on: the name of each pending approver, or the slot address when it names no person"
+      },
       payload_json: {
         label: "Snapshot",
         help: "Record snapshot at submission time"
       },
       flow_run_id: {
         label: "Flow Run",
-        help: "Suspended automation run id this request gates (ADR-0019). The decision resumes it."
+        help: "Suspended automation run id this request gates. The decision resumes it."
       },
       flow_node_id: {
         label: "Flow Node",
-        help: "Approval node id within the flow that opened this request (ADR-0019)."
+        help: "Approval node id within the flow that opened this request."
       },
       node_config_json: {
         label: "Node Config",
-        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests (ADR-0019)."
+        help: "Snapshot of the Approval node config (approvers/behavior) for node-driven requests."
       },
       completed_at: {
         label: "Completed At"
@@ -244,6 +256,18 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "Step",
         help: "Machine name of the step at the time of the action"
       },
+      step_label: {
+        label: "Approval Step",
+        help: "Label of the step at the time of the action"
+      },
+      object_name: {
+        label: "Object",
+        help: "Object of the record the request is about"
+      },
+      record_id: {
+        label: "Record",
+        help: "The record the request is about"
+      },
       step_index: {
         label: "Step Index"
       },
@@ -272,6 +296,10 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       acted_as: {
         label: "Acted As",
         help: "The pending-approver slot this action was taken as, in the slot’s stored spelling: a user id, an email, or a position address. Empty when no slot admitted the action, such as the submitter’s own actions, system actions and admin overrides."
+      },
+      acted_as_label: {
+        label: "Acting As",
+        help: "The slot this action was taken as, for display: the name of the person it names, or its address when it names no person"
       },
       comment: {
         label: "Comment"
@@ -315,7 +343,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_approval_delegation: {
     label: "Approval Delegation",
     pluralLabel: "Approval Delegations",
-    description: "Self-service out-of-office rule: route this user's approver slots to a delegate within a time window.",
+    description: "While someone is away, approvals assigned to them personally go to their delegate.",
     fields: {
       id: {
         label: "Delegation ID"
@@ -334,7 +362,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       valid_from: {
         label: "Valid From",
-        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive (ADR-0091 D2 predicate) — never by a background job."
+        help: "Rule is inactive before this instant. Null = active immediately. Enforced at resolution time via isGrantActive — never by a background job."
       },
       valid_until: {
         label: "Valid Until",

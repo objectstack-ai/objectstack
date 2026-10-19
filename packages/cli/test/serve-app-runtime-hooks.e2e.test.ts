@@ -27,7 +27,7 @@ import { promisify } from 'node:util';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { childEnv, runServe, randomPort, CLI, TSX } from './helpers/serve-process.js';
+import { childEnv, runServe, CLI, TSX } from './helpers/serve-process.js';
 import { linkSpec } from './helpers/define-stack-fixture.js';
 
 const execFileP = promisify(execFile);
@@ -95,7 +95,7 @@ afterAll(() => {
 
 describe('os serve — an app booted from its artifact keeps its module code (#4095)', () => {
   it('runs onEnable, so the declared script action has a handler', async () => {
-    const { stdout, stderr } = await runServe(dir, ['--port', randomPort()], {
+    const { stdout, stderr } = await runServe(dir, [], {
       waitFor: /Press Ctrl\+C to stop/,
     });
 

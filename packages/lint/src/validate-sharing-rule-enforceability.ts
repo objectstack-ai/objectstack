@@ -17,12 +17,13 @@
  * that is the whole reason this rule exists and its neighbours are deferred:
  *
  *   The one runtime consumer of a stack-declared `sharingRules[].condition` is
- *   `bootstrapDeclaredSharingRules` (plugin-sharing), and the ONLY thing it
- *   does with the key is hand it to `compileCelToFilter(condition, { variables:
- *   {} })`. A condition that does not lower is not degraded, not partially
- *   applied and not deferred — the rule is SKIPPED (ADR-0049: never seeded as a
- *   permissive match-all), so it never reaches `sys_sharing_rule` and grants
- *   nothing at all. The only trace is one WARN line at boot.
+ *   `createDeclaredSharingRuleSource` (plugin-sharing — the registry read
+ *   enforcement uses since ADR-0131 D2 retired the boot seeder), and the ONLY
+ *   thing it does with the key is hand it to `compileCelToFilter(condition,
+ *   { variables: {} })`. A condition that does not lower is not degraded, not
+ *   partially applied and not deferred — the rule is SKIPPED (ADR-0049: never
+ *   served as a permissive match-all), so enforcement never reads it and it
+ *   grants nothing at all. The only trace is one WARN line.
  *
  * So this rule does not model the consumer, guess at it, or grep for it. It
  * calls the consumer's own decision procedure, from the same package
@@ -89,7 +90,7 @@
  *    lowered) writes silently inert security metadata.
  *  - `unresolved-variable` → {@link SHARING_RULE_RUNTIME_VARIABLE_CONDITION}.
  *    The condition reads `current_user.*`. Criteria sharing rules are
- *    MATERIALIZED — the seeder compiles one static `criteria_json` per rule and
+ *    MATERIALIZED — the registry read compiles one static `criteria` filter per rule and
  *    the evaluator writes `sys_record_share` grants from it — so there is no
  *    "current user" at compile time and the compiler correctly refuses. The fix
  *    is a different mechanism, not a different spelling, which is exactly why
@@ -285,7 +286,7 @@ const RUNTIME_VARIABLE_REMEDY =
  */
 
 /** A condition that does not lower: the seeder skips the rule — both condition ids. */
-const NEVER_SEEDED = 'so the rule is never seeded and grants nothing';
+const NEVER_SERVED = 'so the rule is never served and grants nothing';
 
 /** A lowered condition the driver refuses on every criteria query — both comparison arms. */
 const CRITERIA_QUERY_REFUSED = 'so its criteria query is refused (INVALID_FILTER / 400) and it grants nothing';
@@ -588,7 +589,7 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
     const path = `sharingRules[${index}].condition`;
 
     // The seeder's exact call: `compileCelToFilter(r.condition, { variables: {} })`
-    // in `bootstrap-declared-sharing-rules.ts`. Same function, same options —
+    // in plugin-sharing's `declared-sharing-rules.ts`. Same function, same options —
     // so `ok === false` here means "this rule will be skipped at boot", not
     // "this rule looks suspicious".
     const result = compileCelToFilter(input, { variables: {} });
@@ -625,7 +626,7 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
         rule: SHARING_RULE_RUNTIME_VARIABLE_CONDITION,
         where,
         path,
-        message: `condition reads a runtime variable (${result.detail}), ${NEVER_SEEDED}`,
+        message: `condition reads a runtime variable (${result.detail}), ${NEVER_SERVED}`,
         hint: RUNTIME_VARIABLE_REMEDY,
       });
       return;
@@ -636,7 +637,7 @@ export function validateSharingRuleEnforceability(stack: unknown): SharingRuleEn
       rule: SHARING_RULE_UNLOWERABLE_CONDITION,
       where,
       path,
-      message: `condition is not lowerable (${refusalVerdict(result.detail)}), ${NEVER_SEEDED}`,
+      message: `condition is not lowerable (${refusalVerdict(result.detail)}), ${NEVER_SERVED}`,
       hint: LOWERABLE_REWRITE,
     });
   });

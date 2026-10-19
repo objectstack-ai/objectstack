@@ -22,6 +22,14 @@
  *
  * Where a source column is nullable, a row without it is titled by the other
  * column rather than failing to evaluate.
+ *
+ * `sys_approval_request` is the one object whose formula and `titleFormat`
+ * name different columns (#24007): the formula's flow half is the flow's label
+ * (`process_label`, nullable), with `process_name` as its fallback, while
+ * `titleFormat` keeps `{process_name}` because a template cannot express that
+ * fallback. So for that object point 2 is asserted where they agree — a row
+ * with no stored label, where both draw `process_name` — and a row with a
+ * label pins the formula's own text and the template's difference from it.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -90,7 +98,26 @@ describe('[#20015] approval objects resolve a real record title under ADR-0079 o
     }
   });
 
-  it('sys_approval_request: the H1 is "{process_name} · {record_id}", not the id', async () => {
+  it('sys_approval_request: with a flow label stored, the H1 is "{process_label} · {record_id}"', async () => {
+    // An authored label that is not the humanized machine name ("Deal Desk"),
+    // so the title can only have come from the stored label.
+    const created = await engine.insert('sys_approval_request', {
+      process_name: 'flow:deal_desk', process_label: 'Discount Sign-off',
+      object_name: 'opportunity', record_id: 'opp_45', status: 'pending',
+    }, SYS);
+    expect(created.display_title).toBe('Discount Sign-off · opp_45');
+    const row = await engine.findOne('sys_approval_request', { where: { id: created.id } }, SYS);
+    expect(row).not.toBeNull();
+
+    expect(h1Of(SysApprovalRequest, row!)).toBe('Discount Sign-off · opp_45');
+    expect(h1Of(SysApprovalRequest, row!)).not.toBe(row!.id);
+    expect(resolveRecordTitle(SysApprovalRequest, storedOnly(row!))).toBe('Discount Sign-off · opp_45');
+    // The pairing, restated: `titleFormat` keeps the machine source, so a
+    // renderer that reads it first draws a different text for this row.
+    expect(renderTitleFormat(SysApprovalRequest.titleFormat, row!)).toBe('flow:deal_desk · opp_45');
+  });
+
+  it('sys_approval_request: with no flow label stored, the H1 is "{process_name} · {record_id}", never "null · …"', async () => {
     const created = await engine.insert('sys_approval_request', {
       process_name: 'flow:deal_desk', object_name: 'opportunity', record_id: 'opp_42',
       status: 'pending',
@@ -99,6 +126,7 @@ describe('[#20015] approval objects resolve a real record title under ADR-0079 o
     expect(created.display_title).toBe('flow:deal_desk · opp_42');
     const row = await engine.findOne('sys_approval_request', { where: { id: created.id } }, SYS);
     expect(row).not.toBeNull();
+    expect(row!.process_label ?? null).toBeNull();
 
     expect(h1Of(SysApprovalRequest, row!)).toBe('flow:deal_desk · opp_42');
     expect(h1Of(SysApprovalRequest, row!)).not.toBe(row!.id);

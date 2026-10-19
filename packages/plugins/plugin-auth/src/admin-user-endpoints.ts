@@ -174,6 +174,7 @@ import { generatePlaceholderEmail } from './placeholder-email.js';
 import { revokeSessionsAndApiKeys, type ForcedResetRevocationOutcome } from './forced-reset-revocation.js';
 import { reconcileMembership, type MembershipPolicy } from './reconcile-membership.js';
 import { resolveDefaultOrgId } from './tenancy-service.js';
+import { readJsonRequestBody } from './request-json-body.js';
 
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] };
 
@@ -214,13 +215,20 @@ export function generateTemporaryPassword(length = 16): string {
 
 // ── Shared helpers ───────────────────────────────────────────────────────
 
-async function parseJson(request: Request): Promise<Record<string, unknown>> {
-  try {
-    const parsed = await request.json();
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
+/**
+ * [#24032] The body, or the refusal message for a declared-JSON body that does
+ * not parse: it was read as `{}`, which answered "userId is required" (or
+ * "Either email or phoneNumber is required") for a body that carried the field
+ * (see request-json-body.ts). A well-formed body that is not an object still
+ * reads as no fields, as before.
+ */
+async function parseJson(
+  request: Request,
+): Promise<{ ok: true; body: Record<string, unknown> } | { ok: false; message: string }> {
+  const reading = await readJsonRequestBody(request);
+  if (!reading.ok) return reading;
+  const parsed = reading.body;
+  return { ok: true, body: parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {} };
 }
 
 function badRequest(message: string): EndpointResult {
@@ -551,7 +559,9 @@ export async function runAdminCreateUser(
   request: Request,
   actor: AdminActor,
 ): Promise<EndpointResult> {
-  const body = await parseJson(request);
+  const read = await parseJson(request);
+  if (!read.ok) return badRequest(read.message);
+  const body = read.body;
 
   // #2766 V1.5 — identity: a real email, a phone number, or both. Phone-only
   // users get a generated placeholder address (better-auth requires a unique
@@ -680,7 +690,9 @@ export async function runAdminSetUserPassword(
   request: Request,
   actor: AdminActor,
 ): Promise<EndpointResult> {
-  const body = await parseJson(request);
+  const read = await parseJson(request);
+  if (!read.ok) return badRequest(read.message);
+  const body = read.body;
 
   const userId = body.userId ?? body.user_id;
   if (typeof userId !== 'string' || userId.length === 0) {

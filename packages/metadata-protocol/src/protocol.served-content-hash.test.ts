@@ -74,6 +74,12 @@ function keyOf(w: Record<string, unknown>) {
     return `${w.type}|${w.name}|${w.organization_id ?? '__env__'}|${w.state ?? 'active'}|${w.package_id ?? '__nopkg__'}`;
 }
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 function matchesWhere(r: Record<string, unknown>, where: Record<string, unknown> = {}): boolean {
     for (const [k, v] of Object.entries(where)) {
         if (k === '$or') {
@@ -83,7 +89,7 @@ function matchesWhere(r: Record<string, unknown>, where: Record<string, unknown>
         // Any other combinator is REFUSED, never read as a field name.
         if (k.startsWith('$')) throw new Error(`stub engine: combinator '${k}' is not implemented`);
         if (v === undefined) continue;
-        if (r[k] !== v) return false;
+        if (!whereValueMatches(r[k], v)) return false;
     }
     return true;
 }
@@ -764,5 +770,71 @@ describe('[#22114] the item read serves the version token the save door accepts'
         expect(noDraft.code).toBe('METADATA_CONFLICT');
         expect(noDraft.status).toBe(409);
         expect(noDraft).toHaveProperty('currentVersion', null);
+    });
+});
+
+/**
+ * [#23406] The save door's 409 for a refused FIRST-WRITE PIN states what the
+ * caller asserted. A present `null` parent (`If-None-Match: *` on the REST
+ * door) asserts "no current row of this lifecycle"
+ * (`SaveMetaItemRequestSchema.parentVersion` in `@objectstack/spec`); when a row
+ * is there, the sentence used to be every conflict's — "… has been modified
+ * since you loaded it. Expected parent null but current is …" — though that
+ * caller loaded nothing. It now names the lifecycle, the pin and the current
+ * version. The code, the status and the keyed attributes are unchanged, and a
+ * conflict that is no first-write pin keeps the door's own sentence (the
+ * control).
+ */
+describe('[#23406] a refused first-write pin is told what it asserted', () => {
+    /** The assertion and what contradicts it — never "since you loaded it". */
+    const expectAssertionSentence = (message: string, lifecycle: 'draft' | 'active', current: string) => {
+        expect(message).toContain('view/case_grid');
+        expect(message).toContain(`no ${lifecycle} row exists`);
+        expect(message).toContain('If-None-Match: *');
+        expect(message).toContain(`current is ${current}`);
+        expect(message).not.toContain('since you loaded it');
+        expect(message).not.toContain('Expected parent');
+    };
+
+    it('draft: a first draft over a pending draft — the sentence states the assertion; code, status and keyed fields unchanged', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        const first: any = await p.saveMetaItem({ ...ref, item: viewBody('first'), parentVersion: null, mode: 'draft' } as any);
+
+        const refused = await rejection(() =>
+            p.saveMetaItem({ ...ref, item: viewBody('second'), parentVersion: null, mode: 'draft' } as any));
+        expect({ code: refused.code, status: refused.status }).toEqual({ code: 'METADATA_CONFLICT', status: 409 });
+        expect(refused.currentVersion).toBe(first.version);
+        expect(refused.actualHead).toBe(first.version);
+        expect(refused.expectedParent).toBeNull();
+        expectAssertionSentence(String(refused.message), 'draft', first.version);
+        expectNoStoredHash(refused, storedHashes(h));
+    });
+
+    it('active: a first write of the live row over an existing one — the same, naming the active lifecycle', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        const first: any = await p.saveMetaItem({ ...ref, item: viewBody('first'), parentVersion: null } as any);
+
+        const refused = await rejection(() =>
+            p.saveMetaItem({ ...ref, item: viewBody('second'), parentVersion: null } as any));
+        expect({ code: refused.code, status: refused.status }).toEqual({ code: 'METADATA_CONFLICT', status: 409 });
+        expect(refused.currentVersion).toBe(first.version);
+        expect(refused.expectedParent).toBeNull();
+        expectAssertionSentence(String(refused.message), 'active', first.version);
+    });
+
+    it('control: a conflict that is no first-write pin (a stale token) keeps the door\'s own sentence', async () => {
+        const h = makeEngine();
+        const p = new ObjectStackProtocolImplementation(h.engine);
+        const v1: any = await p.saveMetaItem({ ...ref, item: viewBody('v1') } as any);
+        const v2: any = await p.saveMetaItem({ ...ref, item: viewBody('v2'), parentVersion: v1.version } as any);
+
+        const stale = await rejection(() =>
+            p.saveMetaItem({ ...ref, item: viewBody('lost'), parentVersion: v1.version } as any));
+        expect({ code: stale.code, status: stale.status }).toEqual({ code: 'METADATA_CONFLICT', status: 409 });
+        expect(stale.currentVersion).toBe(v2.version);
+        expect(String(stale.message).startsWith('view/case_grid has been modified since you loaded it.')).toBe(true);
+        expect(String(stale.message)).not.toContain('If-None-Match');
     });
 });

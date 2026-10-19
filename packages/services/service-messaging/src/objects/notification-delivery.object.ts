@@ -69,7 +69,8 @@ export const NotificationDelivery = ObjectSchema.create({
             onlyWhen: { status: { $in: ['dead', 'suppressed'] } },
         },
     },
-    description: 'Durable per-recipient × channel delivery outbox (ADR-0030 Layer 4).',
+    // ADR-0030 Layer 4 — the reference lives in the docblock above, not in the copy.
+    description: 'Durable per-recipient × channel delivery outbox.',
     // [ADR-0079] The record title is `display_title`, a text formula over the
     // same two columns `titleFormat` names. With no pointer declared, the
     // registry's designate-only pass stamped `nameField: 'id'` (the first

@@ -204,6 +204,10 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       "fields.options.description": {
         label: "描述"
       },
+      "fields.options.kind": {
+        label: "类型",
+        helpText: "生命周期类别(仅限单值下拉 / 单选):进行中的一步、成功的终点或失败的终点。阶段字段的每个选项都必须声明。"
+      },
       "fields.reference": {
         label: "引用对象",
         helpText: "目标对象名称。tree 字段可省略；若填写，必须是本对象自身（树是同一对象内部的层级 — 链接到其他对象请用 lookup）"
@@ -632,6 +636,18 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "多态指针伴随字段",
         helpText: "把该文本字段声明为多态指针的 id 半边：此处填写同一对象上保存目标对象名的另一个字段，目标逐行决定（ADR-0052 §5）。使用 snake_case；仅限文本字段，且与 `reference` 互斥。"
       },
+      referenceDeletedWhen: {
+        label: "多态指针目标已删除条件",
+        helpText: "仅与 referenceVia 同用：当同一对象上某个选择（select）字段取其某个选项值时，表示该指针指向的记录已被平台删除，指针以该选项的标签显示为已删除标记。未设置：不会把任何行标记为已删除。"
+      },
+      "referenceDeletedWhen.field": {
+        label: "字段",
+        helpText: "本对象上的同级选择字段（snake_case），例如 cancel_reason。必须是声明了内联选项的单选字段。"
+      },
+      "referenceDeletedWhen.value": {
+        label: "取值",
+        helpText: "该选择字段中表示目标已被删除的选项值，例如 record_deleted。必须是其已声明的选项值之一。"
+      },
       mailAssociation: {
         label: "匹配入站邮件",
         helpText: "把入站邮件关联到本对象中该字段值与邮件发件人或某位收件人地址相同的记录（不区分大小写；不含邮箱自身的地址）。仅限邮箱字段。只在配置了邮箱服务的环境中生效。"
@@ -665,6 +681,9 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       "options.visibleWhen": {
         label: "可见条件"
+      },
+      "options.kind": {
+        label: "类型"
       },
       reference: {
         label: "引用对象",
@@ -1000,7 +1019,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       end_user_controls: {
         label: "终端用户控制",
-        description: "终端用户在此视图上可执行的操作——快速筛选、筛选标签页、可视化切换（ADR-0047，对标 Airtable Interface）。"
+        description: "终端用户在此视图上可执行的操作——快速筛选、筛选标签页、可视化切换。"
       },
       navigation_sharing: {
         label: "导航与共享",
@@ -1204,7 +1223,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       source: {
         label: "页面源码",
-        helpText: "页面源码文本。kind 为 'html'（别名 'jsx'）时，它是受约束的 JSX，在保存时被编译成组件树——只解析，绝不执行。kind 为 'react' 时，它是真正的 React，由受信任运行时在渲染时执行。"
+        helpText: "页面源码文本。kind 为 'html' 时，它是受约束的 JSX，在保存时被编译成组件树——只解析，绝不执行。kind 为 'react' 时，它是真正的 React，由受信任运行时在渲染时执行。"
       },
       object: {
         label: "对象",
@@ -2190,7 +2209,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   api: {
     label: "API 端点",
-    description: "声明式 HTTP 端点——在既有管道之上提供稳定的 URL 与策略层（ADR-0121）"
+    description: "其他系统调用的稳定 HTTP URL，用于运行流程或操作应用中的记录"
   },
   translation: {
     label: "翻译"
@@ -2270,11 +2289,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
   },
   doc: {
     label: "文档",
-    description: "软件包文档——扁平的 Markdown 文档项（ADR-0046）"
+    description: "以 Markdown 编写的帮助页面，可由软件包随附，也可自行编写"
   },
   book: {
     label: "文档手册",
-    description: "文档导航主干——有序分组，成员由派生确定（ADR-0046 §6）"
+    description: "将帮助页面按顺序分节组织的目录"
   },
   permission: {
     label: "权限集",
@@ -2311,15 +2330,11 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       isDefault: {
         label: "默认权限集",
-        helpText: "面向 everyone 岗位的应用基线（ADR-0090 D5）：应用级权限集在启动时自动绑定；包级权限集则成为安装时由管理员确认的建议。默认 false。"
-      },
-      managedBy: {
-        label: "归属来源",
-        helpText: "记录来源（ADR-0086 D3）：跨版本升级时由谁拥有这个权限集。"
+        helpText: "通过内置的 everyone 岗位，把这个权限集授予每一位登录用户。应用自身声明的权限集在启动时授予；已安装包中的权限集则成为一条建议，由管理员在 Setup 中确认。含高权限的权限集不会以这种方式授予。默认 false。"
       },
       packageId: {
         label: "所属包 ID",
-        helpText: "随包分发的权限集所属的包 id（ADR-0086 D3）。环境内自行编写的权限集留空即可。"
+        helpText: "分发这个权限集的包；填写其他包的 id 会被拒绝。在本环境中创建的权限集请留空。"
       },
       systemPermissions: {
         label: "系统权限",
@@ -2327,7 +2342,7 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       adminScope: {
         label: "委派管理范围",
-        helpText: "委派管理（ADR-0090 D12）：让持有本权限集的人管理一个业务单元子树。businessUnit 是子树的根（sys_business_unit.name），必填且不能为空白；includeSubtree 默认为 true；manageAssignments、manageBindings 和 authorEnvironmentSets 默认为 false；被委派者只能分配 assignablePermissionSets 中列出的权限集。不委派任何管理权的权限集请留空。"
+        helpText: "委派管理：让持有本权限集的人管理一个业务单元子树。businessUnit 是子树的根（sys_business_unit.name），必填且不能为空白；includeSubtree 默认为 true；manageAssignments 默认为 false，开启后持有人可在该子树内把人员分配到岗位、并直接授予权限集；被委派者只能分配 assignablePermissionSets 中列出的权限集。不委派任何管理权的权限集请留空。"
       },
       objects: {
         label: "对象权限",
@@ -2372,13 +2387,13 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       delegatable: {
         label: "可自助委派",
-        helpText: "持有者可自行委派该岗位，需限定时段并填写理由（ADR-0091 D3）。默认 false——委派仅限管理员。"
+        helpText: "持有者可自行委派该岗位，需限定时段并填写理由。默认 false——委派仅限管理员。"
       }
     }
   },
   capability: {
     label: "能力",
-    description: "软件包声明的授权能力——ADR-0066 D1 的定义侧（授予在权限集上；要求在资源上）"
+    description: "软件包定义的一项权限；通过权限集授予"
   },
   agent: {
     label: "AI 代理",

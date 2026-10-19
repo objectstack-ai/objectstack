@@ -245,7 +245,7 @@ function makeKernel(opts: { seed?: Row[] } = {}) {
             if (k === '$or') return (v as Array<Record<string, unknown>>).some((c) => match(r, c));
             return v === null || v === undefined
                 ? (r as any)[k] === null || (r as any)[k] === undefined
-                : (r as any)[k] === v;
+                : whereValueMatches((r as any)[k], v);
         });
 
     const engine: any = {
@@ -342,6 +342,12 @@ const FINDING_PROSE = "Field 'b' removed — existing data in this column will b
 // ═══════════════════════════════════════════════════════════════════════════
 // 1. The duplication is real — both channels carry the same findings
 // ═══════════════════════════════════════════════════════════════════════════
+
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
 
 describe('[#10886] the 409 renders its findings into the message AND attaches them', () => {
     it('declares the ADR-0112 envelope and attaches the structured findings', async () => {

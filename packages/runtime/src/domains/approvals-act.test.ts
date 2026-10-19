@@ -156,6 +156,25 @@ describe('[#22576] /approvals/act forwards to the approvals member on a kernel w
         expect(res.body).toBeNull();
     });
 
+    // [#24245] The `@objectstack/hono` catch-all dispatches a `HEAD` as `GET` and
+    // forwards the client's `HEAD` request: the domain reads `HEAD` off the
+    // request the member would read, so the member is still handed a `GET`.
+    it('a HEAD request dispatched as GET is still forwarded as a GET and answered with no body', async () => {
+        const member = stubMember();
+        const { dispatcher } = makeDispatcher({ approvals: { handleActionPage: member.handleActionPage } });
+        const request = new Request(`${ORIGIN}/api/v1${ACT}?token=tok-head-as-get`, { method: 'HEAD' });
+
+        const result = await dispatcher.dispatch('GET', ACT, undefined, {}, ctx(request));
+
+        expect(member.handleActionPage).toHaveBeenCalledTimes(1);
+        expect(member.seen[0]!.method).toBe('GET');
+        expect(member.tokens).toEqual(['tok-head-as-get']);
+        const res = result.result as Response;
+        expect(res.status).toBe(200);
+        expect(res.headers.get('x-page')).toBe('action');
+        expect(res.body).toBeNull();
+    });
+
     it('claims exactly /approvals/act for GET, HEAD and POST — no other method, no sub-path, no sibling', async () => {
         const member = stubMember();
         const { dispatcher } = makeDispatcher({ approvals: { handleActionPage: member.handleActionPage } });

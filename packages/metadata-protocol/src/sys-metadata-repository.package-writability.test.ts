@@ -237,7 +237,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
     resetEnvWritableMetadataTypes();
     ObjectStackProtocolImplementation.resetEnvWritableCache();
     engine = makeFakeEngine();
-    repo = new SysMetadataRepository({ engine: engine as never, organizationId: null, orgLabel: 'env' });
+    repo = new SysMetadataRepository({ engine: engine as never, orgLabel: 'env' });
   });
 
   afterEach(() => {
@@ -478,7 +478,7 @@ describe('#7682 — the refusal discriminates on package writability', () => {
     it('a package-less hatch write under an ORG kernel lands no per-org override either', async () => {
       openHatch();
       const orgRepo = new SysMetadataRepository({
-        engine: engine as never, organizationId: 'org_acme', orgLabel: 'org_acme',
+        engine: engine as never, orgLabel: 'org_acme',
       });
       const err = await putWith(orgRepo, {
         type: 'permission', name: 'showcase_contributor', intent: 'override-artifact',
@@ -1230,7 +1230,7 @@ describe('#8361 — the create-side hatch clause reaches saveMetaItem', () => {
     // this stays byte-identical.
     const engine = makeFakeEngine();
     const repo = new SysMetadataRepository({
-      engine: engine as never, organizationId: null, orgLabel: 'env',
+      engine: engine as never, orgLabel: 'env',
     });
     const err = await putWith(repo, {
       type: 'job', name: 'nightly_sweep', intent: 'runtime-only', packageId: READ_ONLY_PKG,
@@ -1275,7 +1275,7 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
     resetEnvWritableMetadataTypes();
     ObjectStackProtocolImplementation.resetEnvWritableCache();
     engine = makeFakeEngine();
-    repo = new SysMetadataRepository({ engine: engine as never, organizationId: null, orgLabel: 'env' });
+    repo = new SysMetadataRepository({ engine: engine as never, orgLabel: 'env' });
   });
 
   afterEach(() => {
@@ -1320,11 +1320,10 @@ describe('[#20910] the repository doors name a Regime C type\'s sanctioned path,
     // sentence the protocol's package door throws for the same item.
     const err = await putWith(repo, { type: 'object', name: 'showcase_task', intent: 'override-artifact' }) as any;
     expect(err).toMatchObject({ code: 'NOT_OVERRIDABLE', status: 403 });
+    // [#23577] The one sentence every write over a sealed, package-held name reads.
     expect(String(err.message)).toBe(
-      "Metadata item 'object/showcase_task' is provided by a managed package and is sealed against in-place edits: "
-      + 'its type takes no environment overlay (allowEnvironmentOverlay=false), and OS_METADATA_WRITABLE does not open '
-      + 'a managed item. Edit the source artifact and redeploy. '
-      + 'See docs/adr/0131-total-organization-ownership-no-null-organization-id.md.',
+      "'object/showcase_task' is provided by a managed package and is sealed: it cannot be written here. "
+      + 'GET /api/v1/meta/object lists the names in use.',
     );
   });
 

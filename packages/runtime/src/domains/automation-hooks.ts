@@ -123,8 +123,8 @@ export async function handleInboundHookRequest(
         return {
             handled: true,
             response: deps.error(
-                'Inbound automation hooks are not available: no trigger-api service is registered for this '
-                + 'environment. The inbound-hook trigger (@objectstack/trigger-api) serves this route through that '
+                'Inbound automation hooks are not available: no trigger-api service is registered. '
+                + 'The inbound-hook trigger (@objectstack/trigger-api) serves this route through that '
                 + 'service; compose it on the environment that owns the flow.',
                 501,
             ),
@@ -134,8 +134,8 @@ export async function handleInboundHookRequest(
         return {
             handled: true,
             response: deps.error(
-                'Inbound automation hooks are not available: the trigger-api service registered for this '
-                + 'environment does not implement handleInboundHook.',
+                'Inbound automation hooks are not available: the registered trigger-api service '
+                + 'does not implement handleInboundHook.',
                 501,
             ),
         };

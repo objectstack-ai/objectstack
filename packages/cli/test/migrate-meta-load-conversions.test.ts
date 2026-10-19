@@ -2,7 +2,15 @@
 
 /**
  * `os migrate meta` on a stack whose `defineStack` call the current schema
- * ACCEPTS, carrying a spelling the load still converts (`driver: 'mongo'`).
+ * ACCEPTS, and the authored-source load that serves it.
+ *
+ * It was measured on a spelling the load still converted: `driver: 'mongo'`
+ * until #23543 F1, then a flow-level retry policy's `retryDelayMs` until F2
+ * retired `retry-policy-converged` from the load path too. After F2 no load-path
+ * conversion is a step the chain replays from its floor (`--from 16` replays
+ * steps 17 and 18, and every entry of either is retired), so the defect's own
+ * reading — the chain missing what the load converted — has no subject on this
+ * tree. What the fix changed is read directly instead (see "What is pinned").
  *
  * ## The defect
  *
@@ -16,16 +24,23 @@
  *
  * ## What is pinned
  *
- *  1. The fix: the conversion is listed, `--write` writes it, the re-run
- *     applies nothing, and a strict load converts nothing any more.
- *  2. Where the argument is read: off the default export, before the
- *     named-export merge (which spreads it into a new object), and only for
- *     the authored-source load.
- *  3. A stack defined twice starts from the innermost argument, once.
- *  4. The control: an already-canonical source writes nothing, and its
+ *  1. The fix, read where it lives: the authored-source load hands back the
+ *     call's ARGUMENT, not the stack `defineStack` built. Every accepted call
+ *     has a difference between the two whether or not anything converts: the
+ *     strict parse fills the declared defaults into what it returns, and the
+ *     argument carries only what the author wrote. Read off the default
+ *     export, before the named-export merge (which spreads it into a new
+ *     object), and only for the authored-source load.
+ *  2. A stack defined twice starts from the innermost argument.
+ *  3. The control: an already-canonical source writes nothing, and its
  *     `--json` summary equals the one the built stack gives.
- *  5. A stack the schema refuses for one spelling while carrying a load-path
- *     spelling too: each conversion is applied once, and both are written.
+ *  4. A stack the schema refuses for two spellings the chain converts (one
+ *     step-17, one step-18): each conversion is applied once, both are
+ *     written, and a stack defined twice is listed once.
+ *
+ * Retired at F2: "lists a conversion the load already applied; --write writes
+ * it, and the load stops converting". Its first half has no subject (above);
+ * its write / re-run / clean-reload half is pinned by case 4 at the same layer.
  *
  * The strict reload is read through `stackConversions`, the producer's own
  * record of what it converted, and not through the stderr notice: that notice
@@ -146,7 +161,6 @@ async function quietLoad(dir: string, authoredSource = false) {
 const json = (run: Run): any => JSON.parse(run.stdout);
 const sites = (list: Array<{ conversionId: string; path: string; from?: string; to?: string }>) =>
   list.map(({ conversionId, path, from, to }) => ({ conversionId, path, from, to }));
-const conversionIds = (list: readonly { conversionId: string }[]) => list.map((c) => c.conversionId);
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'os-migrate-meta-load-conversions-'));
@@ -163,11 +177,14 @@ afterAll(() => {
 });
 
 /**
- * A stack the current schema accepts. Its one non-canonical spelling is a
- * datasource driver id the load still converts (`retiredFromLoadPath: false`);
- * the `url` is what makes a mongo datasource valid, so the call is accepted.
+ * A stack whose one non-canonical spelling is the flow-level retry policy's
+ * `retryDelayMs`. The current schema REFUSES it at the `retryDelayMs`
+ * tombstone (`retry-policy-converged` is retired from the load path, #23543
+ * F2), and the chain's step 17 renames it `backoffMs`. {@link CANONICAL_SOURCE}
+ * is the same stack as the author would write it today, which the schema
+ * accepts.
  */
-const MONGO_SOURCE = `import { defineStack } from '@objectstack/spec';
+const RETRY_SOURCE = `import { defineStack } from '@objectstack/spec';
 
 export default defineStack({
   manifest: { id: 'com.probe.svc', name: 'Probe Service', namespace: 'probe', version: '1.0.0', type: 'module' },
@@ -180,12 +197,28 @@ export default defineStack({
       },
     },
   ],
-  datasources: [{ name: 'docs', label: 'Docs', driver: 'mongo', config: { url: 'mongodb://mongo.internal:27017/docs' } }],
+  flows: [
+    {
+      name: 'probe_sync',
+      label: 'Sync',
+      type: 'autolaunched',
+      errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 },
+      nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+      edges: [{ id: 'e1', source: 'start', target: 'end' }],
+    },
+  ],
 });
 `;
 
-const MONGO_CONVERSION = 'datasource-driver-mongo-to-mongodb';
-const MONGO_SITE = { conversionId: MONGO_CONVERSION, path: 'datasources[0].driver', from: 'mongo', to: 'mongodb' };
+const RETRY_CONVERSION = 'retry-policy-converged';
+const RETRY_SITE = { conversionId: RETRY_CONVERSION, path: 'flows[0].errorHandling.backoffMs', from: 'retryDelayMs', to: 'backoffMs' };
+const AUTHORED_DELAY = 'retryDelayMs: 2000';
+const CANONICAL_DELAY = 'backoffMs: 2000';
+const CANONICAL_SOURCE = edit(RETRY_SOURCE, AUTHORED_DELAY, CANONICAL_DELAY);
+/** The flow's policy exactly as the author wrote it … */
+const AUTHORED_POLICY = { strategy: 'retry', maxRetries: 3, backoffMs: 2000 };
+/** … and as the strict parse returns it: the declared defaults filled in. */
+const BUILT_POLICY = { ...AUTHORED_POLICY, backoffMultiplier: 1, maxRetryDelayMs: 30000, jitter: false };
 const TIME_SITE = {
   conversionId: 'time-default-utc-suffix-dropped',
   path: 'objects[0].fields.starts_at.defaultValue',
@@ -193,75 +226,45 @@ const TIME_SITE = {
   to: '"10:00"',
 };
 
-describe('an accepted stack: the chain starts from what the author wrote', () => {
-  it('lists a conversion the load already applied; --write writes it, and the load stops converting', async () => {
-    const dir = writeProject({ 'objectstack.config.ts': MONGO_SOURCE });
-
-    // The control for the last reading below: today the strict load converts it.
-    const before = await quietLoad(dir);
-    expect(before.stackProvenance).toBe(true);
-    expect(conversionIds(before.stackConversions)).toEqual([MONGO_CONVERSION]);
-
-    const dry = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(sites(dry.applied)).toEqual([MONGO_SITE]);
-    expect(dry.schemaValid).toBe(true);
-
-    const run = await runMeta(dir, ['--from', '16', '--write', '--json']);
-    expect(run.exitCode, run.stdout + run.stderr).toBeUndefined();
-    const out = json(run);
-    expect(sites(out.applied)).toEqual([MONGO_SITE]);
-    expect(out.write.status).toBe('written');
-    expect(out.write.files).toEqual([{ file: 'objectstack.config.ts', sites: 1 }]);
-    expect(out.write.manual).toEqual([]);
-    expect(out.write.unexplained).toEqual([]);
-    expect(readFileSync(join(dir, 'objectstack.config.ts'), 'utf8')).toBe(
-      edit(MONGO_SOURCE, "driver: 'mongo'", "driver: 'mongodb'"),
-    );
-
-    const again = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(again.applied).toEqual([]);
-    expect(again.schemaValid).toBe(true);
-
-    // The load every other command uses — strict, no shim — converts nothing now.
-    const after = await quietLoad(dir);
-    expect(after.stackProvenance).toBe(true);
-    expect(after.stackConversions).toEqual([]);
-  }, RUN_TIMEOUT);
-
-  it('the authored-source load reads the argument off the default export, before the named exports are merged', async () => {
+describe('an accepted stack: the authored-source load hands back what the author wrote', () => {
+  it('reads the argument off the default export, before the named exports are merged', async () => {
     const dir = writeProject({
-      'objectstack.config.ts': `${MONGO_SOURCE}\nexport const onEnable = async () => {};\n`,
+      'objectstack.config.ts': `${CANONICAL_SOURCE}\nexport const onEnable = async () => {};\n`,
     });
 
     const authored = await quietLoad(dir, true);
-    expect(authored.config.datasources[0].driver).toBe('mongo');
+    expect(authored.config.flows[0].errorHandling).toEqual(AUTHORED_POLICY);
     expect(authored.namedExports).toEqual(['onEnable']);
     expect(typeof authored.config.onEnable).toBe('function');
     // The producer's mark and record are still read off the stack it built.
     expect(authored.stackProvenance).toBe(true);
-    expect(conversionIds(authored.stackConversions)).toEqual([MONGO_CONVERSION]);
+    expect(authored.stackConversions).toEqual([]);
 
     // Every other command still reads the stack `defineStack` built.
     const strict = await quietLoad(dir);
-    expect(strict.config.datasources[0].driver).toBe('mongodb');
+    expect(strict.config.flows[0].errorHandling).toEqual(BUILT_POLICY);
   }, RUN_TIMEOUT);
 
-  it('a stack defined twice starts from the innermost argument, and converts it once', async () => {
+  it('a stack defined twice starts from the innermost argument', async () => {
     const dir = writeProject({
       'objectstack.config.ts': edit(
-        edit(MONGO_SOURCE, 'export default defineStack({', 'export default defineStack(defineStack({'),
+        edit(CANONICAL_SOURCE, 'export default defineStack({', 'export default defineStack(defineStack({'),
         '\n});\n',
         '\n}));\n',
       ),
     });
+    // The outer call's argument is the inner call's BUILT stack, defaults and all.
+    const authored = await quietLoad(dir, true);
+    expect(authored.config.flows[0].errorHandling).toEqual(AUTHORED_POLICY);
+
     const out = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(sites(out.applied)).toEqual([MONGO_SITE]);
+    expect(out.applied).toEqual([]);
     expect(out.schemaValid).toBe(true);
   }, RUN_TIMEOUT);
 });
 
 describe('control: an already-canonical source', () => {
-  const CANONICAL = edit(MONGO_SOURCE, "driver: 'mongo'", "driver: 'mongodb'");
+  const CANONICAL = CANONICAL_SOURCE;
 
   it('writes nothing, and its --json summary is the one the built stack gives', async () => {
     const dir = writeProject({ 'objectstack.config.ts': CANONICAL });
@@ -286,12 +289,13 @@ describe('control: an already-canonical source', () => {
   }, RUN_TIMEOUT);
 });
 
-describe('a stack with one refused spelling and one load-path spelling', () => {
-  // The `time` default with the UTC suffix is refused by the current schema,
-  // so this call hands its argument through; the datasource is valid, so the
-  // driver id is the only load-path conversion in it.
+describe('a stack with two refused spellings the chain converts', () => {
+  // The `time` default with the UTC suffix (step 18) and the flow's
+  // `retryDelayMs` (step 17) are both refused by the current schema, so this
+  // call hands its argument through. It carried a load-path spelling until
+  // #23543 F2; with none left that the chain replays, both arms are refusals.
   const MIXED = edit(
-    MONGO_SOURCE,
+    RETRY_SOURCE,
     "        name: { type: 'text', label: 'Name' },\n",
     "        name: { type: 'text', label: 'Name' },\n        starts_at: { type: 'time', label: 'Starts', defaultValue: '10:00Z' },\n",
   );
@@ -300,16 +304,16 @@ describe('a stack with one refused spelling and one load-path spelling', () => {
     const dir = writeProject({ 'objectstack.config.ts': MIXED });
 
     const dry = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(sites(dry.applied)).toEqual([MONGO_SITE, TIME_SITE]);
+    expect(sites(dry.applied)).toEqual([RETRY_SITE, TIME_SITE]);
 
     const run = await runMeta(dir, ['--from', '16', '--write', '--json']);
     expect(run.exitCode, run.stdout + run.stderr).toBeUndefined();
     const out = json(run);
-    expect(sites(out.applied)).toEqual([MONGO_SITE, TIME_SITE]);
+    expect(sites(out.applied)).toEqual([RETRY_SITE, TIME_SITE]);
     expect(out.write.status).toBe('written');
     expect(out.write.files).toEqual([{ file: 'objectstack.config.ts', sites: 2 }]);
     expect(readFileSync(join(dir, 'objectstack.config.ts'), 'utf8')).toBe(
-      edit(edit(MIXED, "defaultValue: '10:00Z'", "defaultValue: '10:00'"), "driver: 'mongo'", "driver: 'mongodb'"),
+      edit(edit(MIXED, "defaultValue: '10:00Z'", "defaultValue: '10:00'"), AUTHORED_DELAY, CANONICAL_DELAY),
     );
 
     const again = json(await runMeta(dir, ['--from', '16', '--json']));
@@ -318,5 +322,18 @@ describe('a stack with one refused spelling and one load-path spelling', () => {
     const strict = await quietLoad(dir);
     expect(strict.stackProvenance).toBe(true);
     expect(strict.stackConversions).toEqual([]);
+  }, RUN_TIMEOUT);
+
+  it('a stack defined twice starts from the innermost argument, and is listed once', async () => {
+    const dir = writeProject({
+      'objectstack.config.ts': edit(
+        edit(RETRY_SOURCE, 'export default defineStack({', 'export default defineStack(defineStack({'),
+        '\n});\n',
+        '\n}));\n',
+      ),
+    });
+    const out = json(await runMeta(dir, ['--from', '16', '--json']));
+    expect(sites(out.applied)).toEqual([RETRY_SITE]);
+    expect(out.schemaValid).toBe(true);
   }, RUN_TIMEOUT);
 });

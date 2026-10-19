@@ -78,11 +78,11 @@ describe('A — the parent binding parses with the data-source shape', () => {
     expect(zodDef(key.unwrap())).toBe(zodDef(ElementDataSourceSchema));
 
     // The node side of the identity, read off the published node schema rather
-    // than assumed: `PageComponentSchema` is a pipe (strict object → the
-    // `visibleWhen` transform), and `dataSource` is an optional union whose
-    // object arm is that same def.
-    const node = PageComponentSchema as unknown as { _zod: { def: { in?: { shape?: Record<string, unknown> } } } };
-    const dataSource = node._zod.def.in?.shape?.dataSource as { unwrap: () => { _zod: { def: { options: unknown[] } } } };
+    // than assumed: `PageComponentSchema` is a closed object (its `visibility`
+    // fold, a `.transform` pipe, retired at 18, #23543 F4), and `dataSource` is
+    // an optional union whose object arm is that same def.
+    const node = PageComponentSchema as unknown as { shape?: Record<string, unknown> };
+    const dataSource = node.shape?.dataSource as { unwrap: () => { _zod: { def: { options: unknown[] } } } };
     expect(dataSource).toBeDefined();
     const arms = dataSource.unwrap()._zod.def.options;
     expect(zodDef(arms[0])).toBe(zodDef(ElementDataSourceSchema));
@@ -166,7 +166,7 @@ describe('C — every other component row refuses the key: the per-type door', (
     expect(notRefused).toEqual([]);
     // The whole-bag set is the retired types only — a live row landing here
     // would be refusing for a reason this test does not mean to accept.
-    expect(wholeBag.sort()).toEqual(['ai:chat_window', 'user:profile']);
+    expect(wholeBag.sort()).toEqual(['ai:chat_window', 'marketplace:installed-list', 'record:json', 'user:profile']);
   });
 
   it('CONTROL: the related list itself does not report the key as unknown', () => {

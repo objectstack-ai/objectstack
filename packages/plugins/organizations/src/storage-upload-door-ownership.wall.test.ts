@@ -52,6 +52,13 @@ import { join } from 'node:path';
 import { bootStack, type VerifyStack } from '@objectstack/verify';
 import { StorageServicePlugin } from '@objectstack/service-storage';
 import { OrganizationsPlugin } from './organizations-plugin.js';
+import { warmUpUploadWallBoot } from './__tests__/upload-wall-warm-up.testkit.js';
+
+// The walled boot's first load (lazily imported drivers and better-auth entries,
+// sql.js's WASM compile) is paid here, during collection, so the `beforeAll`
+// below clocks the boot and not the loading (AGENTS.md: clocked windows
+// measure behaviour, never loading). See the helper for what it shares: nothing.
+await warmUpUploadWallBoot();
 
 const APP = {
   manifest: {

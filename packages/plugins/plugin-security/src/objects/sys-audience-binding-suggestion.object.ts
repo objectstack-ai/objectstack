@@ -36,7 +36,9 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
   icon: 'shield-question',
   isSystem: true,
   managedBy: 'engine-owned',
-  description: 'Package-suggested everyone-anchor grant and the deployment-level decision on it (ADR-0090 D5/D9).',
+  // [ADR-0090 D5/D9] The everyone-anchor suggestion and its deployment-level
+  // decision, in the words Setup shows.
+  description: 'A package\'s suggestion to give one of its permission sets to everyone who signs in, and the decision taken on it.',
   titleFormat: '{package_id}: {permission_set_name} → {anchor}',
   highlightFields: ['package_id', 'permission_set_name', 'anchor', 'status'],
 
@@ -79,7 +81,8 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
       // real reverse-domain package id is 57 characters — the floor is cleared
       // with room to spare.
       maxLength: 255,
-      description: 'Owning package that ships the suggested permission set (ADR-0086 D3 provenance).',
+      // [ADR-0086 D3] Package provenance.
+      description: 'Owning package that ships the suggested permission set.',
     }),
 
     permission_set_name: Field.text({
@@ -124,7 +127,8 @@ export const SysAudienceBindingSuggestion = ObjectSchema.create({
       required: true,
       readonly: true,
       defaultValue: 'everyone',
-      description: 'Audience anchor position the package suggests binding to (ADR-0090 D9).',
+      // [ADR-0090 D9] The audience anchors.
+      description: 'Audience anchor position the package suggests binding to.',
       options: [
         { value: 'everyone', label: 'Everyone' },
         { value: 'guest', label: 'Guest' },

@@ -344,6 +344,16 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     key: 'print',
     why: "planned, not yet rendered — the print declaration's keys (paper, margins, running header and footer, page numbers, page-break hints) are validated at parse and its printable block subset is enforced at the authoring doors, but no renderer applies them until the console's print rendering lands, and the ruling places the authoring UI in the Studio page designer with it. A form control offered today would let an author set a layout nothing prints",
   },
+  // #24265 — an app page's row binding lands spec-first the same way:
+  // `planned` in the liveness ledger, read by no renderer until the console
+  // mounts it at the page root.
+  {
+    kind: 'omit',
+    type: 'page',
+    path: ROOT_PATH,
+    key: 'record',
+    why: "planned, not yet rendered — the binding's one-row query is validated at parse and refused on every page that is not `type: 'app'`, but no renderer mounts it as the page's `record` until the console's page-root binding lands. A form control offered today would let an author bind a row no predicate can read yet",
+  },
   // #22228 — a field's cell formatting rules land spec-first the same way:
   // `planned` in the liveness ledger, read by no renderer until objectui's cell
   // card. Offering the key in the field form first would be the UI half of
@@ -517,6 +527,13 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     path: ROOT_PATH,
     key: 'attachedOnRead',
     why: "not a form's to offer, by ruling (ruling record 6070963704, letter A): the blocks a service attaches to the rows it serves, computed per caller and never stored, which the ruling says no form reads; a block is declared in code beside the service that attaches it (plugin-approvals' `viewer` on `sys_approval_request`), because nothing authored in a designer can make a service attach a block, and its one reader is the shared build validator",
+  },
+  {
+    kind: 'omit',
+    type: 'object',
+    path: ROOT_PATH,
+    key: 'defaultRowScope',
+    why: "not offered while nothing applies it (#24164 ruling E′, item 1): no server reads the object's default row scope until the security plugin's `collectRLSPolicies` does (#24340), so a form row would let an author declare a row restriction that filters nothing, the declared-not-enforced trap Prime Directive #10 names; its writers are to be the platform identity objects, declared in code (#24341), and none declares it yet. Revisit when the reader lands: a row policy is a composite of a select, two predicate strings and a positions list, a form-face addition rather than a reconciliation",
   },
   {
     kind: 'omit',

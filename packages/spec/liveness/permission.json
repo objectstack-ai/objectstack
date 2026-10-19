@@ -30,14 +30,14 @@
     },
     "managedBy": {
       "status": "dead",
-      "verifiedAt": "2026-10-11",
-      "note": "ADR-0086 D3 — per-record provenance on the metadata-persistence axis (package | platform | user). VERDICT CORRECTED 2026-10-11 (#15204 stage 6b-2): no code reads the AUTHORED key. The cited consumer, bootstrapDeclaredPermissions, stamped `managed_by: 'package'` on every row it wrote and never read `ps.managedBy`, so this row's `live` verdict pointed at a writer of the COLUMN, not a reader of the key; that seeder is now retired (ADR-0131 D3: the boot writes no catalog row). The sys_permission_set.managed_by column is unaffected. Retirement of the authored key is an enforce-or-remove item for the spec seat."
+      "verifiedAt": "2026-10-16",
+      "note": "REMOVED 2026-10-16 — tombstoned at the schema (retiredKey carries the prescription; authoring it is a tsc error and a parse error) and stripped from stored rows and built artifacts by the protocol-18 conversion permission-set-managed-by-removed. The entry stays because retiredKey keeps the key in the walked shape (the rls.priority precedent); a set's provenance is the package that ships it, decided from that package's artifact and recorded as packageId. History: ADR-0086 D3 per-record provenance (package | platform | user); VERDICT CORRECTED 2026-10-11 (#15204 stage 6b-2): no code read the AUTHORED key — bootstrapDeclaredPermissions stamped the sys_permission_set.managed_by COLUMN and never read ps.managedBy, and that seeder is retired (ADR-0131 D3). The sys_permission_set.managed_by column is a different surface and is unaffected."
     },
     "adminScope": {
       "status": "live",
-      "verifiedAt": "2026-07-30",
-      "evidence": "packages/plugins/plugin-security/src/delegated-admin-gate.ts — non-tenant-admin writes to sys_user_position / sys_position_permission_set / sys_user_permission_set / sys_permission_set require a covering adminScope (BU-subtree boundary + assignable-set allowlist + strict-containment for scope grants).",
-      "note": "ADR-0090 D12 — delegated administration; proven by packages/plugins/plugin-security/src/delegated-admin-gate.test.ts."
+      "verifiedAt": "2026-10-15",
+      "evidence": "packages/plugins/plugin-security/src/delegated-admin-gate.ts — non-tenant-admin writes to sys_user_position / sys_user_permission_set require a covering adminScope (BU-subtree boundary + manageAssignments + assignable-set allowlist + strict containment, over includeSubtree / manageAssignments / the allowlist, for a granted set that carries its own scope).",
+      "note": "ADR-0090 D12 — delegated administration; proven by packages/plugins/plugin-security/src/delegated-admin-gate.test.ts. RE-VERIFIED 2026-10-15 (#23488): the scope's manageBindings and authorEnvironmentSets were RETIRED (retiredKey tombstones, D2 conversion permission-admin-scope-binding-authoring-removed) — the binding and set rows they gated are retired (ADR-0131 D3), and the metadata door that writes a position's sets and a set's body reads no adminScope, so neither flag granted anything. The scope itself stays live on the two assignment doors."
     },
     "isDefault": {
       "status": "live",

@@ -75,7 +75,7 @@ function open(name: string, ddl: string): { db: Database.Database; file: string;
   return {
     db,
     file,
-    reader: { client: 'better-sqlite3', query: async (sql, params = []) => db.prepare(sql).all(...(params as unknown[])) as Record<string, unknown>[] },
+    reader: { dialect: 'sqlite', client: 'better-sqlite3', query: async (sql, params = []) => db.prepare(sql).all(...(params as unknown[])) as Record<string, unknown>[] },
   };
 }
 

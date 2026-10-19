@@ -34,7 +34,7 @@ import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { PROTOCOL_MAJOR } from '@objectstack/spec/kernel';
-import { childEnv, randomPort, runServe, type ServeRun } from './helpers/serve-process.js';
+import { childEnv, runServe, type ServeRun } from './helpers/serve-process.js';
 
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 // One `resolve(HERE, …)` call per line: `check:cross-package-test-inputs`
@@ -187,7 +187,7 @@ beforeAll(async () => {
     join(dir, 'src', 'actions', 'index.ts'),
     "export { ResolveTicketAction, EscalateTicketAction } from './ticket.actions.js';\n",
   );
-  boot = await runServe(dir, ['--port', randomPort()], { waitFor: /Press Ctrl\+C to stop/, timeoutMs: RUN_TIMEOUT_MS - 60_000 });
+  boot = await runServe(dir, [], { waitFor: /Press Ctrl\+C to stop/, timeoutMs: RUN_TIMEOUT_MS - 60_000 });
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {

@@ -39,7 +39,7 @@ pnpm verify         # validate + typecheck + coverage tests
 ```bash
 # From the repo root
 pnpm install
-pnpm setup                      # first-time: install + build spec
+pnpm run setup                  # first-time: install + build spec
 
 # Beginner path
 cd examples/app-todo && pnpm typecheck

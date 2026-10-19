@@ -2,9 +2,17 @@
 
 /**
  * `os migrate meta` on a COMPOSED project —
- * `composeStacks([defineStack(…), …], { manifest: 'preserve' })` — whose
- * package body carries a spelling the load still converts
- * (`datasources[].driver: 'mongo'`) (#22256, the composed half).
+ * `composeStacks([defineStack(…), …], { manifest: 'preserve' })` — and the
+ * authored-source load that serves it (#22256, the composed half).
+ *
+ * It was measured on a package body carrying a spelling the load still
+ * converted: `datasources[].driver: 'mongo'` until #23543 F1, then a flow-level
+ * retry policy's `retryDelayMs` until F2 retired `retry-policy-converged` from
+ * the load path too. After F2 no load-path conversion is a step the chain
+ * replays from its floor (`--from 16` replays steps 17 and 18, and every entry
+ * of either is retired), so the defect's own reading — the chain missing what
+ * the load converted — has no subject on this tree. What the fix changed is
+ * read directly instead (see "What is pinned").
  *
  * ## The defect
  *
@@ -21,18 +29,24 @@
  *
  * ## What is pinned
  *
- *  1. An accepted input: the conversion is listed under the body's path,
- *     `--write` writes it into the input's own file and nothing else, the
- *     re-run applies nothing, and a strict load converts nothing any more.
- *  2. Where the authored body comes from: the authored-source load's body
- *     carries the authored spelling, and every other command's load still
- *     carries the converted one.
- *  3. A refused input (re-produced by the shim) carrying the same spelling
- *     beside a refused one: each conversion is listed once and both are
- *     written.
- *  4. An input defined twice starts from the innermost argument, once.
- *  5. The control: an already-canonical composed project writes nothing, and
+ *  1. Where the authored body comes from: the authored-source load assembles
+ *     the package body from the input's ARGUMENT, and every other command's
+ *     load from the stack `defineStack` built. Every accepted input has a
+ *     difference between the two whether or not anything converts: the strict
+ *     parse fills the declared defaults into what it returns, and the argument
+ *     carries only what the author wrote.
+ *  2. An accepted input defined twice starts from the innermost argument.
+ *  3. A refused input (re-produced by the shim) carrying two spellings the
+ *     chain converts (one step-17, one step-18): each conversion is listed
+ *     once, both are written into the input's own file and nothing else, and
+ *     a refused input defined twice is listed once.
+ *  4. The control: an already-canonical composed project writes nothing, and
  *     its `--json` summary equals the one the built composition gives.
+ *
+ * Retired at F2: "an accepted input: lists a conversion the load already
+ * applied; --write writes it into the input's file, and the load stops
+ * converting". Its first half has no subject (above); its write / re-run /
+ * clean-reload half is pinned by case 3 at the same layer.
  *
  * The strict reload is read through `stackConversions`, the producers' own
  * record of what they converted, and not through the stderr notice: that
@@ -152,8 +166,7 @@ async function quietLoad(dir: string, authoredSource = false) {
 const json = (run: Run): any => JSON.parse(run.stdout);
 const sites = (list: Array<{ conversionId: string; path: string; from?: string; to?: string }>) =>
   list.map(({ conversionId, path, from, to }) => ({ conversionId, path, from, to }));
-const conversionIds = (list: readonly { conversionId: string }[]) => list.map((c) => c.conversionId);
-const bodyDriver = (config: any): string => config.packages[0].manifest.datasources[0].driver;
+const bodyErrorHandling = (config: any): Record<string, unknown> => config.packages[0].manifest.flows[0].errorHandling;
 
 beforeAll(() => {
   root = mkdtempSync(join(tmpdir(), 'os-migrate-meta-composed-load-conversions-'));
@@ -170,10 +183,12 @@ afterAll(() => {
 });
 
 /**
- * The service package: a stack the current schema accepts, whose one
- * non-canonical spelling is a datasource driver id the load still converts
- * (`retiredFromLoadPath: false`); the `url` is what makes a mongo datasource
- * valid, so the call is accepted.
+ * The service package, whose one non-canonical spelling is the flow-level retry
+ * policy's `retryDelayMs`. The current schema REFUSES it at the `retryDelayMs`
+ * tombstone (`retry-policy-converged` is retired from the load path, #23543
+ * F2), and the chain's step 17 renames it `backoffMs`.
+ * {@link CANONICAL_SERVICE} is the same package as the author would write it
+ * today, which the schema accepts.
  */
 const SERVICE_STACK = `import { defineStack } from '@objectstack/spec';
 
@@ -188,7 +203,16 @@ export const ServiceStack = defineStack({
       },
     },
   ],
-  datasources: [{ name: 'docs', label: 'Docs', driver: 'mongo', config: { url: 'mongodb://mongo.internal:27017/docs' } }],
+  flows: [
+    {
+      name: 'probe_sync',
+      label: 'Sync',
+      type: 'autolaunched',
+      errorHandling: { strategy: 'retry', maxRetries: 3, retryDelayMs: 2000 },
+      nodes: [{ id: 'start', type: 'start', label: 'Start' }, { id: 'end', type: 'end', label: 'End' }],
+      edges: [{ id: 'e1', source: 'start', target: 'end' }],
+    },
+  ],
 });
 `;
 
@@ -213,13 +237,20 @@ const composed = (service: string): Record<string, string> => ({
   'src/app.stack.ts': APP_STACK,
 });
 
-const MONGO_CONVERSION = 'datasource-driver-mongo-to-mongodb';
-const MONGO_BODY_SITE = {
-  conversionId: MONGO_CONVERSION,
-  path: 'packages[0].manifest.datasources[0].driver',
-  from: 'mongo',
-  to: 'mongodb',
+const RETRY_CONVERSION = 'retry-policy-converged';
+const RETRY_BODY_SITE = {
+  conversionId: RETRY_CONVERSION,
+  path: 'packages[0].manifest.flows[0].errorHandling.backoffMs',
+  from: 'retryDelayMs',
+  to: 'backoffMs',
 };
+const AUTHORED_DELAY = 'retryDelayMs: 2000';
+const CANONICAL_DELAY = 'backoffMs: 2000';
+const CANONICAL_SERVICE = edit(SERVICE_STACK, AUTHORED_DELAY, CANONICAL_DELAY);
+/** The flow's policy exactly as the author wrote it … */
+const AUTHORED_POLICY = { strategy: 'retry', maxRetries: 3, backoffMs: 2000 };
+/** … and as the strict parse returns it: the declared defaults filled in. */
+const BUILT_POLICY = { ...AUTHORED_POLICY, backoffMultiplier: 1, maxRetryDelayMs: 30000, jitter: false };
 const TIME_BODY_SITE = {
   conversionId: 'time-default-utc-suffix-dropped',
   path: 'packages[0].manifest.objects[0].fields.starts_at.defaultValue',
@@ -227,73 +258,41 @@ const TIME_BODY_SITE = {
   to: '"10:00"',
 };
 
-describe('an accepted input: the chain reads the package body as the author wrote it', () => {
-  it('lists a conversion the load already applied; --write writes it into the input’s file, and the load stops converting', async () => {
-    const dir = writeProject(composed(SERVICE_STACK));
-    const before = snapshot(dir);
-
-    // The control for the last reading below: today the strict load converts it.
-    const strictBefore = await quietLoad(dir);
-    expect(strictBefore.stackProvenance).toBe(true);
-    expect(conversionIds(strictBefore.stackConversions)).toEqual([MONGO_CONVERSION]);
-
-    const dry = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(sites(dry.applied)).toEqual([MONGO_BODY_SITE]);
-    expect(dry.schemaValid).toBe(true);
-
-    const run = await runMeta(dir, ['--from', '16', '--write', '--json']);
-    expect(run.exitCode, run.stdout + run.stderr).toBeUndefined();
-    const out = json(run);
-    expect(sites(out.applied)).toEqual([MONGO_BODY_SITE]);
-    expect(out.write.status).toBe('written');
-    expect(out.write.files).toEqual([{ file: 'src/service.stack.ts', sites: 1 }]);
-    expect(out.write.manual).toEqual([]);
-    expect(out.write.unexplained).toEqual([]);
-
-    // The site and nothing else: every other file keeps its bytes.
-    expect(snapshot(dir)).toEqual({
-      ...before,
-      'src/service.stack.ts': edit(before['src/service.stack.ts']!, "driver: 'mongo'", "driver: 'mongodb'"),
-    });
-
-    const again = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(again.applied).toEqual([]);
-    expect(again.schemaValid).toBe(true);
-
-    // The load every other command uses — strict, no shim — converts nothing now.
-    const strictAfter = await quietLoad(dir);
-    expect(strictAfter.stackProvenance).toBe(true);
-    expect(strictAfter.stackConversions).toEqual([]);
-  }, RUN_TIMEOUT);
-
-  it('the authored-source load’s package body carries the authored spelling; every other load’s, the converted one', async () => {
-    const dir = writeProject(composed(SERVICE_STACK));
+describe('an accepted input: the authored-source load assembles the body the author wrote', () => {
+  it('the authored-source load’s package body is the input’s argument; every other load’s, the built stack', async () => {
+    const dir = writeProject(composed(CANONICAL_SERVICE));
 
     const authored = await quietLoad(dir, true);
-    expect(bodyDriver(authored.config)).toBe('mongo');
+    expect(bodyErrorHandling(authored.config)).toEqual(AUTHORED_POLICY);
     expect(authored.stackProvenance).toBe(true);
+    expect(authored.stackConversions).toEqual([]);
 
     const strict = await quietLoad(dir);
-    expect(bodyDriver(strict.config)).toBe('mongodb');
+    expect(bodyErrorHandling(strict.config)).toEqual(BUILT_POLICY);
   }, RUN_TIMEOUT);
 
-  it('an input defined twice starts from the innermost argument, and is listed once', async () => {
+  it('an input defined twice starts from the innermost argument', async () => {
     const dir = writeProject(composed(edit(
-      edit(SERVICE_STACK, 'export const ServiceStack = defineStack({', 'export const ServiceStack = defineStack(defineStack({'),
+      edit(CANONICAL_SERVICE, 'export const ServiceStack = defineStack({', 'export const ServiceStack = defineStack(defineStack({'),
       '\n});\n',
       '\n}));\n',
     )));
+    // The outer call's argument is the inner call's BUILT stack, defaults and all.
+    const authored = await quietLoad(dir, true);
+    expect(bodyErrorHandling(authored.config)).toEqual(AUTHORED_POLICY);
+
     const out = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(sites(out.applied)).toEqual([MONGO_BODY_SITE]);
+    expect(out.applied).toEqual([]);
     expect(out.schemaValid).toBe(true);
   }, RUN_TIMEOUT);
 });
 
-describe('a refused input the shim produces again, carrying a load-path spelling too', () => {
-  // The `time` default with the UTC suffix is refused by the current schema,
-  // so the shim hands the call's argument through and produces it again in
-  // `strict: false` mode for the composer; the driver id is the input's one
-  // load-path conversion.
+describe('a refused input the shim produces again, carrying two spellings the chain converts', () => {
+  // The `time` default with the UTC suffix (step 18) and the flow's
+  // `retryDelayMs` (step 17) are both refused by the current schema, so the
+  // shim hands the call's argument through and produces it again in
+  // `strict: false` mode for the composer. It carried a load-path spelling
+  // until #23543 F2; with none left that the chain replays, both are refusals.
   const MIXED = edit(
     SERVICE_STACK,
     "        name: { type: 'text', label: 'Name' },\n",
@@ -305,20 +304,20 @@ describe('a refused input the shim produces again, carrying a load-path spelling
     const before = snapshot(dir);
 
     const dry = json(await runMeta(dir, ['--from', '16', '--json']));
-    expect(sites(dry.applied)).toEqual([MONGO_BODY_SITE, TIME_BODY_SITE]);
+    expect(sites(dry.applied)).toEqual([RETRY_BODY_SITE, TIME_BODY_SITE]);
 
     const run = await runMeta(dir, ['--from', '16', '--write', '--json']);
     expect(run.exitCode, run.stdout + run.stderr).toBeUndefined();
     const out = json(run);
-    expect(sites(out.applied)).toEqual([MONGO_BODY_SITE, TIME_BODY_SITE]);
+    expect(sites(out.applied)).toEqual([RETRY_BODY_SITE, TIME_BODY_SITE]);
     expect(out.write.status).toBe('written');
     expect(out.write.files).toEqual([{ file: 'src/service.stack.ts', sites: 2 }]);
     expect(snapshot(dir)).toEqual({
       ...before,
       'src/service.stack.ts': edit(
         edit(MIXED, "defaultValue: '10:00Z'", "defaultValue: '10:00'"),
-        "driver: 'mongo'",
-        "driver: 'mongodb'",
+        AUTHORED_DELAY,
+        CANONICAL_DELAY,
       ),
     });
 
@@ -329,10 +328,21 @@ describe('a refused input the shim produces again, carrying a load-path spelling
     expect(strict.stackProvenance).toBe(true);
     expect(strict.stackConversions).toEqual([]);
   }, RUN_TIMEOUT);
+
+  it('an input defined twice starts from the innermost argument, and is listed once', async () => {
+    const dir = writeProject(composed(edit(
+      edit(SERVICE_STACK, 'export const ServiceStack = defineStack({', 'export const ServiceStack = defineStack(defineStack({'),
+      '\n});\n',
+      '\n}));\n',
+    )));
+    const out = json(await runMeta(dir, ['--from', '16', '--json']));
+    expect(sites(out.applied)).toEqual([RETRY_BODY_SITE]);
+    expect(out.schemaValid).toBe(true);
+  }, RUN_TIMEOUT);
 });
 
 describe('control: an already-canonical composed project', () => {
-  const CANONICAL = edit(SERVICE_STACK, "driver: 'mongo'", "driver: 'mongodb'");
+  const CANONICAL = CANONICAL_SERVICE;
 
   it('writes nothing, and its --json summary is the one the built composition gives', async () => {
     const dir = writeProject(composed(CANONICAL));

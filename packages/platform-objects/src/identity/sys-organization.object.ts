@@ -1,6 +1,7 @@
 // Copyright (c) 2025 ObjectStack. Licensed under the Apache-2.0 license.
 
 import { ObjectSchema, Field } from '@objectstack/spec/data';
+import { INVITATION_ROLE_OPTIONS } from '@objectstack/spec/identity';
 
 /**
  * sys_organization — System Organization Object
@@ -54,7 +55,9 @@ export const SysOrganization = ObjectSchema.create({
 
   // Custom actions — generic create / delete are suppressed (better-auth-
   // managed), and better-auth's own columns (`name`, `slug`, `logo`) are
-  // edited ONLY through `update_organization` below. The generic `update` the
+  // edited ONLY through better-auth's `organization/update`: the
+  // `update_organization` row action (all three) and the name/logo-only
+  // `rename_organization` (record header and row) below. The generic `update` the
   // data door admits since #15873 reaches the platform-owned extension columns
   // alone (see `userActions` above and `enable.apiMethods` at the bottom);
   // admins still need to create new orgs from the Setup app.
@@ -94,8 +97,10 @@ export const SysOrganization = ObjectSchema.create({
       bodyShape: { wrap: 'data' },
       // Org-admin actions are multi-org-only; hide them in single-org for
       // consistency with `create_organization` (the org list is empty there,
-      // but this also guards direct record-URL access).
+      // but this also guards direct record-URL access). The grades that reach
+      // `organization/update` are owner and admin (ADR-0108 D1).
       requiresFeature: 'multiOrgEnabled',
+      requiresMembershipReach: 'update_organization',
       successMessage: 'Organization updated',
       refreshAfter: true,
       params: [
@@ -115,6 +120,8 @@ export const SysOrganization = ObjectSchema.create({
       target: '/api/v1/auth/organization/delete',
       recordIdParam: 'organizationId',
       requiresFeature: 'multiOrgEnabled',
+      // `organization/delete` admits the owner alone (ADR-0108 D1).
+      requiresMembershipReach: 'delete_organization',
       confirmText: 'Delete this organization? All members will lose access immediately. This cannot be undone.',
       successMessage: 'Organization deleted',
       refreshAfter: true,
@@ -138,6 +145,52 @@ export const SysOrganization = ObjectSchema.create({
       refreshAfter: true,
     },
     {
+      // FOURTH mirror of `invite_user` (sys_user, sys_invitation, sys_member
+      // carry the other three — keep all four consistent), here because a
+      // `page:header`'s `actions` are ids resolved against the page object's
+      // OWN actions only (spec `component.zod.ts`, page:header), so the
+      // organization record page cannot offer an invite from a mirror on
+      // another object. Ruling 6228318638 (B′ on #24034): declared at
+      // `record_header`, primary, first by `order`.
+      //
+      // The record IS the organization, so its id rides as `organizationId`
+      // instead of better-auth's active-org fallback — an admin on another
+      // org's page invites into that org, not into whichever one is active.
+      name: 'invite_user',
+      label: 'Invite User',
+      // Same wording as the sys_user / sys_invitation / sys_member mirrors.
+      description:
+        'Invite someone by email address. They join this organization with the chosen role when they accept the invitation.',
+      icon: 'user-plus',
+      variant: 'primary',
+      // Lower than every sibling (unset = 0), so the stable `order` sort puts
+      // it first in the record header.
+      order: -1,
+      locations: ['record_header'],
+      type: 'api',
+      target: '/api/v1/auth/organization/invite-member',
+      recordIdParam: 'organizationId',
+      // Same gates as the other three mirrors: the org CAPABILITY (not
+      // multi-org, ADR-0093 D9) and the grades that reach the endpoint
+      // (ADR-0108 D1) — owner, admin and delegated_admin.
+      requiresFeature: 'organization',
+      requiresMembershipReach: 'invite_member',
+      // `${result.email}`: the invitee's address from the invitation row
+      // invite-member answers (see sys_user's mirror).
+      successMessage: 'Invitation sent to ${result.email}',
+      refreshAfter: true,
+      params: [
+        // ⚠️ Neither `email` nor `role` is a field of sys_organization, so
+        // both params name their owner via `objectOverride` — an unresolvable
+        // field-backed param degrades to an unlabelled text input with
+        // nothing red anywhere (see sys_member's mirror). Otherwise the shape
+        // is sys_invitation's: both required, and the role picker offers only
+        // what this caller may grant ([ADR-0105 D8] `INVITATION_ROLE_OPTIONS`).
+        { field: 'email', objectOverride: 'sys_invitation', required: true },
+        { field: 'role', objectOverride: 'sys_invitation', required: true, options: [...INVITATION_ROLE_OPTIONS] },
+      ],
+    },
+    {
       // Current user leaves the org. Distinct from `delete_organization`
       // (admin-only, destroys the org) — `leave` only removes the caller's
       // own membership. Better-auth: `organization/leave { organizationId }`.
@@ -145,15 +198,62 @@ export const SysOrganization = ObjectSchema.create({
       label: 'Leave Organization',
       icon: 'log-out',
       variant: 'danger',
+      // Higher than every sibling (unset = 0), so it sorts LAST: with
+      // `invite_user` leading, the header's three inline slots go to the
+      // invite, `set_active_organization` and `rename_organization`, and this
+      // one folds into the `⋯` overflow's destructive band (objectui's
+      // page:header split, default `maxVisible` 3), with `change_slug` in the
+      // overflow above it. Without it, registration order kept it inline as
+      // the third button. Ungated by grade: every grade may leave.
+      order: 1,
       mode: 'custom',
       locations: ['list_item', 'record_header'],
       type: 'api',
       target: '/api/v1/auth/organization/leave',
       recordIdParam: 'organizationId',
       requiresFeature: 'multiOrgEnabled',
-      confirmText: 'Leave this organization? You will lose access to all of its resources.',
+      // Names what is lost (#24021's copy half, ruling 6228318638 item 2).
+      confirmText: 'Leave this organization? You will lose access to its environments and members.',
       successMessage: 'You have left the organization',
       refreshAfter: true,
+    },
+    {
+      // Rename the organization: its `name` and `logo`, never its `slug`.
+      // The same better-auth door as `update_organization` above
+      // (`organization/update`, fields nested under `data`), with no `slug`
+      // param, so the body carries no slug and the stored one is kept:
+      // better-auth's slug-taken check and plugin-auth's
+      // `beforeUpdateOrganization` slug guard both run only on a sent slug.
+      //
+      // One door per field. A record page reaches no `list_item` action, so
+      // this one is declared at `record_header` too; where the cloud
+      // orchestrator governs the slug, that page offers this action and
+      // `change_slug`, and nothing on it sends a slug to better-auth.
+      // `update_organization` stays the slug door of a composition without the
+      // orchestrator, because `change_slug`'s target exists only in cloud.
+      //
+      // Declared BEFORE `change_slug`: both sort at `order` 0, so declaration
+      // order breaks the tie, the rename takes the header's third inline slot,
+      // and `change_slug` folds into the `⋯` overflow.
+      name: 'rename_organization',
+      label: 'Rename Organization',
+      icon: 'pencil',
+      variant: 'secondary',
+      mode: 'edit',
+      locations: ['record_header', 'list_item'],
+      type: 'api',
+      target: '/api/v1/auth/organization/update',
+      recordIdParam: 'organizationId',
+      bodyShape: { wrap: 'data' },
+      requiresFeature: 'multiOrgEnabled',
+      // The same door as `update_organization`, so the same grades.
+      requiresMembershipReach: 'update_organization',
+      successMessage: 'Organization renamed',
+      refreshAfter: true,
+      params: [
+        { field: 'name', required: true, defaultFromRow: true },
+        { field: 'logo', defaultFromRow: true },
+      ],
     },
     {
       // Rename the organization slug (URL prefix). Backed by the cloud
@@ -334,7 +434,7 @@ export const SysOrganization = ObjectSchema.create({
       required: false,
       group: 'Group Structure',
       description:
-        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference (ADR-0105 D6).',
+        'Reporting/grouping parent. Grants NOTHING — visibility across organizations comes from membership, never from this reference.',
     }),
 
     sort_order: Field.number({
@@ -376,6 +476,9 @@ export const SysOrganization = ObjectSchema.create({
     trackHistory: true,
     searchable: true,
     apiEnabled: true,
+    // Setup's identity records are not discussion surfaces (objectui#12614 item 1):
+    // no Discussion feed, and a comment create on one answers 403 FEEDS_DISABLED.
+    feeds: false,
     // #1591 closed the generic writes on this table — "refused by the identity
     // write guard (ADR-0092 D2) and owned by better-auth; HTTP answers 405
     // before the 403" — and that reasoning still holds for better-auth's own

@@ -101,6 +101,14 @@ export {
   SHARING_RULE_PROVENANCE_PACKAGE,
 } from './sharing-rule-provenance.js';
 export {
+  // [ADR-0131 C3 stage 9] The one translation enforcement serves a declared
+  // rule through: the ownership ceremony asks it which declared names are
+  // SERVED before it renames a mirror's grants onto one.
+  translateDeclaredSharingRule,
+  type DeclaredSharingRule,
+  type DeclaredSharingRuleSkip,
+} from './declared-sharing-rules.js';
+export {
   SharingServicePlugin,
   buildSharingMiddleware,
   backfillRuleGrants,

@@ -33,6 +33,9 @@ describe('[#8715] sys_api_key single-declaration pin', () => {
       'name',
       'prefix',
       'revoked',
+      // Why a forced password reset revoked the key: it restricts the restore
+      // to a platform administrator (plugin-auth `api-key-restore-guard.ts`).
+      'revoked_reason',
       'scopes',
       'updated_at',
       'user_id',

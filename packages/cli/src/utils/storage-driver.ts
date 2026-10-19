@@ -104,7 +104,9 @@ import {
   devAutoMigrateConfig,
   loadTursoDriverFactory as loadRuntimeTursoDriverFactory,
   namesRetiredMemoryEngine,
+  normalizeDatabaseUrl,
   retiredMemoryEngineMessage,
+  sqliteFilenameFromUrl,
   type LoadTursoDriverFactoryOptions,
 } from '@objectstack/runtime';
 import {
@@ -187,7 +189,8 @@ function missingUrlMessage(kind: BuiltinDriverId): string {
  *    value by name. A spelling of the retired in-memory engine (`memory`,
  *    `mingo`, `in-memory`) is this case too, with the retirement's own wording,
  *    and so is its `memory://` / `mingo://` scheme, which
- *    {@link inferDriverTypeFromUrl} refuses;
+ *    {@link inferDriverTypeFromUrl} refuses — as it refuses every
+ *    `<scheme>://` it does not recognise, naming the scheme only;
  *  - a recognized kind with **no local default** selected with **no URL**
  *    (`postgres` / `mysql` / `mongodb` / `turso`). Only `turso` refused before;
  *    the other three guessed — `url: undefined` into `pg`, an invented
@@ -241,9 +244,39 @@ export class UnsupportedDriverError extends Error {
 }
 
 /**
+ * The `OS_DATABASE_URL` spellings {@link inferDriverTypeFromUrl} classifies, in
+ * the order the runtime host's refusal lists them — the sentence an operator
+ * reads when the scheme they typed is none of these.
+ *
+ * Written out rather than derived because the classifier is a chain of regexes,
+ * not a table. What keeps the two from drifting is
+ * `driver-vocabulary-parity.test.ts`, which drives BOTH hosts over the same
+ * URLs and holds their verdicts equal.
+ */
+const RECOGNISED_DATABASE_URL_SCHEMES =
+  'postgres:// (or postgresql://, pg://), mysql:// (or mysql2://), mongodb:// (or mongodb+srv://), '
+  + 'libsql:// or an https:// *.turso.* URL (optional @objectstack/driver-turso), wasm-sqlite://, '
+  + 'file: (or sqlite:), or a file path with no scheme; :memory: is SQLite\'s in-memory database';
+
+/**
+ * The refusal for an `OS_DATABASE_URL` whose `<scheme>://` no arm recognises.
+ *
+ * It names the SCHEME and never the URL: the URL is where postgres/mysql/mongodb
+ * credentials ride, and this sentence is printed to the console on the way out.
+ */
+function unsupportedUrlSchemeMessage(scheme: string): string {
+  return (
+    `Unsupported database URL scheme "${scheme}" (OS_DATABASE_URL / --database). `
+    + `Supported: ${RECOGNISED_DATABASE_URL_SCHEMES}. `
+    + 'Booting on the SQLite default instead would silently ignore the database you named '
+    + 'and write into one you never chose. Fix the URL, or unset it.'
+  );
+}
+
+/**
  * Infer a canonical driver kind from an `OS_DATABASE_URL` scheme.
- * Returns `''` when the URL is absent or its scheme is unrecognized (the caller
- * then falls back to the dev default / registers nothing in production).
+ * Returns `''` only when the URL is absent or blank (the caller then falls back
+ * to the dev default / registers nothing in production).
  *
  * Throws {@link UnsupportedDriverError} for `memory://` and `mingo://`: they name
  * the in-memory engine, which is no longer a boot store. Returning `''` instead
@@ -251,12 +284,31 @@ export class UnsupportedDriverError extends Error {
  * #3276 shape again — and returning a kind would leave the refusal to
  * {@link resolveStorageDefinition}, whose spelling refusal names
  * `OS_DATABASE_DRIVER`, a variable this operator never set.
+ *
+ * Throws it too for any other `<scheme>://` no arm below recognises
+ * (`redis://…`), for the same two reasons. That URL used to answer `''`, so
+ * `serve --dev` booted the SQLite `:memory:` default and threw away the database
+ * the operator named without a word, and a production boot met the no-storage
+ * refusal, which tells an operator who DID set `OS_DATABASE_URL` to set it.
+ *
+ * The arms are the runtime host's (`detectDriverFromUrl` in
+ * `packages/runtime/src/standalone-stack.ts`), so the two hosts give one answer
+ * per URL: `pg://` is postgres, and a value with no scheme is a SQLite file
+ * path, whatever its extension. The runtime refuses every other
+ * `<scheme>://`, so refusing it here takes away nothing that host means to
+ * accept. An OPAQUE scheme (`jdbc:…`, `redis:h`) gets the same answer: both
+ * hosts refuse it, naming the scheme, and `driver-vocabulary-parity.test.ts`
+ * holds the two equal.
  */
 export function inferDriverTypeFromUrl(url: string | undefined): string {
   if (!url) return '';
   const u = url.trim();
+  // Blank is absent, as the runtime host's URL resolution reads it — never a
+  // file path named by whitespace (the scheme-less arm below would take it).
+  if (!u) return '';
   if (/^mongodb(\+srv)?:\/\//i.test(u)) return 'mongodb';
-  if (/^postgres(ql)?:\/\//i.test(u)) return 'postgres';
+  // `pg://` is the runtime host's spelling too (`detectDriverFromUrl`).
+  if (/^(postgres(ql)?|pg):\/\//i.test(u)) return 'postgres';
   if (/^mysql2?:\/\//i.test(u)) return 'mysql';
   // libSQL / Turso URLs classify as `turso`, and since #5602 that classification
   // CONSTRUCTS: resolveStorageDefinition returns a `turso` definition and the CLI
@@ -267,23 +319,60 @@ export function inferDriverTypeFromUrl(url: string | undefined): string {
   // MissingDriverPackageError).
   if (/^libsql:\/\//i.test(u)) return 'turso';
   if (/^https?:\/\//i.test(u) && /\.turso\./i.test(u)) return 'turso';
-  if (/^wasm-sqlite:\/\//i.test(u) || /\.wasm\.db$/i.test(u)) return 'sqlite-wasm';
+  if (/^wasm-sqlite:\/\//i.test(u)) return 'sqlite-wasm';
+  // A `*.wasm.db` file name selects the WASM engine only for a FILE: a `file:` /
+  // `sqlite:` URL or a value with no scheme (both returns below). Tested here,
+  // ahead of every scheme check, it let the name rescue a scheme nothing
+  // recognises (`redis://h/x.wasm.db`, `jdbc:x/x.wasm.db`) into a SQLite file.
+  const wasmFile = /\.wasm\.db$/i.test(u);
   // The retired in-memory engine's two schemes — character-for-character the
   // runtime's `detectDriverFromUrl` arm, so the two hosts recognise and refuse
   // the same URLs. Kept ABOVE the sqlite test so it is not shadowed, and
   // deliberately distinct from sqlite's `:memory:` pseudo-file below, which is
   // the replacement this refusal names.
-  if (/^(memory|mingo):\/\//i.test(u)) {
+  //
+  // The refusal names the SCHEME, never the URL: both schemes accept anything
+  // after the `//`, a `user:password@` and a `?authToken=` included, and this
+  // sentence is printed to the console on the way out. The subject is the
+  // runtime host's own (`refuseRetiredMemoryEngine` in
+  // `packages/runtime/src/standalone-stack.ts`, module-local there, so written
+  // out here), and `driver-vocabulary-parity.test.ts` holds the two equal.
+  // The scheme is also what the error carries as `driverType`, as the
+  // unrecognised-scheme refusal below does.
+  const retiredScheme = /^(memory|mingo):\/\//i.exec(u)?.[0];
+  if (retiredScheme) {
     throw new UnsupportedDriverError(
-      u,
-      retiredMemoryEngineMessage(`OS_DATABASE_URL "${u}"`),
+      retiredScheme,
+      retiredMemoryEngineMessage(`An OS_DATABASE_URL with the "${retiredScheme}" scheme`),
       // Not a kind this resolver can produce — `database-driver-allowlist.pin`
       // reads `recognized` to tell the two apart.
       { recognized: false },
     );
   }
-  if (/^file:/i.test(u) || /^sqlite:/i.test(u) || u === ':memory:' || /\.(db|sqlite|sqlite3)$/i.test(u)) return 'sqlite';
-  return '';
+  if (/^file:/i.test(u) || /^sqlite:/i.test(u)) return wasmFile ? 'sqlite-wasm' : 'sqlite';
+  // What is left with a scheme is refused, naming the scheme and never the URL:
+  //  - an unrecognised `<scheme>://` (`redis://…`). Refusing it here, rather
+  //    than letting a name that ends `.db` reach SQLite, is what keeps
+  //    `redis://h/x.db` refused, as the runtime host refuses it;
+  //  - an OPAQUE scheme, two or more characters and a `:` with no `//`
+  //    (`jdbc:postgresql://…`, `redis:h`), rather than opening a SQLite file at
+  //    a path made of the URL. The runtime host's `detectDriverFromUrl` refuses
+  //    it by the same rule, and `driver-vocabulary-parity.test.ts` holds the
+  //    two equal.
+  // A single letter and a `:` is a drive (`C:\data\app`, `C:/data/app`), not
+  // a scheme, and stays a path.
+  const scheme = /^[a-z][a-z0-9+.-]*:\/\//i.exec(u)?.[0] ?? /^[a-z][a-z0-9+.-]+:/i.exec(u)?.[0];
+  if (scheme) {
+    throw new UnsupportedDriverError(
+      scheme,
+      unsupportedUrlSchemeMessage(scheme),
+      // Not a kind this resolver can produce — `database-driver-allowlist.pin`
+      // reads `recognized` to tell the two apart.
+      { recognized: false },
+    );
+  }
+  // No scheme at all: a SQLite file path — `:memory:`, `./app.db`, `data/app`.
+  return wasmFile ? 'sqlite-wasm' : 'sqlite';
 }
 
 /**
@@ -440,10 +529,11 @@ export function resolveStorageDefinition(
   }
 
   if (kind === 'sqlite') {
-    const filePath = (databaseUrl ?? ':memory:')
-      .replace(/^file:/, '')
-      .replace(/^sqlite:/, '')
-      .replace(/^sql:\/\//, '');
+    // The runtime host's file for this URL ({@link sqliteFileFor}), never a
+    // second copy of its rule: `sqlite://x.db` and `file://x.db` are `x.db`,
+    // never `//x.db` (the filesystem root), `file:///abs/x.db` is `/abs/x.db`,
+    // and `FILE:./x.db` is `./x.db`.
+    const filePath = sqliteFileFor(databaseUrl, 'sqlite');
     return {
       driverId: 'sqlite',
       config: { filename: filePath, ...devAutoMigrateConfig('sqlite', isDev) },
@@ -458,10 +548,9 @@ export function resolveStorageDefinition(
   }
 
   if (kind === 'sqlite-wasm') {
-    const filePath = (databaseUrl ?? ':memory:')
-      .replace(/^file:/, '')
-      .replace(/^wasm-sqlite:\/\//, '')
-      .replace(/^sqlite:/, '');
+    // The same rule as the sqlite arm, `wasm-sqlite://` included:
+    // `sqlite://x.wasm.db` and `file://x.wasm.db` are `x.wasm.db`.
+    const filePath = sqliteFileFor(databaseUrl, 'sqlite-wasm');
     return {
       driverId: 'sqlite-wasm',
       // `persist` passthrough: the CLI kept `on-disconnect` semantics here
@@ -537,6 +626,43 @@ export function resolveStorageDefinition(
   }
 
   return null;
+}
+
+/**
+ * The SQLite file a `default` definition opens for this URL — the runtime
+ * host's answer, by the runtime host's rule: `normalizeDatabaseUrl` (`sqlite:` /
+ * `sqlite://` are `file:`), then `sqliteFilenameFromUrl` (`file:` / `file://`,
+ * and `wasm-sqlite:` for the WASM kind, stripped case-insensitively). This file
+ * used to keep its own copy, a case-sensitive `/^file:/` strip, so
+ * `file://NAME` opened `//NAME` at the filesystem root, where the runtime host
+ * opens `NAME`, and `FILE:./x.db` made a directory named `FILE:.`.
+ *
+ * An absent or blank URL is `:memory:`: blank is absent, as
+ * {@link inferDriverTypeFromUrl} reads it, never a file named by whitespace.
+ *
+ * A URL the rule refuses is re-raised as {@link UnsupportedDriverError} with
+ * the runtime host's own sentence, which names the scheme and never the URL,
+ * minus its `[StandaloneStack]` tag — the shape this host's retired-engine
+ * refusal already has (`driver-vocabulary-parity.test.ts` holds both).
+ * What reaches that is an explicit `sqlite` or `sqlite-wasm` selection over a
+ * value that is not a file path, which this host's URL inference never sees —
+ * a server URL (`OS_DATABASE_DRIVER=sqlite` beside
+ * `postgres://user:password@…`), an unrecognised `<scheme>://`, or an opaque
+ * scheme (`jdbc:postgresql://…`, `redis:h`) — and, on the `sqlite` kind, a
+ * `file:` that names no file. Each used to build a definition: a non-file value
+ * opened a file at a path made of the URL, credentials included, and the empty
+ * `file:` declared an empty file name. The type is
+ * what makes the refusal fatal: `serve.ts` re-throws this class and swallows
+ * every other construction error, so a plain `Error` would boot with no
+ * storage at all.
+ */
+function sqliteFileFor(databaseUrl: string | undefined, kind: 'sqlite' | 'sqlite-wasm'): string {
+  const url = normalizeDatabaseUrl(databaseUrl?.trim() ? databaseUrl : ':memory:');
+  try {
+    return sqliteFilenameFromUrl(url, kind);
+  } catch (err) {
+    throw new UnsupportedDriverError(kind, (err as Error).message.replace(/^\[StandaloneStack\] /, ''));
+  }
 }
 
 /**

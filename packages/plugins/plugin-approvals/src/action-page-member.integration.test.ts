@@ -131,7 +131,10 @@ async function bootStack(options: { rawApp: boolean }) {
 
   const svc = kernel.getService<ApprovalService>('approvals');
   let n = 0;
-  /** A pending request on its own record; twins share a title, so their pages match. */
+  /**
+   * A pending request on its own record. [#23594] The pages name the record by
+   * its id, never its title, so twins' pages differ by exactly that id.
+   */
   const openRequest = async (title = 'Annual leave') => {
     n += 1;
     const recordId = `LR${n}`;
@@ -350,8 +353,16 @@ describe('[#22578] parity — the member answers what the self-hosted mount answ
     const member = await snapshot(await svc.handleActionPage(postRequest(tokenForm(memberTokens.approve))));
     const mount = await snapshot(await app!.fetch(postRequest(tokenForm(mountTokens.approve))));
     expect(mount.status).toBe(200);
-    expect(member).toEqual(mount);
+    expect([member.status, member.headers]).toEqual([mount.status, mount.headers]);
+    // A token is single-use, so each door decides its own twin, and the twins'
+    // pages differ by their record ids alone (#23594: the page names the record
+    // by id). Byte-equal once that one difference is named.
+    const memberRecord = (await svc.getRequest(viaMember, SYSTEM))!.record_id;
+    const mountRecord = (await svc.getRequest(viaMount, SYSTEM))!.record_id;
+    expect(memberRecord).not.toBe(mountRecord);
+    expect(text(member).replaceAll(memberRecord, 'RECORD')).toBe(text(mount).replaceAll(mountRecord, 'RECORD'));
     expect(text(member)).toBe(renderResultPage('approved', (await svc.getRequest(viaMember, SYSTEM))!));
+    expect(text(mount)).toBe(renderResultPage('approved', (await svc.getRequest(viaMount, SYSTEM))!));
 
     for (const requestId of [viaMember, viaMount]) {
       expect(await statusOf(requestId)).toBe('approved');

@@ -41,6 +41,12 @@ interface Arrangement {
     readonly disabled?: readonly string[];
 }
 
+/** [#24371] One `where` value as the store reads it: `{ $in: [...] }` (the by-name read's both-spellings `type`) or equality. */
+const whereValueMatches = (actual: unknown, want: unknown): boolean =>
+    want !== null && typeof want === 'object' && Array.isArray((want as { $in?: unknown }).$in)
+        ? (want as { $in: unknown[] }).$in.includes(actual)
+        : actual === want;
+
 /** One protocol over a real registry with the packages registered in `order`, and the stored row, if any. */
 function protocolFor(arrangement: Arrangement, order: readonly string[]) {
     const registry = new SchemaRegistry({ multiTenant: false, logLevel: 'silent' });
@@ -55,7 +61,7 @@ function protocolFor(arrangement: Arrangement, order: readonly string[]) {
         } as Record<string, unknown>, 'name' as never, packageId);
     }
     for (const packageId of arrangement.disabled ?? []) {
-        registry.installPackage({ id: packageId, name: packageId, version: '1.0.0', type: 'app' } as never);
+        registry.installPackage({ id: packageId, name: packageId, version: '1.0.0', type: 'app' } as never, 'code');
         registry.disablePackage(packageId);
     }
     const rows = arrangement.rowLock === undefined ? [] : [{
@@ -65,7 +71,7 @@ function protocolFor(arrangement: Arrangement, order: readonly string[]) {
         }),
     }];
     const matching = (where: Record<string, unknown> = {}) =>
-        rows.filter((r) => Object.entries(where).every(([k, v]) => v === undefined || (r as Record<string, unknown>)[k] === v));
+        rows.filter((r) => Object.entries(where).every(([k, v]) => v === undefined || whereValueMatches((r as Record<string, unknown>)[k], v)));
     const engine = {
         registry,
         async find(table: string, opts?: { where?: Record<string, unknown>; limit?: number }) {

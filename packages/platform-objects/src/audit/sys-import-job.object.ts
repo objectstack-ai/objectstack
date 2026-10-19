@@ -79,7 +79,7 @@ export const SysImportJob = ObjectSchema.create({
     undo_log: Field.json({
       label: 'Undo Log',
       required: false,
-      description: 'Reversal instructions ({created:[ids], updated:[{id,before}]}) captured for small non-dry-run jobs so the import can be undone',
+      description: 'Reversal instructions ({created:[ids], updated:[{id,before}]}) captured for small non-dry-run jobs so the import can be undone. A partial undo keeps only the unreverted rows here, with a failures list giving each one\'s id, action, code and refusal',
       group: 'Outcome',
     }),
     reverted_at: Field.datetime({
