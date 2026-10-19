@@ -355,6 +355,16 @@ if [[ -f "${BUILD_ROOT}/.objectstack-sha" ]]; then
   # content hash. Every workflow that runs this script has just built that
   # closure, so there this is a cache hit; `new-only` keeps a hit from replaying
   # thousands of cached log lines, and still prints every task that really runs.
+  #
+  # WITH declarations, whatever OS_SKIP_DTS the caller exported. The two guards
+  # above accept a typeless client and spec because the vite hooks read only the
+  # `import` condition; the pin script packs whole packages as they publish and
+  # refuses one whose `types` entry is missing. Measured on this branch with
+  # OS_SKIP_DTS=1 and a typeless tree: exit 1, "@objectstack/client is not built
+  # ... dist/index.d.ts, which is not there", and the rebuild that refusal
+  # prints inherits the same OS_SKIP_DTS (consumer pointer on objectstack#24306).
+  # turbo.json lists OS_SKIP_DTS in globalEnv, so this build hashes apart from a
+  # typeless one and cannot replay it.
   OBJECTSTACK_PINNED_NAMES="$(node -e '
     const manifest = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     const names = Object.keys(manifest.pnpm?.overrides ?? {}).filter((n) => n.startsWith("@objectstack/"));
@@ -366,7 +376,11 @@ if [[ -f "${BUILD_ROOT}/.objectstack-sha" ]]; then
   done
   if (( ${#OBJECTSTACK_TURBO_FILTERS[@]} > 0 )); then
     echo "→ objectui@${PINNED_SHA:0:12} installs ${OBJECTSTACK_PINNED_NAMES} by commit — building them here..."
-    (cd "$FRAMEWORK_ROOT" && pnpm exec turbo run build "${OBJECTSTACK_TURBO_FILTERS[@]}" --output-logs=new-only)
+    if [[ -n "${OS_SKIP_DTS:-}" ]]; then
+      echo "  OS_SKIP_DTS is set; these packages are built WITHOUT it, declarations included,"
+      echo "  because objectui packs them as they publish."
+    fi
+    (cd "$FRAMEWORK_ROOT" && unset OS_SKIP_DTS && pnpm exec turbo run build "${OBJECTSTACK_TURBO_FILTERS[@]}" --output-logs=new-only)
   fi
 
   # The pin script refuses (exit 1, reason on stderr) on a missing entry point,
@@ -391,8 +405,9 @@ if [[ -f "${BUILD_ROOT}/.objectstack-sha" ]]; then
     echo "  ⛔ Not here: editing ${BUILD_ROOT}/pnpm-lock.yaml or making the install below non-frozen"
     echo "  builds a console against a dependency set no objectui commit records."
     if [[ -n "${OS_SKIP_DTS:-}" ]]; then
-      echo "  OS_SKIP_DTS is set: the pin script requires every entry point, declarations included."
-      echo "  Unset it and re-run."
+      echo "  OS_SKIP_DTS is set in this environment. The build above ran without it; a rebuild by"
+      echo "  hand, such as the one the pin script prints, inherits it and comes out typeless again:"
+      echo "  run it as env -u OS_SKIP_DTS <command>."
     fi
     exit 1
   fi
