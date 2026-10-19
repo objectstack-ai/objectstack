@@ -23,28 +23,20 @@
 //     refusal arrives as the `cause` of the kernel's start-failure error);
 //  2. `os migrate organization-ownership` writes its plan, and
 //     `--apply --plan-file PLAN` completes with no boot in between, and
-//     verifies its marker;
+//     verifies its marker — through the real CLI binary, with the arguments,
+//     working directory and environment an operator's run has;
 //  3. the next v18 boot succeeds.
-//
-// 18.0 ships for fresh installs only (ruling record 6259608309 on the v18
-// epic): the registered `os migrate organization-ownership` refuses, and
-// step 2a pins that through the real CLI binary, reading and writing nothing.
-// Step 2 runs the ceremony class the command keeps for 18.x
-// (`OrganizationOwnershipCeremony`), from the CLI's built module in its own
-// process, with the same arguments, working directory and environment an
-// operator's run has. The 18.x release that re-registers the ceremony puts
-// step 2 back on the binary and drops 2a.
 //
 // ⚠ Needs the `sys_metadata` family's no-column schema beside the refusal:
 // against a release whose family still declares the column, step 2 stops at
 // `column-drops` (the declaration keeps it). The two land together.
 
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, describe, expect, it } from 'vitest';
 import { SecurityPlugin, securityDefaultPermissionSets } from '@objectstack/plugin-security';
@@ -57,7 +49,6 @@ import { bootShowcase } from './showcase-boot.js';
 const SHOWCASE_DIR = fileURLToPath(new URL('../../../../examples/app-showcase/', import.meta.url));
 const CLI_ROOT = dirname(createRequire(import.meta.url).resolve('@objectstack/cli/package.json'));
 const CLI_BIN = join(CLI_ROOT, 'bin', 'run.js');
-const CEREMONY_MODULE = pathToFileURL(join(CLI_ROOT, 'dist', 'commands', 'migrate', 'organization-ownership.js')).href;
 
 const columnsOf = (file: string, table: string): string[] => {
   const db = new DatabaseSync(file);
@@ -130,32 +121,11 @@ describe('[ADR-0131 D10 item 5] a 17.x database upgrades through the boot refusa
     expect(columnsOf(file, 'sys_user_permission_set')).toContain('permission_set');
   });
 
-  it('⭐ 2a. in 18.0 the real command refuses with NOT_IMPLEMENTED, and the database is untouched', () => {
-    const before = columnsOf(file, 'sys_metadata');
-    const refused = spawnSync(process.execPath, [
-      CLI_BIN, 'migrate', 'organization-ownership', '--database-url', `file:${file}`, '--out', join(dir, 'refused-plan.json'), '--json',
-    ], { cwd: SHOWCASE_DIR, encoding: 'utf8', timeout: 300_000, env: { ...process.env, NO_COLOR: '1' } });
-    expect(refused.status, `${refused.stdout}\n${refused.stderr}`).toBe(1);
-    expect(JSON.parse(refused.stdout.trim())).toMatchObject({ error: 'plan_refused', code: 'NOT_IMPLEMENTED' });
-    expect(existsSync(join(dir, 'refused-plan.json'))).toBe(false);
-    expect(columnsOf(file, 'sys_metadata')).toEqual(before);
-  }, 320_000);
-
   it('⭐ 2. the ceremony completes with no boot in between, and verifies its marker', () => {
     // As an operator's run has it (S4, #23437): the plan first, then the apply
-    // of that reviewed plan file — through the ceremony class (see the header).
+    // of that reviewed plan file — through the real binary.
     const ceremony = (args: string[]) => spawnSync(process.execPath, [
-      '--input-type=module', '-e',
-      // The built module, as `bin/run.js` runs it: oclif's auto-transpile off,
-      // so an inherited NODE_ENV=test cannot send it to `src/` under tsx.
-      'const [root, url, ...argv] = process.argv.slice(1);' +
-        " const { createRequire } = await import('node:module');" +
-        " const { pathToFileURL } = await import('node:url');" +
-        " const oclif = await import(pathToFileURL(createRequire(root + '/package.json').resolve('@oclif/core')).href);" +
-        ' (oclif.settings ?? oclif.default.settings).enableAutoTranspile = false;' +
-        ' const { OrganizationOwnershipCeremony } = await import(url);' +
-        ' await OrganizationOwnershipCeremony.run(argv, { root });',
-      CLI_ROOT, CEREMONY_MODULE, '--database-url', `file:${file}`, ...args,
+      CLI_BIN, 'migrate', 'organization-ownership', '--database-url', `file:${file}`, ...args,
     ], { cwd: SHOWCASE_DIR, encoding: 'utf8', timeout: 300_000, env: { ...process.env, NO_COLOR: '1' } });
     const planFile = join(dir, 'plan.json');
     const plan = ceremony(['--out', planFile]);
