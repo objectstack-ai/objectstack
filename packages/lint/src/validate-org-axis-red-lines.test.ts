@@ -73,9 +73,11 @@ function sharingRule(input: SharingRule): Record<string, unknown> {
 /**
  * Same guard for the permission-set fixtures rule ① reads (#5009).
  *
- * `permissions[].rowLevelSecurity` is the ONLY authorable RLS surface —
- * `ObjectSchema` declares no `rowLevelSecurity` (nor `rls`) and is `.strict()`,
- * so the object-level traversal this rule used to carry could not run against a
+ * `permissions[].rowLevelSecurity` is the ONLY authorable LIST of RLS policies.
+ * An object declares at most ONE policy, `defaultRowScope` (#24164 ruling E′:
+ * the policy that applies when no held set carries one for the object), and no
+ * `rowLevelSecurity` (nor `rls`) list; `ObjectSchema` is `.strict()`, so the
+ * object-level list traversal this rule used to carry could not run against a
  * stack that parses. Building rule ①'s fixtures through the real schema is what
  * keeps that from quietly coming back: a fixture for a surface the spec does
  * not have now fails HERE.
@@ -349,11 +351,12 @@ const MANIFEST = { id: 'com.example.org-axis-probe', name: 'org_axis_probe', ver
 const ORG_WALKING_POLICY = { name: 'rollup', using: 'parent_organization_id = current_user.organization_id' };
 
 describe('validateOrgAxisRedLines — undeclared keys are the schema’s job, not this rule’s (#5009)', () => {
-  it('object-level RLS is not an authoring surface: `ObjectSchema` declares neither `rowLevelSecurity` nor `rls`', () => {
+  it('an object-level RLS policy LIST is not an authoring surface: `ObjectSchema` declares neither `rowLevelSecurity` nor `rls` (its one object-level policy is `defaultRowScope`)', () => {
     const objectKeys = Object.keys(ObjectSchema.shape);
     expect(objectKeys).not.toContain('rowLevelSecurity');
     expect(objectKeys).not.toContain('rls');
-    // The only declared home for RLS policies is the permission set.
+    // The only declared home for a LIST of RLS policies is the permission set;
+    // an object's own single policy is `defaultRowScope`.
     expect(Object.keys(PermissionSetSchema.shape)).toContain('rowLevelSecurity');
 
     // And `ObjectSchema` is `.strict()`, so this is not a silent strip: a stack

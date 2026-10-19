@@ -666,7 +666,7 @@ const DEFAULT_ROW_SCOPE_OBJECT_GUIDANCE =
  * An object's default row scope: {@link RowLevelSecurityPolicySchema} without
  * `object`, which the declaring object implies. It is the value of
  * `ObjectSchema.defaultRowScope` (`data/object.zod.ts`), whose describe states
- * the contract the security plugin's row-policy collection is to meet.
+ * what the security plugin's row-policy collection does with it.
  *
  * ## Why it is rebuilt, not cut
  *
@@ -692,10 +692,16 @@ const DEFAULT_ROW_SCOPE_OBJECT_GUIDANCE =
  * a policy copied from a permission set fails loudly instead of parsing with a
  * target the runtime would never read.
  *
- * Reader and writers (#24164 ruling E′): the reader is to be the security
- * plugin's `collectRLSPolicies` (#24340); the writers are to be the platform
- * identity objects (#24341). Neither exists yet: until the reader lands, no
- * server reads the key, and until the writers land, no object declares it.
+ * Reader and writers (#24164 ruling E′): the reader is the security plugin's
+ * `collectRLSPolicies` (#24340). When no held permission set carries a row
+ * policy for the declaring object and the operation, it collects this scope as
+ * one policy for that object and judges it exactly as it judges a held
+ * policy: the same applicability filter reads `operation`, `positions` and
+ * `enabled`, the same compiler compiles `using` and `check` (an un-lowerable
+ * predicate fails closed there, as an authored one does), and explain names
+ * it by `name`, `label` and `description` as the object's own. The writers are
+ * to be the platform identity objects (#24341); until they land, no object in
+ * this tree declares it.
  */
 export const DefaultRowScopeSchema = lazySchema(() => {
   const { object: _implied, priority: _priority, tags: _tags, ...members } = RowLevelSecurityPolicySchema.shape;
