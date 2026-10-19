@@ -81,7 +81,7 @@ export const CONNECT_AGENT_UI_BUNDLE = {
   type: 'plugin',
   scope: 'system',
   name: 'Connect an Agent UI',
-  description: 'Connect-an-Agent page + Setup and Account navigation for connecting MCP clients to this environment.',
+  description: 'Connect-an-Agent page + Setup and Account navigation for connecting MCP clients to this system.',
   pages: [CONNECT_AGENT_PAGE],
   // Both entries point at the one `connect_agent` page and share the item id.
   // That is legal and deliberate, read off the fold rather than assumed: the
