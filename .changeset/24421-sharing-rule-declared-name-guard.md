@@ -13,7 +13,7 @@ Clause-②: no (narrowing)
 
 ADR-0131 D6 charts declared sharing rules under regime C: a rule a package declares is read-only, it is customised by a clone under another name, and it is switched off through the deployment-level activation ledger (`sys_metadata_activation`), like flows, actions, positions and permission sets. Same-name shadowing is retired.
 
-The narrowings, FROM → TO, each with its one-line fix:
+What is refused now:
 
 - `POST /api/v1/sharing/rules` (and `SharingRuleService.defineRule`) creating a rule under a declared rule's name — FROM `201`, the new row replacing the declared rule in its scope, TO `409 RESOURCE_CONFLICT` naming the declared rule. Fix: create your rule under another name, and switch the declared one off with `POST /api/v1/security/_activation/sharing_rule/<name>` and `{ "enabled": false }`.
 - A `/data` insert of a `sys_sharing_rule` row under a declared rule's name, or an update that renames a row onto one — FROM `201` / `200`, TO `409 RESOURCE_CONFLICT`. Fix: the same.
