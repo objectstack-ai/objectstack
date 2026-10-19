@@ -98,6 +98,31 @@ export interface AutomationContext {
      */
     tenantId?: string;
     /**
+     * The acting user's unique email, the value row-level security reads as
+     * `current_user.email` (an owner policy such as
+     * `assignee == current_user.email`). The kernel `ExecutionContext.email`,
+     * under its own name.
+     *
+     * Who sets it: the engine's run setup, for a `runAs:'user'` run whose
+     * context names a user and carries no email yet. It is taken from the
+     * resolver a request's envelope is built through (`resolveUserAuthzGrants`
+     * in `@objectstack/core`, the user's `sys_user` email), so the run matches
+     * the same user's own request. After an approval decision it is the
+     * DECIDER's, resolved for them; the trigger user's never survives into the
+     * decider's segment. A context that already carries one keeps it verbatim,
+     * as a request's session email wins over the stored one. Absent on a
+     * `runAs:'system'` run (nothing is resolved for it), on a user-less run,
+     * and for a user with no stored email: every policy that reads it then
+     * drops out, which narrows and never widens.
+     *
+     * It reaches the data engine through `resolveRunDataContext` in
+     * `@objectstack/service-automation`, and rides the run's context into a
+     * `subflow` / `map` child and through a suspension, as {@link positions}
+     * and {@link permissions} do. Identity for row policies only: the flow CEL
+     * scope's `current_user` does not bind it.
+     */
+    email?: string;
+    /**
      * The language of the person who started the run (BCP-47, e.g. `zh-CN`):
      * the door's already-resolved `ExecutionContext.locale`, forwarded as-is.
      * It is never resolved a second time here. The request's own
