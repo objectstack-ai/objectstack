@@ -273,8 +273,13 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
 
       await h.engine.resume(paused.runId!, decided(decision, 'usr_mgr'));
       const after = h.ctxOf(nodeId);
-      // Ruling 6267719791 Q1 A: `{ isSystem: true, userId: <decider> }`.
-      expect(after).toMatchObject({ isSystem: true, userId: 'usr_mgr', positions: [], permissions: [], tenantId: 'org_a' });
+      // Ruling 6267719791 Q1 A: `{ isSystem: true, userId: <decider> }`, and
+      // no positions or permission sets beside the decider, so a
+      // `runAs:'user'` hook this write fires resolves the decider's own grants
+      // (`runas-system-user-hook-grants.integration.test.ts` on the real stack).
+      expect(after).toMatchObject({ isSystem: true, userId: 'usr_mgr', tenantId: 'org_a' });
+      expect(Object.keys(after)).not.toContain('positions');
+      expect(Object.keys(after)).not.toContain('permissions');
       expect(after.org_user_ids).toBeUndefined();
       // No permission resolution for a system run, and none of the submitter's
       // grants left under the decider's name.
@@ -300,7 +305,9 @@ describe("after an approval decision a runAs:'user' run's data operations carry 
       h.engine.registerFlow('sys_review', reviewFlow('sys_review', { runAs: 'system', recorder: true }) as never);
       const paused = await h.engine.execute('sys_review', { ...TRIGGER } as never);
       await h.engine.resume(paused.runId!, decided('approve'));
-      expect(h.ctxOf('after1')).toMatchObject({ isSystem: true, userId: 'usr_rep', positions: [], permissions: [] });
+      const after = h.ctxOf('after1');
+      expect(after).toMatchObject({ isSystem: true, userId: 'usr_rep' });
+      expect(Object.keys(after)).not.toContain('permissions');
     });
 
     it('CONTROL: a decider named WITHOUT the owning service\'s marker changes nothing', async () => {

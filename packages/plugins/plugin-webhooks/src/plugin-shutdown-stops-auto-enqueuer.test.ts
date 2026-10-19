@@ -6,8 +6,9 @@
  *
  * THE DEFECT, AND HOW FAR IT WENT. At `kernel:ready` the plugin binds two
  * hooks onto the data engine and starts an {@link AutoEnqueuer}, which holds
- * TWO realtime subscriptions, a crypto-provider listener and a `setInterval`
- * refresh timer. The teardown that released all of it was spelled `dispose()`.
+ * TWO realtime subscriptions (three since declared webhooks are read from the
+ * registry: the activation ledger's is the third), a crypto-provider listener
+ * and a `setInterval` refresh timer. The teardown that released all of it was spelled `dispose()`.
  * `Plugin` (`@objectstack/core`'s `types.ts`) declares `init()`, `start?(ctx)`
  * and `destroy?()` — and NO `dispose()` — and `ObjectKernel.performShutdown()`
  * / `LiteKernel.destroy()` walk the plugins in reverse calling
@@ -121,7 +122,7 @@ describe('#10772 WebhookOutboxPlugin stops its auto-enqueuer on kernel shutdown'
 
         // POSITIVE CONTROL — the enqueuer really did subscribe, so the
         // assertion below measures a release and not an absence.
-        expect(fixture.realtime.live.size).toBe(2);
+        expect(fixture.realtime.live.size).toBe(3);
 
         await kernel.shutdown();
 
@@ -162,7 +163,7 @@ describe('#10772 WebhookOutboxPlugin stops its auto-enqueuer on kernel shutdown'
     it('the retained dispose() alias still tears down for an embedder that calls it directly', async () => {
         const { plugin, fixture } = await boot();
 
-        expect(fixture.realtime.live.size).toBe(2);
+        expect(fixture.realtime.live.size).toBe(3);
 
         await plugin.dispose();
 

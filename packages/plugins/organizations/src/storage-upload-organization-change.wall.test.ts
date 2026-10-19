@@ -93,6 +93,8 @@ describe('the upload doors after the uploader switches organization, on a booted
   };
   const stored = (object: string, id: string) => ql.findOne(object, { where: { id } }, SYS);
 
+  /** The URL each presigned upload answered, by file id — where its bytes are sent. */
+  const uploadUrls = new Map<string, string>();
   const presign = async (): Promise<string> => {
     const res = await answer(
       await stack.apiAs(uploader, 'POST', '/storage/upload/presigned', {
@@ -102,7 +104,20 @@ describe('the upload doors after the uploader switches organization, on a booted
       }),
     );
     expect(res.status).toBe(200);
+    uploadUrls.set(res.body.data.fileId, String(res.body.data.uploadUrl));
     return res.body.data.fileId;
+  };
+  /**
+   * The upload's declared 5 bytes, PUT to the URL its presign answered — the
+   * commit door commits only a file whose bytes the backend holds (#24548).
+   */
+  const storeTheBytes = async (fileId: string) => {
+    const res = await stack.raw(uploadUrls.get(fileId)!.replace(/^https?:\/\/[^/]+/, ''), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'text/plain' },
+      body: 'plan!',
+    });
+    expect(res.status, await res.clone().text()).toBe(200);
   };
   const startChunked = async (): Promise<{ uploadId: string; fileId: string; resumeToken: string }> => {
     const res = await answer(
@@ -246,6 +261,7 @@ describe('the upload doors after the uploader switches organization, on a booted
     it('ORGANIZATION CHANGED: 409 RESOURCE_CONFLICT naming the change, not 500; the row is unchanged; switching back commits it', async () => {
       await switchTo(startOrg);
       const fileId = await presign();
+      await storeTheBytes(fileId);
       const before = await stored('sys_file', fileId);
 
       await switchTo(otherOrg);
@@ -265,6 +281,7 @@ describe('the upload doors after the uploader switches organization, on a booted
     it('CONTROL — SAME ORGANIZATION: the uploader commits exactly as before', async () => {
       await switchTo(startOrg);
       const fileId = await presign();
+      await storeTheBytes(fileId);
       const own = await answer(await commit(fileId, 'etag-same'));
       expect(own.status, JSON.stringify(own.body)).toBe(200);
       expect(own.body.data.fileId).toBe(fileId);

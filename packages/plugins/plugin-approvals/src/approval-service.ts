@@ -58,7 +58,9 @@ import type {
 // fields the caller had already supplied.
 import type { ExecutionContext } from '@objectstack/spec/kernel';
 import { RESUME_AUTHORITY_SERVICE } from '@objectstack/spec/contracts';
-import { canServeApiOperation, isFileIdToken, referenceTargetOf } from '@objectstack/spec/data';
+import {
+  canServeApiOperation, isFileIdToken, referenceTargetOf, SINGLE_OPTION_TYPES, MULTI_OPTION_TYPES,
+} from '@objectstack/spec/data';
 import type { EnableLike, ObjectCapabilitiesParsed } from '@objectstack/spec/data';
 // [#11993] The SANCTIONED renderer for OPERATION-level refusal copy. The
 // Operation Message Catalog is the ONE seat for these sentences — its own
@@ -1148,6 +1150,31 @@ function parseJson<T = any>(raw: unknown, fallback: T): T {
     try { return JSON.parse(raw) as T; } catch { return fallback; }
   }
   return raw as T;
+}
+
+/** [#24577] What {@link ApprovalService.mirroredStatusValue} answers when a transition writes nothing. */
+const STATUS_NOT_MIRRORED = Symbol('status-not-mirrored');
+
+/**
+ * [#24577] The values a status field declares, read as the engine's record
+ * validator reads a select's options (objectql `record-validator.ts`,
+ * `optionValues`): the option codes of an option-typed field. `undefined` when
+ * the field declares no value set — text, any type that is not an option type,
+ * an option type authored without options (free-form `tags`), a field the
+ * registry does not hold — and then every status is written as it is.
+ */
+function declaredOptionValues(def: unknown): string[] | undefined {
+  if (!def || typeof def !== 'object') return undefined;
+  const { type, options } = def as { type?: unknown; options?: unknown };
+  if (typeof type !== 'string' || (!SINGLE_OPTION_TYPES.has(type) && !MULTI_OPTION_TYPES.has(type))) return undefined;
+  if (!Array.isArray(options) || options.length === 0) return undefined;
+  return options.map((o) => (typeof o === 'object' && o !== null ? String((o as { value?: unknown }).value) : String(o)));
+}
+
+/** [#24577] A held value (one code, or a multi-value field's codes) every part of which the field declares. */
+function holdsDeclaredValues(value: unknown, declared: readonly string[]): boolean {
+  const values = Array.isArray(value) ? value : [value];
+  return values.length > 0 && values.every((v) => v != null && declared.includes(String(v)));
 }
 
 function csvSplit(raw: unknown): string[] {
@@ -3227,6 +3254,10 @@ export class ApprovalService implements IApprovalService {
    * construction (#10101 stamps the request with the subject record's
    * organisation), except for a record re-parented while its approval was
    * pending, which the stamp would scope this write away from.
+   *
+   * **The value written is one the field declares (#24577).** What is written
+   * is {@link mirroredStatusValue}'s answer, and `abandoned` (the request's
+   * row, on a transition that abandons it) is what that answer may restore.
    */
   private async mirrorStatusField(
     object: string,
@@ -3235,15 +3266,76 @@ export class ApprovalService implements IApprovalService {
     status: string,
     actorId: string | null,
     requestOrg: string | null | undefined,
+    abandoned?: { payloadJson: unknown },
   ): Promise<void> {
     try {
+      const value = this.mirroredStatusValue(object, field, status, abandoned);
+      if (value === STATUS_NOT_MIRRORED) {
+        this.logger?.warn?.(
+          `[approvals] approval status '${status}' was not written to ${object}.${field}: the field's options do not `
+          + `declare it, so the field keeps its value. Declare '${status}' among the field's options to mirror this transition.`,
+          { object, record: recordId, field, value: status },
+        );
+        return;
+      }
       const context = actorId
         ? await this.attributedMirrorContext(object, recordId, actorId, requestOrg)
         : SYSTEM_CTX;
-      await this.engine.update(object, { id: recordId, [field]: status }, { context });
+      await this.engine.update(object, { id: recordId, [field]: value }, { context });
     } catch (err: any) {
       this.logger?.warn?.(`[approvals] mirrorStatusField failed: ${err?.message ?? err}`);
     }
+  }
+
+  /**
+   * [#24577] The value a status mirror writes onto `object.field` for
+   * `status`, or {@link STATUS_NOT_MIRRORED} when it writes nothing.
+   *
+   * A field's declared options are its value set (the triage ruling on the
+   * card): the producer never writes outside them. The engine's validator does
+   * not hold that line for this write — it judges a `readonly` field's value
+   * for shape only, and the mirrored field is readonly by the spec's own advice
+   * — so a select that never declared `recalled` came to hold it, and an app
+   * whose submit gate admits only the select's own values never re-entered
+   * approval. The options are read from the registry the engine validates the
+   * same write against (`getSchema` answers `registry.getObject`).
+   *
+   *  - A field with no declared value set ({@link declaredOptionValues}) and a
+   *    status the field declares: the status, as before.
+   *  - A transition that ABANDONS the request (a recall, the dead-run sweep),
+   *    `abandoned` set: the record goes back to where it stood before it
+   *    entered approval. That is the value the field held in the request's
+   *    submit snapshot (`payload_json`, the trigger record the flow started
+   *    from) when that is a declared value or none; else what a never-submitted
+   *    record carries — the field's declared default, or empty. Whether the
+   *    record re-enters approval is then the app's own gate's decision.
+   *  - Every other transition (open, decide, send-back, the revision-limit
+   *    auto-reject): nothing. Send-back is here, not with recall, because its
+   *    run is still alive in the revise window (ADR-0044): a pre-approval value
+   *    restored there re-admits the start condition ADR-0044 tells authors to
+   *    gate on this field, and opens a parallel approval of the same record.
+   */
+  private mirroredStatusValue(
+    object: string,
+    field: string,
+    status: string,
+    abandoned: { payloadJson: unknown } | undefined,
+  ): unknown {
+    let def: { defaultValue?: unknown } | undefined;
+    try {
+      const schema = this.engine.getSchema?.(object) as { fields?: Record<string, unknown> } | undefined;
+      def = schema?.fields?.[field] as typeof def;
+    } catch { /* schema unavailable — no declared value set to hold the write to */ }
+    const declared = declaredOptionValues(def);
+    if (!declared || declared.includes(status)) return status;
+    if (!abandoned) return STATUS_NOT_MIRRORED;
+    const snapshot = parseJson<unknown>(abandoned.payloadJson, undefined);
+    if (snapshot && typeof snapshot === 'object' && Object.prototype.hasOwnProperty.call(snapshot, field)) {
+      const held = (snapshot as Record<string, unknown>)[field];
+      if (held == null) return null;
+      if (holdsDeclaredValues(held, declared)) return held;
+    }
+    return holdsDeclaredValues(def?.defaultValue, declared) ? def!.defaultValue : null;
   }
 
   /**
@@ -4554,9 +4646,11 @@ export class ApprovalService implements IApprovalService {
     }, { context: SYSTEM_CTX });
     await this.syncApproverIndex(requestId, [], org, now);
     if (config.approvalStatusField) {
+      // [#24577] A recall abandons the request: a field whose options do not
+      // declare `recalled` goes back to its value at submit.
       await this.mirrorStatusField(
         raw.object_name, raw.record_id, config.approvalStatusField, 'recalled',
-        actingUserId(context), org,
+        actingUserId(context), org, { payloadJson: raw.payload_json },
       );
     }
 
@@ -6609,8 +6703,11 @@ export class ApprovalService implements IApprovalService {
     if (config.approvalStatusField) {
       // No human did this — a sweep did. Left user-less on purpose (#3783): a
       // flow that wants to react to a dead-run release declares runAs:'system'.
+      // [#24577] It abandons the request, as a recall does: a field whose
+      // options do not declare `recalled` goes back to its value at submit.
       await this.mirrorStatusField(
         raw.object_name, raw.record_id, config.approvalStatusField, 'recalled', null, org,
+        { payloadJson: raw.payload_json },
       );
     }
 

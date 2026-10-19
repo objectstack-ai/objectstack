@@ -348,7 +348,7 @@ const BASE = '/api/v1/storage';
 async function withRoutes(
   session: { userId?: string; organizationId?: string } | null,
   seed: Array<{ object: string; data: any }>,
-  drive: (server: ReturnType<typeof createMockHttpServer>) => Promise<void>,
+  drive: (server: ReturnType<typeof createMockHttpServer>, adapter: LocalStorageAdapter) => Promise<void>,
 ) {
   const rootDir = join(tmpdir(), `os-13178-${Math.random().toString(36).slice(2)}`);
   await fs.mkdir(rootDir, { recursive: true });
@@ -361,7 +361,7 @@ async function withRoutes(
       basePath: BASE,
       resolveSession: async () => session,
     });
-    await drive(httpServer);
+    await drive(httpServer, adapter);
     return engine;
   } finally {
     await fs.rm(rootDir, { recursive: true, force: true });
@@ -379,7 +379,10 @@ describe('[#13178] the routes: the upload doors pass the session organization on
     const engine = await withRoutes(
       { userId: 'u1', organizationId: 'org_A' },
       [{ object: 'sys_file', data: committedFile('f1') }],
-      async (server) => {
+      async (server, adapter) => {
+        // The backend holds the file's bytes: a commit without them is
+        // refused 409 before any write (#24548).
+        await adapter.upload(fileRec('f1').key, Buffer.from('bytes'));
         const res = createMockRes();
         await server._getHandler('POST', `${BASE}/upload/complete`)!(
           createMockReq({ body: { fileId: 'f1', eTag: 'e1' } }),
@@ -513,7 +516,8 @@ describe('[#13178] the routes: the upload doors pass the session organization on
     const engine = await withRoutes(
       { userId: 'u1' },
       [{ object: 'sys_file', data: committedFile('f1') }],
-      async (server) => {
+      async (server, adapter) => {
+        await adapter.upload(fileRec('f1').key, Buffer.from('bytes'));
         const res = createMockRes();
         await server._getHandler('POST', `${BASE}/upload/complete`)!(
           createMockReq({ body: { fileId: 'f1' } }),

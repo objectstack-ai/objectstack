@@ -224,8 +224,8 @@ describe('WebhookSchema', () => {
 
 // #4001 batch 11. The ledger carried this row as `authorable (p)` — "spec-only
 // (#3461)". Resolving the `(p)` found the opposite: three parse doors, one of
-// them a BOOT path. `plugin-webhooks`' `bootstrapDeclaredWebhooks` re-parses
-// every declared webhook before materializing it into `sys_webhook`, and a
+// them a dispatch path. `plugin-webhooks`' declared-webhook reader re-parses
+// every declared webhook before the dispatcher subscribes it, and a
 // failure there warns and SKIPS the subscription — so a rejection here is the
 // difference between a webhook that exists and one that does not.
 describe('unknown keys are rejected, not stripped', () => {
