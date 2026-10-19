@@ -210,6 +210,49 @@
  *    ladder a local "not in this stack ⇒ error" would not have. When the bound
  *    object does not resolve, this rule skips the whole list view (skip 1
  *    below) so one typo yields one finding rather than one per position.
+ *    ONE exception, and it is this rule's own: a binding judged under a
+ *    package closure (the next section).
+ *
+ * ## [#24563] A binding outside the written package's closure is REPORTED
+ *
+ * At the runtime save door, a write into a package is judged against that
+ * package's closure (ruling #9612, `RuntimePackageScope` in
+ * `runtime-gate.ts`): the package's own objects, its declared dependencies',
+ * platform/system objects and provenance-less overlay rows. Every other object
+ * is dropped from the snapshot before any rule runs. Skip 1 then read such a
+ * binding as "an object this stack does not define" and skipped the whole
+ * list view — so a list view written into a package and bound to an object
+ * the package never declared a dependency on (or to an object that exists
+ * nowhere) was stored with every field reference unjudged: `200`, no
+ * advisory, and an unknown `columns` field the overlay door refuses `422`.
+ * And no other rule judged the binding there: `validateObjectReferences`
+ * does not run on a `view` write.
+ *
+ * So when the gate states the closure it narrowed to
+ * (`ListViewFieldRefOptions.packageScope`), an unresolvable binding is
+ * reported here, once per list view, as
+ * {@link LIST_VIEW_OBJECT_OUTSIDE_CLOSURE} — never skipped:
+ *
+ *  - **`warning`**, the verdict a flow's out-of-closure object reference
+ *    gets at the same door (`flow-trigger-unknown-object`, pinned in
+ *    `runtime-gate.package-closure.test.ts`): the package's declared
+ *    `dependencies` bound what it may reference, so the binding is not
+ *    resolvable BY DECLARATION, and the door reports it rather than refuses
+ *    it. An object that exists nowhere lands on the same verdict, because the
+ *    closure is all this snapshot can see.
+ *  - **The field positions stay unjudged** for that list view. Judging them
+ *    against the whole collection would judge the package against objects
+ *    ruling #9612 says it may not reference; the remedy the hint names —
+ *    declare the dependency — is what puts the object, and with it the field
+ *    judgement, inside the closure.
+ *  - **Only under a stated closure.** The CLI commands and a write that names
+ *    no package (an overlay write, the whole collection) pass no scope and
+ *    keep skip 1 exactly as before: there an unresolved binding may come from
+ *    another package, and `defineStack`'s cross-reference check and
+ *    `validateObjectReferences` own it.
+ *
+ * Skip 2 is unchanged under a closure: an object that IS in the closure but
+ * declares no readable field map is still unjudgeable, never a finding.
  *
  * ## Skips — the same three every field-existence rule in this package takes
  *
@@ -239,11 +282,18 @@ import {
   indexObjectGraph,
   isUnjudgeable,
   resolveFieldPath,
+  suggestName,
   type ObjectGraph,
 } from './object-graph.js';
 
 /** A list-view field reference that resolves to no field on the bound object. */
 export const LIST_VIEW_FIELD_UNKNOWN = 'list-view-field-unknown';
+
+/**
+ * [#24563] A list view, judged under a package closure, whose bound object is
+ * not in that closure — see the section of that name on this module.
+ */
+export const LIST_VIEW_OBJECT_OUTSIDE_CLOSURE = 'list-view-object-outside-closure';
 
 /**
  * [#14282] A list-view field reference written as a DOTTED path at a position
@@ -275,6 +325,18 @@ export interface ListViewFieldRefFinding {
   message: string;
   /** How to fix it. */
   hint: string;
+}
+
+/**
+ * What the caller states about the snapshot it hands this rule.
+ *
+ * `packageScope` — [#24563] the package closure the runtime publish gate
+ * narrowed `stack.objects` to (`RuntimePackageScope`), present only when one
+ * was in force. Absent on the CLI commands and on a write that names no
+ * package, which keep skip 1 as before.
+ */
+export interface ListViewFieldRefOptions {
+  packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
 }
 
 type AnyRec = Record<string, unknown>;
@@ -607,12 +669,46 @@ function describeDottedRefusal(
  * safe on both the schema-parsed stack and the raw config the `lint` path
  * carries.
  */
-export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFinding[] {
+export function validateListViewFieldRefs(
+  stack: AnyRec,
+  options?: ListViewFieldRefOptions,
+): ListViewFieldRefFinding[] {
   const findings: ListViewFieldRefFinding[] = [];
   if (!isRec(stack)) return findings;
 
   const graph: ObjectGraph = indexObjectGraph(stack);
-  if (graph.size === 0) return findings;
+  const scope = options?.packageScope;
+  // [#24563] Under a stated closure an empty graph is still a verdict: every
+  // object binding is then outside it, and is reported below.
+  if (graph.size === 0 && !scope) return findings;
+
+  /**
+   * [#24563] One list view whose binding is not in the stated closure — see
+   * the section of that name on this module. One finding per list view, at
+   * the key the binding was read from.
+   */
+  const reportOutsideClosure = (
+    closure: NonNullable<ListViewFieldRefOptions['packageScope']>,
+    object: string,
+    where: string,
+    path: string,
+  ): void => {
+    const pkg = closure.packageId;
+    findings.push({
+      severity: 'warning',
+      rule: LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
+      where,
+      path,
+      message:
+        `binds object "${object}", which is outside package "${pkg}"'s closure (its own objects, the objects of ` +
+        `the packages its manifest declares in \`dependencies\`, and platform objects), so none of the view's ` +
+        `field references are checked.` +
+        suggestName(object, graph.keys()),
+      hint:
+        `Declare a dependency on the package that defines "${object}" in the \`dependencies\` of "${pkg}"'s ` +
+        `manifest, or bind the view to an object inside that closure`,
+    });
+  };
 
   /**
    * Judge ONE written reference at one position.
@@ -690,8 +786,17 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
     });
   };
 
-  /** Every position on ONE list view record. */
-  const checkListView = (listView: AnyRec, object: string | undefined, where: string, path: string): void => {
+  /**
+   * Every position on ONE list view record. `bindingPath` is the key the
+   * binding `object` was read from, where an unresolvable binding is reported.
+   */
+  const checkListView = (
+    listView: AnyRec,
+    object: string | undefined,
+    where: string,
+    path: string,
+    bindingPath: string,
+  ): void => {
     if (!isRec(listView)) return;
 
     // ── Skip 4 (this surface's own): a list view bound to a non-`object`
@@ -707,7 +812,14 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
     // An unresolvable base object is `validate-object-references.ts`' finding;
     // resolving anything against it here would turn one typo into a finding
     // per position.
-    if (!graph.has(object) || !graph.get(object)) return;
+    // [#24563] Except under a stated package closure, where the base object
+    // was dropped by the closure or exists nowhere: reported once, and the
+    // positions stay unjudged (see the section of that name on this module).
+    if (!graph.has(object)) {
+      if (scope) reportOutsideClosure(scope, object, where, bindingPath);
+      return;
+    }
+    if (!graph.get(object)) return;
     // Bound to a `const` so the narrowing survives into the nested closures
     // below (a parameter's narrowing does not).
     const bound: string = object;
@@ -804,6 +916,14 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
     return isRec(data) ? strName(data.object) : undefined;
   };
 
+  /**
+   * [#24563] The key a list view's binding was read from: its own
+   * `data.object` when it declares one, otherwise the fallback the caller
+   * resolved the binding through.
+   */
+  const bindingPathOf = (listView: AnyRec, path: string, fallback: string): string =>
+    listViewObject(listView) !== undefined ? `${path}.data.object` : fallback;
+
   // ── An object's built-in named list views ──
   // The same rungs `validate-searchable-fields` and `validate-sortable-fields`
   // walk, so the three field axes on this surface cannot cover different sets
@@ -824,6 +944,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
         listViewObject(lv) ?? objName,
         `${label} › listViews.${key}`,
         `objects[${oi}].listViews.${key}`,
+        bindingPathOf(lv, `objects[${oi}].listViews.${key}`, `objects[${oi}].name`),
       );
     }
   }
@@ -843,6 +964,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
     // declares none — the same resolution order `validate-list-view-mode`
     // reads.
     const viewObject = strName(view.objectName) ?? strName(view.object);
+    const viewObjectPath = strName(view.objectName) ? `views[${vi}].objectName` : `views[${vi}].object`;
 
     if (view.viewKind === 'list' && !isRec(view.config)) {
       checkListView(
@@ -850,6 +972,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
         listViewObject(view) ?? viewObject,
         `view "${viewLabel}" (flattened list overlay)`,
         `views[${vi}]`,
+        bindingPathOf(view, `views[${vi}]`, viewObjectPath),
       );
     }
 
@@ -859,6 +982,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
         listViewObject(view.config) ?? viewObject,
         `view "${viewLabel}" (ViewItem record)`,
         `views[${vi}].config`,
+        bindingPathOf(view.config, `views[${vi}].config`, viewObjectPath),
       );
     }
 
@@ -868,6 +992,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
         listViewObject(view.list) ?? viewObject,
         `view "${viewLabel}" › list`,
         `views[${vi}].list`,
+        bindingPathOf(view.list, `views[${vi}].list`, viewObjectPath),
       );
     }
 
@@ -879,6 +1004,7 @@ export function validateListViewFieldRefs(stack: AnyRec): ListViewFieldRefFindin
           listViewObject(lv) ?? viewObject,
           `view "${viewLabel}" › listViews.${key}`,
           `views[${vi}].listViews.${key}`,
+          bindingPathOf(lv, `views[${vi}].listViews.${key}`, viewObjectPath),
         );
       }
     }

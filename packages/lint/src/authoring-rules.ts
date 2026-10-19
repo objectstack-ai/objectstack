@@ -372,6 +372,23 @@ export interface AuthoringRuleContext {
    * Read by `validateFlowApiTriggerSecret` only.
    */
   restoredCredentialPaths?: ReadonlySet<string>;
+  /**
+   * [#24563] The package closure (ruling #9612, `RuntimePackageScope` in
+   * `runtime-gate.ts`) the runtime publish gate narrowed the snapshot's
+   * `objects` to — the written package and the packages its manifest
+   * declares in `dependencies`.
+   *
+   * Set only by the runtime publish gate, and only when a closure was in
+   * force; ABSENT on the three CLI commands and on a write that names no
+   * package, whose snapshots carry the whole collection. It is what lets a
+   * rule tell "outside what this package declared it may reference" from
+   * "not in this stack": an object missing from a narrowed snapshot is the
+   * first, one missing from a whole one may come from another package. Read
+   * by `validateListViewFieldRefs` only (through the reference-integrity
+   * suite), which reports a list view bound outside the closure instead of
+   * skipping it.
+   */
+  packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
 }
 
 export interface AuthoringRule {
