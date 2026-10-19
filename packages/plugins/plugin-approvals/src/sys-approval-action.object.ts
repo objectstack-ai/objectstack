@@ -47,14 +47,17 @@ export const SysApprovalAction = ObjectSchema.create({
   // (`object_name` + `record_id`) are written by `ApprovalService` with the row,
   // copied from the request it belongs to (`actionRow`). The row is
   // append-only, so each is the engine's fact at the moment of the action; a
-  // list shows them as stored and never re-derives them.
+  // list shows them as stored and never re-derives them. The pointer shows as
+  // its id half, `record_id`, which the console draws as the target record and
+  // resolves through `object_name` without a column (objectui#13036); no list
+  // view shows the type half (`sys-approval-request-pointer-pair.test.ts`).
   listViews: {
     recent: {
       type: 'grid',
       name: 'recent',
       label: 'Recent',
       data: { provider: 'object', object: 'sys_approval_action' },
-      columns: ['created_at', 'object_name', 'record_id', 'request_id', 'step_label', 'action', 'actor_id', 'acted_as_label', 'via_override', 'comment'],
+      columns: ['created_at', 'record_id', 'request_id', 'step_label', 'action', 'actor_id', 'acted_as_label', 'via_override', 'comment'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 50 },
       emptyState: { title: 'No approval actions yet', message: 'Actions are logged automatically when approvals progress.' },
@@ -74,7 +77,7 @@ export const SysApprovalAction = ObjectSchema.create({
       name: 'all_actions',
       label: 'All',
       data: { provider: 'object', object: 'sys_approval_action' },
-      columns: ['created_at', 'object_name', 'record_id', 'request_id', 'step_label', 'action', 'actor_id', 'acted_as_label', 'via_override', 'comment'],
+      columns: ['created_at', 'record_id', 'request_id', 'step_label', 'action', 'actor_id', 'acted_as_label', 'via_override', 'comment'],
       sort: [{ field: 'created_at', order: 'desc' }],
       pagination: { pageSize: 100 },
     },

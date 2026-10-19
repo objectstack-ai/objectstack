@@ -19,7 +19,8 @@ import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
 /** What the auth service's in-process session read answers, as `AuthSessionApi` declares it. */
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 import { SysWebhook } from './sys-webhook.object.js';
-import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
+import { DeclaredWebhookSource } from './declared-webhooks.js';
+import { normalizeTenancyPosture, postureEnforcesWall } from '@objectstack/spec/security';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { createWebhookRedeliverGuard } from './redeliver-guard.js';
 import { bindWebhookProvenanceStamp, unbindWebhookProvenanceStamp } from './webhook-provenance.js';
@@ -71,6 +72,15 @@ interface MessagingHttpSurface {
  * capability token, as the contract's docblock declares it.
  */
 const WEBHOOKS_SLOT = 'webhooks';
+
+/**
+ * [ADR-0131 D6 regime C] The service slot the declared-webhook reader is bound
+ * to (`DeclaredWebhookReader`), which the activation door
+ * (`POST /api/v1/security/_activation/webhook/:name`) asks whether a name is
+ * declared — the reader the dispatcher and the redelivery veto use, so the
+ * three cannot disagree. The sharing-rule door's `sharingRules` is the pattern.
+ */
+const DECLARED_WEBHOOKS_SLOT = 'declaredWebhooks';
 
 /**
  * [#22756] The slice of a Hono context the redeliver door reads and answers
@@ -166,6 +176,8 @@ export class WebhookOutboxPlugin implements Plugin {
     private autoEnqueuer: AutoEnqueuer | undefined;
     /** Engine the provenance hook was bound to, so `dispose()` can unbind it. */
     private boundEngine: any;
+    /** [ADR-0131 D2/D6] The declared-webhook reader, bound once the data engine is known. */
+    private declaredSource: DeclaredWebhookSource | undefined;
 
     constructor(private readonly options: WebhookOutboxPluginOptions = {}) {}
 
@@ -221,12 +233,11 @@ export class WebhookOutboxPlugin implements Plugin {
 
         if (typeof (ctx as any).hook === 'function') {
             (ctx as any).hook('kernel:ready', async () => {
-                // Materialize declared webhooks FIRST — this only needs the data
+                // The table's write doors, the legacy-secret sweep and the
+                // declared-webhook reader FIRST — this only needs the data
                 // engine, so it must not be gated behind the auto-enqueue
-                // dispatch prerequisites (realtime + messaging). Otherwise a
-                // deployment without realtime would silently fail to materialize
-                // declared webhooks — the very no-op this bridge closes (#3461).
-                await this.bootDeclaredWebhooks(ctx);
+                // dispatch prerequisites (realtime + messaging).
+                await this.bootWebhookTable(ctx);
                 // [#22756] The redelivery veto, and beside it the `webhooks`
                 // service — gated on the engine and messaging alone, like the
                 // step above, and never on the auto-enqueue prerequisites. It
@@ -284,27 +295,35 @@ export class WebhookOutboxPlugin implements Plugin {
     }
 
     /**
-     * [#3461] Bridge the declarative authoring surface to the dispatcher:
-     * materialize stack/connector-declared `webhook` metadata into `sys_webhook`
-     * rows so the auto-enqueuer (and the Studio UI) can see them.
+     * The `sys_webhook` table's write doors, its legacy-secret sweep, and the
+     * declared-webhook reader.
+     *
+     * [ADR-0131 D2, D6] Declared webhooks are no longer materialized: the boot
+     * seeder (`bootstrapDeclaredWebhooks`) is retired, a fresh boot writes no
+     * `sys_webhook` row for one, and the dispatcher, the redelivery veto and the
+     * activation door read the declaration through one
+     * {@link DeclaredWebhookSource}, bound here to the `declaredWebhooks` slot.
+     * The 18.0 seeder's rows stay until the ownership ceremony deletes them;
+     * `declared-webhooks.ts` says how they are read meanwhile.
      *
      * Gated on the DATA ENGINE alone — deliberately independent of the
-     * auto-enqueue dispatch prerequisites (realtime + messaging). Materializing
-     * rows is a pure write; a deployment that mounts the webhook plugin without
-     * realtime must still get its declared webhooks into the table (and the
-     * Setup UI), even if nothing dispatches them yet. Runs before
-     * {@link bootAutoEnqueue} so the enqueuer's first cache refresh sees the rows.
+     * auto-enqueue dispatch prerequisites (realtime + messaging): the write
+     * doors, the sweep and the activation door serve on a kernel that
+     * dispatches nothing. Runs before {@link bootAutoEnqueue}, which reads the
+     * reader bound here.
      */
-    private async bootDeclaredWebhooks(ctx: PluginContext): Promise<void> {
+    private async bootWebhookTable(ctx: PluginContext): Promise<void> {
         const engine = this.tryGetService<IDataEngine>(ctx, ['objectql', 'data']);
         if (!engine) {
-            ctx.logger.warn?.('[webhook] declared-webhook bootstrap skipped — no data engine available');
+            ctx.logger.warn?.('[webhook] sys_webhook write doors and the declared-webhook reader not bound — no data engine available');
             return;
         }
-        // Bind the provenance stamp so an admin edit freezes a seeded row.
+        // Bind the provenance stamp so an admin edit freezes a seeded row: an
+        // 18.0 mirror an administrator edits stops being one, and answers as
+        // itself rather than for its declaration (`classifyDeclaredNameHolder`).
         this.boundEngine = engine;
         bindWebhookProvenanceStamp(engine as any, ctx.logger as any);
-        // [#8566] And the headers_secret shape gate, BEFORE the seeder below
+        // [#8566] And the headers_secret shape gate, BEFORE the sweep below
         // runs its first write — a validation door that arms after the first
         // write it is meant to judge is not a door. It covers every write path
         // at once (the generic data API included, which is the measured
@@ -313,24 +332,16 @@ export class WebhookOutboxPlugin implements Plugin {
         bindWebhookHeadersShapeGate(engine as any, ctx.logger as any);
         // And the retired credential location: a write that puts `secret` or
         // `headers` back into `definition_json` is refused at the door, since
-        // the delivery path refuses such a row too. Bound before the seeder and
-        // the sweep for the same reason — both pass it by construction.
+        // the delivery path refuses such a row too. Bound before the sweep for
+        // the same reason — it passes it by construction.
         bindWebhookLegacyCleartextGate(engine as any, ctx.logger as any);
         let metadataService: IMetadataService | undefined;
         try { metadataService = ctx.getService<IMetadataService>('metadata'); } catch { /* optional */ }
-        try {
-            await bootstrapDeclaredWebhooks(engine, metadataService, ctx.logger as any);
-        } catch (err: any) {
-            ctx.logger.warn?.('[webhook] declared-webhook bootstrap failed (dispatcher still serves admin rows)', {
-                error: err?.message ?? String(err),
-            });
-        }
-        // [#7799] Then heal the rows the seeder cannot touch. Package rows are
-        // rewritten above; `managed_by: 'admin'` and `customized: true` rows are
-        // deliberately frozen against re-seeding, and those are precisely the
-        // ones holding hand-authored production keys in cleartext. Runs AFTER
-        // the seeder so a row it just rewrote is already secret-free and the
-        // sweep is a no-op on it.
+        this.declaredSource = new DeclaredWebhookSource(engine, metadataService, ctx.logger as any);
+        ctx.registerService(DECLARED_WEBHOOKS_SLOT, this.declaredSource);
+        // [#7799] Then heal the rows that still hold a key in cleartext: the
+        // ones an administrator authored or edited, and any 18.0 seeded row the
+        // seeder had not yet rewritten.
         try {
             await migrateLegacyWebhookSecrets(engine, ctx.logger as any);
         } catch (err: any) {
@@ -371,7 +382,16 @@ export class WebhookOutboxPlugin implements Plugin {
             engine,
             realtime,
             (input) => messaging.enqueueHttp(input),
-            { ...enqOpts, logger: ctx.logger },
+            {
+                ...enqOpts,
+                ...(this.declaredSource
+                    ? {
+                        declaredWebhooks: this.declaredSource,
+                        declaredWebhooksDeploymentWide: () => this.postureBuildsNoWall(ctx),
+                    }
+                    : {}),
+                logger: ctx.logger,
+            },
         );
         await this.autoEnqueuer.start();
         ctx.registerService('webhook.autoEnqueuer', this.autoEnqueuer);
@@ -453,10 +473,27 @@ export class WebhookOutboxPlugin implements Plugin {
         }
         messaging.registerRedeliverGuard(
             'webhook',
-            createWebhookRedeliverGuard(engine, subscriptionsObject),
+            createWebhookRedeliverGuard(engine, subscriptionsObject, this.declaredSource),
         );
         ctx.logger.debug?.('[webhook-outbox] redeliver guard installed for source=webhook');
         return true;
+    }
+
+    /**
+     * [ADR-0131 D9] Whether the deployment's tenancy posture builds no
+     * organization wall — the `tenancy` service's posture, read as the sharing
+     * plugin reads it for its declared rules: an absent or unreadable service
+     * is read as walled, never as open.
+     */
+    private postureBuildsNoWall(ctx: PluginContext): boolean {
+        try {
+            const probe = ctx.getService<{ posture?: unknown; isolationActive?: boolean }>('tenancy');
+            const posture = normalizeTenancyPosture(probe?.posture);
+            if (posture) return !postureEnforcesWall(posture);
+            return probe?.isolationActive === false;
+        } catch {
+            return false;
+        }
     }
 
     private tryGetService<T>(ctx: PluginContext, names: string[]): T | undefined {

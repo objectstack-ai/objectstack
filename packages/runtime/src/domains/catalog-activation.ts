@@ -6,7 +6,10 @@
  * `{ enabled?: boolean }`, `:type` one of `position` / `permission`, and — since
  * ADR-0131 D6 charts declared sharing rules under regime C — `sharing_rule`, a
  * rule a package declares, read from the sharing-rule service (`sharingRules`)
- * rather than the security catalog.
+ * rather than the security catalog; and `webhook`, a webhook a stack declares
+ * (`defineStack({ webhooks })`), read from the declared-webhook reader
+ * (`declaredWebhooks`, plugin-webhooks) under the same regime (ADR-0131 D2/D6,
+ * the ruling that retired the declared-webhook seeder).
  *
  * ## Why it exists
  *
@@ -63,6 +66,7 @@ import {
     POSITION_ACTIVATION_SUBJECT,
     PERMISSION_SET_ACTIVATION_SUBJECT,
     SHARING_RULE_ACTIVATION_SUBJECT,
+    WEBHOOK_ACTIVATION_SUBJECT,
     type ActivationSubject,
 } from './activation-gate.js';
 import type { HttpProtocolContext, HttpDispatcherResult } from '../http-dispatcher.js';
@@ -76,12 +80,15 @@ export const CATALOG_ACTIVATION_SEGMENT = '_activation';
  * types the resolver reads from the ledger; `capability` is code-only on the
  * regime and has no switch.
  */
-const CATALOG_ACTIVATION_SUBJECTS: Readonly<Record<'position' | 'permission' | 'sharing_rule', ActivationSubject>> = {
+const CATALOG_ACTIVATION_SUBJECTS: Readonly<Record<'position' | 'permission' | 'sharing_rule' | 'webhook', ActivationSubject>> = {
     position: POSITION_ACTIVATION_SUBJECT,
     permission: PERMISSION_SET_ACTIVATION_SUBJECT,
     // [ADR-0131 D6 regime C] A declared sharing rule — read from the sharing-rule
     // service, which serves no declaration this ledger switches off.
     sharing_rule: SHARING_RULE_ACTIVATION_SUBJECT,
+    // [ADR-0131 D2/D6 regime C] A declared webhook — read from the declared-webhook
+    // reader, which the dispatcher reads its switch through.
+    webhook: WEBHOOK_ACTIVATION_SUBJECT,
 };
 
 type CatalogActivationType = keyof typeof CATALOG_ACTIVATION_SUBJECTS;
@@ -95,6 +102,7 @@ const NOUN: Readonly<Record<CatalogActivationType, string>> = {
     position: 'Position',
     permission: 'Permission set',
     sharing_rule: 'Declared sharing rule',
+    webhook: 'Declared webhook',
 };
 
 /**
@@ -111,6 +119,60 @@ interface DeclaredSharingRuleReader {
 function declaredSharingRuleReaderOf(service: unknown): DeclaredSharingRuleReader | undefined {
     const candidate = service as Partial<DeclaredSharingRuleReader> | null | undefined;
     return typeof candidate?.declaredRuleNamed === 'function' ? (candidate as DeclaredSharingRuleReader) : undefined;
+}
+
+/**
+ * [ADR-0131 D2/D6 regime C] The declaration a `webhook` row addresses, as the
+ * declared-webhook reader (`declaredWebhooks`, plugin-webhooks) reads it:
+ * declared in the code, whether or not the ledger has it switched off. A
+ * webhook an organization authored is a `sys_webhook` row with a switch of its
+ * own (`active`) and is never addressed here.
+ */
+interface DeclaredWebhookReader {
+    declaredWebhookNamed(name: string): Promise<{ webhook: { name: string }; packageId?: string } | null>;
+}
+
+function declaredWebhookReaderOf(service: unknown): DeclaredWebhookReader | undefined {
+    const candidate = service as Partial<DeclaredWebhookReader> | null | undefined;
+    return typeof candidate?.declaredWebhookNamed === 'function' ? (candidate as DeclaredWebhookReader) : undefined;
+}
+
+/**
+ * The service-backed types — declarations a plugin owns, not catalog entries —
+ * each with how its declaration is looked up and how it is named in a refusal.
+ */
+const DECLARATION_LOOKUPS: Readonly<Record<'sharing_rule' | 'webhook', {
+    service: string;
+    noun: string;
+    serviceNoun: string;
+    authoredRemedy: string;
+    lookup(service: unknown, name: string): Promise<{ name: string; packageId?: string } | null> | undefined;
+}>> = {
+    sharing_rule: {
+        service: 'sharingRules',
+        noun: 'sharing rule',
+        serviceNoun: 'sharing-rule service',
+        authoredRemedy: 'A rule your organization authored is switched by its own `active` field.',
+        lookup: (service, name) => declaredSharingRuleReaderOf(service)?.declaredRuleNamed(name),
+    },
+    webhook: {
+        service: 'declaredWebhooks',
+        noun: 'webhook',
+        serviceNoun: 'declared-webhook reader',
+        authoredRemedy: 'A webhook your organization authored is switched by its own `active` field.',
+        lookup: (service, name) => {
+            const reader = declaredWebhookReaderOf(service);
+            return reader
+                ? reader.declaredWebhookNamed(name).then((d) => (d
+                    ? { name: d.webhook.name, ...(d.packageId !== undefined ? { packageId: d.packageId } : {}) }
+                    : null))
+                : undefined;
+        },
+    },
+};
+
+function isDeclarationType(type: CatalogActivationType): type is keyof typeof DECLARATION_LOOKUPS {
+    return Object.prototype.hasOwnProperty.call(DECLARATION_LOOKUPS, type);
 }
 
 /**
@@ -223,46 +285,55 @@ export async function handleCatalogActivationWrite(
         return { handled: true, response: deps.error('Data engine not available', 503) };
     }
     let entry: { name: string; packageId?: string } | undefined;
-    if (type === 'sharing_rule') {
-        const rules = declaredSharingRuleReaderOf(await deps.resolveService(context, 'sharingRules'));
-        if (!rules) {
+    if (isDeclarationType(type)) {
+        const declaration = DECLARATION_LOOKUPS[type];
+        const service = await deps.resolveService(context, declaration.service);
+        let pending: Promise<{ name: string; packageId?: string } | null> | undefined;
+        try {
+            pending = declaration.lookup(service, name);
+        } catch (err) {
+            pending = Promise.reject(err); // a reader that throws before its promise is still a failed read
+        }
+        if (!pending) {
             return {
                 handled: true,
                 response: deps.error(
-                    `Cannot verify the declaration of sharing rule '${name}' — no sharing-rule service is bound to this ` +
-                    `deployment. Refusing rather than writing an activation row for a name nobody can confirm exists.`,
+                    `Cannot verify the declaration of ${declaration.noun} '${name}' — no ${declaration.serviceNoun} is ` +
+                    `bound to this deployment. Refusing rather than writing an activation row for a name nobody can ` +
+                    `confirm exists.`,
                     503,
                     { code: 'SERVICE_UNAVAILABLE' },
                 ),
             };
         }
         try {
-            entry = (await rules.declaredRuleNamed(name)) ?? undefined;
+            entry = (await pending) ?? undefined;
         } catch (err: any) {
             return {
                 handled: true,
                 response: deps.error(
-                    `Cannot verify the declaration of sharing rule '${name}' — the declared rules could not be read ` +
-                    `(${err?.message ?? String(err)}). Refusing rather than writing an activation row for a name nobody ` +
-                    `can confirm exists.`,
+                    `Cannot verify the declaration of ${declaration.noun} '${name}' — the declared ${declaration.noun}s ` +
+                    `could not be read (${err?.message ?? String(err)}). Refusing rather than writing an activation row ` +
+                    `for a name nobody can confirm exists.`,
                     503,
                     { code: 'SERVICE_UNAVAILABLE' },
                 ),
             };
         }
         if (!entry) {
+            const noun = declaration.noun.charAt(0).toUpperCase() + declaration.noun.slice(1);
             return {
                 handled: true,
                 response: deps.error(
-                    `Sharing rule '${name}' is not declared by the application — there is nothing to switch ` +
-                    `${enabled ? 'on' : 'off'}. A rule your organization authored is switched by its own \`active\` field.`,
+                    `${noun} '${name}' is not declared by the application — there is nothing to switch ` +
+                    `${enabled ? 'on' : 'off'}. ${declaration.authoredRemedy}`,
                     404,
                 ),
             };
         }
     }
-    const reader = type === 'sharing_rule' ? undefined : securityCatalogReaderOf(ql);
-    if (type !== 'sharing_rule' && !reader) {
+    const reader = isDeclarationType(type) ? undefined : securityCatalogReaderOf(ql);
+    if (!isDeclarationType(type) && !reader) {
         return {
             handled: true,
             response: deps.error(

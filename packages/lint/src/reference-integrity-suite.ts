@@ -306,7 +306,24 @@ export const REFERENCE_INTEGRITY_RULES: readonly ReferenceIntegrityRule[] = [
   // here: it measured equally clean (0 findings over the same corpus) but its
   // crossing is its own adjudication with its own non-vacuity control, and
   // this card was scoped to the two axes its title names.
-  { name: 'validateListViewFieldRefs', runtimeTypes: ['flow', 'view', 'object'], run: validateListViewFieldRefs },
+  //
+  // [#24563] The one member that reads `packageScope`. Under a package
+  // closure the snapshot's `objects` are that closure (ruling #9612), so a
+  // binding missing from it is outside what the package declared it may
+  // reference, or nowhere at all — and the member's skip 1 used to read that as
+  // "another package's object" and judge nothing. It now refuses the binding
+  // instead (`list-view-object-outside-closure`, `error`: the verdict the
+  // dataset door gives an out-of-closure base object under the same closure;
+  // the flow door's trigger-object advisory is a separate question). The
+  // missing-collection argument above is unchanged: the binding is judged
+  // against `stack.objects`, the collection every per-write snapshot carries,
+  // and the gate states the scope only when it narrowed that collection.
+  {
+    name: 'validateListViewFieldRefs',
+    runtimeTypes: ['flow', 'view', 'object'],
+    run: (stack, ctx) =>
+      validateListViewFieldRefs(stack, ctx?.packageScope ? { packageScope: ctx.packageScope } : undefined),
+  },
   // [#15254] The same question, one surface IN: the field-name lists the
   // OBJECT itself carries (`highlightFields`, `publicSharing.redactFields`),
   // which the three list-view members above do not walk because they are not
@@ -657,6 +674,14 @@ export interface ReferenceIntegrityRunOptions {
    * `path` at the key the author actually wrote.
    */
   loweredHookRefs?: ReadonlySet<string>;
+  /**
+   * [#24563] The package closure the runtime publish gate narrowed
+   * `stack.objects` to — spells the same key as
+   * `AuthoringRuleContext.packageScope`. Present only when a closure was in
+   * force; ABSENT on the CLI commands and on a write that names no package.
+   * Read by `validateListViewFieldRefs` only.
+   */
+  packageScope?: { readonly packageId: string; readonly dependencies: readonly string[] };
 }
 
 /**

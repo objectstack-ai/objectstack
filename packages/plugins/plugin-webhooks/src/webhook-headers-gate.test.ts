@@ -39,7 +39,6 @@ import type {
 } from '@objectstack/spec/contracts';
 import { SysWebhook } from './sys-webhook.object.js';
 import { WEBHOOK_HEADERS_FIELD, resolveWebhookHeaders } from './webhook-headers.js';
-import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
 import {
     WebhookHeadersShapeError,
     WEBHOOK_HEADERS_SHAPE_REFUSAL_CODE,
@@ -385,35 +384,6 @@ describe('sys_webhook.headers_secret shape gate — the write door (#8566)', () 
                 ),
             ).rejects.toMatchObject({ code: 'VALIDATION_ERROR', status: 400 });
             expect(cipherRows(stores)).toHaveLength(0);
-        });
-
-        it('the declared-webhook seeder still materializes headers through the bound gate', async () => {
-            // Ruling item 2: the plugin's own write paths inherit this validation
-            // rather than carrying a second check. That is only safe if they pass
-            // — `bootstrapDeclaredWebhooks` writes `serializeHeaders()` of an
-            // already-filtered map, so it does, and this is the pin that keeps it
-            // true if either side moves.
-            const { engine, stores } = await buildEngine();
-            await bootstrapDeclaredWebhooks(engine, {
-                list: (type: string) => (type === 'webhook'
-                    ? [{
-                        name: 'crm_hook', object: 'contact', triggers: ['create'],
-                        url: 'https://receiver.example/hook', method: 'POST',
-                        headers: { 'X-Team': 'crm' },
-                    }]
-                    : []),
-            } as any);
-
-            const [row] = await engine.find('sys_webhook', {
-                where: { name: 'crm_hook' }, context: SYSTEM_CTX,
-            });
-            expect(row).toBeDefined();
-            // The seeder's write really went through the encrypted channel — it
-            // was not skipped, and the gate did not stand in its way.
-            expect(cipherRows(stores)).toHaveLength(1);
-            await expect(resolveWebhookHeaders(engine, row as any, 'sys_webhook')).resolves.toEqual({
-                'X-Team': 'crm',
-            });
         });
     });
 

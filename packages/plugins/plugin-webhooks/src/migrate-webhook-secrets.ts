@@ -6,9 +6,11 @@
  * `signing_secret` column.
  *
  * ## Why a sweep and not just the seeder
- * `bootstrapDeclaredWebhooks` re-seeds package-declared rows on every boot, so
- * those heal themselves the moment the new mapping lands. The rows that do NOT
- * heal are exactly the ones most likely to hold a real production key:
+ * The 18.0 seeder `bootstrapDeclaredWebhooks` (retired since: declared webhooks
+ * are read from the registry, ADR-0131 D2) re-seeded package-declared rows on
+ * every boot, so those healed themselves the moment the new mapping landed. The
+ * rows that did NOT heal are exactly the ones most likely to hold a real
+ * production key:
  *
  *  - `managed_by: 'admin'` — authored in Setup, never touched by the seeder;
  *  - `customized: true` — a package row an admin edited, deliberately frozen
