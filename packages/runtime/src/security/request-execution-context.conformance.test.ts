@@ -23,7 +23,8 @@
  * Who a request resolves to is the request's {@link Request.principal} at every
  * door, except where a door's declared parameters authenticate nobody for it
  * ({@link expectedPrincipal}: a door that requires a session API, on a host
- * with no auth service). Across rows, every door that resolves a principal
+ * with no auth service; a door that reads only the session, for a request that
+ * carries no session). Across rows, every door that resolves a principal
  * resolves the SAME one ({@link IDENTITY}): the named parameters decide what a
  * door withholds or adds around the identity, and whether it admits at all,
  * never who the caller is.
@@ -59,11 +60,18 @@
  * | the same session while no gate is active | `authGate` (`'resolved'` against `'reread-when-active'`) |
  * | an API key | `credentials` |
  * | an ex-member's organization-stamped key under a walled posture | `tenancy` |
+ * | a session read naming its user by `session.userId` alone | none: it holds every door to the one reading of who a session names (ruling record 6257816853 item 1), which a door re-reading the session its own way would break |
  * | an API key on a host with no auth service | `sessionApi` |
  *
  * The storage door binds no authorizer on a host with no auth service, so its
  * `sessionApi` is told apart in its CONTROL instead, on a host whose auth
  * service exposes no session read.
+ *
+ * The `/auth/me` door reads only the session and no tenancy posture, so no
+ * request above tells its `tenancy` apart (the ex-member's key never reaches
+ * a session-only door): its CONTROL adds a session claiming an organization
+ * its user is not a member of, under the walled posture. Its `sessionApi` is
+ * not observable at all, and its CONTROL says why.
  *
  * The runtime door's `/mcp` face (an OAuth access token) is not a row: its
  * verification and scope interpretation are the door's own, ahead of the call,
@@ -84,6 +92,7 @@ import { resolveRequestExecutionContext, type RequestExecutionContextInput } fro
 import { RestServer } from '@objectstack/rest';
 import { SettingsServicePlugin, type SettingsContext } from '@objectstack/service-settings';
 import { StorageServicePlugin } from '@objectstack/service-storage';
+import { HonoHttpServer, registerCurrentUserEndpoints } from '@objectstack/plugin-hono-server';
 
 import { hashApiKey } from './api-key.js';
 import { resolveExecutionContext } from './resolve-execution-context.js';
@@ -110,6 +119,11 @@ vi.mock('@objectstack/core', async (importOriginal) => {
 
 const ORG = 'org_alpha';
 const COOKIE = 'better-auth.session_token=tok3n.c2ln';
+/** A session whose read names its user by `session.userId` alone, with no user object. */
+const SESSION_USER_ID_COOKIE = 'better-auth.session_token=tok3n_session_user_id.c2ln';
+/** A session claiming an organization its user is not a member of. */
+const NON_MEMBER_COOKIE = 'better-auth.session_token=tok3n_non_member.c2ln';
+const NON_MEMBER_ORG = 'org_beta';
 const KEY = 'osk_conformance_key';
 const EX_MEMBER_KEY = 'osk_conformance_ex_member';
 const FUTURE = '2999-01-01T00:00:00Z';
@@ -189,7 +203,17 @@ function world(opts: { auth: boolean; gateActive?: boolean; sessionApi?: boolean
       ...(opts.sessionApi === false ? {} : {
         api: {
           async getSession(input: { headers: Headers }) {
-            if (input.headers.get('cookie') !== COOKIE) return undefined;
+            const cookie = input.headers.get('cookie');
+            if (cookie === SESSION_USER_ID_COOKIE) {
+              return { session: { id: 'sess_2', userId: 'u_ses', token: 'sess_bearer_2', activeOrganizationId: ORG } };
+            }
+            if (cookie === NON_MEMBER_COOKIE) {
+              return {
+                user: { id: 'u_ses', email: 'ses@example.com' },
+                session: { id: 'sess_3', userId: 'u_ses', token: 'sess_bearer_3', activeOrganizationId: NON_MEMBER_ORG },
+              };
+            }
+            if (cookie !== COOKIE) return undefined;
             return {
               user: { id: 'u_ses', email: 'ses@example.com', authGate: { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' } },
               session: { id: 'sess_1', userId: 'u_ses', token: 'sess_bearer', activeOrganizationId: ORG },
@@ -235,6 +259,8 @@ const REQUESTS: Request[] = [
   },
   { name: 'an API key', headers: { 'x-api-key': KEY }, auth: true, principal: 'u_key' },
   { name: "an ex-member's organization-stamped key under the walled posture", headers: { 'x-api-key': EX_MEMBER_KEY }, auth: true, principal: undefined },
+  { name: 'a session read naming its user by session.userId alone', headers: { cookie: SESSION_USER_ID_COOKIE }, auth: true, principal: 'u_ses' },
+  // Last, as the CONTROLs below read it.
   { name: 'an API key on a host with no auth service', headers: { 'x-api-key': KEY }, auth: false, principal: 'u_key' },
 ];
 
@@ -269,10 +295,17 @@ const principalOf = (answer: unknown): string | undefined => (answer as { userId
 /**
  * Who `request` resolves to at a door declaring `parameters`: its principal,
  * unless the door requires a session API and the host has no auth service, in
- * which case the door authenticates nobody, the API-key door included.
+ * which case the door authenticates nobody, the API-key door included; or
+ * unless the door reads only the session and the request carries none, in
+ * which case an API key alone admits nobody there.
  */
-function expectedPrincipal(request: Request, parameters: Pick<RequestExecutionContextInput, 'sessionApi'>): string | undefined {
-  return !request.auth && parameters.sessionApi === 'required' ? undefined : request.principal;
+function expectedPrincipal(
+  request: Request,
+  parameters: Pick<RequestExecutionContextInput, 'sessionApi' | 'credentials'>,
+): string | undefined {
+  if (!request.auth && parameters.sessionApi === 'required') return undefined;
+  if (parameters.credentials === 'session-only' && request.headers.cookie === undefined) return undefined;
+  return request.principal;
 }
 
 /**
@@ -526,7 +559,65 @@ const STORAGE_ROW: DoorRow = {
   },
 };
 
-const DOORS: ReadonlyArray<DoorRow<unknown>> = [RUNTIME_ROW, REST_ROW, SETTINGS_ROW, STORAGE_ROW];
+/** The current-user routes' prefix, as the endpoints mount by default. */
+const AUTH_ME_PERMISSIONS = '/api/v1/auth/me/permissions';
+
+/**
+ * The `/auth/me` door, `makeExecutionContextResolver`
+ * (`@objectstack/plugin-hono-server`), through its public entry: the three
+ * current-user routes registered on a Hono app over the world's services, a
+ * metadata service and a security service, and one request to
+ * `GET /auth/me/permissions`. The route hands the context the door resolved
+ * to the security service (`resolvePermissionSetsForContext`) for the
+ * caller's sets, and answers its own signed-out body without asking it for a
+ * request the door resolved nobody for, so the drive reads the context there.
+ */
+async function authMePermissions(w: World, headers: Record<string, string>): Promise<{
+  status: number;
+  body: { authenticated?: boolean; userId?: string } | undefined;
+  handedOn: ExecutionContext | undefined;
+}> {
+  const asked: ExecutionContext[] = [];
+  const services: Record<string, unknown> = {
+    ...w.services,
+    objectql: w.ql,
+    metadata: { list: async () => [] },
+    security: {
+      async resolvePermissionSetsForContext(context: ExecutionContext) {
+        asked.push(context);
+        return [];
+      },
+    },
+  };
+  const server = new HonoHttpServer(0);
+  registerCurrentUserEndpoints({
+    rawApp: server.getRawApp(),
+    ctx: { logger: { debug() {}, warn() {} }, getService: <T,>(name: string) => services[name] as T | undefined },
+  });
+  const res: Response = await server.getRawApp().request(`http://localhost${AUTH_ME_PERMISSIONS}`, { headers });
+  expect(asked.length, 'the route asks the security service at most once').toBeLessThanOrEqual(1);
+  return { status: res.status, body: (await res.json()) as { authenticated?: boolean; userId?: string }, handedOn: asked[0] };
+}
+
+const HONO_ROW: DoorRow = {
+  door: 'packages/plugins/plugin-hono-server/src/current-user-endpoints.ts',
+  drive: async (w, headers) => (await authMePermissions(w, headers)).handedOn,
+  parameters: () => ({
+    tenancy: undefined,
+    anonymous: 'fail-closed',
+    authGate: 'withhold',
+    credentials: 'session-only',
+    sessionApi: 'required',
+    session: 'request',
+    localization: 'withhold',
+    requestLocale: undefined,
+    accessToken: 'withhold',
+    oauth: undefined,
+    onAdmission: undefined,
+  }),
+};
+
+const DOORS: ReadonlyArray<DoorRow<unknown>> = [RUNTIME_ROW, REST_ROW, SETTINGS_ROW, STORAGE_ROW, HONO_ROW];
 
 /** The facts that say WHO the caller is; equal at every door that resolves one. */
 const IDENTITY = ['userId', 'tenantId', 'email', 'positions', 'permissions', 'systemPermissions', 'posture', 'org_user_ids', 'accessible_org_ids', 'principalKind'] as const;
@@ -740,5 +831,68 @@ describe('[ruling 6227928430 item 4] one request, the function and every convert
     expect(await storageDownload(w, REQUESTS[1]!.headers)).toMatchObject({ status: 403, code: 'PASSWORD_EXPIRED', handedOn: undefined });
     expect(await storageDownload(world({ auth: false }), REQUESTS[REQUESTS.length - 1]!.headers))
       .toMatchObject({ status: 200, handedOn: undefined });
+  });
+
+  it('CONTROL: the requests tell the /auth/me door\'s named parameters apart', async () => {
+    const authMe = HONO_ROW;
+    const viaFunction = (w: World, headers: Headers, flip: Partial<RequestExecutionContextInput>) => resolveRequestExecutionContext({
+      headers,
+      ql: w.ql,
+      authService: w.services.auth as RequestExecutionContextInput['authService'],
+      ...authMe.parameters(w, headers),
+      ...flip,
+    });
+    const w = world({ auth: true });
+    // `anonymous: 'fail-closed'`: the route answers its own signed-out body
+    // and hands nothing on, and the guest entry would have handed on a guest
+    // context.
+    expect(await authMePermissions(w, REQUESTS[0]!.headers)).toEqual({ status: 200, body: { authenticated: false }, handedOn: undefined });
+    expect((await viaFunction(w, new Headers(), { anonymous: 'guest' }))?.principalKind).toBe('guest');
+    // `authGate`, `accessToken`, `localization` and `requestLocale` withheld:
+    // the gated session with a language preference is served (these routes
+    // are allow-listed for a gated user), and its context carries no posture,
+    // bearer, locale or time zone. Flipped, each is carried.
+    const session = await authMePermissions(w, REQUESTS[1]!.headers);
+    expect(session.status).toBe(200);
+    expect(session.body).toMatchObject({ authenticated: true, userId: 'u_ses' });
+    expect(session.handedOn).toMatchObject({ userId: 'u_ses', principalKind: 'human', tenantId: ORG });
+    expect(session.handedOn?.authGate).toBeUndefined();
+    expect(session.handedOn?.accessToken).toBeUndefined();
+    expect(session.handedOn?.locale).toBeUndefined();
+    expect(session.handedOn?.timezone).toBeUndefined();
+    const headers = new Headers(REQUESTS[1]!.headers);
+    const flipped = await viaFunction(w, headers, {
+      authGate: 'resolved',
+      accessToken: 'carry',
+      localization: { settings: () => w.services.settings },
+      requestLocale: preferredLocaleFromHeader(headers.get('accept-language')),
+    });
+    expect(flipped).toMatchObject({
+      authGate: { code: 'PASSWORD_EXPIRED', message: 'Your password has expired.' },
+      accessToken: 'sess_bearer',
+      locale: 'zh-CN',
+      timezone: 'Europe/Paris',
+    });
+    // `credentials: 'session-only'`: an API key alone admits nobody here, and
+    // a door reading keys would admit its owner.
+    expect(await authMePermissions(w, REQUESTS[3]!.headers)).toEqual({ status: 200, body: { authenticated: false }, handedOn: undefined });
+    expect((await viaFunction(w, new Headers(REQUESTS[3]!.headers), { credentials: 'api-key-and-session' }))?.userId).toBe('u_key');
+    // `tenancy: undefined`: a session claiming an organization its user is not
+    // a member of keeps its claim here, and a door reading the walled posture
+    // drops the claim and keeps the caller.
+    const claim = await authMePermissions(w, { cookie: NON_MEMBER_COOKIE });
+    expect(claim.handedOn).toMatchObject({ userId: 'u_ses', tenantId: NON_MEMBER_ORG });
+    const walled = await viaFunction(w, new Headers({ cookie: NON_MEMBER_COOKIE }), { tenancy: () => w.services.tenancy as never });
+    expect(walled?.userId).toBe('u_ses');
+    expect(walled?.tenantId).toBeUndefined();
+    // `sessionApi: 'required'` is declared, and no request can tell it apart
+    // at a session-only door: without a session read this door reads no
+    // credential at all, so `'optional'` admits nobody either. The key on a
+    // host with no auth service is the request that tells it apart at a door
+    // that reads keys.
+    const noAuth = world({ auth: false });
+    const lastKey = REQUESTS[REQUESTS.length - 1]!.headers;
+    expect((await authMePermissions(noAuth, lastKey)).handedOn).toBeUndefined();
+    expect(await viaFunction(noAuth, new Headers(lastKey), { sessionApi: 'optional' })).toBeUndefined();
   });
 });

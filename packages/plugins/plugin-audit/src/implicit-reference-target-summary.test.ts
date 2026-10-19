@@ -46,6 +46,7 @@ import { describe, it, expect } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { referenceTargetOf } from '@objectstack/spec/data';
 import { installAuditWriters } from './audit-writers.js';
+import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
 
 /**
  * The target a `user` field names when the author does not restate it — read
@@ -264,6 +265,7 @@ async function boot() {
     engine.registry.registerObject(o as any, OWNER_PACKAGE);
   }
   installAuditWriters(engine as any, 'test.audit', {
+    getDefaultOrganizationId: singlePostureDefaultOrganization,
     getI18n: () => undefined as any,
     getLocale: async () => undefined,
   });

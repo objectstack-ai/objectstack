@@ -183,7 +183,7 @@ export const zhCN: TranslationData = {
     },
     connect_agent: {
       label: '连接智能体',
-      subtitle: '让任意支持 MCP 的 AI 客户端受控访问此环境——每次调用都在调用者自身的权限与行级安全范围内执行。',
+      subtitle: '让任意支持 MCP 的 AI 客户端受控访问本系统——每次调用都在调用者自身的权限与行级安全范围内执行。',
     },
 
     // Platform record pages (#15743) -- see `en.ts` for the key set.

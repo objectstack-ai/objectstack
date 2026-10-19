@@ -36,6 +36,7 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const LEDGER = 'sys_audit_log';
 /** A parent object whose records each caller reads only when it owns them. */
@@ -105,6 +106,7 @@ describe('[#21175] sys_audit_log read visibility — the plugin read path', () =
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 

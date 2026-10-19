@@ -55,6 +55,7 @@ import type { IDataEngine } from './data-engine';
 import type { IDataDriver } from './data-driver';
 import type { FlowFunctionEffect, FlowFunctionEntry } from '../automation/flow-function.zod';
 import type { ServiceObject } from '../data/object.zod';
+import type { Hook, HookContext } from '../data/hook.zod';
 import type { BaseEngineOptions, EngineQueryOptions } from '../data/data-engine.zod';
 
 /**
@@ -403,6 +404,20 @@ export interface IObjectQLEngine extends IDataEngine {
             strict?: boolean;
             warnLegacyHandler?: boolean;
             metrics?: unknown;
+            /**
+             * Wraps each handler the hook runs IN-PROCESS: an inline `handler`
+             * function, and the function a string `handler` names (resolved from
+             * `functions` or the package's registered functions). Never applied to
+             * the handler `bodyRunner` builds from a `body`. Called once per hook,
+             * at bind; what it returns is what the engine calls. The engine awaits
+             * a handler and discards its return value. The runtime passes the
+             * wrap that hands an in-process handler `ctx.title(field?)` (#24289).
+             * Absent: every handler binds exactly as resolved.
+             */
+            wrapHandler?: (
+                handler: (context: HookContext) => unknown,
+                hook: Hook,
+            ) => (context: HookContext) => unknown;
         },
     ): void;
 

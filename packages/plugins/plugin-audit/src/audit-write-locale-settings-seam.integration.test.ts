@@ -9,6 +9,7 @@ import { ObjectKernel } from '@objectstack/core';
 import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 /**
  * [#24235] A summary line is stored ONCE, at write time, so the writer's held
@@ -68,6 +69,7 @@ describe('audit writers — a localization change reaches the very next audited 
   beforeAll(async () => {
     kernel = new ObjectKernel({ logger: { level: 'silent' } } as any);
     await kernel.use(new ObjectQLPlugin());
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 

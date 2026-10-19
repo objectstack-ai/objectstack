@@ -56,6 +56,7 @@ import { describe, it, expect } from 'vitest';
 import { ObjectQL, ValidationError } from '@objectstack/objectql';
 import { installAuditWriters } from './audit-writers.js';
 import { SysActivity, SysAuditLog } from './objects/index.js';
+import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
 
 const OWNER_PACKAGE = 'com.objectstack.test.activity-type-vocabulary';
 
@@ -208,7 +209,7 @@ async function boot() {
   for (const o of [SysAuditLog, SysActivity, bizTicket, writableClone()]) {
     engine.registry.registerObject(o as any, OWNER_PACKAGE);
   }
-  installAuditWriters(engine as any, 'test.audit');
+  installAuditWriters(engine as any, 'test.audit', { getDefaultOrganizationId: singlePostureDefaultOrganization });
   return { engine, ...stub };
 }
 

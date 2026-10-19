@@ -12,7 +12,7 @@ Clause-②: yes (narrowing)
 
 **`@objectstack/spec`**
 
-- **`defineStack`'s cross-reference check** now reaches a `record:line_items` block in a page region's components, in a container's component children and in a slot. A block under a `page:tabs` item's `children` is not yet judged. It judges a column that declares no `type` as the type it renders, and reports the column schema's own refusal (`STACK_CROSS_REFERENCE_INVALID`, 422). Today that means `scale` on an identity-only column over a `currency` field of the child object. The child object is the one the panel lists: the object `dataSource` binding's `object` when the node carries one, else `childObject`. A child object the stack does not declare, a column naming no field of it, and a column the column schema refuses on its own (left to the component-props gate) are not judged.
+- **`defineStack`'s cross-reference check** now reaches a `record:line_items` block in a page region's components, in a container's component children, in a slot and, since #24349, in a `page:tabs` or `page:accordion` item's `children`. It judges a column that declares no `type` as the type it renders, and reports the column schema's own refusal (`STACK_CROSS_REFERENCE_INVALID`, 422). Today that means `scale` on an identity-only column over a `currency` field of the child object. The child object is the one the panel lists: the object `dataSource` binding's `object` when the node carries one, else `childObject`. A child object the stack does not declare, a column naming no field of it, and a column the column schema refuses on its own (left to the component-props gate) are not judged.
 - The step-18 migration entry `ui-record-line-items-props-closed` now says so, and no longer says that this block draws a column exactly as declared.
 
 ## FROM → TO
@@ -25,4 +25,4 @@ The one-line fix: delete `scale` from a `record:line_items` column that renders 
 
 ## Who is affected, measured
 
-On `origin/main` `ec749fbb44`: two authored `record:line_items` blocks in the examples (the showcase project detail page, five typed columns, its block under a `page:tabs` item, so not yet judged; the showcase invoice document page, four `{ name, label }` columns, two of them over `currency` fields) and one in the published skills (four `{ name }` columns). None carries `scale`, so no example, skill or fixture outside this change's own pins changes verdict. Deployed metadata was not measured.
+On `origin/main` `ec749fbb44`: two authored `record:line_items` blocks in the examples (the showcase project detail page, five typed columns, its block under a `page:tabs` item; the showcase invoice document page, four `{ name, label }` columns, two of them over `currency` fields) and one in the published skills (four `{ name }` columns). None carries `scale`, so no example, skill or fixture outside this change's own pins changes verdict. Deployed metadata was not measured.

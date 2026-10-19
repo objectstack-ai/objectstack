@@ -267,7 +267,7 @@ export const en: TranslationData = {
     connect_agent: {
       label: 'Connect an Agent',
       subtitle:
-        'Give any MCP-capable AI client governed access to this environment — '
+        'Give any MCP-capable AI client governed access to this system — '
         + "every call runs under the caller's own permissions and row-level security.",
     },
 

@@ -27,11 +27,18 @@
  * `file-field-hydration-refused.test.ts`; this file holds the seam's own
  * branches with a fake DRIVER (not a fake engine) and an engine middleware
  * standing in for the security layer's refusal.
+ *
+ * [#24335] ASKED BEFORE READ: with a security service in the engine's slot,
+ * the engine asks its `canReadObject('sys_file')` first and a refused caller
+ * is served the refused arm without the `sys_file` read — so the security
+ * layer, which logs every refusal at WARN, sees no access attempt. The last
+ * block pins that against the same fixture, and that the served body is the
+ * one the refused read produced.
  */
 
 import { describe, it, expect } from 'vitest';
 import { FileRefusedValueSchema, valueSchemaFor } from '@objectstack/spec/data';
-import { ObjectQL } from './engine';
+import { ObjectQL, SECURITY_SERVICE_SOURCE_SLOT } from './engine';
 
 const FILE_ID = 'f_7cQx2Lm90a';
 const SECOND_ID = 'f_zz11yy22xx';
@@ -142,9 +149,11 @@ function makeCapturingLogger() {
  * field), a registered `sys_file`, and three rows: one holding a file, one
  * holding two files plus a legacy URL, one holding none. When `refuseReader`
  * is set, a middleware refuses every non-system `sys_file` read the way the
- * security layer's CRUD gate does.
+ * security layer's CRUD gate does, and records each read it refuses in
+ * `attempts` (the reads plugin-security would log a denial for). `security`,
+ * when given, is what the engine's security-service slot resolves.
  */
-async function boot(opts: { sysFileRead?: () => Promise<any[]>; refuseReader?: boolean } = {}) {
+async function boot(opts: { sysFileRead?: () => Promise<any[]>; refuseReader?: boolean; security?: unknown } = {}) {
   const logger = makeCapturingLogger();
   const engine = new ObjectQL({ logger } as any);
   const { driver, storeFor } = makeDriver(opts.sysFileRead ?? (async () => COMMITTED_ROWS));
@@ -167,10 +176,17 @@ async function boot(opts: { sysFileRead?: () => Promise<any[]>; refuseReader?: b
       status: { type: 'text' },
     },
   } as any);
+  const attempts: any[] = [];
+  if (opts.security !== undefined) {
+    (engine as unknown as Record<symbol, unknown>)[SECURITY_SERVICE_SOURCE_SLOT] = () => opts.security;
+  }
   if (opts.refuseReader) {
     engine.registerMiddleware(
       async (ctx: any, next: () => Promise<void>) => {
-        if (!ctx.context?.isSystem) throw refusal();
+        if (!ctx.context?.isSystem) {
+          attempts.push(ctx.context);
+          throw refusal();
+        }
         return next();
       },
       { object: 'sys_file' },
@@ -184,7 +200,7 @@ async function boot(opts: { sysFileRead?: () => Promise<any[]>; refuseReader?: b
     gallery: [FILE_ID, SECOND_ID, 'https://cdn.example.com/legacy.png'],
   });
   storeFor('doc').set('d3', { id: 'd3', title: 'Empty', attachment: null, gallery: null });
-  return { engine, logger };
+  return { engine, logger, attempts };
 }
 
 const byId = (rows: any[]) => Object.fromEntries(rows.map((r) => [r.id, r]));
@@ -294,5 +310,118 @@ describe('a refused sys_file read marks the file field refused — not absent', 
     const seam = logger.lines.warn.filter((l: any) => l.msg.startsWith('sys_file lookup failed'));
     expect(seam).toHaveLength(1);
     expect(logger.lines.debug.filter((l: any) => /sys_file read refused/.test(l.msg))).toEqual([]);
+  });
+});
+
+/**
+ * A security service the engine's slot resolves, answering `canReadObject` as
+ * `admits` says (the fixture's middleware refuses every non-system reader, so
+ * `false` is the true answer for READER_CTX), and recording every ask.
+ */
+function makeSecurity(admits: (object: string, context: any) => boolean | Promise<boolean>) {
+  const asks: Array<{ object: string; context: any }> = [];
+  const svc: Record<string, unknown> = {
+    getReadFilter: async () => undefined,
+    canReadObject: async (object: string, context: any) => {
+      asks.push({ object, context });
+      return admits(object, context);
+    },
+  };
+  return { svc, asks };
+}
+
+describe('[#24335] the engine asks before it reads sys_file — a refused reader makes no access attempt', () => {
+  it('a reader the admission refuses is served the refused arm and never reaches the sys_file read', async () => {
+    const { svc, asks } = makeSecurity((_o, ctx) => ctx?.isSystem === true);
+    const { engine, attempts } = await boot({ refuseReader: true, security: svc });
+
+    const rows = byId(await engine.find('doc', { context: READER_CTX }));
+
+    // No read of sys_file reached the security layer: nothing for it to log.
+    expect(attempts).toEqual([]);
+    expect(rows.d1.attachment).toEqual({ id: FILE_ID, metadataRefused: true });
+    // One ask per read, about sys_file, with the caller's own envelope.
+    expect(asks).toHaveLength(1);
+    expect(asks[0].object).toBe('sys_file');
+    expect(asks[0].context).toMatchObject(READER_CTX);
+    expect(Object.keys(asks[0].context).filter((k) => k.startsWith('__'))).toEqual([]);
+  });
+
+  it('the body is byte-identical to the one the refused read served, by list and by id', async () => {
+    const asked = await boot({ refuseReader: true, security: makeSecurity(() => false).svc });
+    const unasked = await boot({ refuseReader: true });
+
+    const listAsked = await asked.engine.find('doc', { context: READER_CTX });
+    const listUnasked = await unasked.engine.find('doc', { context: READER_CTX });
+    const oneAsked = await asked.engine.findOne('doc', { where: { id: 'd2' }, context: READER_CTX });
+    const oneUnasked = await unasked.engine.findOne('doc', { where: { id: 'd2' }, context: READER_CTX });
+
+    // The comparison is armed: the unasked engine did attempt, and was refused.
+    expect(unasked.attempts.length).toBeGreaterThan(0);
+    expect(asked.attempts).toEqual([]);
+    expect(oneAsked?.gallery?.[0]).toEqual({ id: FILE_ID, metadataRefused: true });
+    expect(JSON.stringify(listAsked)).toBe(JSON.stringify(listUnasked));
+    expect(JSON.stringify(oneAsked)).toBe(JSON.stringify(oneUnasked));
+  });
+
+  it('the reader\'s own sys_file read is still refused, and still reaches the security layer', async () => {
+    const { engine, attempts } = await boot({ refuseReader: true, security: makeSecurity(() => false).svc });
+
+    const err = await engine.find('sys_file', { context: READER_CTX }).catch((e: unknown) => e);
+
+    expect((err as any)?.code).toBe('PERMISSION_DENIED');
+    expect((err as any)?.statusCode).toBe(403);
+    expect(attempts).toHaveLength(1);
+  });
+
+  it('CONTROL a reader the admission admits still reads sys_file as itself, and is hydrated', async () => {
+    const { svc, asks } = makeSecurity(() => true);
+    const { engine } = await boot({ security: svc });
+
+    const rows = byId(await engine.find('doc', { context: READER_CTX }));
+
+    expect(asks).toHaveLength(1);
+    expect(rows.d1.attachment).toEqual({
+      id: FILE_ID,
+      name: 'contract.pdf',
+      size: 1024,
+      mimeType: 'application/pdf',
+      url: `/api/v1/storage/files/${FILE_ID}`,
+    });
+  });
+
+  it('CONTROL an admitted read the security layer still refuses takes the same refused arm', async () => {
+    const { engine, attempts } = await boot({ refuseReader: true, security: makeSecurity(() => true).svc });
+
+    const rows = byId(await engine.find('doc', { context: READER_CTX }));
+
+    expect(attempts).toHaveLength(1);
+    expect(rows.d1.attachment).toEqual({ id: FILE_ID, metadataRefused: true });
+  });
+
+  it('CONTROL unasked — no canReadObject, or an ask that throws — the read goes to the security layer as before', async () => {
+    const noMethod = await boot({ refuseReader: true, security: { getReadFilter: async () => undefined } });
+    const throwing = await boot({
+      refuseReader: true,
+      security: makeSecurity(() => {
+        throw new Error('admission unavailable');
+      }).svc,
+    });
+
+    for (const { engine, attempts } of [noMethod, throwing]) {
+      const rows = byId(await engine.find('doc', { context: READER_CTX }));
+      expect(attempts).toHaveLength(1);
+      expect(rows.d1.attachment).toEqual({ id: FILE_ID, metadataRefused: true });
+    }
+  });
+
+  it('CONTROL a record holding no file id asks nothing', async () => {
+    const { svc, asks } = makeSecurity(() => false);
+    const { engine } = await boot({ refuseReader: true, security: svc });
+
+    const row = await engine.findOne('doc', { where: { id: 'd3' }, context: READER_CTX });
+
+    expect(row?.id).toBe('d3');
+    expect(asks).toEqual([]);
   });
 });

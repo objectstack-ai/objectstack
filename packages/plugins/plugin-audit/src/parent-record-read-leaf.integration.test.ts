@@ -50,6 +50,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
 import { LEDGER_AUDIT_CAPABILITY } from './audit-log-read-visibility.js';
 import { PARENT_GATE_SCAN_LIMIT } from './parent-record-read-gate.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const ACTIVITY = 'sys_activity';
 const LEDGER = 'sys_audit_log';
@@ -121,6 +122,7 @@ const objectOf = (name: string, extra: Record<string, unknown> = {}) => ({
 async function bootKernel(driver: SqliteWasmDriver) {
   const kernel = new ObjectKernel({ logger: { level: 'silent' } });
   await kernel.use(new ObjectQLPlugin());
+  await kernel.use(singlePostureTenancy());
   await kernel.use(new AuditPlugin());
   await kernel.use({
     name: 'test.security-stand-in',

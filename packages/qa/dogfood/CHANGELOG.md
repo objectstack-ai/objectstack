@@ -1,5 +1,133 @@
 # @objectstack/dogfood
 
+## 0.0.48-next.4
+
+### Patch Changes
+
+- Updated dependencies [b2e7870]
+- Updated dependencies [6a49efb]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [78652c0]
+- Updated dependencies [1eae21f]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [8d3dd6f]
+- Updated dependencies [f7af839]
+- Updated dependencies [a237d7f]
+- Updated dependencies [03ac4ec]
+- Updated dependencies [5e97907]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [6e43b7b]
+- Updated dependencies [727091c]
+- Updated dependencies [62c4441]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [d702b18]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a19b2a7]
+- Updated dependencies [2ac0616]
+- Updated dependencies [5a9a80b]
+- Updated dependencies [1489952]
+- Updated dependencies [8eccf51]
+- Updated dependencies [8a88901]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [9040945]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [cbfa5e4]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [77e9f79]
+- Updated dependencies [83dfbc0]
+- Updated dependencies [9822b05]
+- Updated dependencies [889bf12]
+- Updated dependencies [7a8733f]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [e15897c]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [d79dc48]
+- Updated dependencies [1173017]
+- Updated dependencies [8baeda5]
+- Updated dependencies [5da2e88]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [ec749fb]
+- Updated dependencies [c4526a7]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [6868514]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [538f923]
+- Updated dependencies [d65826f]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [d8e11b5]
+- Updated dependencies [44a5011]
+- Updated dependencies [f573976]
+- Updated dependencies [f573976]
+- Updated dependencies [71fa166]
+- Updated dependencies [e22defb]
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/plugin-sharing@18.0.0-next.4
+  - @objectstack/verify@18.0.0-next.4
+  - @objectstack/service-storage@18.0.0-next.4
+  - @objectstack/plugin-audit@18.0.0-next.4
+  - @objectstack/platform-objects@18.0.0-next.4
+  - @objectstack/runtime@18.0.0-next.4
+  - @objectstack/plugin-email@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/plugin-webhooks@18.0.0-next.4
+  - @objectstack/plugin-approvals@18.0.0-next.4
+  - @objectstack/mcp@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/example-showcase@0.3.22-next.4
+  - @objectstack/connector-mcp@18.0.0-next.4
+  - @objectstack/connector-openapi@18.0.0-next.4
+  - @objectstack/connector-rest@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/plugin-pinyin-search@18.0.0-next.4
+  - @objectstack/service-analytics@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-messaging@18.0.0-next.4
+  - @objectstack/trigger-record-change@18.0.0-next.4
+  - @objectstack/trigger-schedule@18.0.0-next.4
+  - @objectstack/example-crm@4.0.100-next.4
+  - @objectstack/example-multi-package@0.0.7-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 0.0.48-next.3
 
 ### Patch Changes
