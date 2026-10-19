@@ -182,7 +182,16 @@ describe('os create: a name npm refuses is refused before anything is written', 
 
         // ⛔ The asymmetry is correct, not a second defect: `init`'s argument is
         // the package name, so npm's ceiling is already measured against it.
-        const inited = await runCli(['init', COMPOSED_TOO_LONG], initCwd);
+        //
+        // `--no-install`: what is judged is that `init` ACCEPTS the name, and
+        // it refuses an invalid one before the first write, long before any
+        // install. Without the flag, `init` ran `<pm> install` in this
+        // `tmpdir()` scaffold, which carries no `packageManager` pin on
+        // purpose: under Corepack that resolved `pnpm@latest` from the public
+        // registry and then fetched the scaffold's dependencies from it —
+        // measured: a registry answering HTTP 429 turned this exit 0 into a
+        // failure with nothing about the name changed.
+        const inited = await runCli(['init', COMPOSED_TOO_LONG, '--no-install'], initCwd);
         expect(inited.code).toBe(0);
       } finally {
         rmSync(createCwd, { recursive: true, force: true });

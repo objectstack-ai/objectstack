@@ -180,6 +180,19 @@ export const PERMISSION_SET_ACTIVATION_SUBJECT: ActivationSubject = {
 };
 
 /**
+ * [ADR-0131 D6 regime C] The declared-sharing-rule door's wording. A declared
+ * sharing rule is customised by a clone under another name plus the declared
+ * rule switched off; an organization still authors its own rules under a wall
+ * (ADR-0131 D3), so the remedy names that half and the operator for the switch.
+ */
+export const SHARING_RULE_ACTIVATION_SUBJECT: ActivationSubject = {
+    subject: 'a declared sharing rule',
+    remedy:
+        'To switch a declared sharing rule off for this installation, ask your platform operator; sharing rules your ' +
+        'organization authors under names of its own stay yours to create and switch.',
+};
+
+/**
  * The activation body every `_activation` door reads: `{ enabled?: boolean }`,
  * unknown keys refused, `enabled` defaulting to `true`.
  *

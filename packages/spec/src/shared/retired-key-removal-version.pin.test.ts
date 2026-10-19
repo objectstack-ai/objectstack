@@ -261,6 +261,14 @@ const JOIN: Readonly<Record<string, readonly Renderer[]>> = {
     refusal("action:group member type 'navigation'", () => ActionGroupPropsSchema.safeParse({ actions: [{ label: 'Clone', type: 'navigation', target: '/apps/crm/tasks' }] })),
     refusal("action:menu member type 'navigation'", () => ActionMenuPropsSchema.safeParse({ actions: [{ label: 'Clone', type: 'navigation', target: '/apps/crm/tasks' }] })),
   ],
+  // #24394: retired after 17.7.0, so the v18 train's major. The two nodes carry
+  // the tombstone at `patch`; the containers' shared member carries the same one.
+  'page-action-row-patch-removed': [
+    tombstone(ActionButtonPropsSchema, 'action:button', 'patch'),
+    tombstone(ActionIconPropsSchema, 'action:icon', 'patch'),
+    refusal("action:group member's patch", () => ActionGroupPropsSchema.safeParse({ actions: [{ label: 'Close', patch: { status: 'done' } }] }), 'actions'),
+    refusal("action:menu member's patch", () => ActionMenuPropsSchema.safeParse({ actions: [{ label: 'Close', patch: { status: 'done' } }] }), 'actions'),
+  ],
   'cbp-master-detail-required-defaulted': [
     refusal(
       'a controlled_by_parent master_detail without `required`',

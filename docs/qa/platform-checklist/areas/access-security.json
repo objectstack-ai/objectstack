@@ -2820,7 +2820,7 @@
       "source": [
         "packages/core/src/security/resolve-authz-context.ts#hasPlatformAdminStanding (§6b-config — the config anchor inside the ONE derivation site; additive, never subtractive) + (hasPlatformAdminStanding, the id-shaped projection)",
         "packages/core/src/security/platform-admin.ts#parsePlatformAdminEmails (parsePlatformAdminEmails whole-variable refusal, resolvePlatformAdminEmails loud-once resolve, matchesConfiguredPlatformAdmin verified-only)",
-        "packages/core/src/security/resolve-authz-context.ts#legacyGrantAnchorRetired (#11663 L5 — the unscoped admin_full_access row derives PLATFORM_ADMIN only when the requested posture enforces no wall)",
+        "packages/core/src/security/resolve-authz-context.ts#grantAnchorsPlatformStanding (#11663 L5 — the unscoped admin_full_access row derives PLATFORM_ADMIN only when the requested posture enforces no wall)",
         "packages/spec/src/security/tenancy-posture.ts#postureEnforcesWall (walled = every posture except single)",
         "packages/core/src/security/admin-standing-surface.ts (the env declared a non-table derivation input — no break-glass write can reach it)",
         "packages/types/src/env.ts#PLATFORM_OWNER_EMAIL_ENV,200 (PLATFORM_OWNER_EMAIL_ENV / resolvePlatformOwnerEmail)",

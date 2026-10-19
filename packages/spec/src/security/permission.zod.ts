@@ -677,7 +677,7 @@ const PERMISSION_SET_MANAGED_BY_REMOVED =
   + 'nothing ever read the authored key: no seeder, package upgrade or lock consulted it, so `package` never made '
   + 'a set upgrade-owned and `platform` or `user` never shielded one from an upgrade. Delete the key; a set\'s '
   + 'provenance is the package that ships it, decided from that package\'s artifact and recorded as `packageId`, '
-  + 'and a set created in this environment carries neither. '
+  + 'and a set authored in this system carries neither. '
   + 'Run `os migrate meta --from 17` to list the mechanical edits for existing sources; `--write` applies the ones it can prove, and you apply the rest by hand.';
 
 /**

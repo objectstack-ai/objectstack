@@ -123,6 +123,44 @@ describe('validateComponentProps — undeclared keys', () => {
     }
   });
 
+  // #24394 — a page action row's own `patch` is a retiredKey tombstone on every
+  // row: the row's `operation: 'update'` runs the declared action its `name`
+  // names, and the platform action route writes THAT action's `patch`.
+  it('refuses a page action row `patch` as an error carrying the prescription, on each node and member', () => {
+    const PATCH = { status: 'done' };
+    const cases: ReadonlyArray<readonly [unknown, string, string]> = [
+      [{ type: 'action:button', properties: { label: 'Close', name: 'close_task', operation: 'update', patch: PATCH } },
+        'properties.patch', "An `action:button`'s `patch` was removed in @objectstack/spec 18"],
+      [{ type: 'action:icon', properties: { icon: 'check', name: 'close_task', operation: 'update', patch: PATCH } },
+        'properties.patch', "An `action:icon`'s `patch` was removed in @objectstack/spec 18"],
+      [{ type: 'action:group', properties: { actions: [{ label: 'Close', name: 'close_task', operation: 'update', patch: PATCH }] } },
+        'properties.actions.0.patch', "An `action:group` or `action:menu` member's `patch` was removed in @objectstack/spec 18"],
+      [{ type: 'action:menu', properties: { actions: [{ label: 'Close', name: 'close_task', operation: 'update', patch: PATCH }] } },
+        'properties.actions.0.patch', "An `action:group` or `action:menu` member's `patch` was removed in @objectstack/spec 18"],
+    ];
+    for (const [component, at, opening] of cases) {
+      const findings = validateComponentProps(stackWith([component]));
+      expect(findings, at).toHaveLength(1);
+      const [f] = findings;
+      expect(f.rule).toBe('component-props-invalid');
+      expect(f.severity).toBe('error');
+      expect(f.path).toBe(`pages[0].regions[0].components[0].${at}`);
+      expect(f.message).toContain(opening);
+      expect(f.message).toContain("Move the values into the `patch` of the action the row's `name` names");
+    }
+  });
+
+  it("refuses a page action row's `operation: 'update'` with no `name` at `name`, and accepts it with one", () => {
+    const nameless = validateComponentProps(stackWith([{ type: 'action:button', properties: { label: 'Close', operation: 'update' } }]));
+    expect(nameless.map((f) => [f.rule, f.path])).toEqual([
+      ['component-props-invalid', 'pages[0].regions[0].components[0].properties.name'],
+    ]);
+    const named = validateComponentProps(
+      stackWith([{ type: 'action:button', properties: { label: 'Close', name: 'close_task', operation: 'update' } }]),
+    );
+    expect(named).toEqual([]);
+  });
+
   // #21589 — an `object-master-detail-form` detail entry's `sortField` is a
   // retiredKey tombstone, one array level down. The same door and, since
   // #23026, the same refusal: an error that names the entry's key.
