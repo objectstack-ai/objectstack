@@ -3186,8 +3186,8 @@ export class ApprovalService implements IApprovalService {
    *    Nothing downstream supplies a missing organisation: the automation
    *    engine's grants bridge answers a `tenantId` only when it was handed one,
    *    and an organisation-less resolution is not the actor's request in the
-   *    record's organisation — its peers are the actor alone, and its positions
-   *    come from every organisation the actor belongs to.
+   *    record's organisation — its peers are the actor alone, and its grants
+   *    are not the ones that organisation gives them.
    * The write itself is authorized by `isSystem` alone — the security
    * middleware short-circuits before it reads any grant — so leaving the arrays
    * off changes nothing about what this write may do.

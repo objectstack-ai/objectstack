@@ -16,7 +16,7 @@
  * Two producer facts make that true, and each has its own pins here:
  *  - the write names the organisation (`tenantId`), read live off the record.
  *    Without it every consumer resolves organisation-less: the person alone as
- *    peer, and positions from every organisation they belong to;
+ *    peer, and grants that are not the ones the record's organisation gives;
  *  - the write carries NO `positions` / `permissions` of its own. A consumer
  *    keeps carried arrays verbatim, so empty ones stood in for the person's
  *    grants and left the hook on the member baseline.
