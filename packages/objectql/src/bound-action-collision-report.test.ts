@@ -217,7 +217,7 @@ describe('ObjectQL.registerAction on a key another owner holds', () => {
         const { engine, replacements } = await engineSpied();
         engine.registerAction('bc_org', 'rename', () => 'owner', 'app:com.test.owner');
         engine.registerAction('bc_org', 'rename', () => 'imperative');
-        expect(replacements().map(([, meta]) => meta.replacedPackage)).toEqual(['app:com.test.owner']);
+        expect(replacements().map(([, meta]) => (meta as any).replacedPackage)).toEqual(['app:com.test.owner']);
     });
 
     it('the same owner re-registering, and the tear-down-then-register resync, are silent', async () => {
