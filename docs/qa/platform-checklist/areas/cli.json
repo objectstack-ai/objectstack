@@ -1897,11 +1897,10 @@
       "source": [
         "packages/cli/src/commands/migrate/organization-ownership.ts",
         "packages/cli/src/commands/migrate/organization-ownership.ts#ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE",
-        ".changeset/pre/15212-180-guards-fresh-single-only.md",
         "packages/spec/src/system/fate-supplement.zod.ts#OrganizationOwnershipSupplementSchema",
         "packages/cli/src/utils/organization-ownership-drop-gate.ts",
         "docs/adr/0131-total-organization-ownership-no-null-organization-id.md",
-        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22617-cli-organization-ownership-plan, 22937-cli-ceremony-promotions, 22937-cli-organization-ownership-apply, 22937-core-email-template-row-definition, 22937-core-row-definition-mappers, 15211-ceremony-metadata-promotion, 15211-cli-apply-reviewed-plan, 23280-host-fate-supplement, 23400-ownership-occupancy-gate, 23429-sys-metadata-family-organization-column-retired, 23558-ceremony-dialect-resolver, 23684-drop-gate-host-tables, 23281-comment-reactions-upgrade-conversion"
+        "v18 changesets (.changeset/pre/, consumed into 18.0.0-next.*): 22617-cli-organization-ownership-plan, 22937-cli-ceremony-promotions, 22937-cli-organization-ownership-apply, 22937-core-email-template-row-definition, 22937-core-row-definition-mappers, 15211-ceremony-metadata-promotion, 15211-cli-apply-reviewed-plan, 23280-host-fate-supplement, 23400-ownership-occupancy-gate, 23429-sys-metadata-family-organization-column-retired, 23558-ceremony-dialect-resolver, 23684-drop-gate-host-tables, 23281-comment-reactions-upgrade-conversion, 15212-180-guards-fresh-single-only"
       ],
       "history": [
         {
