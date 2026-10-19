@@ -533,7 +533,7 @@ const LEDGER: ReadonlyArray<OmitEntry | SubsetEntry> = [
     type: 'object',
     path: ROOT_PATH,
     key: 'defaultRowScope',
-    why: "not offered while nothing applies it (#24164 ruling E′, item 1): no server reads the object's default row scope until the security plugin's `collectRLSPolicies` does (#24340), so a form row would let an author declare a row restriction that filters nothing, the declared-not-enforced trap Prime Directive #10 names; its writers are to be the platform identity objects, declared in code (#24341), and none declares it yet. Revisit when the reader lands: a row policy is a composite of a select, two predicate strings and a positions list, a form-face addition rather than a reconciliation",
+    why: "not offered by this reconciliation (#24164 ruling E′, item 1): the reader is in — the security plugin's `collectRLSPolicies` applies the object's default row scope when no held set carries a row policy for the object and operation (#24340) — but a row policy is a composite of a select, two predicate strings and a positions list, so offering it is a form-face addition rather than a reconciliation of a scalar key; its writers are to be the platform identity objects, declared in code (#24341)",
   },
   {
     kind: 'omit',
