@@ -485,3 +485,176 @@ describe('[#24468] undeclared related fields are judged per RULE, never per refe
       { related: { account: unavailable('undeclared-field', ['region']) } as never })).toThrow(/declares no 'region'/);
   });
 });
+
+// [#24512] A `conditional` rule's `when` reads one hop through a reference the
+// way a `script` condition does: the collector names the hop (so the engine
+// preloads it), and `checkConditional` evaluates `when` on the scope
+// `resolveTraversalScope` decides — the related row, or a refusal naming why
+// there is none. Before, `when` met the bare id and every write it guarded was
+// refused as unevaluable.
+describe('[#24512] a `conditional` rule\'s `when` reads one hop through a reference', () => {
+  const THEN = 'GATE-THEN: partner deals are capped at 10000.';
+  const OTHERWISE = 'GATE-OTHERWISE: direct deals start at 100.';
+  const SIBLING = 'SIBLING: deals over 100000 need approval.';
+  /** The card's shape: a `conditional` whose `when` reads the account's type. */
+  const gate = (when: string, name = 'partner_gate') => ({
+    name, type: 'conditional', severity: 'error', message: 'unused', when,
+    then: { name: 'gate_cap', type: 'script', severity: 'error', message: THEN, condition: 'record.amount > 10000' },
+    otherwise: { name: 'gate_floor', type: 'script', severity: 'error', message: OTHERWISE, condition: 'record.amount < 100' },
+  });
+  const sibling = { name: 'big_deal', type: 'script', severity: 'error', message: SIBLING, condition: 'record.amount > 100000' };
+  const schemaOf = (...validations: unknown[]) => ({ fields: opportunity.fields, validations });
+  const PARTNER = { account: row({ id: 'acc_1', type: 'partner' }) };
+  const DIRECT = { account: row({ id: 'acc_1', type: 'direct' }) };
+
+  /** The thrown envelope, or `null` when the write is accepted. */
+  const verdict = (
+    schema: unknown, data: Record<string, unknown>, related?: Record<string, unknown>,
+  ): ValidationError | null => {
+    try {
+      evaluateValidationRules(schema as any, data, 'insert', { related: related as never });
+      return null;
+    } catch (e) {
+      if (e instanceof ValidationError) return e;
+      throw e;
+    }
+  };
+  const messagesOf = (e: ValidationError | null): string[] => (e?.fields ?? []).map((f) => f.message);
+  const deal = (amount: number) => ({ name: 'A', amount, account: 'acc_1' });
+
+  describe('the collector reaches `when`, so the engine preloads its hop', () => {
+    it('names the hop a top-level `when` takes', () => {
+      const map = collectPredicateRelationships(schemaOf(gate("record.account.type == 'partner'")) as any);
+      expect([...map.keys()]).toEqual(['account']);
+      expect([...map.get('account')!]).toEqual(['type']);
+    });
+
+    it('names the hop a `when` nested in a branch takes', () => {
+      const map = collectPredicateRelationships(schemaOf({
+        name: 'outer', type: 'conditional', when: 'record.amount > 0',
+        otherwise: gate("record.account.tier == 'gold'", 'inner'),
+      }) as any);
+      expect([...map.keys()]).toEqual(['account']);
+      expect([...map.get('account')!]).toEqual(['tier']);
+    });
+
+    it('names nothing for the guard spelling, which reads the stored id and no hop', () => {
+      expect(collectPredicateRelationships(schemaOf(gate('record.account != null')) as any).size).toBe(0);
+    });
+  });
+
+  describe('`when` is evaluated on the related row and picks its branch', () => {
+    const schema = schemaOf(gate("record.account.type == 'partner'"));
+
+    it('a partner account runs `then`', () => {
+      const refused = verdict(schema, deal(50000), PARTNER);
+      expect(refused?.code).toBe('VALIDATION_FAILED');
+      expect(refused?.fields).toEqual([expect.objectContaining({ code: 'rule_violation', message: THEN })]);
+      expect(refused?.fields[0]?.constraint?.reason).toBeUndefined();
+      // `then` admits what it does not refuse, and `otherwise` is not run.
+      expect(verdict(schema, deal(50), PARTNER)).toBeNull();
+    });
+
+    it('any other account runs `otherwise`', () => {
+      const refused = verdict(schema, deal(50), DIRECT);
+      expect(refused?.code).toBe('VALIDATION_FAILED');
+      expect(refused?.fields).toEqual([expect.objectContaining({ code: 'rule_violation', message: OTHERWISE })]);
+      // `otherwise` admits what it does not refuse, and `then` is not run.
+      expect(verdict(schema, deal(50000), DIRECT)).toBeNull();
+    });
+
+    it('a `when` nested in a branch is evaluated on the related row too', () => {
+      const nested = schemaOf({
+        name: 'outer', type: 'conditional', severity: 'error', message: 'unused', when: 'record.amount > 0',
+        then: gate("record.account.type == 'partner'", 'inner'),
+      });
+      expect(messagesOf(verdict(nested, deal(50000), PARTNER))).toEqual([THEN]);
+      expect(messagesOf(verdict(nested, deal(50), DIRECT))).toEqual([OTHERWISE]);
+      expect(verdict(nested, deal(50000), DIRECT)).toBeNull();
+    });
+
+    it('does not hand the expanded row to the branch rules or back to the caller', () => {
+      // The branch reads the stored id: hydration is per predicate, never per rule tree.
+      const schemaWithIdBranch = schemaOf({
+        ...gate("record.account.type == 'partner'"),
+        then: { name: 'blocked', type: 'script', severity: 'error', message: 'blocked account', condition: "record.account == 'acc_1'" },
+      });
+      const data = deal(10);
+      expect(messagesOf(verdict(schemaWithIdBranch, data, PARTNER))).toEqual(['blocked account']);
+      expect(data.account).toBe('acc_1');
+    });
+
+    it('CONTROL — the guard spelling keeps reading the stored id', () => {
+      const guarded = schemaOf({
+        name: 'linked', type: 'conditional', severity: 'error', message: 'unused', when: 'record.account != null',
+        then: { name: 'cap', type: 'script', severity: 'error', message: THEN, condition: "record.account.type == 'partner' && record.amount > 10000" },
+      });
+      expect(verdict(guarded, { name: 'A', amount: 50000, account: null }, {})).toBeNull();
+      expect(messagesOf(verdict(guarded, deal(50000), PARTNER))).toEqual([THEN]);
+    });
+  });
+
+  describe('a `when` the engine cannot serve has no verdict — and a sibling keeps its own', () => {
+    it('a second hop is refused as unevaluable, naming the rule; the sibling still judges', () => {
+      const schema = schemaOf(gate("record.account.owner.region == 'north'"), sibling);
+      const refused = verdict(schema, deal(200000), PARTNER);
+      expect(refused?.code).toBe('VALIDATION_FAILED');
+      const gateError = refused?.fields.find((f) => f.constraint?.rule === 'partner_gate');
+      expect(gateError).toMatchObject({
+        code: 'rule_violation',
+        constraint: { rule: 'partner_gate', reason: 'unevaluable', fault: 'reads more than one relationship hop' },
+      });
+      expect(gateError?.message).toMatch(/^Validation rule 'partner_gate' could not be evaluated \(reads more than one relationship hop\)/);
+      expect(messagesOf(refused)).toContain(SIBLING);
+      // Neither branch ran.
+      expect(messagesOf(refused).join('\n')).not.toContain('GATE-');
+      // The sibling admits on its own: only the gate refuses.
+      expect(verdict(schema, deal(10), PARTNER)?.fields.map((f) => f.constraint?.rule)).toEqual(['partner_gate']);
+    });
+
+    it('a field the related object does not declare is refused, naming only that field; a sibling through the same reference keeps its verdict', () => {
+      const schema = schemaOf(gate("record.account.region == 'north'"), opportunity.validations[0]);
+      // The engine reads the declared rest and lists the undeclared column.
+      const related = { account: { ...row({ id: 'acc_1', type: 'partner' }), undeclaredFields: ['region'] } };
+      const refused = verdict(schema, deal(50000), related);
+      expect(refused?.code).toBe('VALIDATION_FAILED');
+      const gateError = refused?.fields.find((f) => f.constraint?.rule === 'partner_gate');
+      expect(gateError).toMatchObject({ code: 'rule_violation', constraint: { rule: 'partner_gate', reason: 'unevaluable' } });
+      expect(gateError?.message).toContain("'crm_account' declares no 'region'");
+      // The sibling reading `type` through the same reference refuses with its own message…
+      expect(messagesOf(refused)).toContain('Partner accounts are capped at 10000.');
+      // …and admits what it admits alone.
+      const direct = { account: { ...row({ id: 'acc_1', type: 'direct' }), undeclaredFields: ['region'] } };
+      expect(verdict(schema, deal(50000), direct)?.fields.map((f) => f.constraint?.rule)).toEqual(['partner_gate']);
+    });
+
+    it('an empty reference is refused naming the guard, not as a fault in this object\'s columns', () => {
+      const refused = verdict(schemaOf(gate("record.account.type == 'partner'")), { name: 'A', amount: 50, account: null },
+        { account: unavailable('no-reference') });
+      expect(refused?.fields).toEqual([expect.objectContaining({ code: 'rule_violation', constraint: expect.objectContaining({ rule: 'partner_gate', reason: 'unevaluable' }) })]);
+      expect(refused?.fields[0]?.message).toContain('`conditional` rule whose `when` is `record.account != null`');
+      expect(refused?.fields[0]?.message).not.toContain('which this object does not declare');
+    });
+
+    it('a delete\'s reference cleanup is named, as it is for a `condition`', () => {
+      const refused = (() => {
+        try {
+          evaluateValidationRules(
+            { fields: { amount: { type: 'number' }, account: { type: 'lookup', reference: 'crm_account' } },
+              validations: [gate("record.account.status == 'closed'")] } as any,
+            { amount: 50, account: null }, 'update',
+            { previous: { id: 'deal_1', amount: 50, account: null }, related: referentialClearBinding({
+              object: 'crm_account', id: 'acc_1', referencingObject: 'crm_deal', field: 'account',
+            }) },
+          );
+          return null;
+        } catch (e) {
+          return e as ValidationError;
+        }
+      })();
+      expect(refused).toBeInstanceOf(ValidationError);
+      expect(refused?.message).toContain('Cannot delete crm_account (acc_1): the delete clears `account`');
+      expect(refused?.message).toContain("validation rule 'partner_gate' on crm_deal could not be evaluated");
+    });
+  });
+});
