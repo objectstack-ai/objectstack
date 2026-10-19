@@ -434,10 +434,9 @@ export type CelRootIdentifiersResult =
 export type CelAstNode = ASTNode;
 
 /**
- * The canonical parse env. Identical in configuration to the one
- * {@link celEngine.compile} builds per call — same `unlistedVariablesAreDyn`,
- * same `enableOptionalTypes`, same {@link DEFAULT_LIMITS}, same stdlib — and
- * built once because `parse` neither mutates the environment nor depends on the
+ * The canonical parse env, shared with {@link celEngine.compile} (#24536) —
+ * {@link buildEnv}'s `unlistedVariablesAreDyn`, `enableOptionalTypes`,
+ * {@link DEFAULT_LIMITS} and stdlib — and built once because `parse` neither mutates the environment nor depends on the
  * `now()` it was given (the same reasoning `recordScopeEnv` already relies on).
  * The parity suite pins the equivalence against a freshly-built env, so this
  * memo cannot silently drift away from `compile`.
@@ -1790,9 +1789,9 @@ export const celEngine: DialectEngine = {
 
   compile(source: string): EvalResult<unknown> {
     try {
-      // We use a wall-clock now() here purely for parse-time stdlib
-      // type-checking; the function is never actually called.
-      const env = buildEnv(() => new Date(0));
+      // The canonical parse env (#24536): parsing and checking neither mutate
+      // it nor call the stdlib, so one environment serves every compile.
+      const env = (canonicalParseEnv ??= buildEnv(() => new Date(0)));
       // #3306 — accept the null-guard idiom `cond ? <value> : null`, which cel-js's
       // ternary unifier otherwise rejects (`int`/`double`/`string` ≠ `null`). Same
       // rewrite the runtime uses, so build and eval agree on what is valid.

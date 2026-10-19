@@ -75,4 +75,12 @@ describe('#24536 — one environment per engine entry point, not one per call', 
     expect(built(() => { for (let i = 1; i < 20; i++) run(i); })).toBe(0);
   });
 
+  it('repeated compiles build no new environment', () => {
+    celEngine.compile(SOURCE);
+    const n = built(() => {
+      for (let i = 0; i < 50; i++) expect(celEngine.compile(SOURCE).ok).toBe(true);
+      expect(celEngine.compile('nope(').ok).toBe(false);
+    });
+    expect(n).toBe(0);
+  });
 });
