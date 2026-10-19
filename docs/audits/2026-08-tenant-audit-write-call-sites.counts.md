@@ -36,8 +36,8 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 | Write call sites | 232 |
 | Object name statically decidable | 161 |
 | Object name chosen at run time | 71 |
-| Against a tenancy-enabled object | 147 |
-| Against an object declaring tenancy off | 14 |
+| Against a tenancy-enabled object | 160 |
+| Against an object declaring tenancy off | 1 |
 | Threading a tenant context | 172 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
@@ -90,7 +90,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-19 at `fc628bc39`.
+Measured on 2026-10-19 at `e09294fe1`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
@@ -189,9 +189,9 @@ Measured on 2026-10-19 at `fc628bc39`.
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `delete` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `insert` | `objectName` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-automation/src/builtin/crud-nodes.ts` | `update` | `objectName` | undecidable | context, elevation undecidable | 1 |
-| `packages/services/service-automation/src/flow-credential-channel.ts` | `delete` | `sys_flow_credential` | disabled | elevated | 5 |
-| `packages/services/service-automation/src/flow-credential-channel.ts` | `insert` | `sys_flow_credential` | disabled | elevated | 1 |
-| `packages/services/service-automation/src/flow-credential-channel.ts` | `update` | `sys_flow_credential` | disabled | elevated | 2 |
+| `packages/services/service-automation/src/flow-credential-channel.ts` | `delete` | `sys_flow_credential` | enabled | elevated | 5 |
+| `packages/services/service-automation/src/flow-credential-channel.ts` | `insert` | `sys_flow_credential` | enabled | elevated | 1 |
+| `packages/services/service-automation/src/flow-credential-channel.ts` | `update` | `sys_flow_credential` | enabled | elevated | 2 |
 | `packages/services/service-automation/src/flow-credential-migration.ts` | `insert` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-automation/src/flow-credential-migration.ts` | `update` | `DATA_MIGRATION_FLAG_OBJECT` | undecidable | elevated | 1 |
 | `packages/services/service-automation/src/flow-dispatch-store.ts` | `insert` | `sys_flow_dispatch` | enabled | elevated | 1 |
@@ -202,8 +202,8 @@ Measured on 2026-10-19 at `fc628bc39`.
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `delete` | `sys_metadata` | enabled | elevated | 1 |
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `insert` | `sys_metadata` | enabled | elevated | 1 |
 | `packages/services/service-datasource/src/datasource-admin-plugin.ts` | `update` | `sys_metadata` | enabled | elevated | 2 |
-| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `delete` | `sys_secret` | disabled | elevated | 1 |
-| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `insert` | `sys_secret` | disabled | elevated | 1 |
+| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `delete` | `sys_secret` | enabled | elevated | 1 |
+| `packages/services/service-datasource/src/datasource-secret-binder.ts` | `insert` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-job/src/db-job-adapter.ts` | `insert` | `sys_job` | enabled | elevated | 1 |
 | `packages/services/service-job/src/db-job-adapter.ts` | `update` | `sys_job` | enabled | elevated | 3 |
 | `packages/services/service-job/src/db-job-adapter.ts` | `insert` | `sys_job_run` | enabled | elevated | 1 |
@@ -230,9 +230,9 @@ Measured on 2026-10-19 at `fc628bc39`.
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `objectName` | undecidable | options unreadable | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `objectName` | undecidable | options unreadable | 2 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_platform_setting_audit` | enabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `delete` | `sys_secret` | disabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_secret` | disabled | elevated | 1 |
-| `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `sys_secret` | disabled | elevated | 1 |
+| `packages/services/service-settings/src/settings-service-plugin.ts` | `delete` | `sys_secret` | enabled | elevated | 1 |
+| `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_secret` | enabled | elevated | 1 |
+| `packages/services/service-settings/src/settings-service-plugin.ts` | `update` | `sys_secret` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service-plugin.ts` | `insert` | `sys_setting_audit` | enabled | elevated | 1 |
 | `packages/services/service-settings/src/settings-service.ts` | `insert` | `object` | undecidable | context, elevation undecidable | 1 |
 | `packages/services/service-settings/src/settings-service.ts` | `update` | `object` | undecidable | context, elevation undecidable | 1 |

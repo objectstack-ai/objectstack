@@ -226,8 +226,8 @@ cannot read, and they are neither in nor out.
 | write call sites on the application surface | **232** |
 | …whose object name is statically decidable | 161 |
 | …whose object name is chosen at run time | 71 |
-| …against an object with tenancy ENABLED | 147 |
-| …against an object that declares tenancy off | 14 |
+| …against an object with tenancy ENABLED | 160 |
+| …against an object that declares tenancy off | 1 |
 | threading a tenant context | 172 |
 | PROVABLY carrying none (options read, no context key) | **8** |
 | …of those, against a decidably tenancy-enabled object | **2** |
@@ -297,7 +297,7 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-19 at `fc628bc39`.
+Measured on 2026-10-19 at `e09294fe1`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
