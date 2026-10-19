@@ -33,22 +33,6 @@ import { ObjectSchema, Field } from '@objectstack/spec/data';
  * engine fails CLOSED without this store, it is registered by
  * `PlatformObjectsPlugin` (platform infrastructure), not by service-settings.
  *
- * ## Deployment-level (ADR-0131 D7, ruling record 6257510973 · Q4 A)
- *
- * A secret is owned by the row that references it — `sys_setting` /
- * `sys_platform_setting`, the webhook, the flow credential, the field's record,
- * the datasource — never by an organization of its own. Every read is by id,
- * under privilege. So nothing stamps or scopes this table by organization.
- *
- * In the 18.x expand step the 18.0 `organization_id` column stays DECLARED
- * (below), nullable and unread, and `tenancy: { enabled: false }` takes the
- * object out of the tenancy machinery. Declaring the column is what keeps an
- * 18.0 database booting: with `systemFields: { tenant: false }` and no
- * declared column, the v18 boot guard reads the physical column an 18.0
- * install left here as the v17 shape and refuses the boot, and the drift report
- * offers to drop it. The upgrade ceremony drops the column; then this object
- * declares `systemFields: { tenant: false }` like the rest of D7's family.
- *
  * @namespace sys
  */
 export const SysSecret = ObjectSchema.create({
@@ -67,9 +51,6 @@ export const SysSecret = ObjectSchema.create({
   // opt-in (`isSystem: true`), which the middleware short-circuits. A
   // principal-less read is refused (ADR-0096 D5).
   access: { default: 'private' },
-  // [ADR-0131 D7] Deployment-level: no tenant scope, no stamp. See the header
-  // for why the 18.0 column is still declared below.
-  tenancy: { enabled: false },
   description:
     'Cipher store written by three privileged producers (see managedBy); each holds its handle in its own column. Never holds plaintext.',
   highlightFields: ['namespace', 'key', 'kms_key_id', 'version', 'rotated_at'],
@@ -172,23 +153,6 @@ export const SysSecret = ObjectSchema.create({
       readonly: true,
       description:
         'Provider-encoded ciphertext blob (base64 / JSON). Implementation-defined; only the matching ICryptoProvider can read it.',
-    }),
-
-    /**
-     * The 18.0 organization column, kept until the upgrade ceremony drops it.
-     * No writer sets it and no reader reads it; a row an 18.0 install wrote
-     * still holds its organization here, and it opens by id like any other.
-     * Same physical shape as the column 18.0 injected (a 255-wide string), so
-     * the schema sync sees no drift on an 18.0 table.
-     */
-    organization_id: Field.text({
-      label: 'Organization (18.0, retired)',
-      required: false,
-      readonly: true,
-      hidden: true,
-      maxLength: 255,
-      description:
-        'Retired: the organization an 18.0 install stamped on this row. Unread and never written; the upgrade ceremony drops the column.',
     }),
   },
 

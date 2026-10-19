@@ -3386,10 +3386,6 @@ export const jaJPObjects: NonNullable<TranslationData['objects']> = {
       ciphertext: {
         label: "暗号文",
         help: "プロバイダーエンコードされた暗号文 blob（base64 / JSON）。実装定義のため、対応する ICryptoProvider のみが読み取り可能。"
-      },
-      organization_id: {
-        label: "組織（18.0、廃止済み）",
-        help: "廃止済み：18.0 のインストールがこの行に記録した組織。読み取りも書き込みも行われません。アップグレード手順でこの列は削除されます。"
       }
     },
     _views: {

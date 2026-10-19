@@ -3386,10 +3386,6 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
       ciphertext: {
         label: "密文",
         help: "提供方编码后的密文数据（base64 / JSON）。实现定义；仅匹配的 ICryptoProvider 可读取。"
-      },
-      organization_id: {
-        label: "组织（18.0，已退役）",
-        help: "已退役：18.0 安装在此行上记录的组织。不再读取，也不再写入；升级仪式会删除该列。"
       }
     },
     _views: {

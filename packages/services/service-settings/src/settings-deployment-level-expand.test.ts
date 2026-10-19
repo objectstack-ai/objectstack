@@ -2,27 +2,26 @@
 
 /**
  * [ADR-0131 D7 · ruling record 6257510973, Q4 A] The 18.x expand step for the
- * settings producer: `sys_secret` is deployment-level, and the settings audit
- * trail's global rung is `sys_platform_setting_audit`.
+ * settings audit trail: its global rung is the deployment-level
+ * `sys_platform_setting_audit`.
  *
  * Pinned over a real `ObjectQL` engine and the real platform objects, under the
  * `single` posture with one organization — the posture an 18.0 install runs —
- * so the engine's ADR-0131 D9 stamp is live in this rig. The control below
- * shows it stamping an organization-less system insert into
- * `sys_setting_audit`; the same engine leaves a `sys_secret` row unstamped, so
- * the absence is the object's declaration, not a rig that stamps nothing.
+ * so the engine's ADR-0131 D9 stamp is live in this rig: the control shows it
+ * stamping an organization-less system insert into `sys_setting_audit`, so an
+ * unstamped sibling row is the sibling's shape, not a rig that stamps nothing.
  *
  * Two halves, as the 18.x line's expand rule asks:
  *
- *  - **The new write shape.** A secret names no organization, at any rung. A
- *    global-rung audit row goes to `sys_platform_setting_audit`, with no
- *    organization; a tenant-rung row stays in `sys_setting_audit`, stamped.
- *  - **The dual read, on 18.0-shaped rows.** An 18.0 install stamped its
- *    secrets with the Default Organization and wrote its global-rung audit
- *    rows into `sys_setting_audit`. Those rows are read as they are: the
- *    stamped secret opens by id, and the 18.0 global audit row is still served
- *    beside the new one. Nothing re-stamps, clears or moves them — that is the
- *    upgrade ceremony's.
+ *  - **The new write shape.** A global-rung audit row goes to
+ *    `sys_platform_setting_audit`, with no organization; a tenant-rung row
+ *    stays in `sys_setting_audit`, stamped.
+ *  - **The dual read, on 18.0-shaped rows.** An 18.0 install wrote its
+ *    global-rung audit rows into `sys_setting_audit`, stamped with the Default
+ *    Organization. The global rung's history is selected by SCOPE in that
+ *    table (never by a NULL organization, which those rows do not have) beside
+ *    the sibling; nothing re-stamps or moves them — that is the upgrade
+ *    ceremony's.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -169,7 +168,7 @@ async function boot() {
   return { engine, svc, cryptoProvider, rows, seed, writesTo };
 }
 
-describe('[18.x expand · Q4 A] the new write shape, under single with the Default Organization', () => {
+describe('[18.x expand · Q4 A] the settings audit trail\'s new write shape, under single with the Default Organization', () => {
   it('control: the rig stamps an organization-less system insert into a tenant-column object', async () => {
     const { engine, rows } = await boot();
     await engine.insert('sys_setting_audit', {
@@ -179,16 +178,9 @@ describe('[18.x expand · Q4 A] the new write shape, under single with the Defau
     expect(rows('sys_setting_audit')).toEqual([expect.objectContaining({ organization_id: DEFAULT_ORG })]);
   });
 
-  it('a tenant value: the secret names no organization; the audit row is stamped in sys_setting_audit', async () => {
-    const { svc, rows, writesTo } = await boot();
+  it('a tenant value: the audit row is stamped in sys_setting_audit, and the sibling takes nothing', async () => {
+    const { svc, rows } = await boot();
     await svc.setMany('tenant_vault', { token: 's3cret' }, { tenantId: DEFAULT_ORG, userId: undefined });
-
-    const [secretWrite] = writesTo('sys_secret');
-    expect(secretWrite?.data).toMatchObject({ namespace: 'tenant_vault', key: 'token' });
-    expect(secretWrite?.data).not.toHaveProperty('organization_id');
-    expect(secretWrite?.options?.tenantId).toBeUndefined();
-    expect(rows('sys_secret')).toHaveLength(1);
-    expect(rows('sys_secret')[0]!.organization_id ?? null).toBeNull();
 
     expect(rows('sys_setting_audit')).toEqual([
       expect.objectContaining({ namespace: 'tenant_vault', key: 'token', scope: 'tenant', organization_id: DEFAULT_ORG }),
@@ -196,13 +188,9 @@ describe('[18.x expand · Q4 A] the new write shape, under single with the Defau
     expect(rows('sys_platform_setting_audit')).toEqual([]);
   });
 
-  it('a global value: the secret names no organization; the audit row goes to sys_platform_setting_audit, unstamped', async () => {
+  it('a global value: the audit row goes to sys_platform_setting_audit, unstamped, and sys_setting_audit takes nothing', async () => {
     const { svc, rows, writesTo } = await boot();
     await svc.setMany('relay_probe', { api_key: 're_123' }, { tenantId: DEFAULT_ORG, userId: undefined });
-
-    expect(rows('sys_secret')).toHaveLength(1);
-    expect(rows('sys_secret')[0]!.organization_id ?? null).toBeNull();
-    expect(writesTo('sys_secret')[0]?.options?.tenantId).toBeUndefined();
 
     const platformAudit = rows('sys_platform_setting_audit');
     expect(platformAudit).toEqual([
@@ -215,29 +203,6 @@ describe('[18.x expand · Q4 A] the new write shape, under single with the Defau
 });
 
 describe('[18.x expand · Q4 A] the dual read, on 18.0-shaped rows', () => {
-  it('an 18.0 secret stamped with the Default Organization opens by id, and keeps its stamp', async () => {
-    const { svc, cryptoProvider, seed, rows } = await boot();
-    // The 18.0 shape: the ciphertext row carries the organization its
-    // `sys_setting` row did, and the setting holds the handle.
-    const handle = await cryptoProvider.encrypt('legacy-token', {
-      scope: 'settings', namespace: 'tenant_vault', key: 'token', tenantId: DEFAULT_ORG,
-    });
-    seed('sys_secret', {
-      id: handle.id, organization_id: DEFAULT_ORG, namespace: 'tenant_vault', key: 'token',
-      kms_key_id: handle.kmsKeyId, alg: handle.alg, version: handle.version, ciphertext: handle.ciphertext,
-    });
-    seed('sys_setting', {
-      id: 'set_18', organization_id: DEFAULT_ORG, namespace: 'tenant_vault', key: 'token', scope: 'tenant',
-      user_id: null, value: null, value_enc: handle.id, encrypted: true, locked: false,
-    });
-
-    const got = await svc.get('tenant_vault', 'token', { tenantId: DEFAULT_ORG, userId: undefined });
-    expect(got.value).toBe('legacy-token');
-    expect(got.source).toBe('tenant');
-    // Read, not rewritten: the 18.0 stamp is the ceremony's to drop.
-    expect(rows('sys_secret')).toEqual([expect.objectContaining({ id: handle.id, organization_id: DEFAULT_ORG })]);
-  });
-
   it('the global rung\'s history reads both tables: the 18.0 row in sys_setting_audit and the new one in the sibling', async () => {
     const { engine, svc, seed } = await boot();
     // The 18.0 shape: a global-rung audit row in sys_setting_audit, stamped
