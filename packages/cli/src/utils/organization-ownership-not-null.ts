@@ -1,0 +1,69 @@
+// Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
+
+import type { NotNullColumn, NotNullOutcome } from './organization-ownership-apply.js';
+import type { SqlDriverLike } from './schema-migrate.js';
+
+type DriftEntry = Parameters<SqlDriverLike['applyMigrationEntries']>[0][number];
+
+export interface NotNullTarget {
+  /** The driver whose database holds `table` (the primary, or the `telemetry` sibling). */
+  driverFor(table: string): Pick<SqlDriverLike, 'applyMigrationEntries' | 'driftApplyLimit'> | undefined;
+  /** Whether the booted composition declares an object for this table (a rotation shard judged by its base). */
+  isDeclared(table: string): boolean;
+}
+
+/**
+ * The ceremony's `notNull` port (18.x step 5d; ruling record 6269955919 on the
+ * v18 epic, ② A): each tenant column goes NOT NULL through the driver's own
+ * drift apply door — the SQLite table rebuild, or `ALTER COLUMN … SET NOT
+ * NULL` — never a hand `ALTER`.
+ *
+ * The differ proposes no entry for it (the column's nullability is the
+ * ceremony's, not a declaration's), so the entry is the ceremony's own
+ * `tighten_not_null`, handed to the one driver that holds the table. A table
+ * the composition does not declare is not rebuilt (`not-declared`); a
+ * transport whose apply door cannot perform the op (the Turso remote face,
+ * `driftApplyLimit`) is `unsupported`, never attempted.
+ */
+export async function applyNotNullThroughDrift(target: NotNullTarget, columns: readonly NotNullColumn[]): Promise<NotNullOutcome[]> {
+  const outcomes: NotNullOutcome[] = [];
+  for (const { table, column } of columns) {
+    if (!target.isDeclared(table)) {
+      outcomes.push({ table, column, outcome: 'not-declared' });
+      continue;
+    }
+    const driver = target.driverFor(table);
+    if (!driver) {
+      outcomes.push({ table, column, outcome: 'failed', detail: 'no driver holds the table' });
+      continue;
+    }
+    const limit = driver.driftApplyLimit?.('tighten_not_null') ?? null;
+    if (limit) {
+      outcomes.push({ table, column, outcome: 'unsupported', detail: limit });
+      continue;
+    }
+    const entry = {
+      kind: 'nullability_mismatch',
+      remoteName: table,
+      table,
+      column,
+      expected: 'NOT NULL',
+      actual: 'NULL',
+      severity: 'error',
+      category: 'destructive',
+      op: { type: 'tighten_not_null', table, column },
+      message: `${table}.${column}: NOT NULL, applied by the organization-ownership ceremony (ADR-0131 D10, 8e).`,
+    } as unknown as DriftEntry;
+    try {
+      const { applied, skipped } = await driver.applyMigrationEntries([entry], { allowDestructive: true });
+      outcomes.push(
+        applied.length === 1
+          ? { table, column, outcome: 'applied' }
+          : { table, column, outcome: 'failed', detail: `the drift apply door did not apply it (${skipped.length} skipped)` },
+      );
+    } catch (error) {
+      outcomes.push({ table, column, outcome: 'failed', detail: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return outcomes;
+}

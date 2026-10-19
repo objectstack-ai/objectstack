@@ -53,7 +53,7 @@ vi.mock('../../utils/schema-migrate.js', async (importOriginal) => {
   };
 });
 
-type Command = (typeof import('./organization-ownership.js'))['OrganizationOwnershipCeremony'];
+type Command = (typeof import('./organization-ownership.js'))['default'];
 let MigrateOrganizationOwnership: Command;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -182,7 +182,7 @@ const apply = (prepared: Prepared, out: string): Promise<Outcome> =>
   ]);
 
 beforeAll(async () => {
-  ({ OrganizationOwnershipCeremony: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
+  ({ default: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
   for (const key of [...OVERRIDING_ENV, 'NODE_ENV', 'OS_SECRET_KEY'] as const) savedEnv[key] = process.env[key];
   for (const key of OVERRIDING_ENV) delete process.env[key];
   // The deployed posture: no telemetry sibling, and the crypto provider's key.

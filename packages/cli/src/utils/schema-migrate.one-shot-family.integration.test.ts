@@ -64,7 +64,7 @@ import MigrateDuplicates from '../commands/migrate/duplicates.js';
 import MigrateFilesToReferences from '../commands/migrate/files-to-references.js';
 import MigrateMeta from '../commands/migrate/meta.js';
 import MigrateMultiValueColumns from '../commands/migrate/multi-value-columns.js';
-import { OrganizationOwnershipCeremony as MigrateOrganizationOwnership } from '../commands/migrate/organization-ownership.js';
+import MigrateOrganizationOwnership from '../commands/migrate/organization-ownership.js';
 import MigratePlan from '../commands/migrate/plan.js';
 import MigrateRecordedBy from '../commands/migrate/recorded-by.js';
 import MigrateResume from '../commands/migrate/resume.js';
