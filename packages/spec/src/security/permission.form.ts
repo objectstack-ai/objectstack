@@ -49,7 +49,7 @@ export const permissionForm = defineForm({
         //    (`judgePermissionSetOwnerBinding`).
         { field: 'description', type: 'textarea', colSpan: 2, helpText: 'Human-readable description shown in Setup.' },
         { field: 'isDefault', type: 'boolean', colSpan: 1, helpText: 'Gives this set to everyone who signs in, through the built-in everyone position. A set the app itself declares is granted at startup; a set from an installed package becomes a suggestion an admin confirms in Setup. A set with high-privilege permissions is never granted this way. Default false.' },
-        { field: 'packageId', type: 'text', colSpan: 2, helpText: 'The package that ships this set; a value naming any other package is refused. Leave empty for a set created in this environment.' },
+        { field: 'packageId', type: 'text', colSpan: 2, helpText: 'The package that ships this set; a value naming any other package is refused. Leave empty for a set authored in this system.' },
       ],
     },
     {

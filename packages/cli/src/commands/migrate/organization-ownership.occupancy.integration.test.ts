@@ -40,13 +40,13 @@ vi.mock('../../utils/schema-migrate.js', async (importOriginal) => ({
   bootSchemaStack: boot,
 }));
 
-type Command = (typeof import('./organization-ownership.js'))['default'];
+type Command = (typeof import('./organization-ownership.js'))['OrganizationOwnershipCeremony'];
 let MigrateOrganizationOwnership: Command;
 
 // The command's module graph is large, and oclif reads the package's config on
 // the first run: both are paid outside the case timeout.
 beforeAll(async () => {
-  ({ default: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
+  ({ OrganizationOwnershipCeremony: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
 }, 60_000);
 
 const CASE_TIMEOUT_MS = 60_000;

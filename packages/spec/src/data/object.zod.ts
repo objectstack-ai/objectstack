@@ -2973,35 +2973,43 @@ const ObjectSchemaBase = strictObject(
    * The object's default row scope (#24164 ruling E′, item 1): one row-level
    * security policy, the permission-set `rowLevelSecurity` entry shape without
    * `object` ({@link DefaultRowScopeSchema}). Layer 1 silence on an object, no
-   * held set carrying a row policy for it, then means this policy rather than
-   * no filter.
+   * held set carrying a row policy for it, means this policy rather than no
+   * filter.
    *
-   * The describe states the CONTRACT, not shipped behaviour (Prime Directive
-   * #10, the claim as narrow as the enforcement): its one reader is to be
-   * plugin-security's `collectRLSPolicies`, the collection every read, write
-   * and explain door uses (#24340), and until that lands no server reads the
-   * key; its writers are to be the platform identity objects (#24341), and no
-   * object declares it yet. The liveness row is `planned` with an author
-   * warning until the reader lands.
+   * Its one reader is plugin-security's `collectRLSPolicies` (#24340, ruling
+   * item 2), the collection every read, write and explain door composes from.
+   * When the held sets' collection for this object and the operation is empty
+   * — the collection's own emptiness, so a held `'*'` policy counts and a held
+   * policy for another operation, switched off or outside the caller's
+   * positions does not — the reader collects this policy in its place, for the
+   * declaring object, and judges it with the same applicability filter and the
+   * same compiler as a held policy. An authored set policy is used as
+   * authored, with the default not added; a superuser-bypass principal never
+   * reaches the collection (the bypass is decided before it); an object with no
+   * default collects exactly what it collected before.
    *
-   * The ruling's semantics, which the reader is to meet: when no held set
-   * carries a row policy for this object, the default applies; an authored set
-   * policy is used as authored; a superuser-bypass principal is untouched (the
-   * bypass is decided before the collection); an object with no default keeps
-   * today's behaviour.
+   * A `using` the row-filter compiler cannot lower is dropped with the
+   * compiler's WARN and fails closed to zero rows, exactly as an authored
+   * policy's does; the authoring lint (`RLS_PREDICATE_UNENFORCEABLE`) walks
+   * permission sets only and does not judge this key. Explain names an applied
+   * default as the object's own declaration, with its `label` and
+   * `description`. The writers are to be the platform identity objects
+   * (#24341); no object in this tree declares the key yet.
    */
   defaultRowScope: DefaultRowScopeSchema.optional().describe(
     "The object's default row scope: one row-level security policy, written like a permission set's "
     + '`rowLevelSecurity` entry without `object` (the declaring object is implied; writing `object` is '
-    + 'refused). The contract the security plugin\'s row-policy collection, the one step every read, write '
-    + 'and explain passes through, is to meet once it reads the key: when no permission set the caller '
-    + 'holds carries a row policy for this object, this policy is to apply; a policy an authored set '
-    + 'carries for the object is to be used as authored, with this default not added to it; a principal '
-    + 'whose superuser bypass skips row policies is to be unaffected; an object that declares none keeps '
-    + 'the behaviour it has without the key. The platform\'s identity objects are to declare it for their '
-    + 'own tables. Not applied yet: no server reads this key in this release, so declaring it filters no '
-    + 'rows. Until the collection applies it, restrict rows with a permission set\'s `rowLevelSecurity` '
-    + 'policy.',
+    + 'refused). The security plugin\'s row-policy collection, the one step every read, write and explain '
+    + 'passes through, applies it when no permission set the caller holds carries a row policy for this '
+    + 'object and the operation: a held policy for every object (`\'*\'`) counts, while one for another '
+    + 'operation, switched off, or outside the caller\'s positions does not. A policy an authored set carries '
+    + 'for the object is used as authored, with this default not added to it; a principal whose superuser '
+    + 'bypass skips row policies is unaffected; an object that declares none keeps the behaviour it has '
+    + 'without the key. The default is judged like a held policy: its `operation`, `positions` and `enabled` '
+    + 'decide where it applies, and a `using` the row-filter compiler cannot lower makes every read it '
+    + 'governs return no rows, with one warning in the server log. Authoring checks do not judge this '
+    + 'predicate, so keep it inside the lowerable subset. Explain names an applied default as the object\'s '
+    + 'own, not a permission set\'s.',
   ),
 
   /**
@@ -3983,8 +3991,11 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
       '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes` only. ' +
-      "Declare a top-level action with `objectName: '<target>'`; `defineStack()` attaches " +
-      'it to the object.',
+      "Declare a top-level action with `objectName: '<target>'` in the same stack: " +
+      '`defineStack()` accepts it because the stack extends the target, keeps it in the ' +
+      'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +
+      'object wherever the object is served, whichever package registers first. A target no ' +
+      'loaded package registers fails the boot.',
     hooks:
       '`hooks` cannot be contributed through an object extension — declare a top-level ' +
       'hook bound to the target object instead.',
