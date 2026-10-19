@@ -20,6 +20,7 @@ import { AutoEnqueuer, type AutoEnqueuerOptions } from './auto-enqueuer.js';
 type SessionRead = Awaited<ReturnType<NonNullable<AuthSessionApi['getSession']>>>;
 import { SysWebhook } from './sys-webhook.object.js';
 import { DeclaredWebhookSource } from './declared-webhooks.js';
+import { normalizeTenancyPosture, postureEnforcesWall } from '@objectstack/spec/security';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { createWebhookRedeliverGuard } from './redeliver-guard.js';
 import { bindWebhookProvenanceStamp, unbindWebhookProvenanceStamp } from './webhook-provenance.js';
@@ -383,7 +384,12 @@ export class WebhookOutboxPlugin implements Plugin {
             (input) => messaging.enqueueHttp(input),
             {
                 ...enqOpts,
-                ...(this.declaredSource ? { declaredWebhooks: this.declaredSource } : {}),
+                ...(this.declaredSource
+                    ? {
+                        declaredWebhooks: this.declaredSource,
+                        declaredWebhooksDeploymentWide: () => this.postureBuildsNoWall(ctx),
+                    }
+                    : {}),
                 logger: ctx.logger,
             },
         );
@@ -471,6 +477,23 @@ export class WebhookOutboxPlugin implements Plugin {
         );
         ctx.logger.debug?.('[webhook-outbox] redeliver guard installed for source=webhook');
         return true;
+    }
+
+    /**
+     * [ADR-0131 D9] Whether the deployment's tenancy posture builds no
+     * organization wall — the `tenancy` service's posture, read as the sharing
+     * plugin reads it for its declared rules: an absent or unreadable service
+     * is read as walled, never as open.
+     */
+    private postureBuildsNoWall(ctx: PluginContext): boolean {
+        try {
+            const probe = ctx.getService<{ posture?: unknown; isolationActive?: boolean }>('tenancy');
+            const posture = normalizeTenancyPosture(probe?.posture);
+            if (posture) return !postureEnforcesWall(posture);
+            return probe?.isolationActive === false;
+        } catch {
+            return false;
+        }
     }
 
     private tryGetService<T>(ctx: PluginContext, names: string[]): T | undefined {

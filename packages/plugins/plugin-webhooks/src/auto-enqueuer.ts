@@ -155,6 +155,20 @@ interface CachedSubscription {
      */
     organizationId?: string;
     /**
+     * [ADR-0131 D2/D9] Set on a DECLARED webhook when the deployment's posture
+     * builds no organization wall (`single`). A declared webhook is the
+     * application's, not one organization's, so it has no `organizationId` of
+     * its own — and under `single` every record event is stamped with the
+     * Default Organization (D9), so the org-less refusal below would make it
+     * receive nothing at all. Deployment-wide, it receives every organization's
+     * events and each delivery row is stamped with the EVENT's organization:
+     * exactly what the 18.0 seeded copy did, whose row the boot stamped with
+     * that same Default Organization. Never set under a wall, where the
+     * ruling's org-less refusal ({@link AutoEnqueuer.admitsOrganization})
+     * stands.
+     */
+    deploymentWide?: boolean;
+    /**
      * [#8069] Set when a credential this subscription needs could not be
      * recovered. The subscription stays CACHED — that is the change — but every
      * event it matches is written to `sys_http_delivery` as a parked `dead` row
@@ -191,6 +205,14 @@ export interface AutoEnqueuerOptions {
      * declared name is read. Absent: rows only.
      */
     declaredWebhooks?: DeclaredWebhookReader;
+
+    /**
+     * Whether the deployment's tenancy posture builds no organization wall,
+     * read on every refresh. True makes each declared webhook deployment-wide
+     * (see `CachedSubscription.deploymentWide`); absent or false keeps it
+     * org-less, refused for an organization-walled event.
+     */
+    declaredWebhooksDeploymentWide?: () => boolean;
 
     logger?: OptionalLogger;
 }
@@ -296,6 +318,7 @@ export class AutoEnqueuer {
     private readonly organizationRefusalReported = new Set<string>();
     /** [ADR-0131 D2/D6] The declared-webhook reader, when the host binds one. */
     private readonly declared?: DeclaredWebhookReader;
+    private readonly declaredDeploymentWide?: () => boolean;
     /** Self-heal subscription on the activation ledger — bound only with {@link declared}. */
     private subIdLedger: string | undefined;
     /**
@@ -315,6 +338,7 @@ export class AutoEnqueuer {
         this.refreshIntervalMs = opts.refreshIntervalMs ?? 60_000;
         this.logger = opts.logger;
         this.declared = opts.declaredWebhooks;
+        this.declaredDeploymentWide = opts.declaredWebhooksDeploymentWide;
     }
 
     /**
@@ -554,6 +578,12 @@ export class AutoEnqueuer {
             else heldByRow.add(String(row.name));
         }
 
+        let deploymentWide = false;
+        try {
+            deploymentWide = this.declaredDeploymentWide?.() === true;
+        } catch {
+            /* an unreadable posture is not an open one: org-less, as under a wall */
+        }
         const subscriptions: CachedSubscription[] = [];
         for (const d of declared) {
             const name = d.webhook.name;
@@ -564,7 +594,9 @@ export class AutoEnqueuer {
             // `active` is the declared `isActive`, or the activation ledger's switch over it.
             if (!d.active) continue;
             const sub = this.projectDeclared(d);
-            if (sub) subscriptions.push(sub);
+            if (!sub) continue;
+            if (deploymentWide) sub.deploymentWide = true;
+            subscriptions.push(sub);
         }
         return { subscriptions, mirrorIds };
     }
@@ -1167,8 +1199,9 @@ export class AutoEnqueuer {
                 // organization — the one honest tenant in scope on this
                 // fire-and-forget path (no request context exists here).
                 // Absent for an org-less subscription; the row then lands
-                // NULL, the global-row shape.
-                organizationId: sub.organizationId,
+                // NULL, the global-row shape. A deployment-wide declared
+                // webhook takes the event's organization instead.
+                organizationId: sub.deploymentWide ? organization.organizationId : sub.organizationId,
                 // [#3946] Envelope keys are written LAST so the event payload
                 // cannot rewrite them. Behaviour-neutral for the engine's own
                 // publishers — since #4626 a `data.record.*` payload is a
@@ -1315,7 +1348,7 @@ export class AutoEnqueuer {
                 timeoutMs: sub.timeoutMs,
                 // [#13546] See the per-record path — the subscription's own
                 // organization, absent for an org-less subscription.
-                organizationId: sub.organizationId,
+                organizationId: sub.deploymentWide ? organization.organizationId : sub.organizationId,
                 // [#3946] Envelope keys last so the payload cannot rewrite them.
                 payload: {
                     ...payload,
@@ -1394,6 +1427,9 @@ export class AutoEnqueuer {
         eventOrganizationId: string | undefined,
         event: RealtimeEventPayload,
     ): boolean {
+        // [ADR-0131 D2/D9] A declared webhook on a deployment with no wall
+        // belongs to the deployment, so every organization's event is its own.
+        if (sub.deploymentWide) return true;
         // org A × org A, and none × absent.
         if (sub.organizationId === eventOrganizationId) return true;
         // org A × org B — another organization's subscription is simply not a

@@ -206,7 +206,7 @@ async function flush() {
     await new Promise((r) => setTimeout(r, 0));
 }
 
-async function startEnqueuer(engine: FakeEngine, logger?: any) {
+async function startEnqueuer(engine: FakeEngine, logger?: any, deploymentWide?: boolean) {
     const realtime = new FakeRealtime();
     const calls: any[] = [];
     const enqueue: HttpEnqueueFn = async (input) => {
@@ -217,6 +217,7 @@ async function startEnqueuer(engine: FakeEngine, logger?: any) {
     const enqueuer = new AutoEnqueuer(engine as any, realtime as any, enqueue, {
         refreshIntervalMs: 0,
         declaredWebhooks,
+        ...(deploymentWide !== undefined ? { declaredWebhooksDeploymentWide: () => deploymentWide } : {}),
         ...(logger ? { logger } : {}),
     });
     await enqueuer.start();
@@ -304,6 +305,78 @@ describe('declared webhooks — a fresh install dispatches from the registry', (
         expect(reports).toHaveLength(1);
         expect(reports[0][1]).toMatchObject({ name: 'bad' });
         await enqueuer.stop();
+    });
+});
+
+describe('declared webhooks — the organization dimension follows the posture (ADR-0131 D2/D9)', () => {
+    const orgEvent = (organizationId: string) => ({
+        ...taskCreated(),
+        payload: { recordId: 't-1', organizationId },
+    });
+
+    it('with no wall (`single`) a declared webhook receives an organization-stamped event, its delivery stamped with that organization', async () => {
+        // Under `single` every record carries the Default Organization (D9), and
+        // the 18.0 seeded copy carried it too, so it delivered. The declaration
+        // has no organization of its own; deployment-wide, it delivers as well.
+        const engine = new FakeEngine({ declared: { webhook: [declaredWebhook()] } });
+        const { enqueuer, realtime, calls } = await startEnqueuer(engine, undefined, true);
+        await realtime.publish(orgEvent('org_default'));
+        await flush();
+        expect(calls).toHaveLength(1);
+        expect(calls[0]).toMatchObject({ refId: declaredWebhookRefId('task_changed'), organizationId: 'org_default' });
+        await enqueuer.stop();
+    });
+
+    it('under a wall a declared webhook stays org-less: an organization-walled event is refused, said once', async () => {
+        const warn = vi.fn();
+        const engine = new FakeEngine({ declared: { webhook: [declaredWebhook()] } });
+        const { enqueuer, realtime, calls } = await startEnqueuer(engine, { warn, debug() {} }, false);
+        await realtime.publish(orgEvent('org_a'));
+        await realtime.publish(orgEvent('org_a'));
+        await flush();
+        expect(calls).toEqual([]);
+        expect(warn.mock.calls.filter(([m]) => String(m).includes('belongs to NO organization'))).toHaveLength(1);
+        await enqueuer.stop();
+    });
+
+    it('the plugin reads the posture from the tenancy service: `single` is deployment-wide, an absent service is walled', async () => {
+        const boot = async (tenancy?: unknown) => {
+            const engine = new FakeEngine({ declared: { webhook: [declaredWebhook()] } });
+            const realtime = new FakeRealtime();
+            const calls: any[] = [];
+            const services: Record<string, unknown> = {
+                objectql: engine,
+                manifest: { register() {} },
+                realtime,
+                messaging: {
+                    isHttpDeliveryReady: () => true,
+                    enqueueHttp: async (input: any) => { calls.push(input); return 'd'; },
+                    redeliverHttp: async () => ({ id: 'd', status: 'pending' }),
+                    registerRedeliverGuard() {},
+                },
+                ...(tenancy ? { tenancy } : {}),
+            };
+            const hooks: Array<() => Promise<void>> = [];
+            const ctx: any = {
+                logger: { info() {}, warn() {}, error() {}, debug() {} },
+                getService: (n: string) => {
+                    if (!(n in services)) throw new Error(`no ${n}`);
+                    return services[n];
+                },
+                registerService: (n: string, svc: unknown) => { services[n] = svc; },
+                hook: (event: string, fn: () => Promise<void>) => { if (event === 'kernel:ready') hooks.push(fn); },
+            };
+            const plugin = new WebhookOutboxPlugin({ autoEnqueue: { refreshIntervalMs: 0 } });
+            await plugin.init(ctx);
+            for (const fn of hooks) await fn();
+            await realtime.publish(orgEvent('org_default'));
+            await flush();
+            await plugin.destroy();
+            return calls;
+        };
+        expect(await boot({ posture: 'single' })).toHaveLength(1);
+        expect(await boot({ posture: 'isolated' })).toEqual([]);
+        expect(await boot()).toEqual([]);
     });
 });
 
