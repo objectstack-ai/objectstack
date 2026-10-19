@@ -121,12 +121,14 @@ export const SysIdentityEmail = ObjectSchema.create({
       label: 'Body (text)',
       required: false,
       searchable: true,
+      requiredPermissions: ['manage_platform_settings'],
       group: 'Content',
     }),
 
     body_html: Field.textarea({
       label: 'Body (HTML)',
       required: false,
+      requiredPermissions: ['manage_platform_settings'],
       group: 'Content',
     }),
 
