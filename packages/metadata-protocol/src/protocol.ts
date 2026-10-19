@@ -5685,12 +5685,22 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
 
     const issues: Array<{ code: string; field?: string; message: string }> = [];
 
+    // [#24411] Every finding below names STORED data a save makes unreachable,
+    // so a field with no stored column (a `formula`, computed on read —
+    // ADR-0079 addendum, item 9) loses nothing when it is removed or retyped.
+    // "Stored" is the spec's storage predicate — the one the sortability
+    // projection reads — judged from the field's own declaration, ⛔ never a
+    // type list kept here. A false finding trains callers to send `force=true`
+    // by reflex, which silences the true one on a stored field.
+    const isStored = (field: SearchFieldMeta | undefined): boolean => !isVirtualSearchField(field);
+
     // Removed fields — silently dropping a column is a data-loss event.
     for (const fname of Object.keys(prevFields)) {
         // Skip system fields — those are managed by applySystemFields and
         // re-injected on every registerObject call; they will look "removed"
         // in any user-supplied overlay.
         if (prevFields[fname]?.system) continue;
+        if (!isStored(prevFields[fname])) continue;
         if (!(fname in nextFields)) {
             issues.push({
                 code: 'field_removed',
@@ -5714,7 +5724,9 @@ function detectDestructiveObjectChanges(prev: any, next: any): Array<{
         if (!prevField) continue; // brand-new field — non-destructive
         const prevType = prevField.type;
         const nextType = nextField.type;
-        if (prevType && nextType && prevType !== nextType) {
+        // Judged by what the STORED side loses: an unstored previous field held
+        // no values, so retyping it into anything starts from an empty column.
+        if (prevType && nextType && prevType !== nextType && isStored(prevField)) {
             const compatible = TYPE_COMPATIBILITY[prevType]?.has(nextType);
             if (!compatible) {
                 issues.push({
