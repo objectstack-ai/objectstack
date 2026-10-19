@@ -9,7 +9,7 @@
       "title": "Every user-initiated write answers visibly — success names what changed, a refusal says why, and a no-op claims nothing",
       "since": "v17.7",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -25,7 +25,7 @@
         ],
         "knownGaps": [
           "FIXED, regression row, expected PASS (objectui#11817): Setup → Users → Invite User toasts 'Invitation sent to EMAIL' — the declared successMessage 'Invitation sent to ${result.email}' (packages/platform-objects/src/identity/sys-user.object.ts#invite_user) interpolating the invitee from the action result — while the sys_invitation and sys_email rows are written (QA run #23163 at objectui 1fb1ced36243; pin ObjectView.inviteFeedback-11817.test.tsx)",
-          "FIXED, regression rows, expected PASS (QA run #23953 at objectui daeb77fc84dd): Studio Publish gives a success confirmation (objectui#11807); the task grid's 'Save All' toasts '1 row saved' (objectui#12303 fixed for this row); the approvals drawer's Approve toasts the framework-declared successMessage 'Approved \"${result.request.record_title}\"' (packages/plugins/plugin-approvals/src/sys-approval-request.object.ts), e.g. Approved \"EXP-2001\" (#23157, closed). Studio's 'Discard draft' now gives feedback too, but the toast and its confirm name the raw type/name — 'Draft discarded: object/NAME' (objectui ResourceEditPage.tsx, key engine.edit.draftDiscarded, unchanged at f8267df93aba) — while the item has a label: expected FAIL on acceptance[1] for that row, filed as objectstack-ai/objectui#12690 and not to be re-filed",
+          "FIXED, regression rows, expected PASS (QA run #23953 at objectui daeb77fc84dd): Studio Publish gives a success confirmation (objectui#11807); the task grid's 'Save All' toasts '1 row saved' (objectui#12303 fixed for this row); the approvals drawer's Approve toasts the framework-declared successMessage 'Approved \"${result.request.record_title}\"' (packages/plugins/plugin-approvals/src/sys-approval-request.object.ts), e.g. Approved \"EXP-2001\" (#23157, closed). Studio's 'Discard draft' toast and its confirm now name the item by its LABEL — QA run #24570 at objectui 4016370a read 'Draft discarded: QA Widget' — a regression row, expected PASS (objectstack-ai/objectui#12690, closed by objectui PR #12830, 0f42aaf8, in the console pin 4016370a and on objectui main; ResourceEditPage.tsx falls back to type/name only for an item with no label)",
           "FIXED, regression row, expected PASS (objectui#11816): leaving an inline editor with no value change no longer reads '1 row modified · Save All (1)' (QA run #23163 at objectui 1fb1ced36243; pin data-table-noop-edit-11816.test.tsx) — negative[1]",
           "Undo is scored only where a surface offers it, and on stock NONE does: at objectui 1fb1ced36243 only an action declaring `undoable` pushes an Undo op (inline and form edits push none), and the showcase declares no undoable action (records-forms.record-edit-undo, blocked(fixture)). So acceptance[5] scores blocked(fixture) on stock (QA run #23163 A5). Its absence elsewhere is recorded in the evidence and is never a FAIL of this item: which writes should offer Undo is a product decision, not this item's oracle"
         ]
@@ -48,8 +48,8 @@
         "sign in as admin; keep a second context (or the REST API) open to read server truth independently of the UI",
         "for each variant perform the write once, then within ~2 s capture a screenshot and the DOM of every feedback region — toasts ([data-sonner-toast]), role=status / role=alert regions, and the surface's own save indicator — recording the verbatim text, or its absence",
         "for each variant read server-side whether the write landed (GET the record, the metadata item or the sys_ row) and record the request's status from the network log",
-        "repeat the record rows signed in as the member persona, on member-owned records",
-        "negative pass: (a) submit the create form with a required field empty, then again with a value that breaks a validation rule; (b) open an inline editor and leave it without changing the value",
+        "repeat the record rows signed in as the member persona, on member-owned records — the stock member's set (showcase_member_default) grants showcase_task read + create only, so the member's create row runs while its inline-edit, bulk-delete and kanban rows answer 403 PERMISSION_DENIED: record those as refused writes (their error feedback is still clause 3's to score), or bind the member to the contributor position for the edit rows (showcase_contributor grants task edit, not delete)",
+        "negative pass: (a) submit the create form with a required field empty; then break a validation rule — showcase_task's only rule is the UPDATE-time state machine task_status_flow (no create-time rule exists), so drive it as a refused transition, e.g. a kanban move Backlog → Done; (b) open an inline editor and leave it without changing the value",
         "where a variant offers Undo, click it and read the record back — on stock none does (knownGaps[3]), so record acceptance[5] blocked(fixture)"
       ],
       "acceptance": [
@@ -123,6 +123,12 @@
           "date": "2026-10-16",
           "change": "knownGaps[1], acceptance[3].verify and variants[1] and [6] corrected (checklist-accuracy notes 1–3 of QA run #23953, wave #23878). knownGaps[1] was stale: Save All toasts '1 row saved', Discard draft gives feedback and Approve toasts the declared 'Approved \"RECORD\"'; the Discard toast names the raw type/name, which is the open objectui#12690, so that row is an expected FAIL on clause 1 rather than 'no feedback'. acceptance[3].verify admitted only a 4xx, but the console refuses a required-field-empty submit in the browser and sends no request — a refusal that still says why, at the field — so the oracle now names both shapes and records which occurred. Not loosened: a 2xx write, a reasonless refusal or any success feedback still FAILS. The inline-edit and approval variants named surfaces that do not exist as written (no 'Edit inline' button; the inbox link opens the review queue)",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "knownGaps[1], steps[3] and steps[4] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24570, ux-conventions.write-feedback; wave anchor #24579 §3). The Studio Discard row no longer reproduces as an expected FAIL: objectstack-ai/objectui#12690 is closed (objectui PR #12830, merge 0f42aaf8, an ancestor of the console pin 4016370a and of objectui main, measured by merge-base --is-ancestor exit 0), and the run read the label. showcase_task carries no create-time validation rule (examples/app-showcase/src/data/objects/task.object.ts: one state_machine on update), and the stock member cannot update or delete tasks (security/permission-sets.ts at base 9a7838edf5). No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -131,7 +137,7 @@
       "title": "Every disabled control explains itself — the reason shows on hover and on keyboard focus, and is exposed as an accessible description",
       "since": "v17.7",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -146,7 +152,7 @@
         ],
         "knownGaps": [
           "FIXED, now the calibration reference (objectui#11811): the task record's Archive button (examples/app-showcase/src/ui/actions/index.ts#ArchiveTaskAction, disabled while has(record.done) && record.done != true) carries its reason as a tooltip AND an aria-describedby on a focusable wrapper, in both its record_header and record_section placements (objectui DeclaredActionsBar.tsx; pin DeclaredActionsBar.disabledReason-11811.test.tsx). The action spec has no author-facing reason next to `disabled`, so the reason is the generic platform fallback — record it as generic under clause 3. Check this control first to calibrate both the hover and the keyboard oracle",
-          "Studio's Publish button on the read-only showcase package and the import wizard's disabled Next are FIXED for the keyboard (QA run #23953 at objectui daeb77fc84dd): each carries its reason on a focusable wrapper with an aria-describedby, so both now calibrate hover AND keyboard, expected PASS; Studio's automation Enabled toggle and the field inspector's Remove pass the same way. Expected FAIL on stock, not to be re-filed: the field inspector's read-only Label / API name / Type / Required / Move up-down show the panel tooltip on hover but are not in the tab order and carry no description (objectstack-ai/objectui#12303); and the Studio validation editor's controls on a read-only package (Type, Severity, rule name, label, message, status field, transitions, Runs on, Priority, Enabled) give no reason on hover or by keyboard (objectstack-ai/objectui#12691)"
+          "Studio's Publish button on the read-only showcase package and the import wizard's disabled Next are FIXED for the keyboard (QA run #23953 at objectui daeb77fc84dd): each carries its reason on a focusable wrapper with an aria-describedby, so both now calibrate hover AND keyboard, expected PASS; Studio's automation Enabled toggle and the field inspector's Remove pass the same way. Regression rows, expected PASS since QA run #24570 (objectui 4016370a, two fresh loads each): the field inspector's read-only Label / API name / Type / Required / Move up-down sit in a focusable panel wrapper described by the read-only reason, with the tooltip on focus (objectstack-ai/objectui#12303, closed by objectui PR #12324, b64fda3f — the rail body described by fieldRailReasonId, StudioDesignSurface.tsx); and the Studio validation editor's body on a read-only package is a role=group tab stop described by the reason, with the tooltip on hover and focus (objectstack-ai/objectui#12691, closed by objectui PR #12833, d0a00d79, ObjectValidationsPanel.tsx). Both fixes are in the console pin 4016370a and on objectui main"
         ]
       },
       "variants": [
@@ -213,6 +219,12 @@
           "date": "2026-10-16",
           "change": "knownGaps[1] corrected (checklist-accuracy note 4 of QA run #23953, wave #23878). It said Studio Publish calibrates hover only and that Publish and the import wizard's Next carry reasons a keyboard cannot reach; at objectui daeb77fc84dd both are keyboard-reachable through a focusable wrapper with an aria-describedby, so they calibrate both oracles. The expected-FAIL list keeps the field inspector's read-only inputs (objectui#12303) and adds the validation editor's read-only controls that #23953 extracted as objectui#12691. Wording only: no step, request or oracle changed",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "knownGaps[1]'s two expected FAILs re-pointed to regression rows — checklist-accuracy finding of the 18.0 QA sweep (QA run #24570, ux-conventions.disabled-control-reason knownGaps[1]; wave anchor #24579 §3): objectstack-ai/objectui#12303 and #12691 no longer reproduce at 4016370a. Read on objectui: both issues are closed completed, by PR #12324 (merge b64fda3f) and PR #12833 (merge d0a00d79); each merge is an ancestor of the console pin 4016370a and of objectui main (merge-base --is-ancestor exit 0), and the wrapper code is present on main. No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -221,7 +233,7 @@
       "title": "Where a label exists users see the label — machine names, raw ids and spec paths appear only as secondary text",
       "since": "v17.7",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P1",
       "surface": "browser",
       "personas": [
@@ -235,7 +247,7 @@
           "read access to the served metadata of every sampled surface — labels are read from metadata, never assumed"
         ],
         "knownGaps": [
-          "objectui#11862 is FIXED for the rows that still failed at 1fb1ced36243 (QA run #23953 at objectui daeb77fc84dd): the Access permission-set list, the Changes panel and the Lookup inspector's Display-field picker now lead with the label, as do Explain access's principal line (pin AccessExplainPanel.principalPerson-11862.test.tsx) and the nav editor's items — regression rows, expected PASS. Explain's server-built Principal resolution prose names the person too — 'Principal NAME (EMAIL; id USER_ID)' (packages/plugins/plugin-security/src/explain-engine.ts; #23157, closed). Expected FAIL on stock, not to be re-filed (objectstack-ai/objectui#12693): (a) Explain access's principal card renders its position and permission-set chips by machine name (org_member, showcase_member_default) and the result banner names the object by its name, while labels exist; (b) Studio Interfaces' list-view 'Columns' chips render field api names (title, owner_ref)",
+          "objectui#11862 is FIXED for the rows that still failed at 1fb1ced36243 (QA run #23953 at objectui daeb77fc84dd): the Access permission-set list, the Changes panel and the Lookup inspector's Display-field picker now lead with the label, as do Explain access's principal line (pin AccessExplainPanel.principalPerson-11862.test.tsx) and the nav editor's items — regression rows, expected PASS. Explain's server-built Principal resolution prose names the person too — 'Principal NAME (EMAIL; id USER_ID)' (packages/plugins/plugin-security/src/explain-engine.ts; #23157, closed). Regression rows, expected PASS since QA run #24570 (objectui 4016370a, two fresh loads each): (a) Explain access's principal card draws its position and permission-set chips by label and the result banner names the object by its label; (b) Studio Interfaces' list-view 'Columns' rows draw each field's label, its api name on the row's title (objectstack-ai/objectui#12693, closed by objectui PR #12834, cda4076b, in the console pin 4016370a and on objectui main). ⚠️ Explain's Principal resolution 'Contributed by' chips are a different surface from (a): QA run #24570 found them on machine names at 4016370a and extracted objectstack-ai/objectui#13056 — score them against the console the run serves",
           "FIXED, regression row, expected PASS (objectui#11866): Profile states the access the console resolves rather than the auth library's raw user.role ('user') (objectui apps/console/src/pages/system/ProfilePage.tsx; pin ProfilePage.access.test.tsx)",
           "FIXED, regression row, expected PASS (objectui#11778): the flow inspector's Node Type select offers the add-node palette's display names instead of raw snake_case types such as http_request, connector_action and try_catch (pin FlowNodeInspector.nodeTypeOptions-11778.test.tsx); QA run #23163 read the Node Type value as its label",
           "Regression rows, expected PASS: the audit-log actor and composite field values render as people and labels since objectstack-ai/objectui#11697."
@@ -316,6 +328,12 @@
           "date": "2026-10-16",
           "change": "knownGaps[0] and acceptance[3].verify corrected (checklist-accuracy note 5 of QA run #23953, wave #23878). knownGaps[0] was mostly stale: at objectui daeb77fc84dd the permission-set list, the Changes panel and the Display-field picker lead with the label, and the server-built principal prose names the person (#23157, closed), so those are regression rows; the expected FAIL moves to the two surfaces #23953 extracted as objectui#12693. acceptance[3] did not say whether a tracker reference inside an app's own authored label, or an ADR number inside server-built prose, counts — #23953 left both unscored. The verify text now scores by who wrote the text (a platform-built match FAILS; an author-written one is an authoring finding, the negative[0] rule) and records ADR numbers without scoring them, which is how #23953 read them; whether an ADR citation in user-facing server prose should FAIL is left as an open question on #24036. Not loosened: every match the clause scored before still scores",
           "ref": "#24036"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "knownGaps[0]'s expected FAILs (a) and (b) re-pointed to regression rows — checklist-accuracy finding of the 18.0 QA sweep (QA run #24570, ux-conventions.labels-over-machine-names knownGaps[0]; wave anchor #24579 §3): objectstack-ai/objectui#12693 (a) and (b) no longer reproduce at 4016370a. Read on objectui: the issue is closed completed by PR #12834 (merge cda4076b), an ancestor of the console pin 4016370a and of objectui main (merge-base --is-ancestor exit 0). The run's new acceptance[0] rows are the product defect it extracted (objectstack-ai/objectui#13056) and stay out of this ledger edit. No clause changed",
+          "ref": "#24649"
         }
       ]
     }

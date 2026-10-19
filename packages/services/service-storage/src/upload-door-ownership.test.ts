@@ -158,6 +158,14 @@ async function alicePresigns(filename = 'alice-plan.txt'): Promise<string> {
   return res.body.data.fileId as string;
 }
 
+/**
+ * The declared 5 bytes, stored under the file's key — what the commit door
+ * needs the backend to HOLD before it commits (#24548).
+ */
+async function storeTheBytes(fileId: string): Promise<void> {
+  await adapter.upload((await store.getFile(fileId))!.key, Buffer.from('hello'));
+}
+
 /** Alice starts a chunked upload through the real start door. */
 async function aliceStartsChunked(
   filename = 'alice-chunked.bin',
@@ -222,6 +230,7 @@ describe('isFileUploader — the one rule', () => {
 describe('the commit door (POST /upload/complete)', () => {
   it('POSITIVE: the uploader commits their own upload', async () => {
     const fileId = await alicePresigns();
+    await storeTheBytes(fileId);
     const res = await call(routes, 'POST', COMMIT, 'alice', { body: { fileId, eTag: 'etag-alice' } });
     expect(res.status).toBe(200);
     expect(res.body.data.fileId).toBe(fileId);
@@ -408,6 +417,7 @@ describe('open mode (no session resolver) is unchanged', () => {
       body: { filename: 'open.txt', mimeType: 'text/plain', size: 5 },
     });
     expect(presign.status).toBe(200);
+    await storeTheBytes(presign.body.data.fileId);
     expect((await call(open, 'POST', COMMIT, null, { body: { fileId: presign.body.data.fileId } })).status).toBe(200);
 
     const start = await call(open, 'POST', `${BASE}/upload/chunked`, null, {
