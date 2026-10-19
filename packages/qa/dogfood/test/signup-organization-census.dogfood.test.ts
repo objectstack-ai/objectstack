@@ -1,13 +1,18 @@
 // Copyright (c) 2026 ObjectStack. Licensed under the Apache-2.0 license.
 //
 // [ADR-0131 D9] The organization census of one self-registration, end to end
-// on the real stack: a sign-up through `POST /auth/sign-up/email` lands three
+// on the real stack: a sign-up through `POST /auth/sign-up/email` lands two
 // framework writes on tenant-column objects — the declared self-registration
-// grant (`sys_user_permission_set`), the verification mail (`sys_email`) and
-// the activity about the records the sign-up creates (`sys_activity`). Each
-// producer names the organization it can derive, so on a `single` boot —
-// where the Default Organization is the only organization there is — the
-// sign-up leaves no row without one on any of the three tables.
+// grant (`sys_user_permission_set`) and the activity about the records the
+// sign-up creates (`sys_activity`). Each producer names the organization it
+// can derive, so on a `single` boot — where the Default Organization is the
+// only organization there is — the sign-up leaves no row without one on
+// either table, nor on `sys_email`.
+//
+// [ADR-0131 D7, ruling of record 6257510973, Q2 A] The verification mail is
+// identity mail — about a person, not an organization — so it is written to
+// `sys_identity_email`, `sys_email`'s deployment-level sibling with no
+// organization column, and not to the tenant mail log.
 //
 // Under a wall the same sign-up has no organization to derive (the registrant
 // belongs to none yet); those rows' fate is not settled by this file.
@@ -19,7 +24,9 @@ import { EmailServicePlugin } from '@objectstack/plugin-email';
 import { AuditPlugin } from '@objectstack/plugin-audit';
 
 const SYS = { context: { isSystem: true } };
-const CENSUS_TABLES = ['sys_user_permission_set', 'sys_email', 'sys_activity'] as const;
+const CENSUS_TABLES = ['sys_user_permission_set', 'sys_email', 'sys_activity', 'sys_identity_email'] as const;
+/** The tenant-column tables the sign-up must write to — the mail is no longer one of them. */
+const WRITTEN_TENANT_TABLES = ['sys_user_permission_set', 'sys_activity'] as const;
 const REGISTRANT = 'census-registrant@dogfood.test';
 
 /** A transport that accepts every message, so the verification mail persists as sent. */
@@ -87,15 +94,17 @@ describe('[ADR-0131 D9] a self-registration on a single boot leaves no organizat
     expect(registrant?.id, 'the registrant exists').toBeTruthy();
     const grants = await ql.find('sys_user_permission_set', { where: { user_id: registrant.id }, ...SYS });
     expect(grants.map((g: any) => g.permission_set)).toEqual(['member_default']);
-    const mails = await ql.find('sys_email', { where: { related_object: 'sys_user', related_id: registrant.id }, ...SYS });
-    expect(mails.length, 'the verification mail persisted').toBeGreaterThan(0);
+    const mails = await ql.find('sys_identity_email', { where: { related_object: 'sys_user', related_id: registrant.id }, ...SYS });
+    expect(mails.length, 'the verification mail persisted, in the identity-mail log').toBeGreaterThan(0);
+    const tenantMails = await ql.find('sys_email', { where: { related_object: 'sys_user', related_id: registrant.id }, ...SYS });
+    expect(tenantMails, 'no verification mail in the tenant mail log').toEqual([]);
     const activity = await ql.find('sys_activity', { where: { object_name: 'sys_user', record_id: registrant.id }, ...SYS });
     expect(activity.length, 'the registrant\'s creation is on the activity stream').toBeGreaterThan(0);
   });
 
-  it('every row the sign-up wrote on the three tables names the Default Organization', async () => {
+  it('every row the sign-up wrote on a tenant-column table names the Default Organization', async () => {
     const census: Record<string, { written: number; orgLess: unknown[]; foreign: unknown[] }> = {};
-    for (const table of CENSUS_TABLES) {
+    for (const table of CENSUS_TABLES.filter((t) => t !== 'sys_identity_email')) {
       const written = (await rowsOf(table)).filter((r) => !beforeSignUp.get(table)!.has(r.id));
       census[table] = {
         written: written.length,
@@ -103,10 +112,26 @@ describe('[ADR-0131 D9] a self-registration on a single boot leaves no organizat
         foreign: written.filter((r) => r.organization_id != null && r.organization_id !== defaultOrgId).map((r) => r.id),
       };
     }
-    for (const table of CENSUS_TABLES) {
+    for (const table of WRITTEN_TENANT_TABLES) {
       expect(census[table].written, `${table}: the sign-up wrote rows here`).toBeGreaterThan(0);
+    }
+    for (const table of Object.keys(census)) {
       expect(census[table].orgLess, `${table}: rows without an organization`).toEqual([]);
       expect(census[table].foreign, `${table}: rows owned by another organization`).toEqual([]);
     }
+  });
+
+  // [ADR-0131 D7, Q2 A] The verification mail is identity mail.
+  it('sys_identity_email carries no organization column, and the sign-up\'s mail row names none', async () => {
+    // Read through the registry's schema, which carries the injected columns.
+    const schema = ql.getSchema?.('sys_identity_email');
+    expect(schema, 'sys_identity_email is registered').toBeTruthy();
+    expect(Object.keys(schema.fields ?? {})).not.toContain('organization_id');
+    // Non-vacuity: the same read sees the injected column on the tenant mail log.
+    expect(Object.keys(ql.getSchema('sys_email')?.fields ?? {})).toContain('organization_id');
+    const registrant = await ql.findOne('sys_user', { where: { email: REGISTRANT }, ...SYS });
+    const [mail] = await ql.find('sys_identity_email', { where: { related_id: registrant.id }, ...SYS });
+    expect(mail).toMatchObject({ related_object: 'sys_user', subject: expect.any(String) });
+    expect('organization_id' in mail).toBe(false);
   });
 });
