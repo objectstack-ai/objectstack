@@ -1,10 +1,12 @@
 ---
-'@objectstack/service-storage': patch
+'@objectstack/service-storage': minor
 ---
 
 fix(service-storage): the single-shot upload commit refuses a file whose bytes the storage backend does not hold
 
-Clause-②: no
+Clause-②: no (narrowing)
+
+<!-- adr-0087: not-required (no-migration-prescription) What narrows is the single-shot upload commit door: a completion naming a file whose bytes the storage backend does not hold, or holds at another size than the upload declared, used to answer 200 and commit the row, and is now refused 409 with the row left pending. Nothing migrates: no spec key, authorable spelling, export or stored shape is removed, renamed or re-shaped, and no stored row is read, rewritten or converted, so there is nothing for `objectstack migrate meta` to rewrite. A refused client finishes the upload by sending its bytes, not by rewriting code or metadata. -->
 
 **What was wrong.** `POST /api/v1/storage/upload/complete` set the `sys_file` row to `committed` without asking the storage backend. A presigned upload whose byte `PUT` failed, or was never sent, therefore committed with the size it declared. The download doors serve any `committed` file, so `GET /api/v1/storage/files/:fileId/url` handed out a signed URL, and fetching it failed with `500`.
 
