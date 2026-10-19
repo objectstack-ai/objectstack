@@ -24,6 +24,24 @@ import {
   unlinkTombstoneIdentifier,
   unlinkTombstoneUserPrefix,
 } from './implicit-account-linking';
+// [#23184] better-auth's first module load is paid HERE, at module load, and
+// not inside the first clocked case: clocked windows measure behaviour, never
+// loading (AGENTS.md, Build & Test). `AuthManager` reaches these vendor modules
+// through a lazy `await import()`, so without these lines the first case that
+// builds an instance paid about 0.7 s of vendor module evaluation on a dev
+// container. The module cache hands `AuthManager` these same instances, and
+// better-auth's one load-time read (`NODE_ENV`, kept by its env module when
+// first evaluated) already happened at the `./auth-manager` import above,
+// through `better-auth/adapters`, so nothing a case runs is different.
+import 'better-auth';
+import 'better-auth/api';
+import 'better-auth/plugins';
+import 'better-auth/plugins/bearer';
+import 'better-auth/plugins/custom-session';
+import 'better-auth/plugins/generic-oauth';
+import 'better-auth/plugins/organization';
+import 'better-auth/plugins/organization/access';
+import '@better-auth/oauth-provider';
 
 // ── In-memory IDataEngine (the audience-posture harness shape) ───────────────
 
