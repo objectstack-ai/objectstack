@@ -1686,20 +1686,22 @@ describe('ApprovalService (node era)', () => {
     expect(await svc.redeemActionToken(forU7.reject)).toMatchObject({ ok: false, reason: 'not_pending' });
   });
 
-  it('remind: each concrete approver gets their own action links', async () => {
+  it('remind: each concrete approver gets their own reminder, and none carries an action link (#24564)', async () => {
     const emitted: any[] = [];
     svc.attachMessaging({ async emit(input) { emitted.push(input); } });
     const req = await svc.openNodeRequest(openInput(['u9', 'ada@example.com']), CTX);
+    const minted = (engine._tables['sys_approval_token'] ?? []).length;
     await svc.remind(req.id, { actorId: 'u1' }, CTX);
     const reminders = emitted.filter(e => e.topic === 'approval.reminder');
-    expect(reminders).toHaveLength(2);
+    expect(reminders.map(r => r.audience)).toEqual([['u9'], ['ada@example.com']]);
     for (const r of reminders) {
-      expect(r.audience).toHaveLength(1);
-      expect(r.payload.actions).toHaveLength(2);
-      expect(r.payload.actions[0].url).toContain('/api/v1/approvals/act?token=');
+      // Messaging stores the payload it is handed: no link, no token, in any field.
+      expect(Object.keys(r.payload).sort()).toEqual(['actionUrl', 'body', 'title']);
+      expect(JSON.stringify(r)).not.toMatch(/token=|\/approvals\/act/);
+      expect(r.payload.actionUrl).toBe(`/system/approvals?request=${req.id}`);
     }
-    const urls = reminders.flatMap(r => r.payload.actions.map((a: any) => a.url));
-    expect(new Set(urls).size).toBe(4); // every link is personal + per-action
+    // A reminder mints nothing: a token minted here could only travel in the stored payload.
+    expect((engine._tables['sys_approval_token'] ?? []).length).toBe(minted);
   });
 
   // ── pagination + search pushdown (#1745) ────────────────────────
