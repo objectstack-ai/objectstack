@@ -152,7 +152,6 @@ describe("a runAs:'user' hook sees the acting user and their organisation's memb
     const before = seen.length;
     await ql.insert('hook_probe', { name: 'p' }, { context: context as any });
     expect(seen.length, 'the hook ran exactly once').toBe(before + 1);
-    console.log("PROBE", JSON.stringify(context), "=>", JSON.stringify(seen[seen.length - 1]), "ctx:", JSON.stringify(Object.fromEntries(Object.entries(seenContexts[seenContexts.length - 1] ?? {}).filter(([k]) => ["isSystem","userId","tenantId","positions","permissions","org_user_ids"].includes(k)))));
     return seen[seen.length - 1];
   }
 
