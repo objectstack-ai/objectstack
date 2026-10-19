@@ -353,8 +353,12 @@ describe('[#24164 E′] the platform administrator is unchanged', () => {
 });
 
 describe('[#24164 E′] explain names the object default, never a permission set', () => {
-  const rlsLayer = (decision: { layers: Array<{ layer: string }> }) =>
-    decision.layers.find((l) => l.layer === 'rls') as { verdict: string; detail: string; contributors: unknown[]; record?: any };
+  type RlsLayer = { layer: string; verdict: string; detail: string; contributors: unknown[]; record?: any };
+  const rlsLayer = (decision: { layers: RlsLayer[] }): RlsLayer => {
+    const layer = decision.layers.find((l) => l.layer === 'rls');
+    if (!layer) throw new Error('explain returned no rls layer');
+    return layer;
+  };
 
   it('object-level: the rls layer names the default, its label and description, and the declaring object', async () => {
     const { security } = await boot({ baseline: false, declared: true });
