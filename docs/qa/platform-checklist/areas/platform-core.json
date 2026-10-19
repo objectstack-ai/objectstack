@@ -3204,7 +3204,7 @@
       "title": "Settings on v18: a global-scope key is stored in sys_platform_setting (readable through /data only with manage_platform_settings), and under a walled posture one organization's tenant save or lock does not change or lock another's, with a data-API read of sys_setting filtered to readable namespaces",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -3218,6 +3218,9 @@
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a second boot with OS_TENANCY_POSTURE=isolated (walled posture) on its own port and file DB — the stock single posture leaves every walled clause vacuous, so confirm the posture from the boot log before scoring",
           "on the walled boot: two organizations A and B with an admin each"
+        ],
+        "knownGaps": [
+          "acceptance[2] and acceptance[3] are walled legs, and fixtures.requires[1]–[2], personas[2] and steps[2]–[3] serve only them. 18.0 refuses the boot they need: os serve — and os dev / os start, which boot through it — refuses OS_TENANCY_POSTURE=group|isolated (and the legacy OS_MULTI_ORG_ENABLED=true) before a config is read: FATAL: tenancy posture '…' is not supported in 18.0 (NOT_IMPLEMENTED), exit 1 (packages/cli/src/commands/serve.ts#walledPostureRefusal). A stock 18.0 boot also holds one organization, so there is no B to read (see RUNNER.md's environment-facts entries '18.0 boots the single tenancy posture only' and 'A stock 18.0 boot holds exactly one organization'). On a stock 18.0 boot neither clause is scored: record both skipped with those entries cited, never blocked(fixture) and never fail. Their mechanism is scored through acceptance[0]: settings-organization-isolation.pin.test.ts drives two organizations, the lock and the organization-less refusal under a walled posture in-process, and asserts that `single` does not refuse. acceptance[0] and acceptance[1] run as written. The clauses stay: the walled postures return in a later 18.x release"
         ]
       },
       "steps": [
@@ -3246,7 +3249,7 @@
           "evidence": "reads"
         },
         {
-          "clause": "a tenant key with no organization → 400 SETTINGS_VALIDATION",
+          "clause": "walled: a tenant key written with no organization in scope → 400 SETTINGS_VALIDATION. Under `single` the same write is admitted, so the refusal is the walled posture's (packages/services/service-settings/src/settings-service.ts#organizationlessTenantKeyError)",
           "oracle": "api",
           "verify": "status + code",
           "evidence": "the answer"
@@ -3271,6 +3274,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "fixtures.knownGaps added and acceptance[3].clause marked walled — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA runs #24557 and #24558 scored both clauses blocked(environment) on the boot's NOT_IMPLEMENTED FATAL). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses group and isolated before a config is read, and settings-service.ts refuses an organization-less tenant key only under a walled posture, so acceptance[3], which steps[3] already ran on the walled boot, was the second walled leg. No clause deleted; the shared statement is RUNNER.md's environment-facts entry, which this gap points at",
+          "ref": "#PENDING-24579R5"
         }
       ]
     },
