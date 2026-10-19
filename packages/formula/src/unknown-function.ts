@@ -73,7 +73,7 @@
  * ## Why refusing an unregistered call is not a false positive
  *
  * The validation environment and the runtime environment are the same builder —
- * `celEngine.compile` and `celEngine.evaluate` both call {@link buildEnv}, and
+ * `celEngine.compile` and `celEngine.evaluate` both build through {@link buildEnv}'s constructor, and
  * the census on #13594 probed 53 names across both with **0 divergent verdicts**
  * (and found **0** host-registered extra functions in the reachable corpus). So
  * a call this refuses is a call that WILL fault at evaluation time; refusing it
