@@ -112,9 +112,11 @@ function makeStubEngine() {
             if (table !== 'sys_metadata') return null;
             return findRow(opts.where)?.row ?? null;
         },
-        async find(table: string, opts: { where: Record<string, unknown> }) {
+        async find(table: string, opts: { where: Record<string, unknown>; limit?: number }) {
             if (table !== 'sys_metadata') return [];
-            return Array.from(rows.values()).filter((r) => matchesMetadataWhere(r, opts.where ?? {}));
+            const matched = Array.from(rows.values()).filter((r) => matchesMetadataWhere(r, opts.where ?? {}));
+            // The caller's bound, after the filter, by presence (`check:objectql-double-limit`).
+            return typeof opts?.limit === 'number' ? matched.slice(0, opts.limit) : matched;
         },
         async insert(table: string, data: Record<string, unknown>) {
             nextId += 1;
