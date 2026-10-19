@@ -6981,8 +6981,9 @@ export class ObjectQL implements IObjectQLEngine {
     const hasTenant = tenantScope !== undefined;
     const hasTz = execCtx?.timezone !== undefined;
     const isSystem = execCtx?.isSystem === true;
-    // [#13491] The object's tenancy classification — the ONE reading both the
-    // mute below and `resolveSystemInsertOrganization` narrow by. An object
+    // [#13491] The object's tenancy classification — the reading the mute
+    // below narrows by (ADR-0131 C8 stage 8b retired its other reader, the
+    // system-insert exemption, under every posture). An object
     // with no tenant field is out by construction; a platform object is out
     // unless the inventory adjudicated it tenant-scoped.
     const isTenantAuditInScope =
@@ -7259,20 +7260,13 @@ export class ObjectQL implements IObjectQLEngine {
     // system write that threaded one. Nothing to resolve; this is the shape the
     // ruling asks every system write to reach.
     if (carriesOrganization(execCtx?.tenantId)) return undefined;
-    // [ADR-0131 D9, C8 stage 8b] Under `single` a platform object has no
+    // [ADR-0131 D9, C8 stage 8b] Under every posture a platform object has no
     // exemption: with a tenant column it is in scope like any other object, so
-    // its organization-less system insert is stamped with the Default
-    // Organization or refused below — never left NULL.
-    //
-    // ⚠️ WALLED POSTURES ONLY: #13491's per-object exemption still stands under
-    // `group` / `isolated` (epic ruling record 6259899486 on #15194, item 4).
-    // 18.0 refuses a walled posture at the operator's boot path, and the walled
-    // half of the lift lands in 18.x, after the stages that give the walled
-    // writers an organization of their own. The cut is a POSTURE condition on
-    // purpose — ⛔ never re-narrow it with a per-table list.
-    if (isPlatformObjectOutOfTenantAuditScope(object) && this.resolveEnginePosture() !== 'single') {
-      return undefined;
-    }
+    // its organization-less system insert is stamped with the derived
+    // organization or refused below — never left NULL. The walled half landed
+    // in 18.x, after the stages that gave the walled writers (identity mail,
+    // global audit, declared webhooks) an organization or a sibling of their
+    // own. ⛔ Never re-introduce a per-table or per-posture cut here.
     const objectSchema = this._registry.getObject(object) as any;
     // A federated object's schema is the REMOTE's (ADR-0015); the platform's
     // injected column says nothing about it, which is the same reason
