@@ -63,7 +63,7 @@ describe('INVARIANT 1 — no spelling that worked before may stop working', () =
     }
   });
 
-  it('carries the five plugin-kind spellings that no registry derivation could produce', () => {
+  it('carries the four plugin-kind spellings that no registry derivation could produce', () => {
     // Named explicitly because losing them is the specific regression the
     // union-vs-pure-derivation choice was made to avoid, and a reader needs to
     // see the population rather than infer it.
@@ -71,9 +71,10 @@ describe('INVARIANT 1 — no spelling that worked before may stop working', () =
     const pluginOnly = Object.entries(PLURAL_TO_SINGULAR).filter(([, s]) => !registryTypes.has(s));
     // `themes` left this list at commit 35ad101bc (ADR-0049 — the carrier retired, so
     // `/meta/theme` now earns `unrecognisedMetaTypeRefusal`'s verdict; pinned
-    // in the #8421 block at the bottom of this file).
+    // in the #8421 block at the bottom of this file). `sharingRules` left it
+    // when ADR-0131 D6 gave `sharing_rule` a code-only registry entry.
     expect(pluginOnly.map(([p]) => p).sort()).toEqual(
-      ['analyticsCubes', 'connectors', 'ragPipelines', 'sharingRules', 'webhooks'],
+      ['analyticsCubes', 'connectors', 'ragPipelines', 'webhooks'],
     );
     for (const [plural, singular] of pluginOnly) {
       expect(canonicalMetaUrlType(plural)).toBe(singular);
