@@ -47,8 +47,8 @@ const storageColumn = JSON.stringify([{
   storageKey: KEYS[0],
 }]);
 
-function fakeEngine(rows: Array<Record<string, any>>) {
-  const tables = new Map<string, any[]>([[RECLAIM_OBJECT, rows.map((r) => ({ ...r }))]]);
+function fakeEngine(rows: Array<Record<string, any>>, table: string = RECLAIM_OBJECT) {
+  const tables = new Map<string, any[]>([[table, rows.map((r) => ({ ...r }))]]);
   const rowsOf = (t: string) => tables.get(t) ?? [];
   const engine = {
     rows: (t = RECLAIM_OBJECT) => [...rowsOf(t)],
@@ -318,5 +318,54 @@ describe('failure handling', () => {
     });
 
     expect(out.kind).toBe('reclaimed');
+  });
+});
+
+describe('[ADR-0131 D7, Q2 A] the job reads the mail log it names', () => {
+  const IDENTITY = 'sys_identity_email';
+
+  it('a sys_identity_email job reclaims and rewrites the sibling row', async () => {
+    const engine = fakeEngine([terminalRow()], IDENTITY);
+    const store = fakeStore();
+
+    const out = await reclaimAttachmentContent({ rowId: 'row-1', keys: KEYS, object: IDENTITY }, {
+      engine, store, now: () => NOW, logger: logger(),
+    });
+
+    expect(out).toMatchObject({ kind: 'reclaimed', rowId: 'row-1' });
+    expect(store.objects.size).toBe(0);
+    expect(engine.updates).toEqual([expect.objectContaining({ table: IDENTITY, id: 'row-1' })]);
+    expect(JSON.parse(engine.rows(IDENTITY)[0].attachments_json)[0].storageKey).toBeUndefined();
+  });
+
+  it('a sys_identity_email job whose row is still queued keeps the content and re-arms', async () => {
+    const engine = fakeEngine([terminalRow({ status: 'queued', message_id: undefined })], IDENTITY);
+    const store = fakeStore();
+    const rearm = vi.fn(async () => true);
+
+    const out = await reclaimAttachmentContent({ rowId: 'row-1', keys: KEYS, object: IDENTITY }, {
+      engine, store, now: () => NOW, rearm,
+    });
+
+    expect(out.kind).toBe('rearmed');
+    expect(store.objects.size).toBe(1);
+  });
+
+  it('a job naming no mail log stalls without deleting or re-arming', async () => {
+    const engine = fakeEngine([terminalRow()]);
+    const store = fakeStore();
+    const rearm = vi.fn(async () => true);
+    const log = logger();
+
+    const out = await reclaimAttachmentContent(
+      { rowId: 'row-1', keys: KEYS, object: 'sys_user' as never },
+      { engine, store, now: () => NOW, rearm, logger: log },
+    );
+
+    expect(out.kind).toBe('stalled');
+    expect(rearm).not.toHaveBeenCalled();
+    expect(store.objects.size).toBe(1);
+    expect(engine.updates).toEqual([]);
+    expect(String(log.error.mock.calls[0]?.[0])).toMatch(/names 'sys_user', which is not a mail log/);
   });
 });

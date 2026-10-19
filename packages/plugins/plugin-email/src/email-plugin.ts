@@ -8,7 +8,7 @@ import type {
   IQueueService,
   QueueBackoffPolicy,
 } from '@objectstack/spec/contracts';
-import { SysEmail, SysEmailTemplate } from '@objectstack/platform-objects/audit';
+import { SysEmail, SysEmailTemplate, SysIdentityEmail } from '@objectstack/platform-objects/audit';
 import {
   EmailService,
   LogTransport,
@@ -35,6 +35,12 @@ import type {
 import { bindEmailTemplateDoor, unbindEmailTemplateDoor } from './email-template-door.js';
 import { sweepStrandedOutbox, type OutboxSweepResult } from './outbox-sweep.js';
 import { readInternalHeadersJson } from './internal-header-readback.js';
+import {
+  EMAIL_LOG_OBJECTS,
+  TENANT_EMAIL_OBJECT,
+  emailLogObjectOfJob,
+  isEmailLogObject,
+} from './email-log-objects.js';
 import {
   EMAIL_ATTACHMENT_RECLAIM_QUEUE,
   EMAIL_ATTACHMENT_RECLAIM_GRACE_MS,
@@ -261,6 +267,18 @@ function resolveDataEngine(ctx: PluginContext): IDataEngine | null {
   }
 }
 
+/** Two sweeps' counts as one: every count added, `truncated` when either was. */
+function sumSweepResults(a: OutboxSweepResult, b: OutboxSweepResult): OutboxSweepResult {
+  return {
+    scanned: a.scanned + b.scanned,
+    requeued: a.requeued + b.requeued,
+    sent: a.sent + b.sent,
+    failed: a.failed + b.failed,
+    skipped: a.skipped + b.skipped,
+    truncated: a.truncated || b.truncated,
+  };
+}
+
 /**
  * EmailServicePlugin — registers the `email` service.
  *
@@ -383,7 +401,9 @@ export class EmailServicePlugin implements Plugin {
       scope: 'system',
       defaultDatasource: 'cloud',
       namespace: 'sys',
-      objects: [SysEmail, SysEmailTemplate],
+      // `sys_identity_email` is `sys_email`'s deployment-level sibling for mail
+      // about a person (ADR-0131 D7, ruling of record 6257510973, Q2 A).
+      objects: [SysEmail, SysIdentityEmail, SysEmailTemplate],
       emailTemplates: BUILTIN_AUTH_TEMPLATES,
     });
 
@@ -442,8 +462,10 @@ export class EmailServicePlugin implements Plugin {
     const persistence: EmailPersistence | undefined = this.options.persist === false
       ? undefined
       : {
-        async insert(row) {
-          const created = await (engine as any).insert('sys_email', row, {
+        // `object` is the log the service chose for the row; absent (an
+        // older caller) is the tenant log, as before the sibling existed.
+        async insert(row, object = TENANT_EMAIL_OBJECT) {
+          const created = await (engine as any).insert(object, row, {
             context: SYSTEM_CTX,
           });
           // The engine's OWN answer is forwarded, not laundered into
@@ -456,8 +478,8 @@ export class EmailServicePlugin implements Plugin {
           // we asked for.
           return created?.id ? { id: String(created.id) } : { id: String(row.id) };
         },
-        async update(id, patch) {
-          await (engine as any).update('sys_email', { id, ...patch }, {
+        async update(id, patch, object = TENANT_EMAIL_OBJECT) {
+          await (engine as any).update(object, { id, ...patch }, {
             context: SYSTEM_CTX,
           });
         },
@@ -468,8 +490,8 @@ export class EmailServicePlugin implements Plugin {
         // delivery paths above re-read rows through `find`, which omits the
         // column for every caller including `SYSTEM_CTX`. Inert — and never
         // calls the accessor — when the column is not flagged.
-        async readHeadersJson(rowIds) {
-          return readInternalHeadersJson(engine as any, rowIds);
+        async readHeadersJson(rowIds, object = TENANT_EMAIL_OBJECT) {
+          return readInternalHeadersJson(engine as any, rowIds, object);
         },
       };
 
@@ -490,7 +512,7 @@ export class EmailServicePlugin implements Plugin {
     if (persistence) this.service.setPersistence(persistence);
     this.service.setTemplateLoader(templateLoader);
     this.engineWiring = { engine, persistence };
-    ctx.logger.info('EmailServicePlugin: sys_email persistence + template loader enabled');
+    ctx.logger.info('EmailServicePlugin: sys_email / sys_identity_email persistence + template loader enabled');
     return persistence;
   }
 
@@ -724,7 +746,10 @@ export class EmailServicePlugin implements Plugin {
           'afterInsert',
           async (hookCtx: any) => {
             try {
-              if (hookCtx?.object !== 'sys_email') return;
+              // Both logs: a row inserted into either, at `queued`, is an
+              // outbox entry (the sibling shares the row shape, ADR-0131 D7).
+              const object = hookCtx?.object;
+              if (!isEmailLogObject(object)) return;
               const row = hookCtx?.result;
               if (!row || typeof row !== 'object') return;
               if (row.status !== 'queued' || row.message_id) return;
@@ -738,7 +763,7 @@ export class EmailServicePlugin implements Plugin {
               setTimeout(() => {
                 void (async () => {
                   try {
-                    const rows = await (engine as any).find('sys_email', {
+                    const rows = await (engine as any).find(object, {
                       where: { id: rowId },
                       limit: 1,
                       context: SYSTEM_CTX,
@@ -746,14 +771,14 @@ export class EmailServicePlugin implements Plugin {
                     const fresh = Array.isArray(rows) ? rows[0] : (rows as any)?.data?.[0];
                     const target = fresh ?? row;
                     if (target.status !== 'queued' || target.message_id) return;
-                    await svc.deliverPersistedRow(target);
+                    await svc.deliverPersistedRow(target, undefined, object);
                   } catch (err: any) {
                     // `error`, not `warn` (#5161): the insert returned, the row
                     // is there, everything looks normal — and the mail was NOT
                     // sent. Nothing else in this process will look at that row
                     // again, so a line nobody reads is the whole loss.
                     ctx.logger.error(
-                      `EmailServicePlugin: outbox drain FAILED for sys_email row '${rowId}' — that message was `
+                      `EmailServicePlugin: outbox drain FAILED for ${object} row '${rowId}' — that message was `
                       + 'NOT sent and the row stays at `queued`; nothing retries it in this process. Fix: it is '
                       + 'picked up by the boot outbox sweep on the next restart; to have failures retried and '
                       + 'dead-lettered instead of waiting for one, turn on Settings → Mail → "Durable queue '
@@ -775,7 +800,7 @@ export class EmailServicePlugin implements Plugin {
           },
           { packageId: DRAIN_PKG },
         );
-        ctx.logger.info('EmailServicePlugin: sys_email outbox drain hook installed');
+        ctx.logger.info('EmailServicePlugin: sys_email / sys_identity_email outbox drain hook installed');
       }
 
       // ── 'email.send.async' SUBSCRIBER ────────────────────────────────
@@ -809,7 +834,20 @@ export class EmailServicePlugin implements Plugin {
               return;
             }
 
-            const rows = await (engine as any).find('sys_email', {
+            // The log the row lives in: the job names it for the sibling, and a
+            // job naming none is `sys_email` — every job an 18.0 process
+            // published included (expand-first, ADR-0131 D7 / Q2 A).
+            const object = emailLogObjectOfJob(data?.object);
+            if (!object) {
+              // A job no retry can fix: report it, do not burn the budget.
+              ctx.logger.error(
+                `EmailServicePlugin: an ${EMAIL_SEND_QUEUE} job for row '${rowId}' names '${String(data?.object)}', `
+                + `which is not a mail log (${EMAIL_LOG_OBJECTS.join(', ')}) — that message will NOT be delivered. `
+                + 'Fix: publish delivery jobs through IEmailService.send(), which names the log it wrote.',
+              );
+              return;
+            }
+            const rows = await (engine as any).find(object, {
               where: { id: rowId },
               limit: 1,
               context: SYSTEM_CTX,
@@ -822,9 +860,9 @@ export class EmailServicePlugin implements Plugin {
               // accepted and can never be delivered is a durability loss, and
               // it will look like nothing happened at all.
               ctx.logger.error(
-                `EmailServicePlugin: sys_email row '${rowId}' referenced by an ${EMAIL_SEND_QUEUE} job no longer `
+                `EmailServicePlugin: ${object} row '${rowId}' referenced by an ${EMAIL_SEND_QUEUE} job no longer `
                 + 'exists — that message will NEVER be delivered and the caller was already told it was queued. '
-                + 'Fix: stop deleting sys_email rows in `queued` state (it is an append-only log), or drain the '
+                + `Fix: stop deleting ${object} rows in \`queued\` state (it is an append-only log), or drain the `
                 + 'queue before purging.',
               );
               return;
@@ -835,7 +873,7 @@ export class EmailServicePlugin implements Plugin {
 
             // maxAttempts: 1 — the QUEUE owns retrying. Letting the row loop
             // retry underneath it would multiply the two budgets together.
-            const result = await svc.deliverPersistedRow(row, { maxAttempts: 1, priorAttempts });
+            const result = await svc.deliverPersistedRow(row, { maxAttempts: 1, priorAttempts }, object);
             if (result.status === 'failed') {
               // Force the queue to retry / DLQ by throwing
               throw new Error(result.error ?? 'email send failed');
@@ -881,11 +919,11 @@ export class EmailServicePlugin implements Plugin {
                         // being re-armed is the one currently running, so
                         // reusing its key would let the running message's own
                         // idempotency record suppress its successor.
-                        idempotencyKey: `sys_email_attachments:${payload.rowId}:rearm:${Date.now()}`,
+                        idempotencyKey: `${payload.object ?? TENANT_EMAIL_OBJECT}_attachments:${payload.rowId}:rearm:${Date.now()}`,
                         maxAttempts: 5,
                         retries: 4,
                         backoff: { type: 'exponential', delayMs: 60_000, maxDelayMs: 60 * 60_000 },
-                        metadata: { object: 'sys_email', rowId: payload.rowId },
+                        metadata: { object: payload.object ?? TENANT_EMAIL_OBJECT, rowId: payload.rowId },
                       },
                     );
                     return true;
@@ -958,21 +996,30 @@ export class EmailServicePlugin implements Plugin {
       // the very failure it exists to prevent. A stranded-row report is also
       // not grounds to refuse an otherwise healthy boot; the gate above is
       // where this plugin refuses.
+      //
+      // Both logs, each on its own: `sys_email` (which keeps every identity
+      // row an 18.0 install wrote there — expand-first) and its sibling
+      // `sys_identity_email`. One log failing to sweep does not stop the
+      // other, and the settled result is their sum.
       if (persistence) {
         const svc = this.service;
         this.outboxSweepSettled = (async () => {
-          try {
-            return await sweepStrandedOutbox({ engine: engine as any, service: svc, logger: ctx.logger });
-          } catch (err: any) {
-            ctx.logger.error(
-              'EmailServicePlugin: the boot sweep of stranded sys_email rows FAILED to run — messages accepted '
-              + 'before the last restart are still sitting at `queued`, nothing else looks at them, and the '
-              + 'server will keep reporting healthy with that mail undelivered. Fix: make sure sys_email is '
-              + 'readable by the system context (schema sync ran, the datasource is up), then restart to '
-              + `re-sweep. Cause: ${err?.message ?? err}`,
-            );
-            return undefined;
+          let total: OutboxSweepResult | undefined;
+          for (const object of EMAIL_LOG_OBJECTS) {
+            try {
+              const swept = await sweepStrandedOutbox({ engine: engine as any, service: svc, logger: ctx.logger, object });
+              total = total ? sumSweepResults(total, swept) : swept;
+            } catch (err: any) {
+              ctx.logger.error(
+                `EmailServicePlugin: the boot sweep of stranded ${object} rows FAILED to run — messages accepted `
+                + 'before the last restart are still sitting at `queued`, nothing else looks at them, and the '
+                + `server will keep reporting healthy with that mail undelivered. Fix: make sure ${object} is `
+                + 'readable by the system context (schema sync ran, the datasource is up), then restart to '
+                + `re-sweep. Cause: ${err?.message ?? err}`,
+              );
+            }
           }
+          return total;
         })();
       }
 

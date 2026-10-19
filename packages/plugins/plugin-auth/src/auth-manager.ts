@@ -2008,7 +2008,9 @@ export class AuthManager {
           // the user's mail carries only the deployment default. Best-effort;
           // `undefined` leaves the #14319 ladder exactly as it was.
           const storedLocale = await this.storedRecipientLocale({ id: user.id });
-          const mailOrganization = await this.authMailOrganizationArg();
+          // [ADR-0131 D7, ruling of record 6257510973, Q2 A] Both mails are
+          // about a person, not an organization: identity mail, recorded in
+          // the deployment-level `sys_identity_email`, with no organization.
           const result = await email.sendTemplate(invitation
             ? {
               // Exactly the variables `auth.account_invitation` declares —
@@ -2028,7 +2030,7 @@ export class AuthManager {
               },
               relatedObject: 'sys_user',
               relatedId: user.id,
-              ...mailOrganization,
+              identityMail: true,
             }
             : {
               template: 'auth.password_reset',
@@ -2043,7 +2045,7 @@ export class AuthManager {
               },
               relatedObject: 'sys_user',
               relatedId: user.id,
-              ...mailOrganization,
+              identityMail: true,
             });
           if (result?.status === 'failed') {
             throw new Error(
@@ -2106,9 +2108,9 @@ export class AuthManager {
               },
               relatedObject: 'sys_user',
               relatedId: user.id,
-              // [ADR-0131 D9] The mail is about a user, who belongs to no
-              // organization yet: the derivable owner, as for the grant.
-              ...(await this.authMailOrganizationArg()),
+              // [ADR-0131 D7, Q2 A] The mail is about a person, who may belong
+              // to no organization yet: identity mail, in `sys_identity_email`.
+              identityMail: true,
             });
             if (result?.status === 'failed') {
               throw new Error(
@@ -3881,8 +3883,8 @@ export class AuthManager {
               relatedObject: 'sys_invitation',
               relatedId: invitation.id,
               // commit b706af987 — the invitation HOLDS its organization; thread it so
-              // the sys_email row is stamped. Org-less auth mail (reset /
-              // verification / magic link) deliberately threads nothing.
+              // the sys_email row is stamped: tenant mail. Mail about a person
+              // (reset / verification / magic link) is identity mail instead.
               ...(invitation.organizationId
                 ? { organizationId: String(invitation.organizationId) }
                 : {}),
@@ -4125,7 +4127,8 @@ export class AuthManager {
                 expiresInMinutes: 10,
                 appName: this.getAppName(),
               },
-              ...(await this.authMailOrganizationArg()),
+              // [ADR-0131 D7, Q2 A] A sign-in link for a person: identity mail.
+              identityMail: true,
             });
           } catch (err: any) {
             console.error(`[AuthManager] sendMagicLink failed: ${err?.message ?? err}`);
@@ -5631,31 +5634,6 @@ export class AuthManager {
   }
 
   /**
-   * [ADR-0131 D9] The organization a write this manager makes on a
-   * tenant-column object carries when nothing on the write names one: the
-   * Default Organization under `single` — the only organization there is —
-   * and none under a wall, where `tenancy.defaultOrgId()` answers `null`. One
-   * reading for every such producer here (the auth mails that are about a user
-   * rather than an organization), so they cannot disagree about it. `undefined` when no tenancy service is wired or
-   * it cannot answer: the producer then names nothing, as before.
-   */
-  private async derivableWriteOrganizationId(): Promise<string | undefined> {
-    try {
-      const tenancy = this.config.getTenancy?.();
-      const organizationId = tenancy ? await tenancy.defaultOrgId() : null;
-      return organizationId ?? undefined;
-    } catch {
-      return undefined;
-    }
-  }
-
-  /** The `organizationId` argument of an auth mail that is about a user, not an organization. */
-  private async authMailOrganizationArg(): Promise<{ organizationId?: string }> {
-    const organizationId = await this.derivableWriteOrganizationId();
-    return organizationId ? { organizationId } : {};
-  }
-
-  /**
    * [ADR-0131 D3/D9 — the self-registration grant settles on the first
    * membership] The `user.create.after` half of an admitted self-registration.
    * The grant is an organization row (D3), so it is written WITH a membership,
@@ -5995,7 +5973,8 @@ export class AuthManager {
         },
         relatedObject: 'sys_user',
         ...(from.id ? { relatedId: from.id } : {}),
-        ...(await this.authMailOrganizationArg()),
+        // [ADR-0131 D7, Q2 A] A notice to the account holder: identity mail.
+        identityMail: true,
       });
     } catch (err) {
       // Best-effort by design — see the ⛔ above. Logged so an operator can see
