@@ -122,6 +122,41 @@ let activeBinding: StdLibBinding = UNBOUND;
 let evaluationEnv: Environment | undefined;
 
 /**
+ * Programs parsed on {@link evaluationEnv}, keyed on the source `env.parse` was
+ * handed (#24536).
+ *
+ * With the environment built once, parsing and type-checking were most of what
+ * an evaluation still cost, and one source is evaluated once per row. A cel-js
+ * program is the parse-once, evaluate-many form of `env.evaluate`: it holds the
+ * AST and the types its check recorded, never a value, so it answers every
+ * scope exactly as a fresh parse would.
+ *
+ * The key is the source AFTER the rewrites (`rewriteTemporalEquality`,
+ * `rewriteNullableTernary`, the overload retry's `rewriteFaultedOperands`), so a
+ * rewrite that depends on the row's values is part of the key, never applied
+ * from another row. Nothing invalidates an entry: every entry belongs to the
+ * one environment, whose registrations never change after it is built. Bounded
+ * like `temporalRewriteCache`, oldest entry out first. A source that does
+ * not parse is never stored; it is reparsed, and refused, every time.
+ */
+const evaluationPrograms = new Map<string, ReturnType<Environment['parse']>>();
+const EVALUATION_PROGRAM_CACHE_MAX = 500;
+
+/** Evaluate `source` on {@link evaluationEnv} through its cached program. */
+function runProgram(env: Environment, source: string, scope: Record<string, unknown>): unknown {
+  let program = evaluationPrograms.get(source);
+  if (program === undefined) {
+    program = env.parse(source);
+    if (evaluationPrograms.size >= EVALUATION_PROGRAM_CACHE_MAX) {
+      const first = evaluationPrograms.keys().next().value;
+      if (first !== undefined) evaluationPrograms.delete(first);
+    }
+    evaluationPrograms.set(source, program);
+  }
+  return program(scope);
+}
+
+/**
  * The "never faults" BASELINE: the namespace roots the strict check env
  * declares, so that a `record`-scoped CEL site is never faulted for merely
  * NAMING one. ⛔ It is NOT any surface's accept set — membership here is not a
@@ -1870,7 +1905,7 @@ export const celEngine: DialectEngine = {
         // ternary unifier. All rewrites are no-ops for sources that don't need them.
         const evalSource = rewriteNullableTernary(rewriteTemporalEquality(source, scope));
         try {
-          const raw = env.evaluate(evalSource, scope);
+          const raw = runProgram(env, evalSource, scope);
           return { ok: true, value: coerce(raw) as T };
         } catch (err) {
           // ADR-0032 §1c — string-serialized fields make CEL raise
@@ -1889,7 +1924,7 @@ export const celEngine: DialectEngine = {
           const coercedSource = rewriteFaultedOperands(evalSource, scope);
           if (coercedSource === null) throw err;
           try {
-            const raw = env.evaluate(coercedSource, scope);
+            const raw = runProgram(env, coercedSource, scope);
             return { ok: true, value: coerce(raw) as T };
           } catch {
             // Hydration did not resolve it — surface the original fault, not the

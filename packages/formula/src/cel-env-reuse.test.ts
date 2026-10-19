@@ -84,3 +84,40 @@ describe('#24536 — one environment per engine entry point, not one per call', 
     expect(n).toBe(0);
   });
 });
+
+describe('#24536 — the per-source program cache answers every row as a fresh parse would', () => {
+  it('a rewrite decided by the ROW is part of the key: alternating rows keep their own answers', () => {
+    // #7168: `record.due` is wrapped in `date(…)` only on a row whose
+    // `previous.due` is a Date, so the two rows run two different programs.
+    const expr = { dialect: 'cel' as const, source: 'record.due == previous.due' };
+    const dateRow = { record: { due: '2026-06-20' }, previous: { due: new Date('2026-06-20T00:00:00Z') } };
+    const textRow = { record: { due: '2026-06-20' }, previous: { due: '2026-06-20' } };
+    const textOther = { record: { due: '2026-06-20' }, previous: { due: '2026-06-21' } };
+    for (let i = 0; i < 3; i++) {
+      expect(celEngine.evaluate(expr, dateRow)).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(expr, textRow)).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(expr, textOther)).toEqual({ ok: true, value: false });
+    }
+  });
+
+  it('the overload retry runs its own rewritten program, row by row', () => {
+    const expr = { dialect: 'cel' as const, source: 'record.rating >= 4' };
+    for (let i = 0; i < 3; i++) {
+      expect(celEngine.evaluate(expr, { record: { rating: '5.0' } })).toEqual({ ok: true, value: true });
+      expect(celEngine.evaluate(expr, { record: { rating: 3 } })).toEqual({ ok: true, value: false });
+      expect(celEngine.evaluate(expr, { record: { rating: '3.5' } })).toEqual({ ok: true, value: false });
+    }
+  });
+
+  it.each([
+    ['a parse fault', 'record.a +'],
+    ['a check fault', "1 + 'a'"],
+    ['a runtime fault', 'record.a.b.c'],
+    ['an unknown function', 'nope(record.a)'],
+  ])('%s is reported the same on every evaluation', (_label, source) => {
+    const expr = { dialect: 'cel' as const, source };
+    const first = celEngine.evaluate(expr, { record: { a: 1 } });
+    expect(first.ok).toBe(false);
+    for (let i = 0; i < 3; i++) expect(celEngine.evaluate(expr, { record: { a: 1 } })).toEqual(first);
+  });
+});
