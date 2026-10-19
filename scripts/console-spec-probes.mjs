@@ -104,11 +104,46 @@ export function describeCandidates(blob) {
     const text = match[2];
     // Long enough to be unique, short enough to survive intact, and free of
     // escapes and line breaks so a literal search means what it says.
-    if (text.length < 32 || text.length > 160) continue;
-    if (/[\\\r\n]/.test(text)) continue;
-    found.add(text);
+    if (text.length >= 32 && text.length <= 160 && !/[\\\r\n]/.test(text)) {
+      found.add(text);
+      continue;
+    }
+    for (const segment of literalSegments(text)) found.add(segment);
   }
   return [...found].sort();
+}
+
+/**
+ * The second candidate source: the plain runs inside a describe literal the
+ * whole-literal rule above skips — one longer than 160 characters, or one
+ * carrying an escape.
+ *
+ * That rule is right about the WHOLE literal: an escape is spelled one way in a
+ * spec's dist and may be spelled another in a bundle (`—` emitted as the
+ * raw dash, or the reverse), so the literal as a whole is no probe. The text
+ * BETWEEN two escapes is plain characters in both spellings. Skipping it cost
+ * real coverage (objectstack#24663): on a pin whose reference differs from this
+ * tree only in such literals both pools were empty, the build stamped
+ * `freshWitness: null`, and the assertion passed a console carrying the
+ * reference's spec — at objectui 12dc7b47 against objectstack f4755a68a797 the
+ * one changed describe is the flow `runAs` text, over 160 characters with its em
+ * dash escaped.
+ *
+ * So a skipped literal is cut at every escape sequence and at every quote
+ * character — a bundler re-quotes a string to whichever quote needs fewer
+ * escapes, which can put a backslash before a quote that had none — and each run
+ * of 32 characters or more is a candidate. A run is NOT cut to 160: that bound
+ * was about a whole literal surviving, and a run is plain text the bundler copies
+ * byte for byte. Cutting it into windows would also turn one changed run into
+ * windows the other spec still contains, which pickProbe's substring rule drops.
+ *
+ * A literal the rule above accepts is still taken whole, so every candidate it
+ * produced before is still produced; this only adds candidates it skipped.
+ */
+function literalSegments(text) {
+  return text
+    .split(/\\(?:u\{[0-9a-fA-F]+\}|u[0-9a-fA-F]{4}|x[0-9a-fA-F]{2}|[\s\S])|["'`\r\n]/)
+    .filter((segment) => segment.length >= 32);
 }
 
 /**
