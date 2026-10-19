@@ -57,7 +57,9 @@
  * probes recover it the fail-closed way), ONE `ShareLinkService` with the
  * production password hasher, and the password sent the way the console's
  * landing page sends it: the `X-Share-Password` header. Refusals are read as
- * the ADR-0112 envelope's `status` + `error.code`.
+ * the ADR-0112 envelope's `status` + `error.code`. Every password verdict is
+ * the production verifier's own; a pair it already judged is answered from
+ * a memo of that verdict (see `beforeAll`).
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -170,6 +172,35 @@ beforeAll(async () => {
   await engine.insert(OBJECT, { id: RECORD, title: 'Shared doc' }, { context: { isSystem: true } } as any);
 
   const svc = new ShareLinkService({ engine: engine as any });
+  // [#24633] One scrypt verification per distinct (password, hash) pair, not
+  // one per request. The production verifier derives a key at the account
+  // parameters (scrypt N=16384, r=16) on every call, and `resolveToken` calls
+  // it for every password presented to a protected link, an `email` one
+  // included whatever email was sent. Counted at `eadea5720`: 70 calls, plus
+  // the 4 mints below, and they were the file's wall time. It read 34.84 s in
+  // CI (run 39298888283, Test Core 6/6, attempt 2), and the loop case with
+  // 10 calls timed out at vitest's 5000 ms default on attempt 1. The calls
+  // hold only 6 distinct pairs (3 protected live links x a wrong and the
+  // correct password), and a verdict is a pure function of its pair, so each
+  // pair is judged once by the real verifier and its verdict replayed.
+  // Every request is still made, so every answer is still a real request's,
+  // and the service is still built with both password members at their
+  // defaults, as production builds it (so its legacy-hash upgrade stays on;
+  // no row here is legacy). The memo wraps the instance's own verifier,
+  // which is not exported. If that member moves, this throws rather than
+  // leave the file paying for every call again.
+  const productionVerify: unknown = (svc as any).verifyPassword;
+  if (typeof productionVerify !== 'function') {
+    throw new Error('ShareLinkService no longer keeps its password verifier as `verifyPassword`; re-point the memo below');
+  }
+  const verdicts = new Map<string, Map<string, Promise<boolean>>>();
+  (svc as any).verifyPassword = (plain: string, hash: string): Promise<boolean> => {
+    let byPlain = verdicts.get(hash);
+    if (!byPlain) verdicts.set(hash, (byPlain = new Map()));
+    let verdict = byPlain.get(plain);
+    if (!verdict) byPlain.set(plain, (verdict = (productionVerify as (p: string, h: string) => Promise<boolean>)(plain, hash)));
+    return verdict;
+  };
   const creator = { isSystem: true, userId: 'usr_creator' } as any;
   const mint = async (audience: 'public' | 'signed_in' | 'email', password?: string) =>
     svc.createLink(
