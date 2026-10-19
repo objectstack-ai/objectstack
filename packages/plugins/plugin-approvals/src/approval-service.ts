@@ -3243,8 +3243,8 @@ export class ApprovalService implements IApprovalService {
     if (column) {
       const rows = await this.engine.find(object, {
         where: { id: recordId }, fields: ['id', column], limit: 1, context: SYSTEM_CTX,
-      } as any);
-      organization = this.recordOrgResolver.organizationOf(object, Array.isArray(rows) ? rows[0] : rows);
+      });
+      organization = this.recordOrgResolver.organizationOf(object, Array.isArray(rows) ? rows[0] : undefined);
     }
     if (!organization && requestOrg != null && String(requestOrg) !== '') organization = String(requestOrg);
     return { isSystem: true, userId: actorId, ...(organization ? { tenantId: organization } : {}) };

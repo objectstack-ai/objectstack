@@ -5131,8 +5131,8 @@ describe('status mirror identity (#3783)', () => {
     // `organizationId`, which is not an envelope field. The record-organisation
     // read and the end-to-end envelope are pinned in
     // `status-mirror-envelope.integration.test.ts`.
-    const req = await open();
-    expect(req.organization_id).toBe('t1');
+    await open();
+    expect(engine._tables['sys_approval_request'][0].organization_id).toBe('t1');
     expect(mirrorContext()).toEqual({ isSystem: true, userId: 'u1', tenantId: 't1' });
   });
 });

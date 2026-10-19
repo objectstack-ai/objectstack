@@ -43,7 +43,7 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ObjectKernel, resolveUserAuthzGrants } from '@objectstack/core';
-import { ObjectQLPlugin, bindHooksToEngine } from '@objectstack/objectql';
+import { ObjectQLPlugin, bindHooksToEngine, type ObjectQL } from '@objectstack/objectql';
 import { SqlDriver } from '@objectstack/driver-sql';
 import { AutomationServicePlugin, type AutomationEngine } from '@objectstack/service-automation';
 import { RecordChangeTriggerPlugin } from '@objectstack/trigger-record-change';
@@ -123,7 +123,7 @@ const envelopeOf = (c: any): Envelope => ({
 
 describe("the status mirror hands a runAs:'user' cascade the person's own request envelope in the record's organisation (#24519)", () => {
   let kernel: ObjectKernel;
-  let ql: any;
+  let ql: ObjectQL;
   let svc: ApprovalService;
   let openNode: (recordId: string, submitter: string, approvers: string[], config?: Record<string, unknown>) => Promise<string>;
   /** The context of every write to the business object, in order. */
@@ -145,7 +145,7 @@ describe("the status mirror hands a runAs:'user' cascade the person's own reques
     await kernel.use(new AutomationServicePlugin());
     await kernel.use(new RecordChangeTriggerPlugin());
     await kernel.bootstrap();
-    ql = kernel.getService('objectql');
+    ql = kernel.getService<ObjectQL>('objectql');
     const automation = kernel.getService<AutomationEngine>('automation');
 
     const driver = new SqlDriver({ client: 'better-sqlite3', connection: { filename: ':memory:' }, useNullAsDefault: true });
