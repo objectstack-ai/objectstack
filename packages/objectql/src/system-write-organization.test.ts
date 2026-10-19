@@ -124,12 +124,11 @@ const DISPATCH_ORDER = {
 /**
  * A platform-namespace object the #13491 inventory did NOT adjudicate.
  *
- * ⚠️ Its exclusion below is `unclassified`, not `global`. Until the 2026-08-31
- * ruling this file read it as "platform namespace ⇒ deliberately org-less
- * (…)"; that wholesale reading was withdrawn, and what these cases now pin
- * is that an UNADJUDICATED object's behaviour did not move — which is what
- * bounds the reclassification's blast radius to the admitted list. The admitted
- * and `global` sides are pinned in `tenancy-by-object-classification.test.ts`.
+ * ⚠️ Its exclusion below is `unclassified`, not `global`, and since ADR-0131
+ * C8 stage 8b it holds under a WALLED posture only (epic ruling record
+ * 6259899486 on #15194, item 4). Under `single` the object is judged like any
+ * other — derived or refused. The admitted and `global` sides are pinned in
+ * `tenancy-by-object-classification.test.ts`.
  */
 const SYS_LEDGER = {
   name: 'sys_audit_entry',
@@ -389,19 +388,27 @@ describe('#8844 multi-organization — the write is REFUSED, never defaulted', (
 });
 
 describe('#8844 the exclusions — populations the refusal must not touch', () => {
-  it.each(['isolated', 'single'] as const)(
-    'a platform-namespace object stays org-less on the %s posture',
+  it.each(['isolated', 'group'] as const)(
+    'a platform-namespace object stays org-less on the %s posture — the walled exemption stands in 18.0',
     async (posture) => {
-      // ⚠️ [#13491] Reads as an UNCLASSIFIED verdict now, not a namespace one.
-      // The card commit ff08691e6 cites measured this primitive on `sys_permission_set` and filed it as an
-      // observation because an org-less row is defensible there. The #8844
-      // ruling confirms that reasoning holds for platform objects and does NOT
-      // generalize to application objects — which is exactly the boundary here.
+      // ⚠️ [#13491] Reads as an UNCLASSIFIED verdict, not a namespace one, and
+      // [C8 stage 8b] holds under a wall only: 18.0 refuses a walled posture at
+      // the operator's boot path, and the walled half of the lift is 18.x's
+      // (epic ruling record 6259899486 on #15194, item 4).
       const { engine, observed } = await makeEngine({ posture });
       await engine.insert('sys_audit_entry', { subject: 'e1' }, { context: SYSTEM_CTX } as any);
       expect(lastWrite(observed, 'sys_audit_entry')?.options?.tenantId).toBeUndefined();
     },
   );
+
+  it('[C8 stage 8b] single posture: a platform-namespace object is no longer excluded — it takes the sole organization', async () => {
+    // ADR-0131 D9 / D11: `single` is never a reason for a row to be org-less.
+    // The walled case above is the control: same object, same write, only the
+    // posture differs.
+    const { engine, observed } = await makeEngine({ posture: 'single', organizations: [ORG_ID] });
+    await engine.insert('sys_audit_entry', { subject: 'e1' }, { context: SYSTEM_CTX } as any);
+    expect(lastWrite(observed, 'sys_audit_entry')?.options?.tenantId).toBe(ORG_ID);
+  });
 
   it.each(['isolated', 'single'] as const)(
     'an object declaring `tenancy.enabled: false` stays org-less on the %s posture',
@@ -418,8 +425,10 @@ describe('#8844 the exclusions — populations the refusal must not touch', () =
   it('never probes `sys_organization` for a write it does not judge', async () => {
     // The cost half of the exclusions: an ordinary write must pay two property
     // reads and a regexp, not a query.
+    // [C8 stage 8b] A platform object is judged under `single` now, so it is
+    // not in this population: only the walled exemption skips its probe, and
+    // a walled refusal never probes anyway.
     const { engine, observed } = await makeEngine({ organizations: [ORG_ID] });
-    await engine.insert('sys_audit_entry', { subject: 'e1' }, { context: SYSTEM_CTX } as any);
     await engine.insert('billing_license', { subject: 'lic' }, { context: SYSTEM_CTX } as any);
     await engine.insert('dispatch_order', { subject: 'session' }, { context: SESSION_CTX } as any);
     expect(observed.filter((c) => c.object === 'sys_organization')).toEqual([]);
