@@ -1,5 +1,53 @@
 # @objectstack/metadata-protocol
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- 2ec6827: feat(metadata-protocol): the draft save records `draftChanges` — which surface, actor and instant last changed each key path of a pending draft — and the strict draft read serves it
+  
+  Clause-②: yes (widening)
+  
+  - **Recorded by the draft save.** `saveMetaItem({ mode: 'draft', surface })` compares the body it writes with the body it replaces, inside the write's own transaction: the draft row, else (the draft's first save) the active row its publish would replace, else nothing, which records `[]`, the whole body. A path is the object keys from the body root to the deepest changed key; an array is one leaf, with no index. Each changed path is stamped `{ by: surface ?? 'api', actor, at }`, where `actor` is the value the save's history event carries (or `null`) and `at` is the write's instant as `toISOString()`.
+  - **Kept until publish or discard.** No two entries share a path: a save replaces every entry at or under each path it changes, so the longest prefix answers for a key. A save that changes no key path leaves the entries as they were. Publish and discard delete the draft row, and the entries with it, so the next draft starts clean. A `migrate-stored` rewrite and an active save record nothing.
+  - **Served on the strict draft read only.** `getMetaItem({ state: 'draft' })` answering a stored draft row carries `draftChanges` beside `item`. It is absent on the active read, the cached branch, the `?preview=draft` read, and a draft row whose saves recorded none (one saved before this release) — never `[]`.
+  - **Stored on the row.** `sys_metadata` gains a nullable `draft_changes` column (`@objectstack/metadata-core`'s `SysMetadataObject`), never inside the stored body. Schema sync adds it to an existing table on boot with no manual step (measured on SQLite and the memory driver).
+  - **Translated labels.** `@objectstack/platform-objects`' translation bundles carry the new column's label and help text in every shipped locale.
+  - **An unknown `surface` is refused.** In-process, a value outside `copilot | studio | api` is refused `400 INVALID_REQUEST` before anything is written.
+- 33a45cc: fix(metadata-protocol): removing a field that stores nothing is not a destructive change
+  
+  Clause-②: yes (widening) (the save door newly accepts, without `force`, a removal it refused; owes the seat's `TIER_DEFAULT` review of record before the queue)
+  
+  - **What changed.** The object save's safety diff (`PUT /api/v1/meta/object/:name`, and every other door that reaches `saveMetaItem`'s destructive gate) now judges each finding by whether the field is stored, using the spec's storage predicate `isVirtualSearchField` (`SEARCH_VIRTUAL_TYPES`) on the field's own declaration — the predicate the sortability projection already reads. A `formula` field is computed on read and has no column (ADR-0079 addendum, item 9), so:
+    - removing a `formula` field saves `200` without `?force=true` (it answered `409 DESTRUCTIVE_CHANGE` with "existing data in this column will become inaccessible");
+    - retyping a `formula` field into a stored kind saves without `force`: the new column starts empty, and no stored value is lost.
+  - **Not changed.** Removing a stored field, including an engine-computed but stored one (`autonumber`, `summary`), still answers `409 DESTRUCTIVE_CHANGE` with the same `field_removed` finding and message. Retyping a stored field into a `formula` still answers `409` with `field_type_change`. The `force` mechanism, the messages and the error codes are unchanged.
+  - **Who notices.** An author or an agent that removes a formula field no longer needs `force=true` for it, so `force=true` stays reserved for a real loss of stored data.
+
+### Patch Changes
+
+- e67ac4b: `duplicatePackage` no longer renames, in free text, a name that is both a prefixed package object and a field key of one of the package's objects. Such a name (for example a field keyed `acme_deal` on the object `acme_deal`) may name the field, so it is now rewritten only at object-reference properties (`object`, `reference`, `objectName`, a permission set's `objects` keys, …), the way a bare object name already is. A copied list view's `columns` and a copied form's `sections[].fields` keep naming the field the copy has, instead of a field named after the renamed object: the list view is no longer refused at the copy with `list-view-field-unknown`, and the form no longer copies a field the copy does not have. Free text naming such an object (a description) is left as stored; a prefixed object no field key spells is still renamed in free text as before.
+- Updated dependencies [4bd7215]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+  - @objectstack/lint@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/metadata@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+  - @objectstack/sdui-parser@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Minor Changes

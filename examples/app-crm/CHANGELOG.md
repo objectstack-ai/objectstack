@@ -1,5 +1,24 @@
 # @objectstack/example-crm
 
+## 4.0.100-next.5
+
+### Patch Changes
+
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [964a237]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/service-i18n@18.0.0-next.5
+
 ## 4.0.100-next.4
 
 ### Patch Changes

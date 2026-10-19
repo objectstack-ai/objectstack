@@ -1,5 +1,66 @@
 # @objectstack/verify
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [9847f87]
+- Updated dependencies [8ed3786]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [94e60c0]
+- Updated dependencies [9524666]
+- Updated dependencies [adb7910]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [964a237]
+- Updated dependencies [b7a688e]
+  - @objectstack/plugin-sharing@18.0.0-next.5
+  - @objectstack/plugin-hono-server@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/plugin-security@18.0.0-next.5
+  - @objectstack/plugin-auth@18.0.0-next.5
+  - @objectstack/rest@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/mcp@18.0.0-next.5
+  - @objectstack/service-datasource@18.0.0-next.5
+  - @objectstack/plugin-approvals@18.0.0-next.5
+  - @objectstack/service-automation@18.0.0-next.5
+  - @objectstack/service-package@18.0.0-next.5
+  - @objectstack/service-mailbox@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/metadata@18.0.0-next.5
+  - @objectstack/plugin-audit@18.0.0-next.5
+  - @objectstack/plugin-email@18.0.0-next.5
+  - @objectstack/plugin-webhooks@18.0.0-next.5
+  - @objectstack/service-analytics@18.0.0-next.5
+  - @objectstack/service-cache@18.0.0-next.5
+  - @objectstack/service-job@18.0.0-next.5
+  - @objectstack/service-messaging@18.0.0-next.5
+  - @objectstack/service-queue@18.0.0-next.5
+  - @objectstack/service-realtime@18.0.0-next.5
+  - @objectstack/service-settings@18.0.0-next.5
+  - @objectstack/service-sms@18.0.0-next.5
+  - @objectstack/service-storage@18.0.0-next.5
+  - @objectstack/trigger-api@18.0.0-next.5
+  - @objectstack/trigger-record-change@18.0.0-next.5
+  - @objectstack/trigger-schedule@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+  - @objectstack/plugin-pinyin-search@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Patch Changes

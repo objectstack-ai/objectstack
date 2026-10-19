@@ -1,5 +1,63 @@
 # @objectstack/plugin-sharing
 
+## 18.0.0-next.5
+
+### Minor Changes
+
+- 964a237: fix(plugin-sharing,runtime)!: a declared sharing rule is read-only and clonable — no rule, new or renamed, can take its name, and it is switched off through the activation ledger, which revokes its grants at once
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) no spec key, export, option or stored metadata shape is added, removed or renamed, so `objectstack migrate meta` has nothing to rewrite; what changes is the accept set of two write doors, whose remedy is another name for the caller's rule plus one activation call -->
+  
+  **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  ADR-0131 D6 charts declared sharing rules under regime C: a rule a package declares is read-only, it is customised by a clone under another name, and it is switched off through the deployment-level activation ledger (`sys_metadata_activation`), like flows, actions, positions and permission sets. Same-name shadowing is retired.
+  
+  What is refused now:
+  
+  - `POST /api/v1/sharing/rules` (and `SharingRuleService.defineRule`) creating a rule under a declared rule's name — FROM `201`, the new row replacing the declared rule in its scope, TO `409 RESOURCE_CONFLICT` naming the declared rule. Fix: create your rule under another name, and switch the declared one off with `POST /api/v1/security/_activation/sharing_rule/<name>` and `{ "enabled": false }`.
+  - A `/data` insert of a `sys_sharing_rule` row under a declared rule's name, or an update that renames a row onto one — FROM `201` / `200`, TO `409 RESOURCE_CONFLICT`. Fix: the same.
+  
+  What is added:
+  
+  - **The switch.** `POST /api/v1/security/_activation/sharing_rule/:name` writes the declared rule's activation row, behind the same authority as the other activation doors: `manage_metadata`, and the platform operator under a wall, because the row covers every organization. A declared rule switched off is served nowhere. The write revokes every grant that carries the rule's name in the same request, and switching it back on re-derives them. The name must be a declared rule (`404` otherwise; a rule your organization authored keeps its own `active` field), and with no sharing-rule service bound the door answers `503`.
+  - **A declaration over a stored row is reported, never made an overlay.** When a package declares a rule whose name a `sys_sharing_rule` row already holds in a scope (a package upgrade, or a copy customised before this release), the row keeps answering as its own rule. The declaration is not served beside it, and that is logged at `error` once per name and scope per process, with the remedy.
+  
+  Unchanged: rules whose name no declaration holds are created, renamed and switched as before. A stored row that already holds a declared name stays editable as itself. `DELETE /api/v1/sharing/rules/:idOrName` on a declared rule is still `403 PERMISSION_DENIED`, and is now answered the same way when the rule is switched off.
+
+### Patch Changes
+
+- 9847f87: fix(plugin-sharing): a minted share link carries an organization, never a NULL one (ADR-0131 D9)
+  
+  Clause-②: no
+  
+  - **What changed.** `ShareLinkService.createLink` stamps `sys_share_link.organization_id`. It takes the organization of the linked record, read under the system context. When the record names none, it takes the acting context's organization (`tenantId`). When neither names one, it applies the system-write rule: under `single`, the Default Organization (the only one there is); under a wall (`group` or `isolated`), the mint is refused with `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` (status 500) and no link is written. The same refusal answers a `single` install that holds no organization or several. Before, every link was written with `organization_id` NULL.
+  - **A link on another organization's record.** Under `group`, a member active in one organization can mint on a visible record of another. The link carries the record's organization, not the session's.
+  - **What stays the same.** Under `single` nothing a user sees changes. The mint response keeps the `ShareLink` shape and carries no organization field. A composition that registers no `sys_organization` object writes links as before.
+  - **Who can meet the refusal.** No in-repo caller reaches it. Both share-link routes need a signed-in caller. Under a wall, an organization-less API key is refused at admission, and an organization-less session cannot see a record that has a tenant column, so its mint is refused before the stamp. The refusal is reached by a walled, organization-less caller minting on an object with no tenant column, or by a system caller that threads no `tenantId`. The fix is to pass the organization on the context (`{ isSystem: true, tenantId }`).
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [4d12b23]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [b7a688e]
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/platform-objects@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/formula@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Minor Changes

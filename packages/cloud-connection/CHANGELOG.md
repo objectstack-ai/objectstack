@@ -1,5 +1,33 @@
 # @objectstack/cloud-connection
 
+## 18.0.0-next.5
+
+### Patch Changes
+
+- Updated dependencies [e67ac4b]
+- Updated dependencies [fa26308]
+- Updated dependencies [01fafde]
+- Updated dependencies [26501ae]
+- Updated dependencies [9112bcd]
+- Updated dependencies [94e60c0]
+- Updated dependencies [adb7910]
+- Updated dependencies [69f342b]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [2ec6827]
+- Updated dependencies [fb0d85b]
+- Updated dependencies [ff48407]
+- Updated dependencies [45bec43]
+- Updated dependencies [33a45cc]
+- Updated dependencies [964a237]
+  - @objectstack/metadata-protocol@18.0.0-next.5
+  - @objectstack/spec@18.0.0-next.5
+  - @objectstack/objectql@18.0.0-next.5
+  - @objectstack/runtime@18.0.0-next.5
+  - @objectstack/metadata-core@18.0.0-next.5
+  - @objectstack/core@18.0.0-next.5
+  - @objectstack/types@18.0.0-next.5
+
 ## 18.0.0-next.4
 
 ### Minor Changes
