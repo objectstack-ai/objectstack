@@ -22,7 +22,8 @@
  *      row stores it, and after a restart (the stored rows hydrated into a new
  *      registry) the door serves it again;
  *  (b) a malformed row is refused `400 VALIDATION_ERROR` and neither the
- *      registry nor the `sys_packages` row moves;
+ *      registry nor the `sys_packages` row moves; and when `sys_packages`
+ *      refuses a well-formed edit, the prior row is put back everywhere;
  *  (d) end to end: a list view saved into P bound to an object of a package P
  *      never declared is refused `422 INVALID_METADATA`
  *      (`list-view-object-outside-closure`), and after the PATCH declares that
@@ -239,6 +240,27 @@ describe('[#24670] PATCH /packages/:id — `dependencies` on the protocol branch
     expect({ status: answer.status, code: answer.code }).toEqual({ status: 400, code: 'VALIDATION_ERROR' });
     expect(p.registryManifest(OWN)).toEqual(registryBefore);
     expect(await p.storedManifest(OWN)).toEqual(storedBefore);
+  }, 60_000);
+
+  it('(b) a refused durable write puts the prior row back: the registry, GET and sys_packages keep it', async () => {
+    // The row is replaced WHOLE in the registry, which is what lets the
+    // protocol's shallow pre-patch snapshot restore it when `sys_packages`
+    // refuses the write (#21243's undo).
+    const p = await boot(newDir());
+    await p.install(OWN);
+    const declared = { [DEP]: '^1.0.0' };
+    expect((await p.call('PATCH', `/${OWN}`, { dependencies: declared })).status, 'precondition').toBe(200);
+    await (p.engine as any).execute({
+      sql: `CREATE TRIGGER refuse_own_update BEFORE UPDATE ON sys_packages `
+        + `WHEN OLD.id = '${OWN}' BEGIN SELECT RAISE(ABORT, 'refused by the test trigger'); END`,
+    });
+
+    const answer = await p.call('PATCH', `/${OWN}`, { dependencies: {} });
+
+    expect(answer.status, JSON.stringify(answer.body)).toBe(500);
+    expect(p.registryManifest(OWN)?.dependencies).toEqual(declared);
+    expect((await p.call('GET', `/${OWN}`)).body?.data?.manifest?.dependencies).toEqual(declared);
+    expect((await p.storedManifest(OWN))?.dependencies).toEqual(declared);
   }, 60_000);
 
   it('(d) the remedy end to end: a save refused for an undeclared package is admitted once the PATCH declares it', async () => {
