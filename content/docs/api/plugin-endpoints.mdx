@@ -109,7 +109,7 @@ These are the routes `service-ai` mounts, and the SDK method that reaches each:
 | POST | `/ai/chat` | `ai.chat` / `ai.chatStream` | Chat completion — JSON with `stream: false`, otherwise the Vercel UI Message Stream |
 | POST | `/ai/chat/stream` | — | Generic-SSE twin of `/ai/chat`: the same completion without the tool loop or persistence |
 | POST | `/ai/complete` | `ai.complete` | Text completion |
-| GET | `/ai/models` | `ai.models` | Models this environment offers (ADR-0028) |
+| GET | `/ai/models` | `ai.models` | Models this system offers (cloud ADR-0028) |
 | GET | `/ai/status` | — | Active adapter provenance (console diagnostics) |
 | GET | `/ai/effective-model` | — | Resolved model ids and their source (console diagnostics) |
 | POST / GET | `/ai/conversations` | `ai.conversations.create` / `.list` | Create / list conversations — the list is newest first and pages by keyset: send the `id` of the last conversation you hold as `cursor`, and read `hasMore` to learn whether another page follows |

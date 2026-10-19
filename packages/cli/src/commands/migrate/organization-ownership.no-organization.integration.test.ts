@@ -61,7 +61,7 @@ import '@objectstack/objectql';
 import '@objectstack/metadata-protocol';
 import '@objectstack/plugin-auth';
 
-type Command = (typeof import('./organization-ownership.js'))['default'];
+type Command = (typeof import('./organization-ownership.js'))['OrganizationOwnershipCeremony'];
 let MigrateOrganizationOwnership: Command;
 
 const CLI_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
@@ -162,7 +162,7 @@ describe('os migrate organization-ownership on a single-posture database that ho
       savedEnv[key] = process.env[key];
       delete process.env[key];
     }
-    ({ default: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
+    ({ OrganizationOwnershipCeremony: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
     dir = mkdtempSync(join(tmpdir(), 'os-ceremony-no-organization-'));
     file = join(dir, 'fixture.db');
 

@@ -2334,7 +2334,7 @@ export const esESMetadataForms: NonNullable<TranslationData['metadataForms']> = 
       },
       packageId: {
         label: "ID de paquete",
-        helpText: "El paquete que distribuye este conjunto; un valor que nombra otro paquete se rechaza. Déjalo vacío para un conjunto creado en este entorno."
+        helpText: "El paquete que distribuye este conjunto; un valor que nombra otro paquete se rechaza. Déjalo vacío para un conjunto creado en este sistema."
       },
       systemPermissions: {
         label: "Permisos del sistema",
