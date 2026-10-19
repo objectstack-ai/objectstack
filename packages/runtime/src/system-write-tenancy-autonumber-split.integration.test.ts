@@ -68,7 +68,11 @@ const DISPATCH_ORDER = {
   },
 } as any;
 
-const ORG_OBJECT = { name: 'sys_organization', fields: { name: { type: 'text' } } } as any;
+// [C8 stage 8b] Declared as the platform declares it (`sys-organization.object.ts`):
+// better-auth owns the table, so the registration injects no organization column.
+// A bare schema would gain one, and under `single` the first organization's own
+// insert would then be refused for want of an organization.
+const ORG_OBJECT = { name: 'sys_organization', managedBy: 'better-auth', fields: { name: { type: 'text' } } } as any;
 
 const openDrivers: SqlDriver[] = [];
 
