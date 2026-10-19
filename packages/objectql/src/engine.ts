@@ -147,7 +147,7 @@ import {
   // Layer 0 — see {@link buildDriverOptions}.
   computeTenantLayer0Verdict,
   // [#24497] The ONE grants resolver, the one the request path seeds a
-  // context's grants and peer list through — see `ScopedContext.withUserGrantsSeeded`.
+  // context's grants and peer list through — see `ScopedContext[SEED_USER_GRANTS]`.
   resolveUserAuthzGrants,
 } from '@objectstack/core';
 import { WriteEpoch, isWriteEpochOperation } from './write-epoch.js';
@@ -313,7 +313,7 @@ import {
   divergingHookPayloadKeys,
   MultiUpdateHookKeyDivergenceError,
 } from './multi-update-hook-key-divergence.js';
-import { UnscopedHookApi, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
+import { UnscopedHookApi, SEED_USER_GRANTS, type HookRunAs, type HookRunAsRef, type RunAsDerivableApi } from './hook-run-as.js';
 import type { HookWriteRecording } from './hook-write-provenance.js';
 import { resolveMasterDetailRelation } from './master-detail.js';
 // [#19911] The settlement's question "does judging the FK's own lock need the
@@ -21808,8 +21808,12 @@ export class ScopedContext implements IScopedContext, RunAsDerivableApi {
    *
    * Called on the api {@link withRunAs}`('user')` derived, which is never
    * elevated, so it does not re-judge the elevation flag.
+   *
+   * Keyed on {@link SEED_USER_GRANTS}, a symbol the package entry does not
+   * export, so it is no nameable member of this class's published face (see
+   * the symbol's docblock in `hook-run-as.ts`).
    */
-  async withUserGrantsSeeded(): Promise<ScopedContext> {
+  async [SEED_USER_GRANTS](): Promise<ScopedContext> {
     const ctx = this.executionContext;
     if (!ctx.userId) return this;
     const needsGrants = !Array.isArray(ctx.permissions);

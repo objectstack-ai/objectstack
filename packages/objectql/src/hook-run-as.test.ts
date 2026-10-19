@@ -372,6 +372,13 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       expect(userless.seen).toEqual([]);
     });
 
+    it('the seed is no nameable member of the published face: keyed on a symbol the package entry does not export', async () => {
+      const entry = await import('./index.js');
+      expect('SEED_USER_GRANTS' in entry).toBe(false);
+      expect(Object.getOwnPropertyNames(ScopedContext.prototype)).not.toContain('withUserGrantsSeeded');
+      expect(Object.getOwnPropertySymbols(ScopedContext.prototype)).toHaveLength(1);
+    });
+
     it('a resolver failure keeps the UNSEEDED pin — narrower, never elevated — and says so once at warn', async () => {
       const engine = grantsEngine({ failReads: true });
       const warns: unknown[][] = [];

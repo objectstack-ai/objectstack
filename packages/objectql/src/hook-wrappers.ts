@@ -558,7 +558,7 @@ function installRunAsApi(
   };
   if (runAs !== 'user') return Promise.resolve(install(derived));
   // [#24497] A `'user'` pin carries the user's grants and peer list, seeded
-  // through the resolver the request path uses (`ScopedContext.withUserGrantsSeeded`).
+  // through the resolver the request path uses (`ScopedContext[SEED_USER_GRANTS]`, `hook-run-as.ts`).
   // Cost: one `resolveUserAuthzGrants` per dispatch whose triggering context
   // carries no `permissions` or no `org_user_ids` — the hand-built system
   // contexts; a request-resolved context carries both and resolves nothing.
