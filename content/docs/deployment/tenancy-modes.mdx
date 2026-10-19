@@ -16,6 +16,11 @@ it generalizes the two-valued *tenancy mode* of
 whose `tenancy` service, membership lifecycle and degraded-tenancy boot guard all
 still apply — widened to the three postures.
 
+<Callout type="warn" title="18.0: single only">
+18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 `os serve` (and so `os dev` and `os start`) refuses `group` and
+`isolated` at boot with `NOT_IMPLEMENTED`, before it reads a config.
+</Callout>
+
 <Callout type="info" title="Renamed, not re-configured">
 The posture formerly called `multi` is now `isolated`, and the authoritative knob
 is `OS_TENANCY_POSTURE`, not `OS_MULTI_ORG_ENABLED`. Existing deployments keep
