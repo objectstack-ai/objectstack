@@ -41,6 +41,7 @@ import {
   HookUnscopedDataAccessError,
   HOOK_UNSCOPED_DATA_ACCESS_CODE,
   HOOK_UNSCOPED_DATA_ACCESS_STATUS,
+  SEED_USER_GRANTS,
   hookRunAs,
 } from './hook-run-as.js';
 import { assertEngineDeleteDispatch } from './engine-delete-dispatch.js';
@@ -61,6 +62,9 @@ const OPERATOR: ExecutionContext = {
 
 /** A trigger that resolved NO user: an `isSystem` service write, a system flow node. */
 const USERLESS: ExecutionContext = { isSystem: true, positions: [], permissions: [] } as ExecutionContext;
+
+/** The email `usr_operator`'s stored `sys_user` row carries in the grants-answering engine below (#24639). */
+const STORED_EMAIL = 'operator@example.test';
 
 // ---------------------------------------------------------------------------
 // Layer 1 — the wrapper over a real ScopedContext whose engine records.
@@ -286,7 +290,8 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
   describe("[#24497] a 'user' pin carries the user's grants and peer list, through the request path's resolver", () => {
     /**
      * A recording engine that also answers the reads `resolveUserAuthzGrants`
-     * issues: organisation `org_1` holds `usr_operator` and `usr_peer`.
+     * issues: organisation `org_1` holds `usr_operator` and `usr_peer`, and
+     * `usr_operator`'s stored `sys_user` row carries {@link STORED_EMAIL}.
      * `failReads` makes every read throw, as an unreadable permission store does.
      */
     function grantsEngine(opts: { failReads?: boolean } = {}) {
@@ -294,6 +299,9 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       engine.find = async (object: string, query: any) => {
         engine.seen.push({ method: 'find', context: query?.context, object, where: query?.where });
         if (opts.failReads) throw new Error('permission store unreachable');
+        if (object === 'sys_user' && query?.where?.id === 'usr_operator') {
+          return [{ id: 'usr_operator', email: STORED_EMAIL }];
+        }
         if (object === 'sys_member' && query?.where?.organization_id === 'org_1') {
           return [
             { id: 'm1', user_id: 'usr_operator', organization_id: 'org_1', role: 'member' },
@@ -340,12 +348,17 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
     });
 
     it('a context that already carries a peer list (a request-resolved one) resolves NOTHING and keeps its envelope', async () => {
+      // A request-resolved context carries the email the request path seeded
+      // (`resolveAuthzContext`), so it needs nothing (#24639).
       const engine = grantsEngine();
-      const context = await hookWrite({ ...OPERATOR, org_user_ids: ['usr_operator', 'usr_x'] } as ExecutionContext, engine);
+      const context = await hookWrite({
+        ...OPERATOR, org_user_ids: ['usr_operator', 'usr_x'], email: 'session@example.test',
+      } as ExecutionContext, engine);
       expect(reads(engine)).toEqual([]);
       expect(context.org_user_ids).toEqual(['usr_operator', 'usr_x']);
       expect(context.positions).toEqual(OPERATOR.positions);
       expect(context.permissions).toEqual(OPERATOR.permissions);
+      expect(context.email).toBe('session@example.test');
     });
 
     it('a trigger with no organisation: the peer list is the user alone, as an organisation-less request\'s is', async () => {
@@ -388,6 +401,45 @@ describe('#14010 Hook.runAs — the identity a hook\'s ctx.api presents', () => 
       expect(context.org_user_ids).toBeUndefined();
       expect(warns).toHaveLength(1);
       expect(String(warns[0]![0])).toMatch(/current_user\.org_user_ids drops out/);
+    });
+
+    describe("[#24639] the pin carries the user's email too, so a current_user.email row policy matches", () => {
+      it("a hand-built { isSystem: true, userId, tenantId } trigger: the pin carries the email the user's sys_user row stores", async () => {
+        const engine = grantsEngine();
+        const context = await hookWrite({ isSystem: true, userId: 'usr_operator', tenantId: 'org_1' } as ExecutionContext, engine);
+        expect(context.isSystem).toBe(false);
+        expect(context.email).toBe(STORED_EMAIL);
+        // The email rides the resolution the grants already make: ONE read of the user row.
+        expect(reads(engine).filter((r: any) => r.object === 'sys_user')).toHaveLength(1);
+      });
+
+      it('an email the context already carries is kept VERBATIM, never overwritten by the stored one', async () => {
+        const engine = grantsEngine();
+        const context = await hookWrite({
+          isSystem: true, userId: 'usr_operator', tenantId: 'org_1', email: 'carried@example.test',
+        } as ExecutionContext, engine);
+        expect(context.email).toBe('carried@example.test');
+        // It still needed its grants and peers, and took them.
+        expect([...(context.org_user_ids ?? [])].sort()).toEqual(['usr_operator', 'usr_peer']);
+      });
+
+      it('a context that carries positions, permission sets and a peer list but NO email is not returned early: it takes the email, and only the email', async () => {
+        const engine = grantsEngine();
+        const context = await hookWrite({
+          ...OPERATOR, isSystem: true, org_user_ids: ['usr_operator', 'usr_x'],
+        } as ExecutionContext, engine);
+        expect(context.email).toBe(STORED_EMAIL);
+        expect(context.org_user_ids).toEqual(['usr_operator', 'usr_x']);
+        expect(context.positions).toEqual(OPERATOR.positions);
+        expect(context.permissions).toEqual(OPERATOR.permissions);
+      });
+
+      it('a context with no userId is returned untouched: nothing to seed, nothing read', async () => {
+        const engine = grantsEngine();
+        const api = new ScopedContext({ isSystem: false, tenantId: 'org_1' } as ExecutionContext, engine);
+        expect(await api[SEED_USER_GRANTS]()).toBe(api);
+        expect(reads(engine)).toEqual([]);
+      });
     });
   });
 
