@@ -487,7 +487,8 @@ const ELEMENT_API_NO_CREDENTIALS =
  * `useElementApiDataSource` for each node it renders; the read itself is
  * objectui: packages/react/src/element-data-source/useElementApiDataSource.ts).
  * It parses the binding with this schema before anything else, so a binding
- * refused here is refused there with the same message and nothing is read.
+ * refused here is refused there, with this schema's own message, and nothing
+ * is read.
  * Otherwise it sends one `GET` to `read.url` through the console's signed-in
  * fetch and selects `path` from the JSON answer. The selected value is the
  * element's `data`: in its expression holes (`${data.used}`), in its
