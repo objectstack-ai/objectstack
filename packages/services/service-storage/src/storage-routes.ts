@@ -101,6 +101,9 @@ const ORGANIZATION_CHANGED_MESSAGE =
  * `400`: the request can be well formed and still be refused here, because
  * what is missing is bytes the server does not hold. The `details` carry the
  * chunk indexes, so a client can re-send exactly those.
+ *
+ * [#24548] The single-shot commit door gives the same answer to a file whose
+ * bytes the storage backend does not hold — see {@link heldBytesRefusal}.
  */
 const INCOMPLETE_UPLOAD_STATUS = 409;
 const INCOMPLETE_UPLOAD_CODE: StandardErrorCode = 'RESOURCE_CONFLICT';
@@ -987,6 +990,16 @@ export function registerStorageFamily(
       // asked of the SAME write context that write is about to carry.
       const writeContext: StorageWriteContext = { organizationId: session?.organizationId };
       if (!requireStartingOrganization(writeContext, [file], 'commit', fileId, res)) return;
+      // [#24548] …and only once the storage backend holds the file's bytes:
+      // `committed` is what the download doors serve. Asked after the two
+      // gates above, so only the uploader learns where the bytes stand, and
+      // before the write, so a refused file stays `pending` and completing
+      // again after the bytes land commits it.
+      const notHeld = await heldBytesRefusal(storage, file);
+      if (notHeld !== null) {
+        sendError(res, INCOMPLETE_UPLOAD_STATUS, INCOMPLETE_UPLOAD_CODE, notHeld);
+        return;
+      }
 
       const updated = await store.updateFile(
         fileId,
@@ -1578,7 +1591,19 @@ export function registerStorageFamily(
       }
 
       const payload = localAdapter.verifyToken(token, 'get');
-      const data = await storage.download(payload.k);
+      let data: Buffer;
+      try {
+        data = await storage.download(payload.k);
+      } catch (readErr) {
+        // [#24548] A valid link to a key that holds no file is the caller's
+        // `404`, never a fault. Only that case: every other read failure
+        // reaches the `catch` below and keeps its `500`.
+        if (isMissingLocalFile(readErr)) {
+          sendError(res, 404, 'FILE_NOT_FOUND', 'File not found');
+          return;
+        }
+        throw readErr;
+      }
 
       res.header('content-type', payload.ct ?? 'application/octet-stream');
       res.header('content-length', String(data.byteLength));
@@ -1817,6 +1842,53 @@ function judgeCompletion(session: UploadSessionRecord, listed: ReadonlyArray<Lis
       mismatchedChunks,
     },
   };
+}
+
+/**
+ * [#24548] Why the single-shot commit door may not commit `file`, or `null`
+ * when the storage backend holds its bytes.
+ *
+ * The door used to commit without asking, so a presigned upload whose byte PUT
+ * failed or was never sent committed with the size it declared, and the
+ * download door then handed out a URL for bytes nobody holds. Two questions,
+ * both through members every adapter implements (`IStorageService`):
+ *
+ *  - `exists(key)` — the backend's own answer to "is anything stored under this
+ *    key". Each adapter tells a missing object from a fault there (S3's `404`
+ *    from `HeadObject`; a fault still throws, and the door answers it `500`).
+ *  - `getInfo(key).size` against the size the upload declared — so a partial
+ *    or wrong upload is refused as well. A row that declares no size has none
+ *    to compare.
+ *
+ * The eTag a completion may carry is not compared: no adapter's `getInfo`
+ * reports the stored object's ETag, so there is nothing to compare it with.
+ */
+async function heldBytesRefusal(storage: IStorageService, file: FileRecord): Promise<string | null> {
+  const remedy =
+    'Send the file to its upload URL (start a new upload if that URL has expired), then complete again. ' +
+    'The file stays pending until then.';
+  if (!(await storage.exists(file.key))) {
+    return `This upload cannot be completed: the storage backend holds no bytes for it. ${remedy}`;
+  }
+  if (file.size == null) return null;
+  const declared = Number(file.size);
+  if (!Number.isFinite(declared)) return null;
+  const { size } = await storage.getInfo(file.key);
+  if (size === declared) return null;
+  return (
+    `This upload cannot be completed: the storage backend holds ${size} bytes for it, ` +
+    `not the ${declared} bytes it declared. ${remedy}`
+  );
+}
+
+/**
+ * [#24548] Whether a local adapter read failed because no file is stored under
+ * the key: Node's `ENOENT`, which `LocalStorageAdapter.download` passes through
+ * unchanged. Nothing else — a key naming a directory, an unreadable root, any
+ * other fault — is a missing file.
+ */
+function isMissingLocalFile(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'ENOENT';
 }
 
 /**
