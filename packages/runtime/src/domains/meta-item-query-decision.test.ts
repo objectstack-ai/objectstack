@@ -332,7 +332,7 @@ describe('[#23072] GET /meta/:type/:name/published on the dispatcher: its closed
 
 // ── PUT ───────────────────────────────────────────────────────────────────────
 
-describe('[#23072] PUT /meta/:type/:name on the dispatcher: its closed set is `package` and `mode`', () => {
+describe('[#23072] PUT /meta/:type/:name on the dispatcher: its closed set is `package`, `mode` and [#24395] `surface`', () => {
     const ZH_BODY = MEMBERS['zh-CN'];
     const EN_BODY = MEMBERS['en-US'];
 
@@ -342,7 +342,7 @@ describe('[#23072] PUT /meta/:type/:name on the dispatcher: its closed set is `p
         expect(answer.status).toBe(400);
         expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
         expect(answer.body?.error?.message).toContain('"member" query parameter is not supported');
-        expect(answer.body?.error?.message).toContain('Supported parameters: mode, package.');
+        expect(answer.body?.error?.message).toContain('Supported parameters: mode, package, surface.');
         expect(protocol.saveMetaItem).not.toHaveBeenCalled();
     });
 

@@ -46,7 +46,7 @@ import {
 import { SecurityCatalogNameConflictError, findEnvironmentHeldSecurityCatalogNames } from './registry.js';
 // [ADR-0029 D3] The registry's own refusal of a second owner — read, never
 // re-derived, when a residual object's name is already owned.
-import { ObjectOwnershipConflictError } from './registry.js';
+import { ObjectOwnershipConflictError, collectManifestBoundActions, collectManifestObjectNames, describeUnboundActionTargets } from './registry.js';
 
 export type { Plugin, PluginContext };
 
@@ -393,6 +393,13 @@ export class ObjectQLPlugin implements Plugin {
    * seal the vocabulary, then judge).
    */
   private picklistVocabularySealed = false;
+  /**
+   * [#24400] Set at `kernel:ready` beside {@link picklistVocabularySealed},
+   * once the boot audit has found the target object of every bound top-level
+   * action: from then on a late artifact's bound actions are judged before it
+   * registers.
+   */
+  private boundActionTargetsSealed = false;
   /** Unsubscribe handles for metadata-event subscriptions (ADR-0008 PR-7). */
   private metadataUnsubscribes: Array<() => void> = [];
   /** ADR-0057 lifecycle enforcement (Reaper/Rotator/Archiver). */
@@ -747,6 +754,19 @@ export class ObjectQLPlugin implements Plugin {
           const refusal = describeUnresolvedPicklistReferences(unresolved, orphans);
           if (refusal) throw refusal;
         }
+        // [#24400] The same seal for bound top-level actions: once the boot has
+        // judged every target (`kernel:ready`, below), an artifact arriving
+        // later must bind its actions to an object the registry holds or one
+        // the artifact itself declares. A refused install registers nothing.
+        if (this.boundActionTargetsSealed) {
+          const declared = new Set<string>(residual?.objects.map((o) => o.name) ?? []);
+          for (const manifest of ordered) for (const name of collectManifestObjectNames(manifest)) declared.add(name);
+          const unbound = ordered
+            .flatMap((manifest) => collectManifestBoundActions(manifest, artifactPackageId(manifest)))
+            .filter((bound) => !declared.has(bound.objectName) && ql.registry.getObject(bound.objectName) === undefined);
+          const refusal = describeUnboundActionTargets(unbound);
+          if (refusal) throw refusal;
+        }
 
         for (const manifest of ordered) {
           ql.registerApp(manifest, scope, options?.source);
@@ -903,6 +923,15 @@ export class ObjectQLPlugin implements Plugin {
         );
         if (unresolvedPicklists) throw unresolvedPicklists;
         this.picklistVocabularySealed = true;
+        // [#24400] A top-level action bound by `objectName` to an object no
+        // package registers fails the boot, naming the action, its package and
+        // the object — never registered and listed nowhere. Judged here for the
+        // picklist reason: every package has registered, so "no such object"
+        // is final, and either registration order has had its turn. From here
+        // on each late artifact is judged as it arrives (the `manifest` service).
+        const unboundActions = describeUnboundActionTargets(this.ql?.registry.findUnboundActionTargets() ?? []);
+        if (unboundActions) throw unboundActions;
+        this.boundActionTargetsSealed = true;
         // #7737 — FIRST, before anything that might read data: bind every
         // declared federated object to its remote table now that every
         // plugin's `start()` (including the declared-datasource auto-connect

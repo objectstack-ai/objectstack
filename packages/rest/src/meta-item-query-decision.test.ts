@@ -35,22 +35,25 @@ const LAYERED_MEMBER = 'The "member" selector is not served by the layered view 
 const refusal = (rule: string, message: string) => ({ status: 400, code: 'VALIDATION_ERROR', message, rule });
 
 describe('[#23072] metaItemQueryRefusal — each door\'s closed set', () => {
-    it('the measured sets: the item read\'s six, `/layers`\' one, `/published`\' none, and the dispatcher save\'s two (no `force`)', () => {
+    it('the measured sets: the item read\'s six, `/layers`\' one, `/published`\' none, and the dispatcher save\'s three (no `force`)', () => {
         expect([...META_ITEM_READ_PARAMS].sort()).toEqual(['layers', 'locale', 'member', 'package', 'preview', 'state']);
         expect([...META_ITEM_LAYERS_PARAMS]).toEqual(['package']);
         expect([...META_ITEM_PUBLISHED_PARAMS]).toEqual([]);
         // RestServer's own save door reads `force`; the dispatcher's does not.
-        expect([...META_ITEM_SAVE_PARAMS].sort()).toEqual(['force', 'mode', 'package']);
+        // [#24395] `surface` joined both save doors' sets.
+        expect([...META_ITEM_SAVE_PARAMS].sort()).toEqual(['force', 'mode', 'package', 'surface']);
         expect(metaItemQueryRefusal('save', { force: 'true' })).toEqual(refusal(
-            'unknown-parameter', unknownQueryParamMessage(['force'], ['mode', 'package']),
+            'unknown-parameter', unknownQueryParamMessage(['force'], ['mode', 'package', 'surface']),
         ));
+        expect(metaItemQueryRefusal('save', { surface: 'studio', mode: 'draft' })).toBeUndefined();
+        expect(metaItemQueryRefusal('save', { surface: ['studio', 'api'] })?.rule).toBe('repeated-parameter');
     });
 
     const DOORS = [
         { door: 'item', set: META_ITEM_READ_PARAMS },
         { door: 'layers', set: META_ITEM_LAYERS_PARAMS },
         { door: 'published', set: META_ITEM_PUBLISHED_PARAMS },
-        { door: 'save', set: ['package', 'mode'] },
+        { door: 'save', set: ['package', 'mode', 'surface'] },
     ] as const;
 
     for (const { door, set } of DOORS) {

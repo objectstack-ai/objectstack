@@ -255,7 +255,7 @@ The API binding's rules:
 - **Same-origin only.** `read.url` must open with a single `/`. An absolute URL of any scheme (`https:`, `mailto:`, `javascript:`, …), a protocol-relative `//host`, a backslash the browser reads as a slash, a space or control character, and a relative path such as `./home` are all refused when the page is parsed (`definePage()`, `os validate`, `os build`), with the reason.
 - **No credentials in metadata.** The console reads the endpoint with its own signed-in fetch, so the read block has no `headers`, and a credential key such as `headers`, `credentials` or `token` is refused.
 - **Reads only.** `read.method` is optional and accepts `GET` alone; there is no `write` block.
-- **Not rendered yet.** The console's generic blocks that read an API binding (a stat, a usage bar, a checklist) have not shipped: until they do, the binding parses and no block reads it.
+- **Rendered by the console.** The console reads the binding on every page element and binds the selected value as `data`: in the element's expression holes (`${data.used}`), in its `visibleWhen`, and in every element nested inside it. The console's generic `hero`, `stat`, `usage-bar`, `checklist` and `tile-grid` blocks are built to take it as their `dataSource`. While the read is in flight the element shows a loading panel, and a refused binding or a failed read shows an error panel instead.
 
 ## Variables
 

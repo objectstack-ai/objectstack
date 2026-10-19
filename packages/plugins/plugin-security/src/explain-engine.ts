@@ -54,7 +54,7 @@ import type { PermissionEvaluator } from './permission-evaluator.js';
 import { superuserBypassBitForOperation } from './permission-evaluator.js';
 import { rlsOperationForVerb } from './lifecycle-verb-rls-operation.js';
 import { ExplainObjectNotFoundError } from './errors.js';
-import { RLS_DENY_FILTER, compiledPolicyNameOf } from './rls-compiler.js';
+import { RLS_DENY_FILTER, compiledObjectDefaultRowScopeOf, compiledPolicyNameOf } from './rls-compiler.js';
 import { declaredComparisonColumns } from './declared-comparison-columns.js';
 import {
   declaredJsonStoredColumns,
@@ -1071,6 +1071,47 @@ function policyMembersOf(node: unknown): unknown[] {
 }
 
 /**
+ * [#24164 ruling E′] The object default row scopes a composed row filter
+ * applies: each member {@link policyMembersOf} finds whose compiled filter the
+ * compiler recorded as an object's declared default, once per policy name.
+ * Empty when every member came from a held permission set (the default only
+ * ever applies to an empty collection, so a filter is one or the other).
+ */
+function objectDefaultRowScopesOf(filters: readonly unknown[]): Array<{ name?: string; label?: string; description?: string }> {
+  const out = new Map<string, { name?: string; label?: string; description?: string }>();
+  for (const filter of filters) {
+    for (const member of policyMembersOf(filter)) {
+      const scope = compiledObjectDefaultRowScopeOf(member);
+      if (scope && !out.has(scope.name ?? '')) out.set(scope.name ?? '', scope);
+    }
+  }
+  return [...out.values()];
+}
+
+/**
+ * [#24164 ruling E′] The sentence explain adds where an object's default row
+ * scope is the row-level predicate: the source is the object's declaration,
+ * named with the label and description it declares, never a permission set.
+ */
+function objectDefaultRowScopeSource(
+  object: string,
+  scopes: ReadonlyArray<{ name?: string; label?: string; description?: string }>,
+): string {
+  const named = scopes
+    .map((scope) => {
+      const about = [scope.label, scope.description].filter(
+        (text): text is string => typeof text === 'string' && text.trim() !== '',
+      );
+      return `'${scope.name ?? '(unnamed)'}'${about.length > 0 ? ` (${about.join(' — ')})` : ''}`;
+    })
+    .join(', ');
+  return (
+    ` Source: the object default row scope ${named} declared on '${object}', not a permission set — ` +
+    'no permission set held carries a row policy for this object and operation.'
+  );
+}
+
+/**
  * [#20431] The names of the policies in a compiled row filter whose own filter
  * `refuses` — the attribution the RLS write check logs for the same refusal.
  * The composed filter is one policy's filter, `{ $or: [...] }` of them, or (the
@@ -1775,16 +1816,30 @@ async function applyRecordAttribution(
       const deny = isDenyAll(layer1);
       const m = matches(layer1);
       const excluded = deny || m === false;
+      // [#24164 ruling E′] An object's default row scope is named as itself,
+      // reached through the object's declaration rather than a held set.
+      const [objectDefault] = objectDefaultRowScopesOf([layer1]);
       rlsLayer.record = {
         outcome: excluded ? 'excluded' : 'admitted',
         rowFilter: layer1,
         matchesRecord: deny ? false : m,
-        rules: [{ kind: 'rls_policy', name: 'business_rls', predicate: layer1, effect: excluded ? 'excludes' : 'admits' }],
-        detail: deny
+        rules: [
+          objectDefault
+            ? {
+                kind: 'rls_policy',
+                name: objectDefault.name ?? '(unnamed)',
+                via: 'object_default',
+                predicate: layer1,
+                effect: excluded ? 'excludes' : 'admits',
+              }
+            : { kind: 'rls_policy', name: 'business_rls', predicate: layer1, effect: excluded ? 'excludes' : 'admits' },
+        ],
+        detail: (deny
           ? 'Business RLS composes to DENY ALL for this principal.'
           : excluded
             ? 'The record does not satisfy the business row-level predicate.'
-            : 'The record satisfies the business row-level predicate.',
+            : 'The record satisfies the business row-level predicate.') +
+          (objectDefault ? objectDefaultRowScopeSource(object, [objectDefault]) : ''),
       };
     }
   }
@@ -2454,6 +2509,9 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
   // `__rls_deny__` denial is now reported as `denies` while `readFilter` keeps
   // reporting the predicate that was ACTUALLY composed.
   if (filterParts.some(isDenyAllSentinel)) readFilter = { id: DENY_ALL_SENTINEL_ID };
+  // [#24164 ruling E′] Where the narrowing is an object's declared default row
+  // scope, say so: its source is the object, not a set the principal holds.
+  const objectDefaults = objectDefaultRowScopesOf(filterParts);
   layers.push({
     layer: 'rls',
     verdict: denyAll ? 'denies' : readFilter ? 'narrows' : 'not_applicable',
@@ -2461,7 +2519,8 @@ async function explainOnce(deps: ExplainEngineDeps, input: ExplainInput, asker: 
       ? 'Row-level security composes to DENY ALL for this principal.'
       : readFilter
         ? 'Row-level security narrows the row set (see readFilter for the composed predicate)' +
-          (delegatorFilter ? ' — intersection of agent + delegator filters (D10).' : '.')
+          (delegatorFilter ? ' — intersection of agent + delegator filters (D10).' : '.') +
+          (objectDefaults.length > 0 ? objectDefaultRowScopeSource(object, objectDefaults) : '')
         : 'No RLS policy applies.',
     contributors: [],
   });

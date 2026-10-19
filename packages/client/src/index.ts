@@ -6699,7 +6699,7 @@ export class ObjectStackClient {
     },
 
     /**
-     * Models this environment offers in the chat model picker (ADR-0028) —
+     * Models this system offers in the chat model picker (cloud ADR-0028) —
      * plan-filtered, with the default flagged. Populate a model picker from
      * this rather than hard-coding ids.
      */

@@ -2270,18 +2270,18 @@ export const META_ITEM_READ_PARAMS: readonly string[] = [
  * [#23072] The closed set of `PUT {metaPath}/:type/:name` (the save).
  * **Measured** from the handler and the helper it calls: `force` (the
  * destructive-change acknowledgement), `package` (the saved row's binding,
- * `metaItemPackageBinding`) and `mode` — read a frame down, by
- * `metaSaveRequestOptions` (`./meta-save-request.ts`), beside the `If-Match` /
- * `If-None-Match` headers it reads. The capability, walled-catalog and actor
- * gates read the session, not the query. The same three names the door's
- * multiplicity guard declares.
+ * `metaItemPackageBinding`), and `mode` and [#24395] `surface` (the save's
+ * authoring surface) — both read a frame down, by `metaSaveRequestOptions`
+ * (`./meta-save-request.ts`), beside the `If-Match` / `If-None-Match` headers
+ * it reads. The capability, walled-catalog and actor gates read the session,
+ * not the query. The same four names the door's multiplicity guard declares.
  *
  * ⛔ No member selector: the save is BODY-addressed (ruling 6116165299) — the
  * member it writes is named by the body's own discriminator field
  * (`email_template`'s `locale`), and `SaveMetaItemRequest` declares no
  * selector. A `?member=zh-CN` beside an `en-US` body is refused, not read.
  */
-export const META_ITEM_SAVE_PARAMS: readonly string[] = ['force', 'package', 'mode'];
+export const META_ITEM_SAVE_PARAMS: readonly string[] = ['force', 'package', 'mode', 'surface'];
 
 /**
  * [#23072] The closed set of `GET {metaPath}/:type/:name/layers`.
@@ -2307,8 +2307,8 @@ export const META_ITEM_PUBLISHED_PARAMS: readonly string[] = [];
 /**
  * [#23072] The closed set of the runtime dispatcher's `PUT /meta/:type/:name`:
  * {@link META_ITEM_SAVE_PARAMS} less `force`. **Measured** on that branch of
- * `handleMetadataRequest`: `package` (`metaItemPackageBinding`) and `mode`
- * (`metaSaveRequestOptions`) — the names `RestServer`'s save reads through the
+ * `handleMetadataRequest`: `package` (`metaItemPackageBinding`), `mode` and
+ * `surface` (`metaSaveRequestOptions`) — the names `RestServer`'s save reads through the
  * same two shared readers. `force` is the one name that door was ruled never to
  * take (#11095, settled: its `409 DESTRUCTIVE_CHANGE` remedy already says "the
  * dispatcher's `PUT /meta` accepts no `force`"), so a `?force=true` there is

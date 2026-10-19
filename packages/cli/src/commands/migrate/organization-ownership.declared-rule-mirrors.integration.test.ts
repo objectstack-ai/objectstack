@@ -57,7 +57,7 @@ import { DECLARED_SHARING_RULE_SEEDER_RUNS } from '../../utils/organization-owne
 import '@objectstack/objectql';
 import '@objectstack/metadata-protocol';
 
-type Command = (typeof import('./organization-ownership.js'))['default'];
+type Command = (typeof import('./organization-ownership.js'))['OrganizationOwnershipCeremony'];
 let MigrateOrganizationOwnership: Command;
 
 const CLI_ROOT = fileURLToPath(new URL('../../..', import.meta.url));
@@ -158,7 +158,7 @@ describe('os migrate organization-ownership on a database whose packages declare
       savedEnv[key] = process.env[key];
       delete process.env[key];
     }
-    ({ default: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
+    ({ OrganizationOwnershipCeremony: MigrateOrganizationOwnership } = await import('./organization-ownership.js'));
     dir = mkdtempSync(join(tmpdir(), 'os-ceremony-declared-rules-'));
     file = join(dir, 'fixture.db');
     // The project the command runs in: the ceremony boots ITS composition, so

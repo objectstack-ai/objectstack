@@ -3195,7 +3195,8 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       '(`manifest.navigationContributions`), the contributed ids alone, because the app\'s own ' +
       'entries are declared and translated by the package that owns it. `dashboards.DASH` a ' +
       'dashboard, `.widgets.ID` a widget `id` on it, and `.actions.URL` a header action\'s ' +
-      '`actionUrl`, not its label.',
+      '`actionUrl`, not its label. `picklists.LIST` a picklist\'s `name` that a package of this ' +
+      'stack declares.',
     // The terminal toast keys are held to `FLOW_TERMINAL_MESSAGE_KEYS` by the rule's test.
     '`flows.FLOW` a flow\'s machine `name`; `.successMessage` / `.errorMessage` a toast the flow ' +
       'itself authors (a bundle cannot add one); `.screens.NODE` the `id` of a `type: \'screen\'` ' +
@@ -3209,8 +3210,9 @@ const TRANSLATION_TARGET_UNKNOWN_EXPLANATION: RuleExplanation = {
       'and `.acknowledge` an action that declares a `resultDialog` at all; ' +
       '`resultDialog.fields.PATH` the literal `path` of a declared dialog field, dots included. A ' +
       'bundle translates what the action declares and cannot add an outcome or a dialog.',
-    'Not judged: a platform object in the registry, and an object this stack only extends through ' +
-      '`objectExtensions[]` — the owner\'s field set is not visible from here, so the whole subtree ' +
+    'Not judged: a platform object in the registry, an object this stack only extends through ' +
+      '`objectExtensions[]`, and a picklist it only extends through `picklistExtensions[]` — the ' +
+      'owner\'s declaration is not visible from here, so the whole subtree ' +
       'is skipped (a platform-prefixed name that no platform package, official plugin or cloud ' +
       'runtime object registers is reported on the object key alone). `messages`, ' +
       '`validationMessages`, `settings`, `settingsCommon` and `metadataForms` ' +
@@ -3229,11 +3231,12 @@ const TRANSLATION_OPTION_KEY_UNKNOWN_EXPLANATION: RuleExplanation = {
       'spelling (`direct_mail`, not `Direct Mail` or `direct-mail`). A key that matches an ' +
       'option\'s label is reported with the value to rename it to; any other key with the nearest ' +
       'declared value.',
-    'Judged on three surfaces, each against the one option list its resolver walks: an object ' +
+    'Judged on four surfaces, each against the one option list its resolver walks: an object ' +
       'field\'s `options`; an action param\'s inline `options` (a param that references a `field` ' +
       'and declares no inline list takes the field\'s list when the dialog renders, so its keys are ' +
-      'not judged); and a flow screen field\'s own `options`. A map under something that declares ' +
-      'no options at all is read by nothing.',
+      'not judged); a flow screen field\'s own `options`; and a picklist\'s `options` together with ' +
+      'those its `picklistExtensions[]` entries add, which every field referencing the list ' +
+      'inherits. A map under something that declares no options at all is read by nothing.',
     'A warning, where `translation-target-unknown` is an error: a mis-keyed option names ' +
       'something real, so its fix is a rename, not a deletion.',
   ],

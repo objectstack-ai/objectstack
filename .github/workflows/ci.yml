@@ -305,6 +305,11 @@ jobs:
             # ⛔ Not packages/spec/**: the rest of the spec is bundled CONTENT, and
             # its lag behind a cached dist is the ruled cache design (#9667, #9706;
             # see scripts/check-console-injection.mjs).
+            # The six other manifests are what build-console.sh packs into objectui's
+            # install on a pin carrying .objectstack-sha; objectui's objectstack-pin.mjs
+            # refuses one whose dependency names its lockfile does not record. All seven
+            # are changesets fixed group 0: of the 2727 first-parent commits on main in the
+            # 30 days to ec951e29e, 11 moved one of the six, 10 with spec's: 54 key moves -> 55.
             console:
               - '.objectui-sha'
               - 'scripts/build-console.sh'
@@ -314,6 +319,12 @@ jobs:
               - 'scripts/assert-console-spec-injection.mjs'
               - 'packages/spec/package.json'
               - 'packages/spec/tsup.config.ts'
+              - 'packages/core/package.json'
+              - 'packages/types/package.json'
+              - 'packages/client/package.json'
+              - 'packages/formula/package.json'
+              - 'packages/sdui-parser/package.json'
+              - 'packages/lint/package.json'
               - '.github/workflows/ci.yml'
             # Test inputs that live OUTSIDE every package (#9829, #10015). Packages
             # whose suites read across their own boundary declare that radius in
@@ -2983,7 +2994,7 @@ jobs:
 
       # Keyed on every BUILD INPUT the `filter` job's `console` list names (the
       # pin, the build script, the two scripts that derive and stamp the injection
-      # probes, and the spec's entry layout) and on nothing else.
+      # probes, the spec's entry layout, the six other packed manifests) and on nothing else.
       # scripts/check-ci-filter-parity.mjs holds this key and that list in step
       # (#20765). A head that moves a build input MISSES, so the build and the
       # assertion inside it judge the change on the PR head, not first in the
@@ -3008,7 +3019,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts') }}
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts', 'packages/core/package.json', 'packages/types/package.json', 'packages/client/package.json', 'packages/formula/package.json', 'packages/sdui-parser/package.json', 'packages/lint/package.json') }}
 
       # The gate. Shallow-clones objectui at the pinned SHA, builds
       # @object-ui/console against this tree's client, copies the dist into
@@ -3072,7 +3083,7 @@ jobs:
       # a poisoned entry is reachable from here and must not pass quietly.
       - name: Verify the restored Console dist bundles this tree's spec
         env:
-          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts') }}
+          CONSOLE_DIST_CACHE_KEY: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts', 'packages/core/package.json', 'packages/types/package.json', 'packages/client/package.json', 'packages/formula/package.json', 'packages/sdui-parser/package.json', 'packages/lint/package.json') }}
         run: pnpm check:console-injection --require-stamp
 
       # Reached only with every assertion above green (see the split-restore note).
@@ -3085,4 +3096,4 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: packages/console/dist
-          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts') }}
+          key: ${{ runner.os }}-console-dist-${{ hashFiles('.objectui-sha', 'scripts/build-console.sh', 'scripts/assert-console-spec-injection.mjs', 'scripts/console-spec-probes.mjs', 'packages/spec/package.json', 'packages/spec/tsup.config.ts', 'packages/core/package.json', 'packages/types/package.json', 'packages/client/package.json', 'packages/formula/package.json', 'packages/sdui-parser/package.json', 'packages/lint/package.json') }}

@@ -504,3 +504,114 @@ describe('[#11014 §3] the double fault the trimmed limb used to catch', () => {
         expect(FieldSchema.safeParse(stored).success).toBe(false);
     });
 });
+
+// ═══════════════════════════════════════════════════════════════════════════
+// 4. [#24411] A field that STORES NOTHING loses nothing — judged by the spec's
+//    storage predicate, never by a type list kept beside the detector
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe('[#24411 §4] the destructive diff reads the field\'s own storage declaration', () => {
+    /**
+     * The gate's findings each say what stored data a save makes unreachable.
+     * A `formula` is computed on read and materialises no column (ADR-0079
+     * addendum, item 9), so removing one, or retyping one into a stored kind,
+     * loses nothing — and a 409 there trains authors to send `force=true` by
+     * reflex, which silences the true finding on a stored field too.
+     *
+     * "Stored" is `isVirtualSearchField` (`SEARCH_VIRTUAL_TYPES`), the
+     * predicate the sortability projection reads. `autonumber` is the
+     * contrast that keeps the axis honest: engine-computed, but stored in a
+     * column, so its removal is still a data-loss event.
+     */
+    const OBJ = 'crm_invoice';
+    const STORED = {
+        name: { name: 'name', type: 'text' },
+        notes: { name: 'notes', type: 'text' },
+        amount: { name: 'amount', type: 'number' },
+        reference: { name: 'reference', type: 'autonumber' },
+    };
+    const DOUBLED = { name: 'doubled', type: 'formula', expression: 'record.amount * 2' };
+    const seed = () => row({
+        type: 'object',
+        name: OBJ,
+        metadata: JSON.stringify({ name: OBJ, label: OBJ, fields: { ...STORED, doubled: DOUBLED } }),
+    });
+    const saveFields = (protocol: any, fields: Record<string, unknown>) =>
+        save(protocol, { type: 'object', name: OBJ, item: { name: OBJ, label: OBJ, sharingModel: 'private', fields } });
+    const withoutField = (drop: keyof typeof STORED) =>
+        Object.fromEntries(Object.entries({ ...STORED, doubled: DOUBLED }).filter(([k]) => k !== drop));
+
+    it('CONTROL: a stored `text` removal is still refused, with the same finding and message', async () => {
+        const { protocol, writes } = makeKernel([seed()]);
+
+        const r = await saveFields(protocol, withoutField('notes'));
+
+        expect(r.outcome).toBe('threw');
+        const err = (r as { error: any }).error;
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(err.status).toBe(409);
+        expect(err.issues).toEqual([{
+            code: 'field_removed',
+            field: 'notes',
+            message: "Field 'notes' removed — existing data in this column will become inaccessible.",
+        }]);
+        expect(metadataWrites(writes)).toEqual([]);
+    });
+
+    it('a `formula` removal saves without `force`', async () => {
+        const { protocol, writes } = makeKernel([seed()]);
+
+        const r = await saveFields(protocol, { ...STORED });
+
+        expect(r.outcome, JSON.stringify((r as any).error?.issues)).toBe('resolved');
+        expect(metadataWrites(writes).length).toBeGreaterThan(0);
+    });
+
+    it('an `autonumber` removal is still refused: engine-computed, but stored', async () => {
+        const { protocol } = makeKernel([seed()]);
+
+        const r = await saveFields(protocol, withoutField('reference'));
+
+        expect(r.outcome).toBe('threw');
+        const err = (r as { error: any }).error;
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(err.status).toBe(409);
+        expect(err.issues).toEqual([expect.objectContaining({ code: 'field_removed', field: 'reference' })]);
+    });
+
+    it('removing a formula and a stored field together reports the stored one alone', async () => {
+        const { protocol } = makeKernel([seed()]);
+
+        const { notes: _notes, ...rest } = STORED;
+        const r = await saveFields(protocol, rest);
+
+        expect(r.outcome).toBe('threw');
+        const err = (r as { error: any }).error;
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(err.issues.map((i: any) => i.field)).toEqual(['notes']);
+    });
+
+    it('retyping a formula into a stored kind loses nothing: the stored side starts empty', async () => {
+        const { protocol } = makeKernel([seed()]);
+
+        const r = await saveFields(protocol, { ...STORED, doubled: { name: 'doubled', type: 'number' } });
+
+        expect(r.outcome, JSON.stringify((r as any).error?.issues)).toBe('resolved');
+    });
+
+    it('retyping a stored field into a formula is still refused: the stored side loses its column', async () => {
+        const { protocol } = makeKernel([seed()]);
+
+        const r = await saveFields(protocol, {
+            ...STORED,
+            notes: { name: 'notes', type: 'formula', expression: 'record.name' },
+            doubled: DOUBLED,
+        });
+
+        expect(r.outcome).toBe('threw');
+        const err = (r as { error: any }).error;
+        expect(err.code).toBe('DESTRUCTIVE_CHANGE');
+        expect(err.status).toBe(409);
+        expect(err.issues).toEqual([expect.objectContaining({ code: 'field_type_change', field: 'notes' })]);
+    });
+});
