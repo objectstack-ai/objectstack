@@ -91,13 +91,20 @@ export const SysApprovalRequest = ObjectSchema.create({
   // reads them as stored and never re-derives a label from flow metadata or
   // resolves an approver address itself; `process_name`, `current_step` and
   // `pending_approvers` keep the machine values every query and decision reads.
+  //
+  // The target is the `record_id` column alone. It is the pointer's id half,
+  // so the console draws the target record (its object's icon and name) and
+  // fetches the type half `object_name` for that cell without a column
+  // (objectui#13036). An `object_name` column drew the stored API name as
+  // text; no list view shows a pointer's type half
+  // (`sys-approval-request-pointer-pair.test.ts`).
   listViews: {
     all_requests: {
       type: 'grid',
       name: 'all_requests',
       label: 'All',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
+      columns: ['process_label', 'record_id', 'status', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 50 },
     },
@@ -106,7 +113,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'my_pending',
       label: 'My Pending',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_label', 'object_name', 'record_id', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
+      columns: ['process_label', 'record_id', 'current_step_label', 'pending_approver_labels', 'submitter_id', 'updated_at'],
       filter: [
         { field: 'status', operator: 'equals', value: 'pending' },
         { field: 'pending_approvers', operator: 'contains', value: '{current_user_id}' },
@@ -120,7 +127,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'submitted_by_me',
       label: 'I Submitted',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_label', 'object_name', 'record_id', 'status', 'current_step_label', 'updated_at'],
+      columns: ['process_label', 'record_id', 'status', 'current_step_label', 'updated_at'],
       filter: [{ field: 'submitter_id', operator: 'equals', value: '{current_user_id}' }],
       sort: [{ field: 'updated_at', order: 'desc' }],
       pagination: { pageSize: 25 },
@@ -130,7 +137,7 @@ export const SysApprovalRequest = ObjectSchema.create({
       name: 'completed',
       label: 'Completed',
       data: { provider: 'object', object: 'sys_approval_request' },
-      columns: ['process_label', 'object_name', 'record_id', 'status', 'submitter_id', 'completed_at'],
+      columns: ['process_label', 'record_id', 'status', 'submitter_id', 'completed_at'],
       // Every terminal state, `cancelled` included (#13568) — a platform-voided
       // request is kept as audit evidence, and a terminal state absent from the
       // only curated terminal view is evidence nobody can find.
