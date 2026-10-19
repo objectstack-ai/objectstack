@@ -101,10 +101,13 @@ describe('[#24410] a formula reading a field its lookup target does not declare'
   it('the save door refuses the read, naming the field and the target object', async () => {
     const saved = await call('PUT', '/meta/object/rhf_loan_saved', saveBody('rhf_loan_saved', UNDECLARED));
     expect(saved.status, JSON.stringify(saved.json)).toBe(422);
-    const text = JSON.stringify(saved.json);
-    expect(text).toContain('EXPRESSION_INVALID');
-    expect(text).toContain("field 'summary' expression");
-    expect(text).toMatch(/`name`[^"]*`rhf_book`/);
+    expect(saved.json?.code, JSON.stringify(saved.json)).toBe('INVALID_METADATA');
+    const issues = (saved.json?.issues ?? []) as Row[];
+    // The existing `EXPRESSION_INVALID` rule, located at the key the author edits.
+    expect(issues.map((i) => [i.rule, i.where]), JSON.stringify(saved.json)).toEqual([
+      ['expression-invalid', "object 'rhf_loan_saved' · field 'summary' expression"],
+    ]);
+    expect(String(issues[0].message)).toMatch(/^unknown field `name` on `rhf_book`/);
   });
 
   it('control: the same object reading a declared field of the target saves', async () => {
