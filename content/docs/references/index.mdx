@@ -1,7 +1,7 @@
 ---
 title: Protocol reference — every schema by module
 navTitle: Protocol Reference
-description: Every schema published by @objectstack/spec — 1540 schemas across 14 protocol modules
+description: Every schema published by @objectstack/spec — 1541 schemas across 14 protocol modules
 ---
 
 {/* ⚠️  AUTO-GENERATED — DO NOT EDIT. Run build-docs.ts to regenerate. Hand-written docs live in the module folders under content/docs/. */}
@@ -29,12 +29,12 @@ counts are sums of the rows they head. Regenerate with
 | [Kernel Protocol](/docs/references/kernel) | 30 | 161 | Plugin lifecycle and manifests, capabilities and security, metadata loading, service registry. |
 | [Marketplace Protocol](/docs/references/marketplace) | 4 | 30 | The package & marketplace format — package identity and versions, listing, publish, review, search, install, template manifests. |
 | [QA Protocol](/docs/references/qa) | 1 | 8 | Declarative test suites — scenarios, steps, actions and assertions. |
-| [Security Protocol](/docs/references/security) | 5 | 30 | Permission sets, row-level security, sharing rules, tenancy posture. |
+| [Security Protocol](/docs/references/security) | 5 | 31 | Permission sets, row-level security, sharing rules, tenancy posture. |
 | [Shared Protocol](/docs/references/shared) | 10 | 31 | Primitives used across every protocol — identifiers, HTTP, expressions, error maps, enums. |
 | [Studio Protocol](/docs/references/studio) | 3 | 35 | Studio designer metadata — the authoring surfaces for the protocols above. |
 | [System Protocol](/docs/references/system) | 36 | 284 | The runtime environment — logging, jobs, cache, metrics, notifications, i18n and compliance. |
 | [UI Protocol](/docs/references/ui) | 16 | 169 | Apps, pages, views, dashboards, reports, actions and themes — the ObjectUI layer. |
-| **Total** | **197** | **1540** | 14 protocol modules |
+| **Total** | **197** | **1541** | 14 protocol modules |
 
 ---
 
@@ -266,7 +266,7 @@ Declarative test suites — scenarios, steps, actions and assertions.
 
 ## Security Protocol
 
-**Source:** `packages/spec/src/security/` · **Import:** `@objectstack/spec/security` · **5 pages, 30 schemas**
+**Source:** `packages/spec/src/security/` · **Import:** `@objectstack/spec/security` · **5 pages, 31 schemas**
 
 Permission sets, row-level security, sharing rules, tenancy posture.
 
@@ -275,7 +275,7 @@ Permission sets, row-level security, sharing rules, tenancy posture.
 | [`explain.zod.ts`](/docs/references/security/explain) | `AccessMatrix`, `AccessMatrixEntry`, `AuthzPosture`, `ExplainDecision`, `ExplainLayer`, `ExplainMatchedRule`, `ExplainOperation`, `ExplainRecordAttribution`, `ExplainRequest` |
 | [`misc`](/docs/references/security/misc) *(no single source file)* | `CapabilityDeclaration`, `OrgScopingEntitlement`, `PlatformGlobalObjects`, `TenancyPosture`, `TenantLayer0Verdict` |
 | [`permission.zod.ts`](/docs/references/security/permission) | `AdminScope`, `EffectiveObjectPermission`, `FieldPermission`, `ObjectAccessScope`, `ObjectPermission`, `PermissionSet` |
-| [`rls.zod.ts`](/docs/references/security/rls) | `RLSEvaluationResult`, `RLSOperation`, `RLSUserContext`, `RowLevelSecurityPolicy` |
+| [`rls.zod.ts`](/docs/references/security/rls) | `DefaultRowScope`, `RLSEvaluationResult`, `RLSOperation`, `RLSUserContext`, `RowLevelSecurityPolicy` |
 | [`sharing.zod.ts`](/docs/references/security/sharing) | `CriteriaSharingRule`, `OWDModel`, `ShareRecipientType`, `SharingLevel`, `SharingRule`, `SharingRuleType` |
 
 ---
