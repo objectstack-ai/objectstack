@@ -53,12 +53,16 @@
  */
 
 import type { SendEmailResult } from '@objectstack/spec/contracts';
+import { TENANT_EMAIL_OBJECT, type EmailLogObject } from './email-log-objects.js';
 
 /** System read context — a boot sweep is not an end-user query. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
-/** Backing object; a constant so the query and the log line agree. */
-export const OUTBOX_OBJECT = 'sys_email';
+/**
+ * Default backing object; the sweep reads the log it is handed, so the query
+ * and the log lines agree. The plugin sweeps both logs (`email-log-objects.ts`).
+ */
+export const OUTBOX_OBJECT = TENANT_EMAIL_OBJECT;
 
 /**
  * How old a `queued` row must be before the sweep treats it as stranded
@@ -121,8 +125,12 @@ interface SweepLogger {
 export interface OutboxSweepService {
   isServiceManaged(id: string): boolean;
   /** Publish the row as a durable job; false ⇒ queue delivery is not in force. */
-  enqueuePersistedRow(rowId: string): Promise<boolean>;
-  deliverPersistedRow(row: Record<string, unknown>): Promise<SendEmailResult>;
+  enqueuePersistedRow(rowId: string, object?: EmailLogObject): Promise<boolean>;
+  deliverPersistedRow(
+    row: Record<string, unknown>,
+    opts?: undefined,
+    object?: EmailLogObject,
+  ): Promise<SendEmailResult>;
 }
 
 export interface SweepStrandedOutboxOptions {
@@ -130,6 +138,8 @@ export interface SweepStrandedOutboxOptions {
   engine: { find(object: string, opts: Record<string, unknown>): Promise<unknown> };
   service: OutboxSweepService;
   logger?: SweepLogger;
+  /** The log to sweep. Default {@link OUTBOX_OBJECT} (`sys_email`). */
+  object?: EmailLogObject;
   /** Clock seam for tests. */
   now?: () => number;
   /** Override {@link OUTBOX_SWEEP_MIN_AGE_MS} (tests). */
@@ -170,6 +180,7 @@ export async function sweepStrandedOutbox(
   opts: SweepStrandedOutboxOptions,
 ): Promise<OutboxSweepResult> {
   const { engine, service, logger } = opts;
+  const object = opts.object ?? OUTBOX_OBJECT;
   const now = opts.now?.() ?? Date.now();
   const minAgeMs = opts.minAgeMs ?? OUTBOX_SWEEP_MIN_AGE_MS;
   const limit = Math.max(1, opts.limit ?? OUTBOX_SWEEP_LIMIT);
@@ -177,7 +188,7 @@ export async function sweepStrandedOutbox(
 
   // One row past the batch so "there are more" is a fact, not an inference
   // from a full page (a page that is exactly full is the common false positive).
-  const page = toRows(await engine.find(OUTBOX_OBJECT, {
+  const page = toRows(await engine.find(object, {
     where: { status: 'queued', created_at: { $lt: cutoff } },
     orderBy: [{ field: 'created_at', order: 'asc' }],
     limit: limit + 1,
@@ -206,14 +217,14 @@ export async function sweepStrandedOutbox(
     if (service.isServiceManaged(rowId)) { result.skipped++; continue; }
 
     try {
-      if (await service.enqueuePersistedRow(rowId)) {
+      if (await service.enqueuePersistedRow(rowId, object)) {
         result.requeued++;
         continue;
       }
       // Inline mode — or a publish that failed, in which case delivering
       // inline is what `send()` itself falls back to: the row is already
       // committed, and leaving it for nobody is the bug being fixed.
-      const delivered = await service.deliverPersistedRow(row);
+      const delivered = await service.deliverPersistedRow(row, undefined, object);
       if (delivered.status === 'failed') result.failed++;
       else result.sent++;
     } catch (err: any) {
@@ -221,7 +232,7 @@ export async function sweepStrandedOutbox(
       if (!rowErrorReported) {
         rowErrorReported = true;
         const message =
-          `EmailServicePlugin: outbox sweep could not advance sys_email row '${rowId}' — that message stays `
+          `EmailServicePlugin: outbox sweep could not advance ${object} row '${rowId}' — that message stays `
           + 'at `queued`, undelivered, and nothing will look at it again until the next restart, while the '
           + 'server keeps reporting healthy. Fix: the cause below comes from the datasource or the queue, '
           + 'not from the message itself (a message that cannot be sent is recorded as `failed` on its own '
@@ -236,7 +247,7 @@ export async function sweepStrandedOutbox(
   }
 
   logger?.info?.(
-    `EmailServicePlugin: outbox sweep — ${result.scanned} sys_email row(s) stranded at 'queued' for over `
+    `EmailServicePlugin: outbox sweep — ${result.scanned} ${object} row(s) stranded at 'queued' for over `
     + `${humanMs(minAgeMs)} (accepted, never delivered): ${result.requeued} re-queued for durable delivery, `
     + `${result.sent} sent inline, ${result.failed} failed, ${result.skipped} skipped`
     + (result.truncated
@@ -246,10 +257,10 @@ export async function sweepStrandedOutbox(
 
   if (result.failed > 0) {
     const summary =
-      `EmailServicePlugin: ${result.failed} stranded sys_email row(s) could NOT be delivered by the boot `
+      `EmailServicePlugin: ${result.failed} stranded ${object} row(s) could NOT be delivered by the boot `
       + 'sweep. Those messages were accepted by the platform and have still never reached a recipient; '
       + 'nothing retries them in this process. Fix: read the failures with '
-      + "`SELECT id, error FROM sys_email WHERE status = 'failed'`, fix the transport (Settings → Mail), and "
+      + `\`SELECT id, error FROM ${object} WHERE status = 'failed'\`, fix the transport (Settings → Mail), and `
       + 'turn on Settings → Mail → "Durable queue delivery" so future failures are retried and dead-lettered '
       + 'instead of depending on the next restart.';
     // Same defect as the per-row report above, one scope out (#9748). No
