@@ -3193,6 +3193,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`ui-page-action-row-navigation-executor-refused`.',
   },
   {
+    id: 'ui-page-action-row-patch-retired',
+    order: 104,
+    text:
+      'It also retires the page action rows\' own `patch` (`action:button`, `action:icon`, and each '
+      + '`action:group` / `action:menu` member; ADR-0049 enforce-or-remove). A row\'s `operation: \'update\'` '
+      + 'runs the declared action its `name` names: the platform action route resolves that action by name '
+      + '(ADR-0110 D2) and writes the action\'s own `patch`, so the row\'s `patch` was never sent and never '
+      + 'written. The rows now carry a tombstone at `patch`, and beside `operation: \'update\'` they need a `name`. '
+      + 'A row\'s static `params` are written only where that action declares them. The D2 conversion '
+      + '`page-action-row-patch-removed` strips the key, retired from the load path so authors are refused at '
+      + 'the door while stored rows and `os migrate meta` replay it. Its D3 record is the semantic entry '
+      + '`ui-page-action-row-patch-retired`, which names the judgement the strip cannot make: moving the '
+      + 'values onto the named action\'s `patch`.',
+  },
+  {
     id: 'ui-page-panel-children-cross-references-judged',
     order: 103,
     text:

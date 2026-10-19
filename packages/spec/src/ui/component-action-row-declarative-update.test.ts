@@ -4,20 +4,29 @@
  * The page action rows — `action:button`, `action:icon` and an `action:group` /
  * `action:menu` member — judged by `ActionSchema`'s declarative-update rules,
  * from the one judge both read (`action-declarative-update.ts`). Every row
- * forwards `operation`, `patch`, `params`, `target`, the executor key and
+ * forwards `operation`, `name`, `params`, `target`, the executor key and
  * `locations` to the console's action runner, which reads `operation` before
- * any executor; so a row the action would refuse is refused here too, at the
+ * any executor and posts the write to the platform action route under the
+ * row's `name`; so a row the action would refuse is refused here too, at the
  * same key, with the action's text (the executor spelled as the row spells it).
  *
- * - §1 THE FIVE MEMBERS the family's closing card names, on every row: each is
+ * Two of the action's five rules read the row's own surface (#24394): the
+ * route writes the `patch` of the declared action the row's `name` names. So a
+ * row has no `patch` of its own (its tombstone, pinned in
+ * `component-action-row-patch-retirement.test.ts`, replaces the action's
+ * "`patch` without `operation`" rule), and a row with nothing to write is a
+ * row with no `name`, refused at `name`.
+ *
+ * - §1 THE THREE MEMBERS a row shares with the action, on every row: each is
  *   one issue at its key, and the same row made valid parses.
  * - §2 ONE TEXT: a member's refusal is `ActionSchema`'s, derived from the
  *   action's own parse rather than restated here.
  * - §3 THE REST OF THE SET: the refused-key table's other row keys, the keys a
- *   row does not declare (refused as unknown before the judge), the executor
- *   rule's edges, `params` as a source of values, and `patch` as the action's
- *   own record.
- * - §4 OPERATION FIRST: beside the operation, the rows' url-target and
+ *   row does not declare (refused as unknown before the judge), and the
+ *   executor rule's edges.
+ * - §4 THE ROW'S OWN SURFACE: nothing to write is no `name`; `params` are no
+ *   write of the row's own; the action's half of the rule does not move.
+ * - §5 OPERATION FIRST: beside the operation, the rows' url-target and
  *   executor-alias judgments stand down, so a row is never told to fix a key
  *   it must drop.
  *
@@ -27,8 +36,6 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import type { z } from 'zod';
-
 import { ActionSchema } from './action.zod';
 import { ActionButtonPropsSchema, ActionIconPropsSchema, ComponentPropsMap } from './component.zod';
 
@@ -105,11 +112,12 @@ const asRowSpells = (row: Row, actionText: string): string =>
     ? actionText
     : actionText.replaceAll("a `type: '", "an `actionType: '").replaceAll("`type: '", "`actionType: '");
 
-const UPDATE = { operation: 'update', patch: { status: 'done' } } as const;
+/** A row's declarative update: it runs the declared action its `name` names. */
+const UPDATE = { operation: 'update', name: 'close_task' } as const;
 const STATUS_PARAM = [{ name: 'status', type: 'text', label: 'Status' }];
 
 // ===========================================================================
-// §1 + §2. The five members, on every row
+// §1 + §2. The three members a row shares with the action, on every row
 // ===========================================================================
 
 interface Member {
@@ -124,12 +132,6 @@ interface Member {
 
 const MEMBERS: readonly Member[] = [
   {
-    title: '1. `patch` without `operation`',
-    keys: () => ({ patch: { status: 'done' } }),
-    at: () => ['patch'],
-    control: () => ({ ...UPDATE }),
-  },
-  {
     title: "2. `operation: 'update'` + `target`",
     keys: () => ({ ...UPDATE, target: 'close_task_handler' }),
     at: () => ['target'],
@@ -142,12 +144,6 @@ const MEMBERS: readonly Member[] = [
     control: (k) => ({ ...UPDATE, [k]: 'script' }),
   },
   {
-    title: "4. `operation: 'update'` with no `patch` and no `params`",
-    keys: () => ({ operation: 'update' }),
-    at: () => ['patch'],
-    control: () => ({ operation: 'update', params: STATUS_PARAM }),
-  },
-  {
     title: "5. `operation: 'update'` + a `list_toolbar` location",
     keys: () => ({ ...UPDATE, locations: ['record_header', 'list_toolbar'] }),
     at: () => ['locations', 1],
@@ -157,7 +153,7 @@ const MEMBERS: readonly Member[] = [
 
 const ROW_MEMBERS = ROWS.flatMap((row) => MEMBERS.map((member) => [row.name, member.title, row, member] as const));
 
-describe('the five declarative-update shapes the rows accepted while `ActionSchema` refused them', () => {
+describe('the declarative-update shapes the rows accepted while `ActionSchema` refused them', () => {
   it.each(ROW_MEMBERS)('REFUSAL: %s, member %s, is ONE issue at its key', (_name, _title, row, member) => {
     const issues = issuesOf(row.parse(member.keys(row.executorKey)));
     expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, ...member.at(row.executorKey)]]]);
@@ -261,58 +257,65 @@ describe("the executor rule's edges on a row", () => {
   });
 });
 
-describe('`params` as the source of the values to write', () => {
-  it.each(ROWS)('$name: a non-empty input list counts; an empty one does not', (row) => {
-    expect(row.parse({ operation: 'update', params: STATUS_PARAM }).success).toBe(true);
-    const issues = issuesOf(row.parse({ operation: 'update', params: [] }));
-    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'patch']]]);
+// ===========================================================================
+// §4. The row's own surface
+// ===========================================================================
+
+describe("nothing to write, on a row's surface: no `name`", () => {
+  it.each(ROWS)("REFUSAL: $name with `operation: 'update'` and no `name`, or an empty one, is ONE issue at `name`", (row) => {
+    for (const keys of [{ operation: 'update' }, { operation: 'update', name: '' }]) {
+      const issues = issuesOf(row.parse(keys));
+      expect(issues.map((i) => [i.code, i.path]), JSON.stringify(keys)).toEqual([['custom', [...row.at, 'name']]]);
+      expect(issues[0].message).toContain('`name`');
+    }
+  });
+
+  it.each(ROWS)("CONTROL: $name with `operation: 'update'` and a `name`, and no `patch` and no `params`, parses", (row) => {
+    // The write is the named action's own `patch`, which the route resolves.
+    const r = row.parse({ ...UPDATE });
+    expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
+  });
+
+  it("the action's half does not move: an action with no `patch` and no `params` is still refused at `patch`", () => {
+    const issues = actionIssues({ operation: 'update' });
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', ['patch']]]);
+    expect(issues[0].message.startsWith("An `operation: 'update'` action has nothing to write")).toBe(true);
+    expect(actionIssues({ operation: 'update', params: STATUS_PARAM })).toEqual([]);
+    expect(actionIssues({ operation: 'update', params: [] }).map((i) => i.path)).toEqual([['patch']]);
+  });
+});
+
+describe("a row's `params` are no write of its own", () => {
+  it.each(ROWS)('$name: an input list does not stand in for the `name` — without one it is still ONE issue at `name`', (row) => {
+    const issues = issuesOf(row.parse({ operation: 'update', params: STATUS_PARAM }));
+    expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'name']]]);
+    const named = row.parse({ ...UPDATE, params: STATUS_PARAM });
+    expect(named.success, JSON.stringify(issuesOf(named))).toBe(true);
   });
 
   it.each(ROWS.filter((row) => row.node))(
-    '$name: a non-empty static-values object counts (it IS `properties.params`, merged by the write); an empty one does not',
+    '$name: a static-values object rides the request as params — it parses beside a `name`, and is no `name` of its own',
     (row) => {
-      const r = row.parse({ operation: 'update', params: { status: 'done' } });
-      expect(r.success, JSON.stringify(issuesOf(r))).toBe(true);
-      const issues = issuesOf(row.parse({ operation: 'update', params: {} }));
-      expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'patch']]]);
+      // The route writes them only where the named action declares them, and
+      // refuses any other (ADR-0104 D2): a cross-reference this row cannot see.
+      const named = row.parse({ ...UPDATE, params: { status: 'done' } });
+      expect(named.success, JSON.stringify(issuesOf(named))).toBe(true);
+      const issues = issuesOf(row.parse({ operation: 'update', params: { status: 'done' } }));
+      expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'name']]]);
     },
   );
 
   it.each(ROWS.filter((row) => !row.node))(
-    '$name: an object `params` does not count — the container never forwards it to a non-`api` executor',
+    '$name: an object `params` is refused at `params` — the container never forwards it to a non-`api` executor',
     (row) => {
-      const issues = issuesOf(row.parse({ operation: 'update', params: { status: 'done' } }));
-      expect(issues.map((i) => [i.code, i.path]).sort()).toEqual([
-        ['custom', [...row.at, 'params']],
-        ['custom', [...row.at, 'patch']],
-      ].sort());
+      const issues = issuesOf(row.parse({ ...UPDATE, params: { status: 'done' } }));
+      expect(issues.map((i) => [i.code, i.path])).toEqual([['custom', [...row.at, 'params']]]);
     },
   );
 });
 
-describe("a row's `patch` is `ActionSchema`'s own record of field values", () => {
-  type Shape = { shape: Record<string, z.ZodOptional<z.ZodType>> };
-  const memberOf = (props: unknown) =>
-    ((props as Shape).shape.actions.unwrap() as unknown as z.ZodArray<z.ZodType>).element as unknown as Shape;
-
-  it('NO SECOND SHAPE: every row holds the very schema instance `ActionSchema.patch` declares', () => {
-    const patch = ActionSchema.in.shape.patch.unwrap();
-    expect((ActionButtonPropsSchema as unknown as Shape).shape.patch.unwrap()).toBe(patch);
-    expect((ActionIconPropsSchema as unknown as Shape).shape.patch.unwrap()).toBe(patch);
-    expect(memberOf(GROUP).shape.patch.unwrap()).toBe(patch);
-    expect(memberOf(MENU).shape.patch.unwrap()).toBe(patch);
-  });
-
-  it.each(ROWS)('$name: a `patch` that is not a record is refused at `patch` — the runner drops it before the write', (row) => {
-    for (const patch of ['done', ['status', 'done'], 1]) {
-      const issues = issuesOf(row.parse({ operation: 'update', patch }));
-      expect(issues.map((i) => [i.code, i.path]), JSON.stringify(patch)).toEqual([['invalid_type', [...row.at, 'patch']]]);
-    }
-  });
-});
-
 // ===========================================================================
-// §4. Operation first: the rows' executor-dependent judgments stand down
+// §5. Operation first: the rows' executor-dependent judgments stand down
 // ===========================================================================
 
 describe('beside the operation, the url-target and executor-alias judgments stand down', () => {

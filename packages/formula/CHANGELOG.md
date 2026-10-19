@@ -1,5 +1,59 @@
 # @objectstack/formula
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- d537a31: feat(formula)!: `validateExpression` judges relationship traversal in the `value` role when the caller opts in, with formula wording
+  
+  Clause-②: yes (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No spec key, stored shape or authorable spelling is added, removed or renamed. `validateExpression('value', …)` with `traversalHydration: true` now reports the two traversal conflicts it already reported for `predicate`; a caller that does not pass the flag sees no change. Nothing stored changes, so there is nothing for `objectstack migrate meta` to rewrite. -->
+  
+  - `validateExpression('value', source, { fieldTypes, traversalHydration: true, … })` now refuses a second hop through a reference (`traversal-multi-hop`) and a reference read both through and as a plain value (`traversal-bare-and-traversed`). The messages say the formula reads null, and the repair for an empty reference is the optional read `record.LOOKUP.?FIELD.orValue('…')`. Before, the `value` role ignored the flag.
+  - `findTraversalConflicts` takes an optional fourth argument, `subject` (`'predicate'`, the default, or `'formula'`), which selects that wording. The `TraversalSubject` type is exported.
+  
+  Without the flag, every role behaves as before.
+
+### Patch Changes
+
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [1489952]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [70cfb12]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [370833a]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [f573976]
+  - @objectstack/spec@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Patch Changes

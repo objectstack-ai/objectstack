@@ -1833,7 +1833,7 @@ const ACTION_DECLARATIVE_UPDATE: DeclarativeUpdateSurface = {
   executorKey: 'type',
   executorDefaultsToScript: true,
   onSuccessSubject: "An `operation: 'update'` action's `onSuccess`",
-  staticParams: false,
+  writesNamedAction: false,
 };
 
 /**
