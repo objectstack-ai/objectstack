@@ -3983,8 +3983,11 @@ export const ObjectExtensionSchema = lazySchema(() => strictObject({
     actions:
       '`actions` cannot be contributed through an object extension — the merge carries ' +
       '`fields`, `label`, `pluralLabel`, `description`, `validations` and `indexes` only. ' +
-      "Declare a top-level action with `objectName: '<target>'`; `defineStack()` attaches " +
-      'it to the object.',
+      "Declare a top-level action with `objectName: '<target>'` in the same stack: " +
+      '`defineStack()` accepts it because the stack extends the target, keeps it in the ' +
+      'top-level `actions`, and the engine\'s schema registry attaches it to the target ' +
+      'object wherever the object is served, whichever package registers first. A target no ' +
+      'loaded package registers fails the boot.',
     hooks:
       '`hooks` cannot be contributed through an object extension — declare a top-level ' +
       'hook bound to the target object instead.',
