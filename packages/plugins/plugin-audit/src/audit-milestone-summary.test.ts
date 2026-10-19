@@ -56,6 +56,7 @@ import { describe, it, expect } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { createMemoryI18n } from '@objectstack/core';
 import { installAuditWriters } from './audit-writers.js';
+import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -330,6 +331,7 @@ async function boot(opts: { locale?: string; i18n?: unknown } = {}) {
     engine.registry.registerObject(o as any, OWNER_PACKAGE);
   }
   installAuditWriters(engine as any, 'test.audit', {
+    getDefaultOrganizationId: singlePostureDefaultOrganization,
     getI18n: () => opts.i18n as any,
     getLocale: async () => opts.locale,
   });

@@ -3193,6 +3193,21 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + '`ui-page-action-row-navigation-executor-refused`.',
   },
   {
+    id: 'ui-page-panel-children-cross-references-judged',
+    order: 103,
+    text:
+      'It also extends `defineStack`\'s page cross-reference checks into tab and accordion panels. The '
+      + 'one traversal the inline-action target check and the inline grid column check share descended '
+      + 'an array under `properties` only when its entries were components, and a `page:tabs` or '
+      + '`page:accordion` item is a panel record, not a component, so nothing inside a panel was judged: '
+      + 'a dangling inline modal target built green in a tab and was refused at region level. The '
+      + 'traversal now also descends the panel positions the component rows declare, the list every '
+      + 'other page walk reads, and a component in a panel is refused with the region-level message, '
+      + 'located through the panel. The refusal is at authoring time and nothing stored is rewritten, '
+      + 'so no conversion is registered. Its D3 record is the semantic entry '
+      + '`ui-page-panel-children-cross-references-judged`.',
+  },
+  {
     id: 'ui-record-json-retired',
     order: 100,
     text:
@@ -3220,10 +3235,10 @@ const STEP18_RATIONALE: readonly RationaleFragment[] = [
       + 'other carriers do, so `defineStack`\'s identity-only check reaches the block, with the reach '
       + '`inline-grid-column-identity-only-currency-scale-refused` records for the first two '
       + 'carriers, against the child object the panel lists (the object `dataSource` binding\'s '
-      + '`object` when the node carries one, else `childObject`). It judges the block in a page '
-      + 'region\'s components, in a container\'s component children and in a slot; a block under a '
-      + '`page:tabs` item\'s `children` is not yet judged. Its D3 record is the semantic entry '
-      + '`ui-record-line-items-props-closed`.',
+      + '`object` when the node carries one, else `childObject`). It judges the block wherever a page '
+      + 'carries it: in a page region\'s components, in a container\'s component children, in a '
+      + '`page:tabs` or `page:accordion` item\'s `children` and in a slot. Its D3 record is the '
+      + 'semantic entry `ui-record-line-items-props-closed`.',
   },
   {
     id: 'ui-report-joined-block-dataset-required',

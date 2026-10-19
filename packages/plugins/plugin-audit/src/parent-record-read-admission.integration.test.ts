@@ -46,6 +46,7 @@ import { ObjectQL, ObjectQLPlugin } from '@objectstack/objectql';
 import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 
 import { AuditPlugin } from './audit-plugin.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const ACTIVITY = 'sys_activity';
 const LEDGER = 'sys_audit_log';
@@ -130,6 +131,7 @@ describe('parent-record read gates: the object-level read admission', () => {
     security.canReadObject = admit;
     kernel = new ObjectKernel({ logger: { level: 'silent' } });
     await kernel.use(new ObjectQLPlugin());
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     // Registered AFTER the audit plugin: the gate resolves it per read.
     await kernel.use(securityStandIn());

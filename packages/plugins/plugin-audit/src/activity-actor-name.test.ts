@@ -37,6 +37,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
 import { installAuditWriters } from './audit-writers.js';
+import { singlePostureDefaultOrganization } from './__tests__/single-posture-tenancy.js';
 
 const f = (name: string, type: string, extra: Record<string, unknown> = {}) =>
   ({ name, label: name, type, ...extra }) as any;
@@ -192,7 +193,7 @@ async function boot() {
   for (const o of [sysAuditLog, sysActivity, sysUser, bizTask, bizQuiet]) {
     engine.registry.registerObject(o as any, OWNER_PACKAGE);
   }
-  installAuditWriters(engine as any, 'test.audit');
+  installAuditWriters(engine as any, 'test.audit', { getDefaultOrganizationId: singlePostureDefaultOrganization });
   // Seeded with no context: a system write, which names nobody. Ada has no image.
   await engine.insert('sys_user', { id: ADA, name: 'Ada Lovelace', email: 'ada@example.com' });
   await engine.insert('sys_user', { id: GRACE, name: 'Grace Hopper', email: 'grace@example.com', image: GRACE_IMAGE });

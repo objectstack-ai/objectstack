@@ -158,6 +158,15 @@ export interface InventoryEntry {
   mirror?: RowPredicate;
   /** Fate 3 / 4: rows that leave the table before the NOT NULL gate. */
   departures?: readonly InventoryDeparture[];
+  /**
+   * Fate 3 only, platform-only: the NULL rows no anchor names leave the table
+   * by the mirror-deletion step instead of being reported — on a table whose
+   * runtime writer no longer writes a row it cannot attribute, so such a row
+   * is one it would not write today. Classified after the anchors; under
+   * `single` the Default Organization takes them first, and none leave. A
+   * host declares no deletion, so the spec's supplement row has no such key.
+   */
+  underivableDeparture?: Omit<InventoryDeparture, 'as' | 'where'>;
   categories?: readonly InventoryCategory[];
   /**
    * Fate 4 only: the column is not the tenancy anchor, so it never receives
@@ -515,7 +524,23 @@ export const ORGANIZATION_OWNERSHIP_INVENTORY: readonly InventoryEntry[] = [
   },
   { object: 'sys_share_link', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; the linked record carries the organization`, anchors: [subject('object_name', 'record_id')] },
   { object: 'sys_attachment', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; the attachment's parent record carries the organization`, anchors: [subject('parent_object', 'parent_id')] },
-  { object: 'sys_activity', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; the activity's record carries the organization (rotation-sharded storage)`, anchors: [subject('object_name', 'record_id')] },
+  {
+    object: 'sys_activity',
+    census: P1,
+    fate: 'attribution',
+    citation: `${D3_ORG_ROWS}; the activity's record carries the organization (rotation-sharded storage)`,
+    anchors: [subject('object_name', 'record_id')],
+    // The mirror writes activity only when an organization is derivable, never
+    // a NULL row (audit-writers.ts), so a NULL row no anchor names is one it
+    // would not write today: 14-day telemetry, deleted rather than reported.
+    underivableDeparture: {
+      id: 'underivable-activity',
+      label:
+        'activity rows about a record no organization owns (a sign-up\'s user, a global setting) — telemetry the ' +
+        'mirror no longer writes; deleted by the mirror-deletion step, the change itself stays in sys_audit_log',
+      citation: 'ruling record 6257510973 item 3 (Q3 A: activity is never a NULL row; existing NULL rows are deleted); ADR-0131 D7, D9',
+    },
+  },
   { object: 'sys_comment', census: P1, fate: 'attribution', citation: `${D3_ORG_ROWS}; a reply's parent comment carries the organization`, anchors: [parent('parent_id', 'sys_comment')] },
   { object: 'sys_comment_reaction', census: PMAIN, fate: 'attribution', citation: `${CENSUS_MAIN} (in reach); the reaction's comment carries the organization`, anchors: [parent('comment_id', 'sys_comment')] },
   { object: 'sys_email', census: P1, fate: 'attribution', citation: `${D7}: sys_email is stamped at its producers; the related record carries the organization`, anchors: [subject('related_object', 'related_id')] },

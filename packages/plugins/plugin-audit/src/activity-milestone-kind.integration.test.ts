@@ -61,6 +61,7 @@ import { SqliteWasmDriver } from '@objectstack/driver-sqlite-wasm';
 import { AuditPlugin } from './audit-plugin.js';
 import { keptRowsOfParent } from './activity-field-redaction.js';
 import { declaredMilestoneWatchedFields, milestoneKeyOf, planActivityStamp } from './activity-changed-fields.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const ACTIVITY = 'sys_activity';
 const ITEM = 'amk_item';
@@ -155,6 +156,7 @@ describe('[#22771] a fired milestone is served with metadata.kind, judged like t
       init: async (ctx: any) => ctx.registerService('security', security),
       start: async () => {},
     } as any);
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 
