@@ -63,7 +63,12 @@ function makeEngine(declared: any[], ledger: any[] = []) {
         async find(name: string, q?: any): Promise<any[]> {
             if (name !== LEDGER) return [];
             const f = q?.filter ?? {};
-            return ledger.filter((r) => Object.entries(f).every(([k, v]) => r[k] === v)).map((r) => ({ ...r }));
+            return ledger
+                .filter((r) => Object.entries(f).every(([k, v]) => {
+                    if (k.startsWith('$')) throw new Error(`fake engine: the ${k} combinator is not implemented`);
+                    return r[k] === v;
+                }))
+                .map((r) => ({ ...r }));
         },
         registerHook(event: string, handler: (ctx: any) => any, options?: Record<string, any>): void {
             hooks.push({ event, handler, object: options?.object, packageId: options?.packageId });
