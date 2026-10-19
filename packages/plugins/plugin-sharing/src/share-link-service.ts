@@ -683,7 +683,7 @@ export class ShareLinkService implements IShareLinkService {
     const organizationId = await this.resolveMintOrganization(input, context);
     const stored = organizationId === undefined ? row : { ...row, organization_id: organizationId };
     await this.engine.insert('sys_share_link', stored, {
-      context: organizationId === undefined ? SYSTEM_CTX : { ...SYSTEM_CTX, tenantId: organizationId },
+      context: { ...SYSTEM_CTX, tenantId: organizationId },
     });
     // [#21839] The row as stored carries the hash; the mint response does not.
     return withoutPasswordHash(row);
@@ -737,7 +737,7 @@ export class ShareLinkService implements IShareLinkService {
         fields: ['id', recordTenantField],
         limit: 1,
         context: SYSTEM_CTX,
-      } as any);
+      });
       const value = Array.isArray(rows)
         ? (rows[0] as Record<string, unknown> | undefined)?.[recordTenantField]
         : undefined;
@@ -781,7 +781,7 @@ export class ShareLinkService implements IShareLinkService {
       fields: ['id'],
       limit: 2,
       context: SYSTEM_CTX,
-    } as any);
+    });
     return (Array.isArray(rows) ? rows : [])
       .map((r: any) => r?.id)
       .filter((id: unknown) => id != null && String(id) !== '')
