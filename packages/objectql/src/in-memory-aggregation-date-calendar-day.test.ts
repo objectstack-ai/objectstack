@@ -31,6 +31,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import type { EngineAggregateOptions } from '@objectstack/spec/data';
 import { ObjectQL } from './engine.js';
 import { applyInMemoryAggregation } from './in-memory-aggregation.js';
 
@@ -97,10 +98,10 @@ const ROWS = DUE_DATES.map((due_date, i) => ({ id: `d${i}`, due_date, n: 1 }));
 /** A negative-offset pair, the zero zone, and a positive-offset zone. */
 const ZONES = ['America/New_York', 'America/Los_Angeles', 'UTC', 'Asia/Tokyo'] as const;
 
-function bucketAst(field: string, granularity: Granularity) {
+function bucketAst(field: string, granularity: Granularity): EngineAggregateOptions {
   return {
     groupBy: [{ field, dateGranularity: granularity }],
-    aggregations: [{ function: 'count' as const, alias: 'n' }],
+    aggregations: [{ function: 'count', alias: 'n' }],
   };
 }
 
@@ -229,12 +230,12 @@ describe('(c) engine.aggregate answers one set of labels for a `date` on both ro
       await engine.init();
       engine.registry.registerObject({ name: 'delivery', fields: FIELDS } as any);
 
-      const pushedDown = await engine.aggregate('delivery', { ...bucketAst('due_date', granularity), timezone: 'UTC' } as any);
+      const pushedDown = await engine.aggregate('delivery', { ...bucketAst('due_date', granularity), timezone: 'UTC' });
       expect(nativeCalls()).toBe(1); // the pushdown route
       expect(labelCounts(pushedDown, 'due_date')).toEqual(EXPECTED[granularity]);
 
       for (const tz of ZONES.filter((z) => z !== 'UTC')) {
-        const inMemory = await engine.aggregate('delivery', { ...bucketAst('due_date', granularity), timezone: tz } as any);
+        const inMemory = await engine.aggregate('delivery', { ...bucketAst('due_date', granularity), timezone: tz });
         expect(nativeCalls()).toBe(1); // a non-UTC zone forced the rows route
         expect(labelCounts(inMemory, 'due_date')).toEqual(labelCounts(pushedDown, 'due_date'));
       }
