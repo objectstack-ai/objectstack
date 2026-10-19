@@ -490,13 +490,18 @@ export type {
 // position whose name reaches a query door (the `$select` projection, or the
 // compiled filter), where that door refuses it by name — the loud-failing half
 // #14107 recorded and left open.
+// [#24563] Its THIRD: a list view judged under a package closure whose bound
+// object is outside that closure — reported (advisory) where skip 1 judged
+// nothing; `ListViewFieldRefOptions` is how the runtime gate states the closure.
 export {
   validateListViewFieldRefs,
   LIST_VIEW_FIELD_UNKNOWN,
   LIST_VIEW_FIELD_DOTTED,
+  LIST_VIEW_OBJECT_OUTSIDE_CLOSURE,
 } from './validate-list-view-field-refs.js';
 export type {
   ListViewFieldRefFinding,
+  ListViewFieldRefOptions,
   ListViewFieldRefSeverity,
 } from './validate-list-view-field-refs.js';
 
