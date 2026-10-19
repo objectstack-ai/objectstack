@@ -8,7 +8,9 @@ export const entry: SemanticMigration = {
     + 'and `operation` on each `action:group` / `action:menu` member of `properties.actions`): any value but '
     + '`\'update\'`. Also the `onSuccess` of a page action row that declares `operation: \'update\'`, whatever '
     + 'executor the row names (`actionType` on a node, `type` on a member, or none)',
-  replacement: '`operation: \'update\'` with a `patch` for the declarative single-record write, or no `operation`. '
+  replacement: '`operation: \'update\'` with a `name` naming the declared action whose `patch` is the declarative '
+    + 'single-record write (the row carries no `patch` of its own: `ui-page-action-row-patch-retired`), or no '
+    + '`operation`. '
     + 'A row delete is the object\'s own delete affordance; a bulk def\'s `\'custom\'` has no row form, because the '
     + 'row is already the action. Beside `operation: \'update\'`, no `onSuccess`. ⛔ NOT mechanically convertible: '
     + 'whether a row meant the write or the hop is the author\'s call.',

@@ -117,7 +117,8 @@ describe("the props gate refuses a page action row's `onSuccess` beside an execu
 // `component-action-row-declarative-update.test.ts`).
 
 describe("the props gate judges a page action row's `operation` as `ActionSchema` does", () => {
-  const UPDATE = { operation: 'update', patch: { status: 'done' } };
+  // The row runs the declared action its `name` names; a row has no `patch` of its own.
+  const UPDATE = { operation: 'update', name: 'close_task' };
 
   it.each(ROWS)("REFUSAL: %s with `script`, `operation: 'update'` and `onSuccess` is one finding at `onSuccess`", (_row, node, at, key, subject) => {
     const findings = validateComponentProps(stackWith(node({ [key]: 'script', ...UPDATE, onSuccess: { navigate: '/tasks' } })));
@@ -132,7 +133,7 @@ describe("the props gate judges a page action row's `operation` as `ActionSchema
   });
 
   it.each(ROWS)("REFUSAL: %s with `operation: 'delete'` is one finding at `operation`", (_row, node, at) => {
-    const findings = validateComponentProps(stackWith(node({ operation: 'delete', patch: { status: 'done' } })));
+    const findings = validateComponentProps(stackWith(node({ operation: 'delete', name: 'close_task' })));
     expect(findings.map((f) => [f.rule, f.path])).toEqual([[COMPONENT_PROPS_INVALID, `${at}.operation`]]);
     expect(findings[0].message).toContain("`operation: 'delete'` is a bulk-def operation with no row-level form");
   });

@@ -124,7 +124,7 @@ export function judgePermissionSetOwnerBinding(
     : `, or ${door === 'save' ? 'save the set' : 'save it'} into package '${declared}' `
       + `(?package=${declared} on the REST door, packageId in process)`;
   const owner = bound === null
-    ? 'a set written into no package is authored in this environment, which an absent `packageId` states'
+    ? 'a set written into no package is authored in this system, which an absent `packageId` states'
     : 'the package a set is written into is its owner';
   const tail = `and ${owner} (ADR-0086 D3): a \`packageId\` that disagrees is refused, never silently overridden.`;
   const message = door === 'save'

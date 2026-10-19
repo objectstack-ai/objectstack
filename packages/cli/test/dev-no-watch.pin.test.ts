@@ -46,8 +46,8 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFile, execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,6 +58,54 @@ import { childEnv } from './helpers/serve-process.js';
 const HERE = resolve(fileURLToPath(import.meta.url), '..');
 const CLI = resolve(HERE, '../bin/run-dev.js');
 const TSX = resolve(HERE, '../../../node_modules/.bin/tsx');
+
+const PACKAGE_ROOT = resolve(HERE, '..');
+
+/**
+ * The `packageManager` pin both fixtures carry, as `pnpm@VERSION`.
+ *
+ * Why the fixtures carry one: both live under `tmpdir()`, outside the
+ * repository, and the spawned `os dev` runs `pnpm … dev` inside them. Under
+ * Corepack (CI's `setup-pnpm`), a `pnpm` run with no `packageManager` in reach
+ * resolves `pnpm@latest` from the public registry — measured: a registry
+ * answering HTTP 429 failed this file's two pnpm-running cases with
+ * `os dev ended with code 1` and `expected 1 to be +0`, the shape CI saw.
+ * `COREPACK_DEFAULT_TO_LATEST=0` is NOT the same fix: it swaps `latest` for
+ * Corepack's own bundled default, which CI's store does not hold, and the
+ * registry is reached for that instead.
+ *
+ * Why the pin is DERIVED and not read: VERSION is what `pnpm --version`
+ * answers with this package as its cwd, which is the repository's root pin
+ * reached through Corepack's own walk up to the nearest manifest declaring
+ * one. That is the version CI's Corepack store already holds, so the fixtures
+ * resolve it with no network call, and nothing is copied by hand. Reading the
+ * root `package.json` from here instead would make it a declared input of this
+ * package's tests (`check:cross-package-test-inputs`), which would put cli's
+ * whole PR-tier suite on every PR that edits that manifest. The spec carries no
+ * integrity hash; Corepack resolves the stored version by its number.
+ *
+ * ⛔ The blind spot this leaves, stated so it is not read as covered: the pin
+ * is an UNDECLARED input. A PR that bumps only the root pin does not re-run
+ * this file in CI, exactly as it re-runs none of this suite's other `pnpm -v`
+ * and `pnpm pack` callers, which resolve pnpm through the same walk. A pnpm
+ * whose no-projects sentence changed would first go red on a later PR that
+ * re-runs cli's tests.
+ */
+function derivePackageManagerPin(): string {
+  const answer = execFileSync('pnpm', ['--version'], {
+    cwd: PACKAGE_ROOT,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env: childEnv(),
+  }).trim();
+  if (!/^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/.test(answer)) {
+    throw new Error(
+      `\`pnpm --version\` in ${PACKAGE_ROOT} answered ${JSON.stringify(answer)}, not a version; ` +
+        'without one these fixtures carry no pin and Corepack would fetch a pnpm from the registry',
+    );
+  }
+  return `pnpm@${answer}`;
+}
 
 /** oclif + tsx cold start, with every command module loaded; ~2-10 s when healthy. */
 const RUN_TIMEOUT_MS = 180_000;
@@ -143,6 +191,8 @@ describe('the watch opt-out is reachable', () => {
   });
 });
 
+let fixtureRoot: string;
+let packageManagerPin: string;
 let projectDir: string;
 let workspaceDir: string;
 let watchEqualsFalse: Run;
@@ -150,20 +200,37 @@ let noWatchAtWorkspace: Run;
 let bareAtWorkspace: Run;
 
 beforeAll(async () => {
+  // Both fixtures sit under one root whose manifest carries the pin (see
+  // `derivePackageManagerPin`). Above `projectDir`, not in it: a `package.json`
+  // inside `projectDir` makes it a project, and pnpm then answers
+  // `No projects matched the filters` instead of the `No projects found`
+  // this file pins. Corepack walks up to the nearest manifest declaring a
+  // `packageManager`; pnpm's no-projects answer reads `projectDir` alone.
+  packageManagerPin = derivePackageManagerPin();
+  fixtureRoot = mkdtempSync(join(tmpdir(), 'os-dev-no-watch-'));
+  writeFileSync(
+    join(fixtureRoot, 'package.json'),
+    `${JSON.stringify({ private: true, packageManager: packageManagerPin })}\n`,
+  );
+
   // A project directory: a config file, and no pnpm workspace above it.
-  projectDir = mkdtempSync(join(tmpdir(), 'os-dev-no-watch-project-'));
+  projectDir = join(fixtureRoot, 'project');
+  mkdirSync(projectDir);
   writeFileSync(join(projectDir, 'objectstack.config.ts'), 'export default {};\n');
 
   // A workspace root whose own `dev` script announces that it ran — so the
   // `--no-watch` refusal below is measured against a fixture that DOES start
-  // something when asked (`bareAtWorkspace` is that control).
-  workspaceDir = mkdtempSync(join(tmpdir(), 'os-dev-no-watch-workspace-'));
+  // something when asked (`bareAtWorkspace` is that control). Its own manifest
+  // carries the pin too: the nearest one is what Corepack reads first.
+  workspaceDir = join(fixtureRoot, 'workspace');
+  mkdirSync(workspaceDir);
   writeFileSync(join(workspaceDir, 'pnpm-workspace.yaml'), 'packages: []\n');
   writeFileSync(
     join(workspaceDir, 'package.json'),
     `${JSON.stringify({
       name: 'os-dev-no-watch-fixture',
       private: true,
+      packageManager: packageManagerPin,
       scripts: { dev: `node -e "console.log('${DEV_SCRIPT_MARK}')"` },
     })}\n`,
   );
@@ -176,8 +243,7 @@ beforeAll(async () => {
 }, RUN_TIMEOUT_MS);
 
 afterAll(() => {
-  rmSync(projectDir, { recursive: true, force: true });
-  rmSync(workspaceDir, { recursive: true, force: true });
+  if (fixtureRoot) rmSync(fixtureRoot, { recursive: true, force: true });
 });
 
 describe('a PACKAGE that selects no workspace project fails', () => {

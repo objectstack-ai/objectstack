@@ -390,7 +390,7 @@ export interface IMetadataService {
      * read a MISS and an OUTAGE arrive as the same `undefined`; on the plural
      * read they arrive as the same *array*, and an array carries a **count**.
      * A count is the strongest positive claim a read can make — a consumer that
-     * renders `list(t).length` as "this environment contains N items" states,
+     * renders `list(t).length` as "this system contains N items" states,
      * positively and numerically, something no read established. `list` cannot
      * be fixed in place (every caller would have to change at once, and most
      * are right to keep ignoring the verdict), so the verdict is offered

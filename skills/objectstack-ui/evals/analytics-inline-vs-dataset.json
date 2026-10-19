@@ -1,11 +1,11 @@
 {
   "skill_name": "objectstack-ui",
-  "description": "Inline-vs-dataset / dataset-envelope-ceiling decisions. Every persisted chart is dataset-backed (ADR-0021); the real decision is whether the data need fits the dataset envelope, and if not, which lower layer to escalate to. Naming an inline draft vs a saved dataset is governance, not expressibility.",
+  "description": "Dataset-envelope decisions (ADR-0021: every persisted chart is dataset-backed): does the need fit the envelope and, if not, which lower layer takes it; inline draft vs saved dataset is governance, not expressibility.",
   "evals": [
     {
       "id": 1,
-      "prompt": "On the sales dashboard, add several widgets that all report the same certified 'revenue' metric (sum of amount) — one grouped by region, one by month, one as a KPI total. Emit the ObjectStack metadata.",
-      "expected_output": "Defines the metric ONCE in a dataset (defineDataset with an amount_sum measure + region and a month-granularity date dimension), then binds each widget to that dataset and selects dimensions/values BY NAME. Does not restate the aggregate inline per widget (the ADR-0021 inline object/valueField/aggregate shape was removed).",
+      "prompt": "On the sales dashboard add widgets that all report the certified 'revenue' metric (sum of amount): by region, by month, and a KPI total. Emit the metadata.",
+      "expected_output": "Defines the metric ONCE (defineDataset: an amount_sum measure, region and a month-granularity date dimension); each widget binds it and selects dimensions/values BY NAME — never an inline per-widget aggregate (object/valueField/aggregate was removed, ADR-0021).",
       "files": [],
       "assertions": {
         "must_contain": ["defineDataset", "dataset", "dimensions", "values"],
@@ -15,8 +15,8 @@
     {
       "id": 2,
       "prompt": "Add a dashboard chart showing 30-day rolling revenue (a moving average / running total over time). Model the data need.",
-      "expected_output": "Recognizes that a window/rolling calculation is BEYOND the dataset envelope (a dataset has no window/having grammar and compareTo only does previous-period/year). Escalates to a stored/materialized rolling field or app code, not a Cube — it does not pretend a dataset date-bucket or a plain measure expresses a moving window.",
-      "note": "The must_not_contain on 'dateGranularity' is deliberately strict: proposing date bucketing as the fix is the classic wrong answer. It can flag an otherwise-correct answer that merely mentions the field in passing — treat such a flag as a review cue, not an automatic fail.",
+      "expected_output": "Recognizes a rolling window as BEYOND the dataset envelope (no window/having grammar; compareTo only shifts a period/year): escalates to a stored rolling field or app code, not a Cube, and never passes off a date bucket or a plain measure as a moving window.",
+      "note": "'dateGranularity' in must_not_contain is deliberately strict (date bucketing is the classic wrong answer); it can flag a correct answer that merely mentions the key — a review cue, not an automatic fail.",
       "files": [],
       "assertions": {
         "must_contain": ["window"],
@@ -25,8 +25,8 @@
     },
     {
       "id": 3,
-      "prompt": "On a projects dashboard I want each project row to show its count of related child tasks (task has a lookup to project). Model it.",
-      "expected_output": "Explains that a to-many rollup ONTO the parent grain is not expressible in a dataset (datasets only do to-one joins; to-many traversal is out of scope). Recommends a stored rollup/summary field on project, OR basing the dataset on the child task and grouping by the project lookup (grain = child). Does not author a to-many join in include.",
+      "prompt": "On a projects dashboard each project row shows its count of child tasks (task has a lookup to project). Model it.",
+      "expected_output": "A to-many rollup ONTO the parent grain is not dataset-expressible (datasets join to-one only): recommends a stored rollup/summary field on project, OR a dataset on the child task grouped by the project lookup (grain = child); never a to-many join in include.",
       "files": [],
       "assertions": {
         "must_contain": ["rollup", "to-many"],
@@ -35,8 +35,8 @@
     },
     {
       "id": 4,
-      "prompt": "A dashboard has a top-level date-range filter that must re-scope six charts built over different objects. How should each chart pick up the filter? Emit the metadata.",
-      "expected_output": "Uses a dashboard-level variable/filter plus per-chart filterBindings mapping the filter to each widget's own date field (e.g. invoice→created_at, account→signed_at), broadcast into each chart's WHERE. Charts stay self-contained; it does NOT invent a shared dataset for the filter (a dataset is only implied when a parameter reshapes the query grain/window/join).",
+      "prompt": "A dashboard's top-level date-range filter must re-scope six charts over different objects. How does each chart pick it up? Emit the metadata.",
+      "expected_output": "A dashboard-level filter plus per-chart filterBindings mapping it to each widget's own date field (invoice→created_at, account→signed_at), broadcast into each chart's WHERE; charts stay self-contained and no shared dataset is invented for the filter (a dataset is implied only when a parameter reshapes grain/window/join).",
       "files": [],
       "assertions": {
         "must_contain": ["filterBindings"],
@@ -46,11 +46,31 @@
     {
       "id": 5,
       "prompt": "In a kind:'react' page, drop a quick one-off bar chart of tasks grouped by status. Write the block.",
-      "expected_output": "Uses the inline <ObjectChart objectName=\"task\" type=\"bar\" aggregate={{ function: 'count', groupBy: 'status' }} xAxis={{ field: 'status' }} series={[{ name: 'count' }]} /> block directly — an ad-hoc in-page chart does not require a dataset, and the react ObjectChart block has no dataset prop. Naming a dataset would only be for reuse/governance (Level B), not needed here. Note the axes name the aggregate's RESULT COLUMNS: `status` (its groupBy) and `count` (the fieldless-count column) — a fieldless count needs no field.",
+      "expected_output": "An inline <ObjectChart objectName=\"task\" type=\"bar\" aggregate={{ function: 'count', groupBy: 'status' }} xAxis={{ field: 'status' }} series={[{ name: 'count' }]} /> block: an ad-hoc in-page chart needs no dataset (the react block has no dataset prop; naming one is Level B governance), and the axes name the aggregate's RESULT COLUMNS — status (its groupBy) and count (the fieldless count, which needs no field).",
       "files": [],
       "assertions": {
         "must_contain": ["ObjectChart", "aggregate", "groupBy"],
         "must_not_contain": ["defineDataset"]
+      }
+    },
+    {
+      "id": 6,
+      "prompt": "leave_request shows days_requested, a formula (end_date - start_date, returnType 'number'), on its form; keep it. Add a KPI widget totalling days requested this quarter. Emit the metadata.",
+      "expected_output": "Never sums the formula (virtual, whatever its returnType): adds a stored number a beforeInsert/beforeUpdate hook keeps in step and sums that, or titles the widget as the count it is.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["number"],
+        "must_not_contain": ["field: 'days_requested'", "sql: 'days_requested'"]
+      }
+    },
+    {
+      "id": 7,
+      "prompt": "support_ticket has tags, a multiselect. Add a dashboard chart of open tickets by tag. Emit the metadata.",
+      "expected_output": "Refuses tags as the axis (a multi-value field is no dataset, cube or groupBy dimension): one widget per tag, each filtered { tags: { $contains: TAG } } over a count measure.",
+      "files": [],
+      "assertions": {
+        "must_contain": ["$contains"],
+        "must_not_contain": ["field: 'tags'", "groupBy: 'tags'", "sql: 'tags'"]
       }
     }
   ]
