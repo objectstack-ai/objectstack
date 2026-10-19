@@ -317,6 +317,102 @@ fi
 export OBJECTSTACK_SPEC_DIST="$SPEC_PKG"
 echo "→ Console will bundle @objectstack/spec from ${SPEC_PKG}"
 
+# ── Install THIS framework's @objectstack/* too (objectui consumes it by commit) ──
+# The two injections above answer "which spec and client does the BUNDLE carry".
+# Ruling B on objectui#12955 (objectui#12957) moved the INSTALL off npm as well: a
+# pinned objectui that carries `.objectstack-sha` overrides every @objectstack/*
+# package it resolves to `file:node_modules/.cache/objectstack/<name>` in its root
+# package.json, and its `scripts/objectstack-pin.mjs build` fills those directories
+# from a build of the objectstack commit `.objectstack-sha` names. Until something
+# fills them, the frozen install below dies (measured at objectui 749ed760: exit
+# 254, `ENOENT ... scandir node_modules/.cache/objectstack/client`); and the commit
+# objectui would fill them from is its own pin, not this tree.
+#
+# That script's OBJECTSTACK_ROOT input packs the same packages from an installed
+# and BUILT objectstack tree instead, with no lockfile change. Pointed at THIS tree,
+# every @objectstack/* package objectui installs is this framework's, the same
+# answer the injections give for the bundle. The injections stay: a pin without
+# `.objectstack-sha` still installs from npm and needs them.
+#
+# Detected by the FILE, never by the sha: a pin without `.objectstack-sha` builds
+# exactly as before. A pin with it but without the hook refuses, like the two
+# vite.config.ts guards above, rather than letting objectui build its own pin.
+OBJECTSTACK_PIN_SCRIPT="${BUILD_ROOT}/scripts/objectstack-pin.mjs"
+if [[ -f "${BUILD_ROOT}/.objectstack-sha" ]]; then
+  if [[ ! -f "$OBJECTSTACK_PIN_SCRIPT" ]] || ! grep -q "OBJECTSTACK_ROOT" "$OBJECTSTACK_PIN_SCRIPT"; then
+    echo "✗ objectui@${PINNED_SHA:0:12} carries .objectstack-sha but has no OBJECTSTACK_ROOT hook in"
+    echo "  scripts/objectstack-pin.mjs — its install would resolve @objectstack/* from objectui's own"
+    echo "  build of the objectstack commit it pins, not from this framework."
+    echo "  Bump .objectui-sha to a commit that includes the hook."
+    exit 1
+  fi
+
+  # Build what the pin script packs, through turbo (see the client's note above):
+  # the packages objectui overrides, read from its root package.json at the pin
+  # (the same list the pin script reads), and their dependencies by `^build`.
+  # Unguarded on purpose: the pin script packs whatever dist/ is on disk, so a
+  # stale one would install without a word, while turbo judges freshness by
+  # content hash. Every workflow that runs this script has just built that
+  # closure, so there this is a cache hit; `new-only` keeps a hit from replaying
+  # thousands of cached log lines, and still prints every task that really runs.
+  #
+  # WITH declarations, whatever OS_SKIP_DTS the caller exported. The two guards
+  # above accept a typeless client and spec because the vite hooks read only the
+  # `import` condition; the pin script packs whole packages as they publish and
+  # refuses one whose `types` entry is missing. Measured on this branch with
+  # OS_SKIP_DTS=1 and a typeless tree: exit 1, "@objectstack/client is not built
+  # ... dist/index.d.ts, which is not there", and the rebuild that refusal
+  # prints inherits the same OS_SKIP_DTS (consumer pointer on objectstack#24306).
+  # turbo.json lists OS_SKIP_DTS in globalEnv, so this build hashes apart from a
+  # typeless one and cannot replay it.
+  OBJECTSTACK_PINNED_NAMES="$(node -e '
+    const manifest = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    const names = Object.keys(manifest.pnpm?.overrides ?? {}).filter((n) => n.startsWith("@objectstack/"));
+    process.stdout.write(names.sort().join(" "));
+  ' "${BUILD_ROOT}/package.json")"
+  OBJECTSTACK_TURBO_FILTERS=()
+  for name in $OBJECTSTACK_PINNED_NAMES; do
+    OBJECTSTACK_TURBO_FILTERS+=("--filter=${name}")
+  done
+  if (( ${#OBJECTSTACK_TURBO_FILTERS[@]} > 0 )); then
+    echo "→ objectui@${PINNED_SHA:0:12} installs ${OBJECTSTACK_PINNED_NAMES} by commit — building them here..."
+    if [[ -n "${OS_SKIP_DTS:-}" ]]; then
+      echo "  OS_SKIP_DTS is set; these packages are built WITHOUT it, declarations included,"
+      echo "  because objectui packs them as they publish."
+    fi
+    (cd "$FRAMEWORK_ROOT" && unset OS_SKIP_DTS && pnpm exec turbo run build "${OBJECTSTACK_TURBO_FILTERS[@]}" --output-logs=new-only)
+  fi
+
+  # The pin script refuses (exit 1, reason on stderr) on a missing entry point,
+  # and on two dependency mismatches between these packages and objectui's pin:
+  # a packed manifest whose dependency NAMES differ from what objectui's lockfile
+  # records (a frozen install would link the package without them and exit 0),
+  # and an @objectstack/* dependency objectui's root package.json does not
+  # override. This tree trips either one by itself, the first time it adds or
+  # drops a runtime dependency of one of these packages after the objectstack
+  # commit objectui's `.objectstack-sha` names, and the fix lives in objectui.
+  echo "→ Packing them into objectui's install from ${FRAMEWORK_ROOT} (OBJECTSTACK_ROOT)"
+  if ! (cd "$BUILD_ROOT" && OBJECTSTACK_ROOT="$FRAMEWORK_ROOT" node scripts/objectstack-pin.mjs build); then
+    echo "✗ objectui@${PINNED_SHA:0:12}'s scripts/objectstack-pin.mjs refused to stand this tree in for"
+    echo "  the objectstack commit its .objectstack-sha names (the reason is above)."
+    echo "  If the reason names a dependency (pnpm-lock.yaml does not record what the build"
+    echo "  declares, or an @objectstack/* package the root package.json does not override): this"
+    echo "  tree added or dropped a runtime dependency of a package objectui installs from it, after"
+    echo "  the objectstack commit objectui pins. objectui has to learn it first, in objectui: move"
+    echo "  its .objectstack-sha to an objectstack commit that carries the change"
+    echo "  (scripts/bump-objectstack.sh there), commit the pnpm-lock.yaml (and any override) that"
+    echo "  move needs, land it, then move .objectui-sha here to that objectui commit."
+    echo "  ⛔ Not here: editing ${BUILD_ROOT}/pnpm-lock.yaml or making the install below non-frozen"
+    echo "  builds a console against a dependency set no objectui commit records."
+    if [[ -n "${OS_SKIP_DTS:-}" ]]; then
+      echo "  OS_SKIP_DTS is set in this environment. The build above ran without it; a rebuild by"
+      echo "  hand, such as the one the pin script prints, inherits it and comes out typeless again:"
+      echo "  run it as env -u OS_SKIP_DTS <command>."
+    fi
+    exit 1
+  fi
+fi
+
 pushd "$BUILD_ROOT" > /dev/null
 
 # objectui's root package.json may pin packages that aren't available on
@@ -387,6 +483,9 @@ fi
 # one-sided "is the new text present" probe pass even with no injection at all.
 # --objectui is the checkout just built: objectui's own registry mirrors spec
 # descriptions, so text its tracked source carries is not evidence of either spec.
+# On a pin that installs @objectstack/* from this tree (the OBJECTSTACK_ROOT block
+# above), --vendored IS this tree's spec, packed: the script then reports no
+# skew, because objectui's install no longer holds a published spec to leak.
 node "${FRAMEWORK_ROOT}/scripts/assert-console-spec-injection.mjs" \
   --injected "$SPEC_PKG" \
   --vendored "${BUILD_ROOT}/node_modules/@objectstack/spec" \

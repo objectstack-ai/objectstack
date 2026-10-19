@@ -1,4 +1,5 @@
 [
+  "scripts/build-console-objectstack-root.test.ts",
   "scripts/build-schemas-check-mode.test.ts",
   "scripts/category-title.test.ts",
   "scripts/conversions-major18-merge.test.ts",
