@@ -97,6 +97,22 @@
  * `authz.invalidated` channel plus the TTL, which is the substrate's own
  * contract.
  *
+ * ## [#10757 leg 6] The by-name read is the second reader of this cache
+ *
+ * `getMetaItem`'s active-row read (`readItemActiveRows` — one item's rows,
+ * both spellings of its type, in one store read) is the read the REST
+ * API-exposure gate (`enforceApiAccess` → `loadObjectItem`) makes on every
+ * `/data` request since that gate stopped asking the list. A local reading
+ * measured it as one uncached `sys_metadata` round trip per request. It is the
+ * same kind of value — raw `sys_metadata` rows, upstream of every parse, merge
+ * and registry hydration — so it is cached by this same contract (pre-read
+ * epoch, TTL, clone both ways), under a key that names the item.
+ *
+ * ⚠️ Only the SERVED face reads through it (`getMetaItem`). The protocol's own
+ * authoring checks call the private body directly (the destructive-change
+ * gate before a save, among them) and keep reading the store on every call,
+ * so a save is never judged against a cached row.
+ *
  * ## ⭐ A success is cached ONLY when the engine exposes the write epoch
  *
  * The rule leg C (#11966) landed, and it transfers unchanged. A `ql` with no
@@ -132,6 +148,12 @@ export interface MetaOverlayCacheKey {
   /** Canonical metadata type — already folded by `canonicalizeMetaRequestType`. */
   type: string;
   packageId?: string;
+  /**
+   * [#10757 leg 6] Set for the BY-NAME read (`readItemActiveRows`: one item's
+   * active rows under both spellings of its type), absent for the list read.
+   * The two reads never share an entry: the key spells them differently.
+   */
+  name?: string;
 }
 
 /** One cached row set, with everything needed to decide it is still the answer. */
@@ -276,7 +298,9 @@ export function bumpWriteEpoch(engine: unknown, reason: string): number | undefi
  * reads collide on one key.
  */
 function cacheKeyOf(key: MetaOverlayCacheKey): string {
-  return JSON.stringify([key.type, key.packageId ?? null]);
+  return key.name === undefined
+    ? JSON.stringify([key.type, key.packageId ?? null])
+    : JSON.stringify(['item', key.type, key.packageId ?? null, key.name]);
 }
 
 /**
