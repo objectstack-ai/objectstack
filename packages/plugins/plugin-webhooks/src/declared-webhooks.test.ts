@@ -51,6 +51,7 @@ interface HookEntry {
 function rowMatches(row: any, cond?: Record<string, any>): boolean {
     if (!cond) return true;
     return Object.entries(cond).every(([k, v]) => {
+        if (k.startsWith('$')) throw new Error(`fake engine: the ${k} combinator is not implemented`);
         if (v && typeof v === 'object' && Array.isArray((v as any).$in)) return (v as any).$in.includes(row[k]);
         return row[k] === v;
     });
