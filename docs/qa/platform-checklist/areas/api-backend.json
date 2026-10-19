@@ -178,12 +178,12 @@
       "title": "Removed/retired authoring keys fail at parse/build with located guidance",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "build",
       "steps": [
         "sample retired keys across the ADR-0087 registries, at minimum: a query-surface tombstone (QueryAST cursor / joins / distinct / windowFunctions — retiredKey per #4286), the error-envelope tombstone (EnhancedApiError.fieldErrors, renamed to fields by ADR-0114 D4), and one entry from the retired-filter-operator registry in packages/spec/src/data/filter.zod.ts (RetiredFilterOperatorGuidance)",
-        "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors; run ObjectSchema.create / os build where the key is config-side. The retired filter operator is DIFFERENT and is driven at runtime: author a stored filter carrying it (e.g. { name: { $regex: 'acme' } } in a view or widget filter) and confirm parse/build stay GREEN (FilterConditionSchema is an open record keyed by field name — no tombstone can live on it); then send the same predicate as the where of a query request on the running stack (e.g. POST /api/v1/data/<object>/query) and capture the 400 INVALID_FILTER refusal; then run `os migrate meta --from 16` and locate the filter-regex-options-retired advisory",
+        "author a config/payload using each sampled key: parse the query via the spec schema (QuerySchema.safeParse with cursor: {...}), parse an error envelope carrying fieldErrors; run ObjectSchema.create / os build where the key is config-side. The retired filter operator is DIFFERENT and is driven at runtime: author a stored filter carrying it on a FilterCondition-typed slot — a dashboard widget's `filter`, e.g. { name: { $regex: 'acme' } } (QA run #24541 used an ops-dashboard widget). ⛔ Not a view: a view's `filter` is the ViewFilterRule array [{ field, operator, value }] with a closed operator vocabulary, so the $-object predicate is no view shape at all and confirm parse/build stay GREEN (FilterConditionSchema is an open record keyed by field name — no tombstone can live on it); then send the same predicate as the where of a query request on the running stack (e.g. POST /api/v1/data/<object>/query) and capture the 400 INVALID_FILTER refusal; then run `os migrate meta --from 16` and locate the filter-regex-options-retired advisory",
         "capture each rejection's full text",
         "the documented-strip control: parse an UNKNOWN key on the RestServerConfig `routes` sub-object — RestServerConfigSchema.safeParse({ routes: { someUnknownKey: 1 } }) (or RouteGenerationConfigSchema directly) — and confirm it parses clean with the key gone (routes reads back {}). The behavior is declared in packages/spec/src/api/rest-server.zod.ts: RouteGenerationConfigSchema's docblock states the schemas are not `.strict()`, which is exactly why its retired keys carry tombstones. No spec docblock declares a 'pure display annotation' that is stripped by design — that example is not the control; this documented non-strict sub-object is",
         "record which registry each sampled key came from"
@@ -250,6 +250,12 @@
           "date": "2026-10-16",
           "change": "the strip-by-design leg named no concrete key, and no spec docblock declares a 'pure display annotation' that is stripped by design (#23878 checklist-accuracy finding; searched on main c91af8ed6). The leg now names the documented control the run used: an unknown key on RestServerConfig.routes parses clean to routes {} because RouteGenerationConfigSchema's docblock declares the schemas non-strict, and the same sub-object's retired key includeObjects is refused with its prescription. Re-run against the built @objectstack/spec: safeParse success with {} for the unknown key, failure naming '`routes.includeObjects` was removed …' for the tombstone",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "steps[1] names a slot the $-operator predicate can be stored on — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.enforce-or-remove-authoring-gates step 2; wave anchor #24579 §3): a view filter is the array shape [{field, operator, value}], not a FilterCondition. Re-derived at base 9a7838edf5: ViewFilterRuleSchema (packages/spec/src/ui/view.zod.ts) is a strict rule object, while the widget filter is FilterConditionSchema (ui/dashboard.zod.ts). No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -342,7 +348,7 @@
       "title": "Data-API query contract: every filter operator gives known answers; $-params, select, sort, expand honored; malformed input 400s with the exact code",
       "since": "v15",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -361,7 +367,7 @@
         "for each operator variant below, run BOTH spellings against showcase_account (or showcase_task where the type fits): the POST /api/v1/data/showcase_account/query body form (where: {field: {$op: value}}) and the AST array form ([field, op, value] — spellings per AST_OPERATOR_MAP); e.g. where {status: {$eq: 'active'}}, {annual_revenue: {$gt: 10000000}}, {status: {$in: ['active','prospect']}}, {annual_revenue: {$between: [5000000, 50000000]}}, {name: {$contains: 'orth'}}, {name: {$startsWith: 'Con'}}, {churn_reason: {$null: true}}",
         "for each operator: compute the expected id set from the baseline locally and compare with the returned records — a known-answer check, not a smoke 200",
         "pagination window: GET /api/v1/data/showcase_account?$orderby=name&$top=3&$skip=2 and verify it equals rows 3–5 of the locally sorted baseline; also POST body limit/offset/top equivalents",
-        "selection: ?$select=name,status (and body fields: ['name','status']) — response objects carry exactly the requested keys (plus system identity keys); then the dotted related column fields: ['account.name'] on showcase_invoice, which is REFUSED by design — 400 INVALID_FIELD whose message prescribes `expand` (a dotted path reaches the driver as a column name, matches none, and would fall back to every field)",
+        "selection: ?$select=name,status (and body fields: ['name','status']) — response objects carry exactly the requested keys — no system identity key is added, not even `id` (the SQL driver selects query.fields verbatim); then the dotted related column fields: ['account.name'] on showcase_invoice, which is REFUSED by design — 400 INVALID_FIELD whose message prescribes `expand` (a dotted path reaches the driver as a column name, matches none, and would fall back to every field)",
         "sort: $orderby / orderBy asc and desc on annual_revenue — full ordering compared to the locally sorted baseline, not just first row",
         "expand: as the CONTRIBUTOR (restricted persona), POST /api/v1/data/showcase_invoice/query with expand: {contact: {object: 'showcase_contact', fields: ['name']}} on an invoice they own — contributor holds NO showcase_contact grant, so the expanded row must be withheld/masked while their own invoice row returns (15.1 §A6: expand routes through the secured find path, #2850)",
         "negative shapes: POST query where {status: {$nin: 'done'}} on showcase_task (scalar comparand for a collection operator — #5869) and the AST twin ['status','not_in','done'], plus the GET twin ?$filter=[\"status\",\"not_in\",\"done\"] (the two doors answer different codes — see the clause); GET with an unknown $-param (?$pageSize=5); GET with a bare unknown key (?not_a_field=x); sort on a nonexistent field; a where clause naming a nonexistent field",
@@ -494,6 +500,12 @@
           "date": "2026-10-01",
           "change": "re-pointed to what the doors answer since #20116 (QA run #21056 scored acceptance[5] — the run record's A6 — FAIL; verifier disposition: stale clause, not a product defect). acceptance[5]: POST /query, both spellings, is refused at the request schema with 400 VALIDATION_FAILED + a located fields[] entry; GET $filter still answers 400 INVALID_FILTER; the step-8 GET twin was added. acceptance[2] and step 5: a dotted fields entry is refused 400 INVALID_FIELD by design, prescribing expand. negative[0]: {\"filter\": …} is a declared transport spelling of where, so the widening probe now uses a mistyped clause (400 VALIDATION_FAILED) and an undeclared key (400 INVALID_FIELD). Residual for the maintainer, not a defect: the same condition answers VALIDATION_FAILED on POST and INVALID_FILTER on GET (#8001 family)",
           "ref": "#21060"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "steps[4] states the projection the build serves — checklist-accuracy finding of the 18.0 QA sweep (QA run #24556, api-backend.query-contract-matrix step 5; wave anchor #24579 §3): $select narrows to exactly the requested keys and adds no identity key. Re-derived at base 9a7838edf5 (objectql engine.ts: SqlDriver emits builder.select(query.fields) verbatim). No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -502,7 +514,7 @@
       "title": "Sampled endpoints return the standard error envelope with ledgered codes — no invented codes, no retired keys, statuses match the map",
       "since": "v16",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -547,9 +559,9 @@
           "evidence": "the bodies"
         },
         {
-          "clause": "HTTP status matches the code's declared mapping (HttpStatusErrorCodeMap): 400 validation/filter/param codes, 401 UNAUTHENTICATED, 403 PERMISSION_DENIED, 404 not-found flavors",
+          "clause": "HTTP status agrees with the code: a standard-catalog code answers the status HttpStatusErrorCodeMap maps it from (VALIDATION_ERROR 400, UNAUTHENTICATED 401, PERMISSION_DENIED 403, RESOURCE_NOT_FOUND 404, …), and a registered extension code (OBJECT_NOT_FOUND, RECORD_NOT_FOUND, VALIDATION_FAILED, …) answers a status in its condition's family (ErrorHttpStatusMap: validation 400, not_found 404, authorization 403, conflict 409, …). HttpStatusErrorCodeMap is the status → FLOOR-code map — the code a bare status derives — not a code → status table, so it names no status for an extension code",
           "oracle": "api",
-          "verify": "status-vs-code table across the samples; any mismatch (e.g. a 500 carrying a caller-fixable code) fails",
+          "verify": "status-vs-code table across the samples: each standard code judged against HttpStatusErrorCodeMap read in reverse, each extension code by its family; any mismatch (e.g. a 500 carrying a caller-fixable code) fails",
           "evidence": "the table"
         },
         {
@@ -611,6 +623,12 @@
           "date": "2026-10-16",
           "change": "step 6 sent the BATCH_NOT_ATOMIC sample as options {atomic:false} (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: that body answers 200 and creates the row, because batch.zod strips the options wrapper; a TOP-LEVEL atomic:false answers 400 BATCH_NOT_ATOMIC ('Cross-object batch is always atomic; use POST /data/:object/batch …'), a code ErrorCode carries. The step now uses the top-level spelling; the clauses are unchanged",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "acceptance[3] (clause, verify) names the oracle it can be judged by — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.error-envelope-ledger acceptance[3]; wave anchor #24579 §3): HttpStatusErrorCodeMap is a status → floor-code map (400 → VALIDATION_ERROR, 404 → RESOURCE_NOT_FOUND, …), and OBJECT_NOT_FOUND / RECORD_NOT_FOUND / VALIDATION_FAILED have no entry in it. Re-derived at base 9a7838edf5 (packages/spec/src/api/errors.zod.ts: HttpStatusErrorCodeMap, standardErrorCodeForHttpStatus, ErrorHttpStatusMap)",
+          "ref": "#24649"
         }
       ]
     },
@@ -619,7 +637,7 @@
       "title": "Bulk write doors (createMany/updateMany/deleteMany, per-object batch): per-row outcomes, size cap, single/bulk parity, no silent full-table writes",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -637,7 +655,7 @@
         "boot showcase isolated; as the member POST /api/v1/data/showcase_private_note/createMany with a BARE JSON ARRAY of 3 notes with unique-marker titles (the body is the array; a {records} wrapper answers 400 VALIDATION_FAILED); GET them back",
         "single/bulk parity: POST a 4th note via the single door (POST /api/v1/data/showcase_private_note) and diff its response/stored shape against one createMany row (same fields stamped: owner_id, timestamps, defaults)",
         "as the member POST /api/v1/data/showcase_private_note/updateMany {\"records\": [{\"id\": \"<marker id>\", \"data\": {…}}, …]} naming ONLY the marker rows' ids — updateMany is id-based (UpdateManyRequestSchema); a {where, data} body answers 400 VALIDATION_FAILED naming `records`; re-read",
-        "as the member POST updateMany naming ids that match nothing the member may touch: a nonexistent id, and the id of another user's private note (invisible to the member); capture the per-row results, then re-read the foreign note system-side. Also send {\"records\": []}",
+        "as the member POST updateMany naming ids that match nothing the member may touch: a nonexistent id, and the id of another user's private note (invisible to the member) — in SEPARATE calls, or in one call with options.continueOnError: true: under the default (continueOnError: false) the first failed row ends the run and the second id reports NOT_ATTEMPTED, which says nothing about the no-existence-oracle parity; capture the per-row results, then re-read the foreign note system-side. Also send {\"records\": []}",
         "as admin POST createMany with records.length == maxBatchSize+1 (201 on default config); capture",
         "deleteMany is id-based too ({\"ids\": [...]}; a {where} body answers 400 naming `ids`). As the member, POST deleteMany on two of its own marker notes and capture the refusal — the member baseline holds no allowDelete on showcase_private_note (row 0 PERMISSION_DENIED, the rest NOT_ATTEMPTED); then as admin POST deleteMany with the marker ids; re-read; then re-issue the same deleteMany (the ids are gone now)",
         "throughout: capture per-row result arrays and any ERR_BULK_RESULT_MISMATCH appearance"
@@ -658,7 +676,7 @@
         {
           "clause": "a write that names nothing the caller may touch is a calm per-row no-op, never a wider write: updateMany naming a nonexistent id, or another user's invisible note, answers 2xx with that row failed RECORD_NOT_FOUND (the same code for both — no existence oracle) and the foreign row unchanged; an empty records list answers 2xx with total 0; a repeated deleteMany reports its now-missing ids RECORD_NOT_FOUND (the #2982 failure shape was bulk writes escaping their scope — an id-based door cannot match more rows than it names)",
           "oracle": "api",
-          "verify": "step-4/6 responses: per-row RECORD_NOT_FOUND for the nonexistent and the foreign id, success false, succeeded 0; the foreign note re-reads unchanged system-side; the empty list reports total 0; the repeated deleteMany's first row RECORD_NOT_FOUND",
+          "verify": "step-4/6 responses: per-row RECORD_NOT_FOUND for the nonexistent and the foreign id (each judged in its own call or under continueOnError: true — a NOT_ATTEMPTED row is the stop, not an answer), success false, succeeded 0; the foreign note re-reads unchanged system-side; the empty list reports total 0; the repeated deleteMany's first row RECORD_NOT_FOUND",
           "evidence": "responses + control read"
         },
         {
@@ -715,6 +733,12 @@
           "date": "2026-10-16",
           "change": "re-pointed to the id-based bulk doors (#23878 checklist-accuracy findings, re-measured on main c91af8ed6). updateMany takes {records:[{id,data}]} and deleteMany {ids:[…]} (a where body answers 400 VALIDATION_FAILED naming records / ids), and createMany a bare array. The where-clause steps and the 'empty match' clause are rewritten for that contract: a nonexistent id and another user's invisible note both answer per-row RECORD_NOT_FOUND with the foreign row unchanged, and records [] answers total 0 — the clause still fails if a row the caller cannot see is written. The baseline member holds no allowDelete on showcase_private_note (member deleteMany: PERMISSION_DENIED then NOT_ATTEMPTED; single DELETE 403), so the delete legs name the member's refusal and run the deletion as admin. BATCH_TOO_LARGE at 201 records re-measured: 400, zero rows",
           "ref": "#24036"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[3] and acceptance[2].verify send the two ids so each gets an answer — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.bulk-write-contract step 4 / acceptance[2]): updateMany stops at the first failed row by default, so one batch [nonexistent, foreign] reports the foreign id NOT_ATTEMPTED. Re-derived at base 9a7838edf5: BatchOptions continueOnError defaults false (packages/spec/src/api/batch.zod.ts). No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -1415,7 +1439,7 @@
       "title": "A retired metadata DEFINITION (whole schema type withdrawn) refuses at every authoring door — distinct from a retired key, and the door that must not fall through to 'unknown type, ignored'",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "build",
       "personas": [
@@ -1436,7 +1460,7 @@
         "sample at least four entries spanning BOTH version prefixes and at least three different domains (e.g. data/, system/, identity/, ui/)",
         "for each sampled def, read its entry file and record which ADR-0087 route retired it, whether a prescription was authored, and its CARRIER: the authored key that embedded it, retired as a retiredKey() tombstone (e.g. manifest.loading for kernel/PluginLoadingConfig and its closure; agent.lifecycle for automation/StateMachine and its family), or none — most entries are schema-export definitions with zero consumers: no metadata-type binding, no stack collection, no embedding (e.g. data/ExternalDataSource, automation/ScheduleState). Sample at least one def of each kind",
         "build door, per sampled def, each in its own scratch stack run through os build: for a def WITH a carrier, author the carrier key (e.g. manifest.loading: { strategy: 'lazy' }; an agent carrying lifecycle) — the refusal is the carrier's tombstone. For a def WITHOUT one there is no metadata of that type to author ('a stack that declares metadata of the retired type' could only be an invented key, which is the control below), so drive the door it actually had: import its Zod export from its @objectstack/spec subpath in the config (e.g. ExternalDataSourceSchema from '@objectstack/spec/data') and confirm json-schema/DOMAIN/NAME.json is absent from packages/spec/json-schema",
-        "runtime door against a live boot: PUT /api/v1/meta/TYPE/NAME carrying the carrier key where its type is runtime-writable, and record a code-only type's up-front refusal where it is not (agent is code-only); for a zero-consumer def, PUT a type name spelled after it (e.g. external_data_source) — no type was ever bound, so the expected answer is the same refusal as the control",
+        "runtime door against a live boot: PUT /api/v1/meta/TYPE/NAME carrying the carrier key where its type is runtime-writable, and record a code-only type's up-front refusal where it is not (agent is code-only); manifest.loading's carrier has no runtime metadata-write door at all — `manifest` (like package and plugin) is not a registered metadata type, so PUT /api/v1/meta/manifest/… answers the control's own 400 'is not a metadata type': record it as that, like the code-only agent; for a zero-consumer def, PUT a type name spelled after it (e.g. external_data_source) — no type was ever bound, so the expected answer is the same refusal as the control",
         "as a control, author an invented top-level stack key (e.g. qaInventedFamily) at the build door and PUT an invented type name at the runtime door, and compare their refusals to the retired-def refusals"
       ],
       "acceptance": [
@@ -1491,6 +1515,12 @@
           "date": "2026-10-17",
           "change": "steps re-pointed (checklist-accuracy finding, #23878 close-out): RETIRED_DEFS entries are schema-export definitions, most with no metadata-type binding or stack collection, so 'a stack that declares metadata of each sampled retired type' could only be an invented key. Steps 3–6 now sample by carrier (an authored key retired as a tombstone, or none), drive the carrier key or the schema-export import at os build, name the runtime type each reaches, and make the control an invented stack key and an invented type; knownGaps[0] records the reading. No clause changed. Re-run with os build on a minimal scratch stack (baseline exit 0): 17 data/ExternalDataSource (zero consumers) import → exit 2 \"The requested module '@objectstack/spec/data' does not provide an export named 'ExternalDataSourceSchema'\"; 18 automation/ScheduleState (zero consumers) import → exit 2, the same generic shape; 17 kernel/PluginLoadingConfig via manifest.loading → exit 2 'manifest.loading was removed in @objectstack/spec 17.0.0 (ADR-0049 enforce-or-remove) — the entire block …'; 18 automation/StateMachine via agent.lifecycle → exit 2 'agent.lifecycle was removed in @objectstack/spec 17.7.0 … Delete the key …'; control qaInventedFamily → exit 2 'Unrecognized key(s) on this stack definition'. The carrier refusals name the retirement and differ from the control; the zero-consumer ones are generic, which knownGaps[0] scores as correct. json-schema/data/ExternalDataSource.json, automation/ScheduleState.json and automation/StateMachine.json are absent. Runtime door on stock showcase: PUT /meta/agent/NAME with lifecycle → 403 'Metadata type agent is code-only …'; PUT /meta/external_data_source/NAME and the invented control → the same 400 \"… is not a metadata type\"",
           "ref": "#24036"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[4] says what manifest.loading's runtime door is — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.retired-def-refusal step 5; wave anchor #24579 §3): the carrier's type has no runtime write door. Re-derived at base 9a7838edf5: DEFAULT_METADATA_TYPE_REGISTRY (packages/spec/src/kernel/metadata-plugin.zod.ts) has no manifest, package or plugin entry, and the meta door answers an unregistered type 'is not a metadata type' (metadata-protocol protocol.ts). No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -1499,7 +1529,7 @@
       "title": "A disabled packaged action is refused 409 ACTION_DISABLED at BOTH dispatch doors — after the capability gate (a 403 is never an oracle for the switch), before the param contract and the record load, durable across restart",
       "since": "v17",
       "status": "active",
-      "revision": 3,
+      "revision": 4,
       "priority": "P0",
       "surface": "api",
       "personas": [
@@ -1525,7 +1555,7 @@
         "REST door: POST /api/v1/actions/showcase_task/showcase_mark_done with {\"recordId\": \"no-such-record-0000\"}; capture status + body; then re-read a REAL seeded task and confirm no done/progress write happened anywhere",
         "param-ordering discriminator: disable showcase_action_param_gallery (POST /actions/_activation/showcase_field_zoo/showcase_action_param_gallery {\"enabled\":false}), then invoke POST /actions/showcase_field_zoo/showcase_action_param_gallery with params: {\"bogus_key\": 1} (missing required p_text AND an unknown key) plus a nonexistent recordId; capture. Re-enable and repeat the IDENTICAL request; capture the contrast",
         "403-oracle: POST /actions/showcase_field_zoo/showcase_zoo_perm_missing while it is ENABLED; capture the 403 body. Disable it via /actions/_activation/showcase_field_zoo/showcase_zoo_perm_missing, repeat the identical invocation, capture again; byte-compare the two refusals",
-        "MCP door: disable showcase_portfolio_snapshot (POST /actions/_activation/global/showcase_portfolio_snapshot {\"enabled\":false}); call the MCP run_action tool for it; capture the tool error envelope. Re-enable and confirm the tool call runs again",
+        "MCP door: disable showcase_portfolio_snapshot (POST /actions/_activation/global/showcase_portfolio_snapshot {\"enabled\":false}); call the MCP run_action tool for it with { actionName: 'showcase_portfolio_snapshot' } (the argument is `actionName` — an `action` key is refused -32602 with a did-you-mean); capture the tool error envelope. Re-enable and confirm the tool call runs again",
         "restart durability: RESTART the server (hydrateActionActivations re-loads the ledger at boot, after the authored-action re-sync); wait for the serving line, then invoke showcase_mark_done again → capture; re-enable it via the activation door → invoke again → dispatches; re-read the ledger row (active true, row still present)",
         "flow-type leg (variant): disable showcase_bulk_reassign (type 'flow', target showcase_reassign_wizard) and invoke it over REST — the refusal must be the ACTION's own switch, ahead of the type branch and of any consult of the target flow's ledger row"
       ],
@@ -1622,6 +1652,12 @@
           "date": "2026-10-01",
           "change": "knownGaps no longer presents a live MCP call as possibly undrivable: a stock boot mounts POST /api/v1/mcp (named in the boot banner), and QA run #21056 drove tools/call run_action live for clause 4. The unit pin stays the fallback where the endpoint is absent",
           "ref": "#21060"
+        },
+        {
+          "revision": 4,
+          "date": "2026-10-19",
+          "change": "steps[5] names the MCP argument — checklist-accuracy finding of the 18.0 QA sweep (QA run #24556, api-backend.packaged-action-disabled-dispatch step 6; wave anchor #24579 §3). Re-derived at base 9a7838edf5 (packages/mcp/src/mcp-http-tools.ts run_action input: actionName, objectName, recordId). No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -1630,7 +1666,7 @@
       "title": "POST /actions/_activation/:object/:action — the activation door's ordered arms: authority before body and lookup, the exact 400 shapes, 404 undeclared, 409 ambiguity, 501/503 honesty, and the reserved segment surviving the real mount",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -1647,7 +1683,8 @@
         "knownGaps": [
           "The AMBIGUITY arm (409 RESOURCE_CONFLICT from refuseAmbiguousActionActivation — two objects declaring one action name) has NO stock fixture: every showcase action name is unique across both action files (verified — the machine names are all showcase_-prefixed and declared once), so the live leg needs an authored scratch package declaring the SAME action name on two objects. Do not fake it; the arm is pinned at unit level (action-activation-posture-gate.test.ts: 409 RESOURCE_CONFLICT naming both owners, and setActionActive NEVER called — no row on refusal), and a run without the scratch package scores the clause from that pin, recorded as such.",
           "The 501 arm (engine without setActionActive) and the 503 arm (attached store that throws / no ledger attached) are unreachable on a stock boot — the stock engine implements the projection and the plugin attaches the store. Both are pinned at unit level (action-activation-posture-gate.test.ts: 501 naming ADR-0126 §8; 503 SERVICE_UNAVAILABLE rather than a 200 for a write that did not persist). #12359 measured the 503 live once (actions-without-automation composition) and the registration MOVE closed it — packaged-activation-ledger-reach.dogfood.test.ts keeps that composition green.",
-          "The group/isolated POSTURE legs of the §5 operator gate need an enterprise tenancy runtime no example app composes — the gate itself (both tiers, all postures) is access-security territory (activation-write-operator-gate); this item asserts only the ORDER (authority before body/lookup), which the stock single-posture boot can prove through the manage_metadata tier."
+          "The group/isolated POSTURE legs of the §5 operator gate need an enterprise tenancy runtime no example app composes — the gate itself (both tiers, all postures) is access-security territory (activation-write-operator-gate); this item asserts only the ORDER (authority before body/lookup), which the stock single-posture boot can prove through the manage_metadata tier.",
+          "acceptance[4]'s metadata-plane 503 arm — the declaration lookup reports `degraded` (packages/runtime/src/domains/actions.ts, the 'Cannot verify the declaration … the metadata plane is unavailable' refusal) — is unreachable on a stock boot and pinned by no file in automated.ref: action-activation-posture-gate.test.ts's 503 is the store that cannot persist the row, a different arm, and http-dispatcher.actions-type-dispatch.test.ts '503s rather than running ungated when the metadata plane cannot answer' pins the DISPATCH door's use of the same lookup, not this door. Record that arm as not covered — no live door, no pin — never as a pass carried by the 404"
         ]
       },
       "steps": [
@@ -1687,7 +1724,7 @@
         {
           "clause": "the declaration arm distinguishes its three states: an undeclared action → 404 'has no declaration — there is nothing to switch off' (the ledger addresses DECLARED actions, ADR-0126 §4; a typo is not a server fault, #7535); a metadata plane that cannot answer → 503 (an outage is not a verdict); and NO refused probe of any arm writes a sys_metadata_activation row",
           "oracle": "api",
-          "verify": "step-5: 404 with the nothing-to-switch-off sentence; the ledger read shows zero rows written by any refusal (the only rows present are the happy path's)",
+          "verify": "step-5: 404 with the nothing-to-switch-off sentence; the ledger read shows zero rows written by any refusal (the only rows present are the happy path's). The metadata-plane 503 arm has neither a stock door nor a pin (knownGaps): score it not covered, and the clause partial on its account",
           "evidence": "the 404 trace + the ledger read"
         },
         {
@@ -1747,6 +1784,12 @@
           "date": "2026-09-04",
           "change": "ledger read-back detail and one citation — the door's ordered arms are UNCHANGED and no arm moved. Two corrections, both downstream of #15024 dropping sys_metadata_activation's reserved organization_id column before it ever shipped. (1) VACUITY: step 6 and the happy-path clause read the column back and asserted it NULL. With the column gone that read passes rather than failing (`row.organization_id ?? null` is `null` either way), so the leg was green for the wrong reason; both now score the row's KEY SET, the same inversion #15024 applied to the dogfood pin. automated.ref carried the same staleness as 'one org-NULL row' and now quotes the pin's live name. (2) DECISION: the clause glossed the column as 'the per-org dimension is reserved and unwritten', citing ADR-0126 §5 D3 — a bullet ADR-0131 D7 WITHDREW ('a reserved nullable tenant column is the shape D1 forbids'), naming this table as reverted before 17.3 and not returning. Left as it stood it told a runner the tenant dimension was coming back. The source list now carries ADR-0131 D7 and marks which half of §5 survives: the operator gate stands, the reserved column does not",
           "ref": "#15253"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "knownGaps and acceptance[4].verify record the one arm nothing covers — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.action-activation-door-contract acceptance[4]; wave anchor #24579 §3): the metadata-plane-degraded 503 arm is named in the clause but is neither stock-reachable nor pinned by any file in automated.ref. Re-derived at base 9a7838edf5: the arm is actions.ts's declaration.degraded branch; action-activation-posture-gate.test.ts pins the non-durable store 503 instead, and the metadata-plane 503 pin that exists (http-dispatcher.actions-type-dispatch.test.ts) drives the dispatch door. No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -1755,7 +1798,7 @@
       "title": "Server-side aggregation contract: every AggregationFunction × DateGranularity gives known answers — ruled empty-set values, ISO-Monday week buckets, retired array_agg/string_agg refuse with prescriptions, and aggregate stays secured (engine-only, never raw driver)",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1774,16 +1817,16 @@
         },
         "knownGaps": [
           "Stock seed dates may not spread signed_on across enough DISTINCT buckets for every granularity to be answer-discriminating (e.g. all rows in one ISO week proves week-bucketing resolved, not that it bucketed correctly). Same discipline as api-backend.date-range-preset-matrix: record which granularities were answer-discriminating vs merely well-formed; seeding a few rows at known date offsets during the run is the honest close — record it if done.",
-          "Whether a given aggregate is answered by driver pushdown or by the in-memory path (packages/objectql/src/in-memory-aggregation.ts) depends on driver + timezone (tz≠UTC date buckets take the in-memory path per the #1982 note); the two paths must label identically (#3773/#3839 seam). Record which path answered when it is observable (e.g. via the timezone lever), and score the CONTRACT, which is path-independent."
+          "Whether a given aggregate is answered by driver pushdown or by the in-memory path (packages/objectql/src/in-memory-aggregation.ts) depends on driver + timezone (tz≠UTC date buckets take the in-memory path per the #1982 note); the two paths must label identically (#3773/#3839 seam). Record which path answered when it is observable (via the timezone lever, which only POST /api/v1/analytics/query carries — steps[3]), and score the CONTRACT, which is path-independent."
         ]
       },
       "steps": [
         "read the two enums and pin the matrix: AggregationFunction (packages/spec/src/data/query.zod.ts — 6 members: count/sum/avg/min/max/count_distinct, with retirement error messages wired for array_agg/string_agg) and DateGranularity (— 5 members: day/week/month/quarter/year). Only ONE enumSource pin fits an item; AggregationFunction carries it — hand-count DateGranularity's 5 members at run time and record the count",
         "boot showcase isolated; as admin read the unfiltered showcase_account baseline (generous $top) — the local ground truth every expected value below is computed from",
         "function matrix: for each of the 6 functions POST /api/v1/data/showcase_account/query with { groupBy: ['status'], aggregations: [{ function, field: 'annual_revenue', alias: 'v' }] } (count also in its fieldless/'*' spelling), plus one UNgrouped run per function; compute each expected per-group value locally from the baseline and compare exactly — known answers, not smoke 200s. Add the #11152 leg: min/max over a boolean field answer the NUMBER it is worth (0/1, maintainer ruling 2026-08-28), never false/true",
-        "granularity matrix: record wall clock + timezone, then for each of the 5 granularities POST { groupBy: [{ field: 'signed_on', dateGranularity }], aggregations: [{ function: 'count', alias: 'n' }] }; reconcile the returned bucket KEYS and counts against locally computed ISO-8601 buckets (bucketDateValue's own shapes: 'YYYY', 'YYYY-Qn', 'YYYY-MM', 'YYYY-MM-DD', 'YYYY-Wnn' with weeks starting Monday / week 1 = first Thursday); rows with null/unparseable dates must land in ONE real-null-keyed bucket (#3839 — never a '(null)' sentinel string)",
+        "granularity matrix: record wall clock + timezone, then for each of the 5 granularities POST { groupBy: [{ field: 'signed_on', dateGranularity }], aggregations: [{ function: 'count', alias: 'n' }] }; reconcile the returned bucket KEYS and counts against locally computed ISO-8601 buckets (bucketDateValue's own shapes: 'YYYY', 'YYYY-Qn', 'YYYY-MM', 'YYYY-MM-DD', 'YYYY-Wnn' with weeks starting Monday / week 1 = first Thursday); rows with null/unparseable dates must land in ONE real-null-keyed bucket (#3839 — never a '(null)' sentinel string). The TIMEZONE lever is not on this door: POST /api/v1/data/showcase_account/query refuses a `timezone` key 400 INVALID_FIELD (the protocol does not forward one; engine.aggregate reads only query.timezone). The one wire lever is POST /api/v1/analytics/query with `timezone` — on the stock cube showcase_delivery, a count measure over its time dimension due_date at granularity day, once at UTC and once in a negative-offset zone such as America/Los_Angeles (QA run #24595: the answer's data.sql is present on the driver path and absent on the in-memory one, and the SQL echo refuses a non-UTC bucket)",
         "empty-set semantics: (a) a query whose where matches nothing, grouped and ungrouped; (b) a per-aggregation filter (#10576 — aggregations[].filter, SQL FILTER(WHERE …) semantics) that empties one measure while a sibling measure keeps the full bucket. Expected per the platform ruling (emptyGroupValueFor, packages/spec/src/data/aggregation-policy.ts): count/count_distinct/sum → 0, avg/min/max → null — a 0 flattened onto avg (or a null on count) is a FAIL either direction (objectui#3136)",
-        "negatives: aggregations [{ function: 'array_agg', field: 'name', alias: 'x' }] and the string_agg twin → 400 with the RETIREMENT prescriptions (each message ends with the 'os migrate meta --from 16' instruction; only those two spellings get it); an unknown function ('median') → 400 whose issue lists the six legal functions (zod's own enum error, deliberately NOT the retirement text — telling a typo'd author their value 'was removed' would misinform); aggregations naming a nonexistent field → the located protocol refusal (protocol.ts assertAggregationFieldsExist); aggregations as a non-array → the shape refusal with the worked example",
+        "negatives: aggregations [{ function: 'array_agg', field: 'name', alias: 'x' }] and the string_agg twin → 400 with the RETIREMENT prescriptions (each message ends with the 'os migrate meta --from 16' instruction; only those two spellings get it); an unknown function ('median') → 400 whose issue lists the six legal functions (zod's own enum error, deliberately NOT the retirement text — telling a typo'd author their value 'was removed' would misinform); aggregations naming a nonexistent field → the located protocol refusal (protocol.ts assertAggregationFieldsExist); aggregations as a non-array → on this door the REQUEST SCHEMA answers first: 400 VALIDATION_FAILED with a fields[] entry located at query.aggregations ('expected array'). The protocol's worked-example refusal (assertAggregationFieldsExist: 'must be an array of { function, field?, alias } entries') is not reached through POST /query — the #20116 door posture api-backend.filter-comparand-conformance records",
         "secured-aggregate leg: run one grouped count (count by status on showcase_invoice) as the provisioned contributor-bound member, whose visible row set provably differs from the admin's; compute their expectation from THEIR OWN filtered baseline. The rule under test is the one packages/runtime/src/action-execution.ts states for the aggregate door: aggregate MUST run through the ObjectQL engine (RLS/tenant middleware + the FLS aggregate-input gate) — a raw driver.aggregate() evaluates over every row"
       ],
       "acceptance": [
@@ -1827,7 +1870,7 @@
       "negative": [
         "a refused/unknown aggregation degrading to RAW ROWS with a 200 is the catastrophic direction — the aggregate action door's own rule ('grouped/aggregated output must stay the only thing this action can ever return', action-execution.ts) exists because the engine's in-memory path degrades to raw rows when neither aggregations nor groupBy survive, and the FLS result masker does not cover the aggregate op",
         "an aggregation over a nonexistent field answering 200 (a computed value over nothing) instead of the located refusal is the #4134 class applied to the aggregation axis",
-        "the two bucket paths (driver pushdown vs in-memory) labeling the same instant differently is the #3773 seam — record both labels if the timezone lever exposes the divergence; it is a FAIL even when each path is self-consistent"
+        "the two bucket paths (driver pushdown vs in-memory) labeling the same instant differently is the #3773 seam — record both labels if the timezone lever exposes the divergence; it is a FAIL even when each path is self-consistent. For a `date` dimension (showcase_delivery.due_date and showcase_account.signed_on are Field.date) the label must be the same in EVERY zone — a calendar date has no instant to shift; only a `datetime` dimension legitimately labels differently per zone (QA run #24595 measured the in-memory path shifting a date a day earlier under a negative offset — #24618)"
       ],
       "variants": [
         "fn:count",
@@ -1874,6 +1917,12 @@
           "date": "2026-10-16",
           "change": "the secured-aggregate leg named Mei Phone or Ada Auditor as the restricted persona, and neither gives a differing visible set (#23878 checklist-accuracy finding). Re-measured on main c91af8ed6: Mei's grouped count on showcase_invoice answers 403 PERMISSION_DENIED at the object gate and Ada's equals the admin's (viewAllRecords). The item now opts into search:qa-contributor-bound-member, and the re-run on that persona — one own invoice on an active account — gave [{draft: 1}] against the admin's [{draft: 3}, {paid: 5}, {sent: 5}]",
           "ref": "#24036"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[3], steps[5], knownGaps[1] and negative[2] name the doors that answer — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541 step 6, and QA run #24595 knownGaps[1] / step 4 / negative[2], api-backend.aggregate-contract-matrix; wave anchor #24579 §3, comment 6272314386). On POST /data/:object/query a non-array aggregations is refused by the request schema before the protocol's worked example, and that door carries no timezone; the lever is POST /api/v1/analytics/query on cube showcase_delivery / due_date. negative[2] now says a date dimension's labels are zone-independent; that row's FAIL was the product defect #24618, which PR #24642 (787939130c) fixed on main after this round's base; the clause is unchanged. Re-derived at base 9a7838edf5 (protocol.ts assertAggregationFieldsExist, objectql engine.ts ENGINE_AGGREGATE_OPTION_KEYS, spec data/analytics.zod.ts timezone, examples/app-showcase/src/data/analytics/showcase.cube.ts)",
+          "ref": "#24649"
         }
       ]
     },
@@ -1882,7 +1931,7 @@
       "title": "CEL formula stdlib: all 29 registered functions give known answers against the BUILT package — calendar-day timezone contract, addMonths month-end clamp, floor(-1.2)==-2, null-dropping joins, mixed int/double arithmetic, isoDate/isoDatetime text — and a formula calling an unregistered function is REFUSED at the authoring door (422), never stored to read null",
       "since": "v16",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -1902,7 +1951,7 @@
       "steps": [
         "count the registration chain: packages/formula/src/stdlib.ts registerStdLib registers exactly 29 bare-callable functions by chained registerFunction call — now, today, daysFromNow, daysAgo, isBlank, coalesce, trim, joinNonEmpty, daysBetween, addDays, addMonths, date, datetime, isoDate, isoDatetime, abs, round, floor, ceil, min, max, upper, lower, contains, startsWith, endsWith, matches, len, isEmpty (isoDate and isoDatetime since #22347). The receiver method `can` (current_user.can(object, verb)), which registerPermissionPredicate adds at the head of registerStdLib, is the permission predicate, not a bare-callable catalog function, and is outside this count — validate.ts's CEL_STDLIB_FUNCTIONS docblock tallies the same 29. NOT enumSource-pinnable (a builder chain, not a named z.enum) — re-count the calls in source at run time and fail the matrix stale if the count moved; cross-check the docs catalog (content/docs/data-modeling/formulas.mdx) advertises the same set, no more, no fewer",
         "build the workspace (or confirm dist freshness — the stale-dist trap is the known false-negative here, same as api-backend.formula-gates); the harness must import the BUILT package and record the resolved module path",
-        "drive every one of the 29 with a pinned now and a known-answer expectation, at minimum: floor(-1.2)==-2 and ceil(-1.2)==-1 (round toward −∞/+∞, NOT toward zero); addMonths(date('2026-01-31'), 1) == 2026-02-28T00:00:00Z (month-end clamp, never a March overflow); daysBetween(a,b) sign convention (b−a, negative when b earlier); date()/datetime() alias parity on the same ISO input; isoDate(date('2026-02-28T13:45:00Z'))=='2026-02-28' and isoDatetime(date('2026-02-28T13:45:00Z'))=='2026-02-28T13:45:00.000Z' (the UTC calendar), isoDate(today()) under the boundary zone below == that zone's calendar day, and text refused (isoDate('2026-01-01') faults no matching overload — write isoDate(date(s))); coalesce(null,'x')=='x' but coalesce('', 'x')=='' (null/undefined only); joinNonEmpty([record.a, record.b, record.c, record.d], '-')=='a-b' with record {a: 'a', b: null, c: ' ', d: 'b'} (null AND blank-after-trim dropped — written through record fields, because cel-js refuses a list LITERAL that mixes string and null at type-check, 'List elements must have the same type', so the literal ['a', null, ' ', 'b'] never evaluates); isBlank vs isEmpty on null/''/[]; trim(null)==''; upper/lower/contains/startsWith/endsWith on mixed input; matches regex truthiness; len over string/list/map; min/max returning the SMALLER/LARGER OPERAND VERBATIM (type preserved, numeric comparison); abs/round; now() === the pinned instant",
+        "drive every one of the 29 with a pinned now and a known-answer expectation, at minimum: floor(-1.2)==-2 and ceil(-1.2)==-1 (round toward −∞/+∞, NOT toward zero); addMonths(date('2026-01-31'), 1) == 2026-02-28T00:00:00Z (month-end clamp, never a March overflow); daysBetween(a,b) sign convention (b−a, negative when b earlier); date()/datetime() alias parity on the same ISO input; isoDate(date('2026-02-28T13:45:00Z'))=='2026-02-28' and isoDatetime(date('2026-02-28T13:45:00Z'))=='2026-02-28T13:45:00.000Z' (the UTC calendar), isoDate(today()) under the boundary zone below == that zone's calendar day, and text refused (isoDate('2026-01-01') faults no matching overload — write isoDate(date(s))); coalesce(null,'x')=='x' but coalesce('', 'x')=='' (null/undefined only — from CEL only the null half is authorable: the function treats undefined like null, but an absent record key faults 'No such key' before coalesce runs, so the undefined arm is the harness table's, not an expression's); joinNonEmpty([record.a, record.b, record.c, record.d], '-')=='a-b' with record {a: 'a', b: null, c: ' ', d: 'b'} (null AND blank-after-trim dropped — written through record fields, because cel-js refuses a list LITERAL that mixes string and null at type-check, 'List elements must have the same type', so the literal ['a', null, ' ', 'b'] never evaluates); isBlank vs isEmpty on null/''/[]; trim(null)==''; upper/lower/contains/startsWith/endsWith on mixed input; matches regex truthiness; len over string/list/map; min/max returning the SMALLER/LARGER OPERAND VERBATIM (type preserved, numeric comparison); abs/round; now() === the pinned instant",
         "calendar-day timezone contract (ADR-0053 Phase 2 D1): pin now to an instant whose calendar day DIFFERS between UTC and the reference zone (e.g. 2026-08-30T22:00:00Z with timezone Asia/Shanghai — locally already 08-31) and assert today() == 2026-08-31T00:00:00Z (the reference-tz calendar day expressed as UTC MIDNIGHT — never an instant carrying wall-clock time), daysFromNow/daysAgo offset from that same day; an unknown zone falls back to the UTC calendar day, never throws",
         "mixed-arithmetic overloads (registerNumericCoercions, stdlib.ts): a double-typed record field divided/multiplied by an int literal (record.amount / 100) evaluates to the promoted double instead of faulting 'no such overload' to silent null (#1928), while pure int 7/2 == 3 keeps integer-division semantics untouched",
         "live-door parity: GET a showcase_project row and confirm budget_remaining materializes (read-path evaluation); author a scratch object through the metadata channel whose formula field composes two stdlib calls (e.g. joinNonEmpty + upper) and read back the known answer — the stdlib reaching the LIVE read path, not just the harness",
@@ -1979,6 +2028,12 @@
           "date": "2026-10-13",
           "change": "clause 1 (acceptance[0], #23104 C1) and clause 6 (acceptance[5], #23104 C6) revised, both stale spec. C1: registerStdLib now chains 29 bare-callable registerFunction calls, the 27 plus isoDate and isoDatetime (345d3f3d8, #22347), and formulas.mdx lists the same 29 in 19 rows. The title, step 1's count and list, step 3, the 27-function knownGap, clause 1's text and evidence, and the registerStdLib source note now say 29. Step 3 gains the isoDate / isoDatetime known answers. Its joinNonEmpty row was an assertion defect inside the item: cel-js refuses the literal ['a', null, ' ', 'b'] at type-check ('List elements must have the same type'), so the row now feeds the same values through record fields and expects 'a-b'. The receiver method `can` (registerPermissionPredicate, #18781) is registered at the head of registerStdLib but is not a bare-callable catalog function; step 1 and clause 1 now name it as outside the count, as validate.ts's CEL_STDLIB_FUNCTIONS docblock already does. C6: the EXPECTED-FAIL clause anticipated a louder authoring-time refusal, and that refusal has landed (f85a83b83, #22031, fixing #22019). The object save door dispatches the build's expression rule, so a formula calling sqrt(...) is refused 422 INVALID_METADATA (rule expression-invalid, a NAME fault) at the active door and on a draft's promotion, and nothing is stored. Clause 6, step 7, negative 3 and the title now assert that refusal. They cite protocol.runtime-authoring-gate.test.ts's #22019 block and the lint pin, and name the read-path residual (a pre-gate row still reads null, now with a warn line). Measured against the built packages/formula/dist at f931e765b: the literal joinNonEmpty row refused, the record-field row 'a-b', isoDate / isoDatetime as stated, sqrt(4) refused no matching overload",
           "ref": "#23121"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "steps[2] says which half of the coalesce edge an expression can reach — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.formula-stdlib-matrix acceptance[2] / step 3; wave anchor #24579 §3): undefined is not observable through CEL. Re-derived at base 9a7838edf5: coalesce treats null and undefined alike (packages/formula/src/stdlib.ts), and a missing record key faults 'No such key' first. No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -1987,7 +2042,7 @@
       "title": "enable.apiMethods three-state whitelist on the REST boundary: 404 hides apiEnabled:false, 405 OBJECT_API_METHOD_NOT_ALLOWED carries the EFFECTIVE derived set, bulk∧child + writeMode-precise import, legacy 8-value strip-and-WARN (deny-all cliff), the object gate answers ahead of the caller's 403, batch gated per-op before the txn",
       "since": "v16",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -1999,7 +2054,7 @@
         "app": "showcase",
         "requires": [
           "stock system objects as free negatives — no provisioning at all: sys_session apiMethods ['get','list'] (sys-session.object.ts), sys_device_code ['get'] (sys-device-code.object.ts), sys_api_key ['get','list','update'] (sys-api-key.object.ts), and sys_oauth_consent enable.apiEnabled false (sys-oauth-consent.object.ts) for the 404 fork",
-          "runtime metadata authoring (manage_metadata) for the scratch-object legs"
+          "runtime metadata authoring (manage_metadata) for the scratch-object legs — each scratch object body declares a sharingModel (the author-time rule security-owd-unset refuses one without it, 422) and its whitelist as enable.apiMethods"
         ],
         "knownGaps": [
           "NO showcase user object narrows apiMethods (grepped examples/app-showcase/src — zero declarations), so the subset-whitelist / deny-all / legacy-strip / bulk∧child legs on a USER object need a scratch object authored through the metadata channel (qa_verb_gate_probe). The system objects above cover the 405/404 forks and the ordering leg with no provisioning; record per clause whether the verdict rests on a system object or the scratch object."
@@ -2012,7 +2067,7 @@
         "scratch subset leg: author qa_verb_gate_probe with enable.apiMethods ['get','list','create']; verify update/delete → 405 whose allowed[] is the EFFECTIVE closure in API_OPERATION_ORDER (get, list, create + derived aggregate/search/export/import — and NEVER restore/purge, and NOT the raw 3-element whitelist); POST createMany → refused (bulk not granted); re-author adding 'bulk' → createMany passes the gate, updateMany still refused (bulk∧child: the child verb must itself be granted)",
         "import precision leg (on the scratch object granting create but not update): the import door with writeMode insert clears the gate, writeMode update → 405 (rest-server.ts — the writeMode-precise check, not the coarse create∨update)",
         "legacy strip leg: author enable.apiMethods ['upsert'] and capture BOTH the parse-time warning (object.zod.ts — names the FROM→TO guidance 'declare [create,update] — upsert derives from create ∧ update' AND the deny-all cliff sentence, since stripping leaves []) and the runtime effect (every op → 405, allowed: []); then ['get','history'] → kept ['get'], warn names the history derivation; the registration-time diagnostic (packages/objectql/src/registry.ts warnStrippedLegacyApiMethods) adds the per-object line for schemas that skip Zod",
-        "batch leg: POST /api/v1/batch with [valid create on showcase_task, update on sys_session]; the whole batch is refused by the per-op gate BEFORE the transaction opens (rest-server.ts) and the valid sibling row never lands",
+        "batch leg: POST /api/v1/batch with [valid create on showcase_task, update on sys_session]; the whole batch is refused by the per-op gate BEFORE the transaction opens (batch-routes.ts) with 405 OBJECT_API_METHOD_NOT_ALLOWED naming `bulk` — the route's own gate (a cross-object batch is a bulk write, checked as bulk ∧ the row's verb), which sys_session never grants — not the row's `update`; the valid sibling row never lands",
         "both-sides control: GET and list on sys_session as an entitled caller still answer 200 — the whitelist GRANTS what it lists"
       ],
       "acceptance": [
@@ -2031,7 +2086,7 @@
         {
           "clause": "the three-state contract: undefined → unrestricted (a stock object with no whitelist serves every verb — no regression); a whitelist that is [] — authored empty, stripped-to-empty, or a NON-ARRAY value (fails CLOSED, #3545) — → deny-all (every op 405, allowed: []); a subset → exactly its closure. The flipped #3391 semantics: empty means expose NOTHING, not 'no restriction'",
           "oracle": "api",
-          "verify": "one probe per state; the deny-all leg via the stripped-pure-legacy scratch object",
+          "verify": "one probe per state; the deny-all leg via the stripped-pure-legacy scratch object. The NON-ARRAY arm is not live-reachable: PUT /meta/object refuses a non-array enable.apiMethods at the Zod parse (422) before anything stores it, so score that arm from packages/spec/src/data/api-derivation.test.ts 'a non-array apiMethods resolves to deny-all, not unrestricted' (passing at base 9a7838edf5)",
           "evidence": "the three per-state traces"
         },
         {
@@ -2099,6 +2154,12 @@
           "date": "2026-08-30",
           "change": "new — the enable.apiMethods verb gate had no item of its own: identity-auth.session-list-revoke asserts one consequence on one object, and nothing covered the three-state contract, the derived allowed[] closure, bulk∧child, writeMode-precise import, the legacy strip-and-warn (with its deny-all cliff), or the batch per-op ordering. Register corrections folded in during source verification: the strip lives at object.zod.ts wired via z.preprocess (the register's '' pointed at the guidance table); the enforcement docblock is rest-server.ts with the denial producer; and the stock free negatives are richer than 'three system objects' — sys_session/sys_device_code/sys_api_key give three whitelist shapes and sys_oauth_* adds the apiEnabled:false 404 fork",
           "ref": "#sweep-2026-08-30"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[1], steps[6] and acceptance[2].verify corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541, api-backend.api-methods-verb-gate fixtures and step 7; wave anchor #24579 §3). A scratch object needs a sharingModel (security-owd-unset, error tier); the cross-object /batch refusal names `bulk` (batch-routes.ts checks bulk with the row verb as its child); and a non-array apiMethods is refused by Zod at PUT (\"only producible by a raw/out-of-band metadata write\", api-derivation.ts), so its fail-closed arm is pinned, not live — api-derivation.test.ts measured at base 9a7838edf5 under os-verify-lock (32 passed). Re-derived at base 9a7838edf5. Left alone from the same finding: the OS_METADATA_WRITABLE=object half (object declares allowRuntimeCreate: true, so a NEW object needs no hatch; QA run #24558 authored scratch objects without one)",
+          "ref": "#24649"
         }
       ]
     },
@@ -2107,7 +2168,7 @@
       "title": "RestServerConfig.crud is the CRUD surface's construction contract: five switches gate six mounts, dataPrefix moves the routes and their discovery advertisement together, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2122,7 +2183,7 @@
         ],
         "knownGaps": [
           "NO stock boot authors this sub-object. `os serve` constructs the REST plugin with a fixed config (only project scoping is threaded) and `os dev` passes none at all, so `crud.operations` / `crud.dataPrefix` are reachable only through createRestApiPlugin({ api: ... }) in embedder code. CORRECTED 2026-09-08 (#15543): this gap used to name a second door, createHonoServerPlugin({ restConfig }) — no such function exists (definition probe: zero across the tree, positive control finds createRestApiPlugin at packages/rest/src/rest-api-plugin.ts#createRestApiPlugin). HonoServerPlugin is a class whose restConfig option has one reader taking api.basePath for the SPA fallback; it never constructs a REST server, so a harness must not try to reach these keys through it. Every non-default clause below is therefore scored with oracle `test` against a real RestServer, and the run record must say so instead of claiming a live deployment was reconfigured. RULED 2026-09-07 (#15543; director seat, summon #17, decision batch #2): this is the RECORDED POSTURE, not a gap awaiting a fix. The keys stay and keep their runtime reads, threading a config through is not taken and retiring them is refused, so the harness scoring described here is the PERMANENT method for every non-default clause rather than a workaround to be retired when some future boot path grows a flag. The schema now says so in its own docblocks (packages/spec/src/api/rest-server.zod.ts, WHO CAN WRITE THIS CONFIG) and the per-key reachability rows are in packages/spec/liveness/{crud,metadata,batch}_endpoints.json, so a runner no longer has to re-derive it from the boot paths.",
-          "the MOUNT half has no permanent pin: packages/rest/src/rest-sub-config-parse-not-cast.test.ts asserts the NORMALIZED CONFIG a switch produces, and nothing asserts that the route disappears from the route table — the scratch harness is the only observation until that pin exists (recorded in FOLLOW-UPS.md)"
+          "the MOUNT half IS pinned since #15544: packages/rest/src/rest-config-mount-table.pin.test.ts asserts, as an exact route-set diff against the all-true baseline in both directions, that each crud.operations.* switch (and api.enableCrud) removes exactly its routes — list removing two. rest-sub-config-parse-not-cast.test.ts asserts the NORMALIZED CONFIG a switch produces. Run both before the scratch harness; the harness is now the method only for what neither pins"
         ]
       },
       "steps": [
@@ -2149,10 +2210,10 @@
           "evidence": "the six route-table diffs"
         },
         {
-          "clause": "an unmounted route is NOT the object-level 404: `enable.apiEnabled: false` answers a handler envelope with OBJECT_API_DISABLED, while a switched-off operation has no handler at all and falls to the routing 404 — the two absences must stay distinguishable",
-          "oracle": "api",
-          "verify": "compare the switched-off route's answer with the routing-404 control and with an OBJECT_API_DISABLED body from api-backend.api-methods-verb-gate; a coded envelope where the mount was removed means the switch did not gate the mount",
-          "evidence": "the three bodies side by side"
+          "clause": "an unmounted route is NOT the object-level 404: `enable.apiEnabled: false` answers a handler envelope with OBJECT_API_DISABLED, while a switched-off operation leaves no RestServer handler at all — the two absences must stay distinguishable. Scored in the harness: no stock boot carries a non-default crud block (knownGaps[0]), so a switched-off route's wire answer is unobservable, and on a composed server the dispatcher's own data domain (packages/runtime/src/domains/data.ts) serves /data routes too, so a RestServer route table cannot speak for what the composed server answers there",
+          "oracle": "test",
+          "verify": "the switched-off operation is absent from getRoutes() (acceptance[1]'s harness and the mount pin), set beside a live OBJECT_API_DISABLED body from api-backend.api-methods-verb-gate and the step-2 routing-404 control; a coded envelope from a route the switch should have removed means the switch did not gate the mount. ⛔ Never record the harness absence as the composed server's wire answer (the dispatcher-vs-hono-route trap)",
+          "evidence": "the harness route-table diff + the two live bodies side by side"
         },
         {
           "clause": "`dataPrefix` is the single knob that moves the data surface, and the advertisement moves with it: the CRUD, data-action, sharing and batch registrars all build their base from it, and registerDiscoveryEndpoints sets discovery.routes.data from the same value (ADR-0076 D12 — advertise only what is mounted)",
@@ -2194,7 +2255,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (the construction half only — §C/§D normalized defaults, §E the two tombstone refusals; the mount-table half has no pin)"
+        "ref": "packages/rest/src/rest-sub-config-parse-not-cast.test.ts (the construction half — §C/§D normalized defaults for acceptance[5], §E the two tombstone refusals for acceptance[4]) + packages/rest/src/rest-config-mount-table.pin.test.ts (#15544 — the mount half, acceptance[1]: each crud.operations.* row and api.enableCrud as an exact route-set diff); acceptance[0] and [3] need the run"
       },
       "source": [
         "packages/spec/liveness/crud_endpoints.json (the ADR-0049 ledger this item answers: five live `operations.*` switches + `dataPrefix`, two dead keys)",
@@ -2215,6 +2276,12 @@
           "date": "2026-09-08",
           "change": "the knownGaps were semantically re-characterised, not merely annotated: what they describe as the harness-scoring workaround is now the PERMANENT method, by ruling (#15543, director seat, summon #17, decision batch #2, 2026-09-07) that the crud / metadata / batch keys stay, are embedder-only, and get their reachability written into the schema docblocks and the liveness ledger instead of being re-derived from the boot paths at every run. A runner reading the old text would be waiting for a boot-path flag that is not coming, which is the semantic change this bump records. Two factual corrections ride along, both measured rather than inherited: the door `createHonoServerPlugin({ restConfig })` these gaps named DOES NOT EXIST (HonoServerPlugin is a class whose restConfig reader takes only api.basePath for the SPA fallback and never constructs a REST server), and `os serve` does read a config file — the stack's own top-level `api:` block — forwarding exactly two keys out of it (`packages/cli/src/commands/serve.ts#apiConfig`), so 'nothing the CLI reads' was an over-claim. The acceptance clauses, steps, variants and oracles are untouched: what moved is what a runner should conclude from a non-default clause being unreachable, not what it must measure.",
           "ref": "#15543"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "knownGaps[1], automated.ref and acceptance[2] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541, api-backend.rest-crud-config-contract knownGaps[1] + automated.ref and acceptance[2]; wave anchor #24579 §3). \"The MOUNT half has no permanent pin\" is stale: rest-config-mount-table.pin.test.ts (#15544) pins every crud.operations.* radius, measured at base 9a7838edf5 under os-verify-lock (24 passed). acceptance[2] was an api clause no stock boot can observe (knownGaps[0] makes every non-default clause harness-scored) and its dispatcher-vs-hono-route trap is not discharged by a RestServer-only table, since the dispatcher's data domain also serves /data; it now reads oracle test and says so. Re-derived at base 9a7838edf5; FOLLOW-UPS.md is not edited here",
+          "ref": "#24649"
         }
       ]
     },
@@ -2223,7 +2290,7 @@
       "title": "RestServerConfig.batch is the bulk surface's construction contract: three switches and enableBatchEndpoint gate four per-object mounts (each ANDed with its protocol member), maxBatchSize is the one cap every bulk door measures, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2239,7 +2306,7 @@
         ],
         "knownGaps": [
           "NO stock boot authors this sub-object (same door as the crud block: `os serve` fixes the config, `os dev` passes none), so every non-default clause is scored with oracle `test` against a real RestServer and the run record must say so. RULED 2026-09-07 (#15543; director seat, summon #17, decision batch #2): this is the RECORDED POSTURE, not a gap awaiting a fix. The keys stay and keep their runtime reads, threading a config through is not taken and retiring them is refused, so the harness scoring described here is the PERMANENT method for every non-default clause rather than a workaround to be retired when some future boot path grows a flag. The schema now says so in its own docblocks (packages/spec/src/api/rest-server.zod.ts, WHO CAN WRITE THIS CONFIG) and the per-key reachability rows are in packages/spec/liveness/{crud,metadata,batch}_endpoints.json, so a runner no longer has to re-derive it from the boot paths.",
-          "the mount half of `enableBatchEndpoint` / `operations.*Many` has no permanent pin — the existing pins assert the normalized config and the cap, not the route table (recorded in FOLLOW-UPS.md)"
+          "the mount half of `enableBatchEndpoint` / `operations.*Many` IS pinned since #15544: packages/rest/src/rest-config-mount-table.pin.test.ts asserts each batch.* switch (and api.enableBatch) removes exactly its route as a route-set diff, and its §2 the OTHER conjunct — the four bulk mounts drop when the protocol lacks the member, with every switch still true. Run it before the scratch harness"
         ]
       },
       "steps": [
@@ -2316,7 +2383,7 @@
       ],
       "automated": {
         "kind": "unit",
-        "ref": "packages/rest/src/rest-batch-size-cap.test.ts (the cap on all five doors) + packages/rest/src/rest-sub-config-parse-not-cast.test.ts (bounds, defaults, both tombstone refusals); the mount-table half has no pin"
+        "ref": "packages/rest/src/rest-batch-size-cap.test.ts (the cap on all five doors) + packages/rest/src/rest-sub-config-parse-not-cast.test.ts (bounds, defaults, both tombstone refusals) + packages/rest/src/rest-config-mount-table.pin.test.ts (#15544 — the mount half: each batch.* row as a route-set diff, and the protocol-member conjunct in §2)"
       },
       "source": [
         "packages/spec/liveness/batch_endpoints.json (the ADR-0049 ledger this item answers: maxBatchSize, enableBatchEndpoint and three operations.* live, upsertMany and defaultAtomic dead)",
@@ -2338,6 +2405,12 @@
           "date": "2026-09-08",
           "change": "the knownGaps were semantically re-characterised, not merely annotated: what they describe as the harness-scoring workaround is now the PERMANENT method, by ruling (#15543, director seat, summon #17, decision batch #2, 2026-09-07) that the crud / metadata / batch keys stay, are embedder-only, and get their reachability written into the schema docblocks and the liveness ledger instead of being re-derived from the boot paths at every run. A runner reading the old text would be waiting for a boot-path flag that is not coming, which is the semantic change this bump records. Two factual corrections ride along, both measured rather than inherited: the door `createHonoServerPlugin({ restConfig })` these gaps named DOES NOT EXIST (HonoServerPlugin is a class whose restConfig reader takes only api.basePath for the SPA fallback and never constructs a REST server), and `os serve` does read a config file — the stack's own top-level `api:` block — forwarding exactly two keys out of it (`packages/cli/src/commands/serve.ts#apiConfig`), so 'nothing the CLI reads' was an over-claim. The acceptance clauses, steps, variants and oracles are untouched: what moved is what a runner should conclude from a non-default clause being unreachable, not what it must measure.",
           "ref": "#15543"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "knownGaps[1] and automated.ref corrected — checklist-accuracy finding of the 18.0 QA sweep (QA run #24541, api-backend.rest-batch-config-contract knownGaps[1] + automated.ref; wave anchor #24579 §3): the mount half has a permanent pin, rest-config-mount-table.pin.test.ts (#15544), covering batch.enableBatchEndpoint, operations.*Many and the protocol-member conjunct — measured at base 9a7838edf5 under os-verify-lock (24 passed). No clause changed; FOLLOW-UPS.md is not edited here",
+          "ref": "#24649"
         }
       ]
     },
@@ -2346,12 +2419,12 @@
       "title": "RestServerConfig.metadata is the metadata surface's construction contract: prefix moves eleven mounts and their discovery advertisement, four endpoint switches each gate exactly the face its name states (#15542/#15854), maskObjectFields is the ADR-0106 D8 disclosure gate, and both tombstones refuse at construction",
       "since": "v17",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "api",
       "personas": [
         "admin, authenticated — the live-boot half",
-        "a restricted member who cannot read every field of showcase_account — the masking clause is only observable as a non-admin",
+        "a restricted member who cannot read every field of showcase_project — a member bound to the client_liaison position (showcase_client_liaison set: budget, budget_remaining and spent unreadable) — the masking clause is only observable as a non-admin",
         "no persona for the variant half: a non-default `metadata` block is authorable only by a programmatic embedder (knownGaps)"
       ],
       "fixtures": {
@@ -2375,7 +2448,7 @@
         "harness: construct with { metadata: { endpoints: { items: false } } } and enumerate what leaves: GET {prefix}/:type and NOTHING else — exactly the one mount its describe() names (#15542 moved the whole-store family off this switch; a run that still sees /diagnostics, /_drafts or POST /_migrate-stored leave with it is the old radius returning)",
         "harness: construct with { metadata: { endpoints: { maintenance: false } } } and enumerate: GET {prefix}/diagnostics, GET {prefix}/_drafts and the POST {prefix}/_migrate-stored write door — three whole-store operations, the key #15542 created so that closing a listing read stops disarming a migration door",
         "harness: construct with { metadata: { endpoints: { item: false } } } and enumerate: the WHOLE per-item face — GET, PUT and DELETE {prefix}/:type/:name, /:type/:name/references, /:type/:name/layers, the history family (/history, /audit, /diff, /published, /publish, /rollback) and {prefix}/book/:name/tree; twelve mounts, writes included (#15854)",
-        "harness: construct with { metadata: { enableCache: false } } and confirm the item read takes the uncached branch; then with enableCache true against an app-type, a dashboard-type, a draft read, a preview-drafts read, a package-scoped read and an audience-gated type — each is a carve-out that bypasses the cached path even when the switch is on",
+        "harness: construct with { metadata: { enableCache: false } } and confirm the item read takes the uncached branch; then with enableCache true against an app-type, a dashboard-type, a draft read, a preview-drafts read, a package-scoped read, a member-addressed read (?member=, #22877) and an audience-gated type — each is a carve-out that bypasses the cached path even when the switch is on",
         "harness: construct with { metadata: { maskObjectFields: false } }; separately construct with the default and metaType != 'object'",
         "harness: construct with { metadata: { cacheTtl: 3600 } }, then 0, then -1, then { metadata: { endpoints: { schema: false } } }; capture each refusal text"
       ],
@@ -2405,9 +2478,9 @@
           "evidence": "the two served documents + the normalized value"
         },
         {
-          "clause": "`enableCache` selects the protocol's cached item read, and the cached path is additionally conditional: app types, dashboard types, draft reads, preview-drafts reads, package-scoped reads and audience-gated types each bypass it with the switch still on — so a cache-miss is not evidence the switch is dead",
+          "clause": "`enableCache` selects the protocol's cached item read, and the cached path is additionally conditional: app types, dashboard types, draft reads, preview-drafts reads, package-scoped reads, member-addressed reads (?member=) and audience-gated types each bypass it with the switch still on — so a cache-miss is not evidence the switch is dead",
           "oracle": "test",
-          "verify": "with enableCache false the item read calls the uncached protocol member; with it true, the six carve-outs still call the uncached member. Score each carve-out separately and name it in the record",
+          "verify": "with enableCache false the item read calls the uncached protocol member; with it true, the seven carve-outs still call the uncached member. Score each carve-out separately and name it in the record",
           "evidence": "per-branch call trace"
         },
         {
@@ -2474,6 +2547,12 @@
           "date": "2026-10-16",
           "change": "the masking step named showcase_account, but no stock persona has field-level security there (#23878 checklist-accuracy finding), so the diff was empty for everyone and the clause could only pass vacuously or block. Re-measured on main c91af8ed6: the served /meta/object/showcase_project for a client_liaison member lacks exactly budget, budget_remaining and spent against the admin's copy, while showcase_account is identical for the liaison and a contributor. The fixture line, step 3 and clause 4's verify now name showcase_project and the client_liaison persona",
           "ref": "#24036"
+        },
+        {
+          "revision": 5,
+          "date": "2026-10-19",
+          "change": "steps[8], acceptance[4] (clause, verify) and personas[1] corrected — checklist-accuracy findings of the 18.0 QA sweep (QA run #24541, api-backend.rest-metadata-config-contract acceptance[4] / step 9 and personas[1]; wave anchor #24579 §3). The enableCache carve-outs are SEVEN: a ?member= read also bypasses getMetaItemCached (packages/rest/src/meta-item-read-routes.ts, memberScoped, #22877, at base 9a7838edf5); and personas[1] still named showcase_account, which revision 4 moved to showcase_project / client_liaison everywhere else in the item",
+          "ref": "#24649"
         }
       ]
     },
@@ -2579,7 +2658,7 @@
       "title": "Every read that reaches a NON-addressed object asks that object's own `enable` block (nested-relation filter → 404/405, $expand withheld to the bare id, search skips it), and an `internal: true` field is refused 400 INVALID_FIELD in every evaluate position (filter, sort, groupBy, aggregate, $expand where/orderBy)",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2595,8 +2674,8 @@
         ]
       },
       "steps": [
-        "GET /api/v1/data/S?filter=[[\"t_ref.name\",\"=\",\"x\"]] (nested-relation filter into T)",
-        "GET /api/v1/data/S/ID?$expand=t_ref",
+        "GET /api/v1/data/S?filter={\"t_ref\":{\"name\":\"x\"}} (a nested-relation condition into T — the NESTED spelling is the one the exposure gate judges; the dotted filter=[[\"t_ref.name\",\"=\",\"x\"]] is refused first, 400 INVALID_FIELD as an unsupported dotted path prescribing the nested form)",
+        "GET /api/v1/data/S/ID?expand=t_ref (the by-id door spells it `expand`: its closed set is select, expand — `$expand` answers 400 VALIDATION_ERROR there, while the list door takes `$expand`)",
         "GET /api/v1/search?q=TERM and confirm T never appears",
         "GET /api/v1/data/S?filter=[[\"internal_f\",\"=\",\"x\"]], ?sort=internal_f, POST /api/v1/data/S/query with groupBy / aggregate on internal_f",
         "repeat as admin AND member — the answers must be identical (exposure is not a permission)"
@@ -2609,7 +2688,7 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "a nested-relation filter into an apiEnabled:false target → 404 OBJECT_API_DISABLED naming where.t_ref (405 OBJECT_API_METHOD_NOT_ALLOWED for a whitelist without the verb), for admin and member alike",
+          "clause": "a nested-relation filter into an apiEnabled:false target → 404 OBJECT_API_DISABLED located at filter.t_ref (both the GET and the POST door name the position `filter`) (405 OBJECT_API_METHOD_NOT_ALLOWED for a whitelist without the verb), for admin and member alike",
           "oracle": "api",
           "verify": "status + code + located path, both personas",
           "evidence": "the four lines"
@@ -2650,6 +2729,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "steps[0], steps[1] and acceptance[1].clause corrected — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24541 and #24558, api-backend.second-object-exposure-and-internal-fields; wave anchor #24579 §3). The dotted filter path is refused INVALID_FIELD before the exposure gate, the by-id door takes `expand` not `$expand`, and the refusal locates the condition at filter.t_ref. Re-derived at base 9a7838edf5: protocol.ts refuseInternalInFilter passes the position 'filter' for where and filter alike and refuseUnservedRelationTarget names `${param}.${field}`; DATA_RECORD_READ_PARAMS = ['select', 'expand'] (packages/rest/src/rest-server.ts)",
+          "ref": "#24649"
         }
       ]
     },
@@ -2658,7 +2743,7 @@
       "title": "Request-shape gates on v18: a /data write with a null / array / scalar body or an empty version token is refused 400 (never an unguarded 200), a repeated single-valued query name is refused 400 on the dispatcher doors (a doubled keepData no longer drops tables), and a stale If-Match on an unreadable row answers 404",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2677,7 +2762,7 @@
         "PATCH with {\"expectedVersion\": \"\"} and with an empty If-Match header",
         "POST /api/v1/data/showcase_task/query with body `null`",
         "GET /api/v1/packages?status=a&status=b; DELETE /api/v1/packages/com.example.showcase?keepData=true&keepData=true (expect refusal BEFORE any work — run on a throwaway boot only)",
-        "as the member PATCH with a stale If-Match a row the member cannot read"
+        "as the member PATCH with a stale If-Match a row the member cannot read — a showcase_private_note the admin owns (owner-private OWD). Not a showcase_task row: the object is public_read_write, so every member reads every task"
       ],
       "acceptance": [
         {
@@ -2734,6 +2819,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "steps[4] names a row the member really cannot read — checklist-accuracy finding of the 18.0 QA sweep (QA run #24558, api-backend.data-request-shape-and-query-arity step 5; wave anchor #24579 §3): showcase_task is public_read_write. Re-derived at base 9a7838edf5 (examples/app-showcase/src/data/objects: task.object.ts sharingModel public_read_write, private-note.object.ts private). No clause changed",
+          "ref": "#24649"
         }
       ]
     },
@@ -2742,7 +2833,7 @@
       "title": "/meta read doors on v18: GET /meta/app/PACKAGE_ID returns that package's app, `?member=` selects one bundle member on by-name doors, an unknown query parameter on any by-name door is refused 400, `?package=all` folds to the no-parameter answer, and the object definition marks an FLS-denied field unsortable for that caller",
       "since": "v18",
       "status": "active",
-      "revision": 1,
+      "revision": 2,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2753,7 +2844,7 @@
         "app": "showcase",
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
-          "a showcase email template with two locale members (or one authored through PUT /api/v1/meta/email_template/NAME?member=zh-CN)"
+          "a showcase email template with two locale members: the showcase ships only the en-US member of showcase_task_done_email (examples/app-showcase/src/system/emails), so author the zh-CN member with PUT /api/v1/meta/email_template/showcase_task_done_email carrying `locale: 'zh-CN'` in the BODY — the save door's closed set is force, package, mode and surface, so ?member= is a READ parameter only"
         ]
       },
       "steps": [
@@ -2761,7 +2852,7 @@
         "GET /api/v1/meta/email_template/NAME?member=zh-CN; GET /api/v1/meta/object/showcase_task?member=x",
         "GET /api/v1/meta/object/showcase_task?memeber=x (typo)",
         "GET /api/v1/meta/view?package=all vs GET /api/v1/meta/view",
-        "as a member whose FLS hides a field F: GET /api/v1/meta/object/showcase_task and read sortability for F; GET /api/v1/data/showcase_task?sort=F"
+        "as a member whose FLS hides a field F: the stock showcase declares field-level security on showcase_project only (showcase_client_liaison hides budget, budget_remaining and spent), and no demo persona holds the client_liaison position, so mint the member (POST /api/v1/auth/admin/create-user, then the password change) and bind it with a sys_user_position row for client_liaison; GET /api/v1/meta/object/showcase_project and read sortability for budget; GET /api/v1/data/showcase_project?sort=budget"
       ],
       "acceptance": [
         {
@@ -2789,9 +2880,9 @@
           "evidence": "the two id lists"
         },
         {
-          "clause": "for the FLS-restricted caller F is marked unsortable and the data sort on F is 403 — the two agree",
+          "clause": "for the FLS-restricted caller F is ABSENT from sortability.fields (never offered — it is not listed with sortable: false) and the data sort on F is 403 — the two agree",
           "oracle": "api",
-          "verify": "sortability entry + data answer",
+          "verify": "sortability.fields without F (packages/rest/src/meta-object-sortability-caller-fls.test.ts: 'sortability never offers the unreadable field') + the data answer",
           "evidence": "both excerpts"
         }
       ],
@@ -2815,6 +2906,12 @@
           "date": "2026-10-16",
           "change": "initial — authored from the v18 line (18.0.0-next.*) delta: the capability landed on the v18 pre-release line and the ledger carried no `since: \"v18\"` item for it",
           "ref": "#23879"
+        },
+        {
+          "revision": 2,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[1], steps[4] and acceptance[4] (clause, verify) corrected — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24541 and #24558, api-backend.meta-read-doors-v18 step 5 / acceptance[4] and fixtures; wave anchor #24579 §3). The FLS step named showcase_task, which declares no FLS; the restricted field is showcase_project.budget for a client_liaison-bound member. The pin's contract is that the unreadable field is absent from sortability, not marked unsortable. Only the en-US email member ships, and PUT takes no ?member= (META_ITEM_SAVE_PARAMS: force, package, mode, surface — packages/rest/src/meta-item-read-gate.ts at base 9a7838edf5), so the zh-CN member is authored with a body locale",
+          "ref": "#24649"
         }
       ]
     },
@@ -2823,7 +2920,7 @@
       "title": "Error answers made honest on v18: a hook refusal on a hand-built write route answers 400 with the hook's own sentence, a crash answers a generic 500 that withholds the caught message, and a unique-constraint refusal is 409 UNIQUE_VIOLATION with details at the action door, MCP and sandboxed bodies too",
       "since": "v18",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P2",
       "surface": "api",
       "personas": [
@@ -2834,13 +2931,13 @@
         "requires": [
           "a fresh boot of the showcase: `pnpm dev -- --fresh -p PORT --seed-admin` (ephemeral DB; the seeded admin is printed)",
           "a SCRATCH copy of examples/app-showcase (or a scaffolded blank app) for every planted-metadata step — never edit the shared fixtures; a file DB under /tmp/RUN/ for every boot",
-          "in the scratch app: a beforeInsert hook on sys_sharing_rule (or another hand-built write route's object) that throws a business sentence, and an object with a unique field plus a script action inserting a duplicate"
+          "in the scratch app: a beforeInsert hook on one of the scratch app's OWN objects that throws a business sentence, and an object with a unique field plus a script action inserting a duplicate; every scratch object declares a sharingModel (the author-time rule security-owd-unset refuses compile otherwise). ⛔ Not a hook on sys_sharing_rule: defineStack refuses a package hook on an object the stack does not define ('Hook … references object 'sys_sharing_rule' which is not defined in objects'), so the hand-built nested-envelope write rows are reached through their pins only"
         ]
       },
       "steps": [
-        "POST the hand-built write route whose hook refuses; read the body",
+        "POST a /data write route on the object whose hook refuses (POST /api/v1/data/OBJECT, or its /batch or /createMany door); read the body",
         "invoke the script action that inserts a duplicate value: POST /api/v1/actions/OBJECT/ACTION",
-        "force a server fault on a storage route (e.g. a malformed adapter config on the scratch boot) and read error.message"
+        "force a server fault on a storage route (e.g. a malformed adapter config on the scratch boot — QA run #24558 set storage.local_root under /dev/null through PUT /api/settings/storage) and read error.message"
       ],
       "acceptance": [
         {
@@ -2850,9 +2947,9 @@
           "evidence": "the vitest summary line per pin file, with the package name and the subject sha"
         },
         {
-          "clause": "the hook refusal answers 400 VALIDATION_ERROR carrying the hook's sentence — not 500",
+          "clause": "the hook refusal answers 400 carrying the hook's own sentence — not 500. On a /data door (the live leg) the envelope carries no `code` when the hook declared none, by pinned design; the hand-built nested-envelope rows (sharing rules, suggested bindings, approvals, package publish) re-dress the same refusal as 400 VALIDATION_ERROR — pin-only, since no package-authorable hook reaches their objects",
           "oracle": "api",
-          "verify": "status + message",
+          "verify": "status + message on the live /data door, and the absence of error.code when the hook declared none (rest-hook-script-fault-envelope.test.ts 'the refusal envelope carries no `code` when the hook declared none'); the VALIDATION_ERROR rows from rest-write-route-hook-refusal-sentence.ledger.test.ts (REFUSED_400) — both in automated.ref",
           "evidence": "the body"
         },
         {
@@ -2891,6 +2988,12 @@
           "date": "2026-10-19",
           "change": "acceptance[2] asserts the composite details shape (QA run #24541 acceptance[2] fail, disposition assertion-defect; parked on #24579 §1). #24541: \"details carry field only when the driver names a single column; a tenancy-scoped composite unique names none\" — the pin packages/runtime/src/dispatcher-unique-violation-wire-code.test.ts asserts the details keys are exactly developerMessage and object for an engine write, adding field only when DuplicateRecordError states a column, and driver-sql builds a field's unique: true as the (organization, field) composite. The clause asked for details naming the field, which no stock unique field produces. acceptance[1] is unchanged: QA run #24558's fail there is the product defect #24561; re-derived from main 5a871e4e41, where every source cited here is byte-identical to the run subject 5b14b7f3",
           "ref": "#24622"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[2], steps[0], steps[2] and acceptance[1] (clause, verify) corrected — checklist-accuracy findings of the 18.0 QA sweep (QA runs #24541 and #24558, api-backend.error-sentences-and-unique-violation-wire-code fixtures / step 1 / acceptance[1] / step 3; wave anchor #24579 §3). A package hook on sys_sharing_rule is refused at compile (packages/spec/src/stack.zod.ts hook → object reference check, at base 9a7838edf5); the /data door answers a hook refusal 400 with no code by pinned design, and VALIDATION_ERROR is the hand-built rows' re-dress (REFUSED_400 in the ledger pin). The live leg moves to a /data door. acceptance[1]'s product defect #24561 closed with PR #24631 (4ff18d3f0b, a batch row answers the hook's words), which this re-derivation includes; acceptance[2] (round 1's re-point) is unchanged",
+          "ref": "#24649"
         }
       ]
     }
