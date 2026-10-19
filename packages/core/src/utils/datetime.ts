@@ -290,6 +290,16 @@ export function isBucketGranularity(value: unknown): value is BucketGranularity 
  * built from those parts — the parts already carry the zone shift, so the week
  * boundary lands correctly without re-applying any offset.
  *
+ * [#24618] `value` is an INSTANT, and the zone places it on a calendar. A
+ * `Field.date` value is not one: it is a timezone-naive calendar day (ADR-0053,
+ * "never converted to an instant and never timezone-shifted"), and handed in
+ * with a zone it is read as that day's UTC midnight and lands on the PREVIOUS
+ * day in every zone west of UTC. A caller bucketing a `date` therefore passes
+ * no `timezone` — after putting the value into the `date` storage form
+ * (`temporalStorageForm(value, 'date')`) — which is what
+ * `@objectstack/objectql`'s rows path does for a field its object declares a
+ * `date`. The field type is the caller's to read; this function never sees it.
+ *
  * A finite NUMBER is read as epoch milliseconds — the form SQLite stores a
  * `Field.datetime` in, and what any driver that hands back raw storage values
  * yields. `new Date(String(1767225600000))` is an Invalid Date, so without this

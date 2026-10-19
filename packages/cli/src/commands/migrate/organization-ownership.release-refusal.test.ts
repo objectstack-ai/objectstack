@@ -143,6 +143,18 @@ describe('os migrate organization-ownership — refused in 18.0', () => {
     expect(mod.ORGANIZATION_OWNERSHIP_UPGRADE_UNAVAILABLE).toContain('an 18.x release');
   });
 
+  it('its --help examples show the refusal: none is a plan or an apply 18.0 refuses on every database', () => {
+    const examples = mod.default.examples.map((e) => (typeof e === 'string' ? { command: e, description: '' } : e));
+    expect(examples.length).toBeGreaterThan(0);
+    for (const { command, description } of examples) {
+      expect(command).toMatch(/migrate organization-ownership/);
+      expect(command).not.toMatch(/--out|--apply|--plan-file|--fate-supplement/);
+      expect(description).toContain('NOT_IMPLEMENTED');
+    }
+    // The ceremony class keeps its own examples, for the 18.x release that registers it.
+    expect(mod.OrganizationOwnershipCeremony.examples.some((e) => String(e).includes('--apply --plan-file'))).toBe(true);
+  });
+
   it('the registered command keeps the ceremony class whole underneath: same flags, its own run', () => {
     expect(Object.getPrototypeOf(mod.default)).toBe(mod.OrganizationOwnershipCeremony);
     expect(mod.default.flags).toBe(mod.OrganizationOwnershipCeremony.flags);
