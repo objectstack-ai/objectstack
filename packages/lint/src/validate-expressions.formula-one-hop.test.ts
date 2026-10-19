@@ -87,6 +87,34 @@ describe('a formula expression reads one hop through a reference (#24197)', () =
     expect(errors[0].message).toContain('`record.reader` is read BOTH through the relationship');
     expect(errors[0].message).toContain("`record.reader.?<related field>.orValue('…')`");
   });
+
+  it('[#24410] refuses a read of a field the target does not declare, naming the field and the target', () => {
+    const errors = errorsOf("record.book.name + ' · ' + record.reader.name");
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('unknown field `name` on `hop_book`');
+    expect(errors[0].message).toContain('through the reference `record.book`');
+    expect(errors[0].message).toContain("declare 'name' on 'hop_book' — not on 'hop_loan'");
+    expect(errors[0].source).toBe("record.book.name + ' · ' + record.reader.name");
+  });
+
+  it('[#24410] admits the primary key and a column the platform injects on the target', () => {
+    expect(errorsOf('record.book.id')).toEqual([]);
+    expect(errorsOf('string(record.book.created_at) + record.book.title')).toEqual([]);
+  });
+
+  it('[#24410] does not judge a target the stack does not carry', () => {
+    const stray = {
+      name: 'hop_loan',
+      label: 'Loan',
+      fields: {
+        book: { type: 'lookup', label: 'Book', reference: 'hop_elsewhere' },
+        title: { type: 'formula', label: 'Title', expression: 'record.book.name' },
+      },
+    };
+    const errors = validateStackExpressions(specValid({ objects: [book, shelf, reader, stray] }))
+      .filter((i) => i.where === WHERE && (i.severity ?? 'error') === 'error');
+    expect(errors).toEqual([]);
+  });
 });
 
 /**

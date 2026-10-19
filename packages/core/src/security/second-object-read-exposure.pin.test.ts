@@ -201,6 +201,11 @@ const CALLERS: Record<string, Classification> = {
     kind: 'not-a-served-read',
     reason: 'authoring-time static analysis of metadata; reads no record',
   },
+  // [#24410] A formula's one-hop read judged against its target's declared fields.
+  'packages/lint/src/validate-expressions.ts': {
+    kind: 'not-a-served-read',
+    reason: 'authoring-time static analysis of metadata; reads no record',
+  },
   'packages/metadata-protocol/src/seed-loader.ts': {
     kind: 'not-a-served-read',
     reason: "resolves a seed's references at install, under the system identity; serves nothing to a caller",
