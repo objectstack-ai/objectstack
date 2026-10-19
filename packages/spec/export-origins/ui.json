@@ -525,6 +525,7 @@
     "isViewContainerShaped": "src/ui/assembled-views.zod.ts#isViewContainerShaped (function)",
     "listViewGroupKeyPredicate": "src/ui/view-grouping-query.ts#listViewGroupKeyPredicate (function)",
     "misplacedDefaultPageRefusal": "src/ui/default-record-page.ts#misplacedDefaultPageRefusal (function)",
+    "navItemVisibleDataNeedsDataSource": "src/ui/app.zod.ts#navItemVisibleDataNeedsDataSource (function)",
     "normalizeFilterOperator": "src/ui/view.zod.ts#normalizeFilterOperator (function)",
     "normalizeInlineAction": "src/ui/action.zod.ts#normalizeInlineAction (function)",
     "objectNavTargetExclusivity": "src/ui/app.zod.ts#objectNavTargetExclusivity (function)",
