@@ -3279,7 +3279,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps added and acceptance[3].clause marked walled — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA runs #24557 and #24558 scored both clauses blocked(environment) on the boot's NOT_IMPLEMENTED FATAL). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses group and isolated before a config is read, and settings-service.ts refuses an organization-less tenant key only under a walled posture, so acceptance[3], which steps[3] already ran on the walled boot, was the second walled leg. No clause deleted; the shared statement is RUNNER.md's environment-facts entry, which this gap points at",
-          "ref": "#PENDING-24579R5"
+          "ref": "#24687"
         }
       ]
     },

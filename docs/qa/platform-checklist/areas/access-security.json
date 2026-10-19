@@ -2460,7 +2460,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[2] added — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; the item stays blocked and hidden from the selector, #24579 §0). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses group and isolated before a config is read, ahead of the multi-org runtime load revision 2 cites as the refusal. No clause or marker changed",
-          "ref": "#PENDING-24579R5"
+          "ref": "#24687"
         }
       ]
     },
@@ -2591,7 +2591,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[0], steps[8], acceptance[4] (clause, verify) and variants[1]–[2] re-grounded — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2). The walled legs were blocked(fixture) on an enterprise-runtime gap; re-derived at base bfc1539fe0 that is not what 18.0 does: serve.ts walledPostureRefusal refuses group and isolated before a config is read, ahead of the multi-org runtime load, and that runtime is open code since ADR-0132. Clause 5 keeps its unit pins as its oracle and its wording; no clause deleted",
-          "ref": "#PENDING-24579R5"
+          "ref": "#24687"
         }
       ]
     },
@@ -3427,7 +3427,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps added and steps[0]'s object body made to declare sharingModel — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA runs #24556, #24558 and #24559 scored acceptance[1], acceptance[2] and negative[0] blocked on the boot's NOT_IMPLEMENTED FATAL), and round 2's report on the same wave anchor (a minimal object body is refused 422 security-owd-unset). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses the walled boot before a config is read; meta-item-write-routes.ts asks the walled refusal ahead of saveMetaItem, so the org owner's refusal is unaffected, while the operator's and the single-posture admin's repeats reach the authoring rules, where validate-security-posture.ts refuses an object with no sharingModel at error tier. No clause deleted",
-          "ref": "#PENDING-24579R5"
+          "ref": "#24687"
         }
       ]
     },
@@ -3754,7 +3754,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps added — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA run #24559 scored acceptance[4] pass on its pin with the live leg blocked(environment) on the boot's NOT_IMPLEMENTED FATAL; rounds 2 and 3 named the leg). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses the walled boot; grant-holder-membership-refusal.ts's predicate is posture-independent, which the gap records without re-pointing the clause. No clause deleted",
-          "ref": "#PENDING-24579R5"
+          "ref": "#24687"
         }
       ]
     },
@@ -3840,7 +3840,7 @@
           "revision": 2,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps added — the 18.0 sweep's wave-wide theme '18.0 refuses every walled posture' (wave anchor #24579 §2; QA run #24559 scored acceptance[1] pass on its pin with the live leg blocked(environment) on the boot's NOT_IMPLEMENTED FATAL). Re-derived at base bfc1539fe0: serve.ts walledPostureRefusal refuses the walled boot, and tenant-wall-organization-removal.test.ts pins the emptied-organization refusal as a walled-posture rule with the single posture unchanged. No clause deleted",
-          "ref": "#PENDING-24579R5"
+          "ref": "#24687"
         }
       ]
     },

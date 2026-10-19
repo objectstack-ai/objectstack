@@ -1109,7 +1109,7 @@
           "revision": 3,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[0] corrected — a carried note of the 18.0 sweep (round 3's report on wave anchor #24579): it called showcase_approver_bindings 'draft on purpose'. Re-derived at base bfc1539fe0: approver-bindings.flow.ts authors it status: 'obsolete', and its docblock says why not draft — a draft flow binds and fires exactly like an active one, while obsolete is loaded and never armed. It is still the only flow on showcase_field_zoo, so the gap's conclusion holds. No clause changed",
-          "ref": "#PENDING-24579R5"
+          "ref": "#24687"
         }
       ]
     },

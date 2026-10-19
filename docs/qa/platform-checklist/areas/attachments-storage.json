@@ -1164,7 +1164,7 @@
           "revision": 4,
           "date": "2026-10-19",
           "change": "fixtures.knownGaps[0]'s pointer to the wave's second-organization theme replaced by the theme's own statement — the 18.0 sweep's wave-wide theme '18.0 permits no second organization' (wave anchor #24579 §2; QA runs #24560 and #24558). Re-derived at base bfc1539fe0: auth-manager.ts beforeCreateOrganization answers 403 ORGANIZATION_CREATION_DISABLED wherever the effective posture enforces no wall, which on 18.0 is every boot (serve.ts walledPostureRefusal), and sys_organization declares no create method. The clause and its pins are unchanged; the gap now says how a stock run scores it",
-          "ref": "#PENDING-24579R5"
+          "ref": "#24687"
         }
       ]
     }
