@@ -72,6 +72,20 @@ export const SysApprovalRequest = ObjectSchema.create({
   // (`sys-approval-request.page.ts` says why).
   highlightFields: ['process_label', 'record_id', 'status', 'current_step_label', 'submitter_id', 'updated_at'],
 
+  // [#24625] Free-text search (ADR-0061) scans the auto-default set minus the
+  // snapshot, `payload_json`. A query naming the snapshot is refused to every
+  // reader withheld any field of any object (`payload-predicate-guard.ts`),
+  // and a `$search` names every searched column. With the snapshot in the
+  // set, one field withheld anywhere — an organization administrator's mail
+  // bodies — turned that reader's list search here, and its whole global
+  // search sweep, into a 403. A structured filter on the snapshot is
+  // unchanged, for the readers the guard admits.
+  searchableFields: [
+    'process_name', 'process_label', 'object_name', 'record_id', 'submitter_comment', 'status',
+    'cancel_reason', 'current_step', 'current_step_label', 'pending_approvers', 'pending_approver_labels',
+    'flow_run_id', 'flow_node_id', 'node_config_json',
+  ],
+
   // Curated built-in list views — render as segmented tabs in the console.
   // Filters use {current_user_id} substitution wired by the console.
   //

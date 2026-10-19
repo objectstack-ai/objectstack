@@ -62,12 +62,15 @@ const filterOf = (where: Record<string, unknown>) => encodeURIComponent(JSON.str
 const hasBodyKey = (row: Row) => BODY_FIELDS.some((f) => f in row);
 
 /**
- * The longest run of link-token characters in a stored body — the part of a
- * reset or invitation link that IS the credential. A response "contains the
- * body" exactly when it contains this span; JSON escaping cannot hide it.
+ * The longest run of link-token characters in a stored body that no other
+ * column of the row carries — the part of a reset or invitation link that IS
+ * the credential (an invitation link also names the invitation, which the row
+ * keeps in clear in `related_id`). A response "contains the body" exactly when
+ * it contains this span; JSON escaping cannot hide it.
  */
-function credentialSpanOf(body: unknown): string {
-  const runs = String(body ?? '').match(/[A-Za-z0-9_-]{16,}/g) ?? [];
+function credentialSpanOf(row: Row): string {
+  const elsewhere = JSON.stringify(Object.fromEntries(Object.entries(row).filter(([k]) => !(BODY_FIELDS as readonly string[]).includes(k))));
+  const runs = (String(row.body_text ?? '').match(/[A-Za-z0-9_-]{16,}/g) ?? []).filter((r) => !elsewhere.includes(r));
   const longest = runs.sort((a, b) => b.length - a.length)[0];
   if (!longest) throw new Error('the stored body carries no link token to probe with');
   return longest;
@@ -105,7 +108,7 @@ describe('[#24625] identity-mail bodies over an 18.0 database: principal × door
     invitation = mails.find((m) => m.related_object === 'sys_invitation')!;
     expect(reset, 'the fixture holds the 18.0 password-reset row').toBeTruthy();
     expect(invitation, 'the fixture holds the organization-invitation row').toBeTruthy();
-    resetSpan = credentialSpanOf(reset.body_text);
+    resetSpan = credentialSpanOf(reset);
 
     // The organization administrator: fixture member A, promoted to the
     // organization's `admin` role. The membership hook grants the scoped
@@ -215,6 +218,15 @@ describe('[#24625] identity-mail bodies over an 18.0 database: principal × door
       expect(res.text.includes(resetSpan)).toBe(false);
     });
 
+    it.each([
+      ['sys_activity', 'metadata'],
+      ['sys_audit_log', 'new_value'],
+    ] as const)('%s: a body probe on the copy is refused to the organization admin, named parent or not', async (object, column) => {
+      for (const where of [{ [column]: { $contains: resetSpan } }, { object_name: 'sys_email', [column]: { $contains: resetSpan } }]) {
+        expect((await call('orgAdmin', 'POST', `/data/${object}/query`, { where })).status).toBe(403);
+      }
+    });
+
     it.each(['sys_activity', 'sys_audit_log'] as const)('%s: a member is served no body', async (object) => {
       const res = await call('member', 'GET', mirrorPath(object));
       expect(res.text.includes(resetSpan)).toBe(false);
@@ -244,7 +256,7 @@ describe('[#24625] identity-mail bodies over an 18.0 database: principal × door
       expect(requested.status).toBe(200);
       [identityRow] = await ql.find('sys_identity_email', { where: {}, orderBy: [{ field: 'created_at', order: 'desc' }], limit: 1, ...SYS });
       expect(identityRow, 'HEAD wrote the reset to the identity log').toBeTruthy();
-      identitySpan = credentialSpanOf(identityRow.body_text);
+      identitySpan = credentialSpanOf(identityRow);
 
       // HEAD's own tenant mail: an organization invitation.
       const before = new Set((await ql.find('sys_email', { where: {}, limit: 100, ...SYS })).map((r: Row) => r.id));
@@ -254,7 +266,7 @@ describe('[#24625] identity-mail bodies over an 18.0 database: principal × door
       expect(invite.status).toBe(200);
       tenantRow = (await ql.find('sys_email', { where: {}, limit: 100, ...SYS })).find((r: Row) => !before.has(r.id));
       expect(tenantRow, 'HEAD wrote the invitation to the tenant log').toBeTruthy();
-      tenantSpan = credentialSpanOf(tenantRow.body_text);
+      tenantSpan = credentialSpanOf(tenantRow);
     }, 60_000);
 
     it.each(['orgAdmin', 'member'] as const)('the %s is refused the identity log', async (who) => {
