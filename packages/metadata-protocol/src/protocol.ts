@@ -11368,7 +11368,9 @@ export class ObjectStackProtocolImplementation implements
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
     }) {
-        return this.readMetaItemFace(request, 'served');
+        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}. Folded
+        // HERE, at each face's boundary, as {@link getMetaItems} folds.
+        return this.readMetaItemFace(canonicalizeMetaRequestType(request), 'served');
     }
 
     /**
@@ -11402,7 +11404,8 @@ export class ObjectStackProtocolImplementation implements
         /** [#22877] The bundle member to read — {@link resolveBundleMemberSelector}; omitted, the canonical one. */
         member?: string,
     }) {
-        return this.readMetaItemFace(request, 'execution');
+        // The same #4432 fold {@link getMetaItem} applies, for the same reason.
+        return this.readMetaItemFace(canonicalizeMetaRequestType(request), 'execution');
     }
 
     /**
@@ -11413,13 +11416,13 @@ export class ObjectStackProtocolImplementation implements
      * read's exits; every source, cache, merge, lock and governance step
      * above them is shared, so the item a gate acts on and the item a caller
      * is served cannot disagree about which body is behind the name.
+     *
+     * `request` arrives already folded by the calling face (#4432).
      */
     private async readMetaItemFace(request: {
         type: string, name: string, packageId?: string, state?: 'active' | 'draft', previewDrafts?: boolean,
         member?: string,
     }, face: 'served' | 'execution') {
-        // #4432 — CANONICAL TYPE KEY. See {@link canonicalMetaType}.
-        request = canonicalizeMetaRequestType(request);
         if (request.type === 'object' && isObjectOfDisabledPackage(this.engine?.registry, request.name)) {
             throw objectPackageDisabledError(request.name);
         }
