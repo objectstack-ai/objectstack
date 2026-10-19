@@ -561,6 +561,7 @@ export class AutoEnqueuer {
                 this.reportDeclarationWithheld(name);
                 continue;
             }
+            // `active` is the declared `isActive`, or the activation ledger's switch over it.
             if (!d.active) continue;
             const sub = this.projectDeclared(d);
             if (sub) subscriptions.push(sub);
