@@ -14,7 +14,9 @@
  * name it stay.
  *
  * Every assertion reads the structured result, never the log's wording; the
- * wiring pin finds the plugin's lines by their structured meta.
+ * wiring pin finds the plugin's lines by their structured meta. One pin reads
+ * wording on purpose: the unnamed-grant line is 18.0 release text an operator
+ * acts on, and that release says one sentence about a v17 database everywhere.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -317,6 +319,42 @@ describe('[ADR-0131 D4] the catalog reference report — references whose names 
       positionAssignments: [], permissionSetGrants: [],
       unnamedGrants: ['g_row_only:usr_row_only'],
     }]);
+  });
+});
+
+describe('[ADR-0131 D4] the unnamed-grant line says what 18.0 supports for a v17 database', () => {
+  // The one wording pin in this file. 18.0 supports fresh installs only and its
+  // `os migrate organization-ownership` refuses plan and apply on every
+  // database, so the line an operator reads at boot must not send them to it;
+  // it carries the sentence the drop-gate refusal, the boot refusal and the
+  // command's own refusal carry. Everything else in the line is the report's
+  // own: the count, the field, the D4 reason, and that nothing was changed.
+  const V17_SENTENCE = '18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a '
+    + '17.x release until the 18.x release that carries the upgrade path.';
+
+  it('names the count, the empty field, the reason and "Nothing was changed", then the 18.0 sentence, and prescribes no command', async () => {
+    const b = await boot();
+    await insertUser(b, 'usr_a');
+    await insertUser(b, 'usr_b');
+    await insertUnnamedGrants(b, [
+      { id: 'g_one', user_id: 'usr_a', organization_id: ORG },
+      { id: 'g_two', user_id: 'usr_b', organization_id: ORG },
+    ]);
+    const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    await reportCatalogReferences(b.engine as any, { catalog: b.catalog, logger });
+
+    // Anti-vacuity: the report logged exactly the unnamed-grant line, found by its meta.
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    const [message, , meta] = logger.error.mock.calls[0] as [string, unknown, { count: number }];
+    expect(meta.count).toBe(2);
+
+    expect(message).toContain(
+      '[security] 2 sys_user_permission_set grant(s) name no permission set (permission_set is empty), '
+      + 'so each confers nothing (ADR-0131 D4). Nothing was changed. ' + V17_SENTENCE,
+    );
+    expect(message.endsWith(V17_SENTENCE), 'the sentence closes the line').toBe(true);
+    // The refused command and every step of it are gone, not merely qualified.
+    expect(message).not.toMatch(/organization-ownership|os migrate|--out|--apply|--plan-file|--backup-taken|plan\.json|ceremony/);
   });
 });
 
