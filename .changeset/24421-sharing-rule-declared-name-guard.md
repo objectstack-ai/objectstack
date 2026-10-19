@@ -1,18 +1,26 @@
 ---
 '@objectstack/plugin-sharing': minor
-'@objectstack/rest': patch
+'@objectstack/runtime': minor
 ---
 
-fix(plugin-sharing)!: a new sharing rule, or a rename, cannot take a declared rule's name — the edit of the declared rule stores its customised copy, and that write reconciles the declaration's grants at once
+fix(plugin-sharing,runtime)!: a declared sharing rule is read-only and clonable — no rule, new or renamed, can take its name, and it is switched off through the activation ledger, which revokes its grants at once
 
 Clause-②: no (narrowing)
 
-<!-- adr-0087: not-required (no-migration-prescription) no spec key, export, option or stored metadata shape is added, removed or renamed, so `objectstack migrate meta` has nothing to rewrite; what changes is the accept set of one write door, whose remedy is one key in the caller's request (the declared rule's id) or another name -->
+<!-- adr-0087: not-required (no-migration-prescription) no spec key, export, option or stored metadata shape is added, removed or renamed, so `objectstack migrate meta` has nothing to rewrite; what changes is the accept set of two write doors, whose remedy is another name for the caller's rule plus one activation call -->
 
 **BREAKING** (an accept-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
 
-A `sys_sharing_rule` row holding a declared rule's name replaces the declared rule in its scope (ADR-0131 D6, regime O): that is how an organization narrows or switches off a vendor rule. Until now any write could take the name — Setup's New, a script, an AI tool — and so switch the vendor rule off without anyone asking to.
+ADR-0131 D6 charts declared sharing rules under regime C: a rule a package declares is read-only, it is customised by a clone under another name, and it is switched off through the deployment-level activation ledger (`sys_metadata_activation`), like flows, actions, positions and permission sets. Same-name shadowing is retired.
 
-- **Refused now:** `POST /api/v1/sharing/rules` (and `SharingRuleService.defineRule`) creating a rule under a declared rule's name, and a `/data` insert of `sys_sharing_rule` under one, or an update that renames a row onto one. FROM `201` / `200` with the new row replacing the vendor rule, TO `409 RESOURCE_CONFLICT`, naming the declared rule. Fix: to customise the vendor rule, save it back with its `id` (the declared rule's name, as `GET /api/v1/sharing/rules` lists it); otherwise choose another name.
-- **Unchanged:** saving the declared rule with its `id` stores the organization's customised copy, exactly as a same-name `POST` did before; editing or switching off that copy, through either door, works as before; every rule whose name no declaration holds is created and renamed as before.
-- **Reconciled at once:** the write that creates the customised copy, switches it on or off, or removes it reconciles the declaration's grants in that scope in the same request — revoked while the copy holds the name, re-derived when it no longer does. Before, the declaration's grants stood until the next boot's orphaned-grant sweep. Under a wall an organization's copy is its own (the other organizations keep the declared rule); under `single` the one copy answers everywhere.
+The narrowings, FROM → TO, each with its one-line fix:
+
+- `POST /api/v1/sharing/rules` (and `SharingRuleService.defineRule`) creating a rule under a declared rule's name — FROM `201`, the new row replacing the declared rule in its scope, TO `409 RESOURCE_CONFLICT` naming the declared rule. Fix: create your rule under another name, and switch the declared one off with `POST /api/v1/security/_activation/sharing_rule/<name>` and `{ "enabled": false }`.
+- A `/data` insert of a `sys_sharing_rule` row under a declared rule's name, or an update that renames a row onto one — FROM `201` / `200`, TO `409 RESOURCE_CONFLICT`. Fix: the same.
+
+What is added:
+
+- **The switch.** `POST /api/v1/security/_activation/sharing_rule/:name` writes the declared rule's activation row, behind the same authority as the other activation doors: `manage_metadata`, and the platform operator under a wall, because the row covers every organization. A declared rule switched off is served nowhere. The write revokes every grant that carries the rule's name in the same request, and switching it back on re-derives them. The name must be a declared rule (`404` otherwise; a rule your organization authored keeps its own `active` field), and with no sharing-rule service bound the door answers `503`.
+- **A declaration over a stored row is reported, never made an overlay.** When a package declares a rule whose name a `sys_sharing_rule` row already holds in a scope (a package upgrade, or a copy customised before this release), the row keeps answering as its own rule. The declaration is not served beside it, and that is logged at `error` once per name and scope per process, with the remedy.
+
+Unchanged: rules whose name no declaration holds are created, renamed and switched as before. A stored row that already holds a declared name stays editable as itself. `DELETE /api/v1/sharing/rules/:idOrName` on a declared rule is still `403 PERMISSION_DENIED`, and is now answered the same way when the rule is switched off.
