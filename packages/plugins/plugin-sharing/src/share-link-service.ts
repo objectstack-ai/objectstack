@@ -44,6 +44,17 @@ import { materializeDeclaredFields, readInternalColumn } from '@objectstack/obje
 // schema and an engine that cannot answer `getSchema` are one answer, `false`
 // — the same definition `getPolicy` below has always used.
 import { isPublicSharingEnabled } from '@objectstack/spec/data';
+import type { TenancyPosture } from '@objectstack/spec/security';
+// [ADR-0131 D9] The one "which organization does an organization-less write
+// resolve to?" decision (`@objectstack/core`'s, re-exported unchanged), and the
+// engine's refusal for it — see
+// `ShareLinkService.resolveMintOrganization`.
+import {
+  resolveSystemWriteOrganization,
+  resolveTenantFieldName,
+  SystemWriteOrganizationRequiredError,
+} from '@objectstack/objectql';
+import { resolveTenancyPosture } from '@objectstack/types';
 import type { SharingEngine } from './sharing-service.js';
 import {
   hashShareLinkPassword,
@@ -59,6 +70,9 @@ import {
 
 /** Service-elevated context for the plugin's own queries / mutations. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
+
+/** The organization object the ADR-0131 D9 decision counts on a `single` install. */
+const ORGANIZATION_OBJECT = 'sys_organization';
 
 /**
  * [#5190] The table whose orphans this service owns. `sys_share_link` is
@@ -662,9 +676,122 @@ export class ShareLinkService implements IShareLinkService {
       use_count: 0,
     };
 
-    await this.engine.insert('sys_share_link', row, { context: SYSTEM_CTX });
+    // [ADR-0131 D9] The organization the link belongs to rides the stored row
+    // and the write context — the `{ isSystem, tenantId }` shape #8844's
+    // refusal prescribes for a system write. The mint response keeps the
+    // contract's shape (`ShareLink` declares no organization column).
+    const organizationId = await this.resolveMintOrganization(input, context);
+    const stored = organizationId === undefined ? row : { ...row, organization_id: organizationId };
+    await this.engine.insert('sys_share_link', stored, {
+      context: organizationId === undefined ? SYSTEM_CTX : { ...SYSTEM_CTX, tenantId: organizationId },
+    });
     // [#21839] The row as stored carries the hash; the mint response does not.
     return withoutPasswordHash(row);
+  }
+
+  /**
+   * [ADR-0131 D9, C8 stage 8b-0h] The organization a minted link is stamped
+   * with — never a NULL row on a tenant-columned `sys_share_link`:
+   *
+   *  1. the LINKED RECORD's organization, read under the system context off the
+   *     column the object is walled by, so field-level masking cannot hide it
+   *     from the decision. It wins over the session's: under `group` a member
+   *     active in one organization may mint on a record of another it can see,
+   *     and the link exposes that record, so it belongs where the record does —
+   *     the direct-grant rule `SharingService.resolveDirectGrantOrganization`
+   *     follows for `sys_record_share`;
+   *  2. the acting context's organization (`tenantId`), when the record names
+   *     none — an object with no tenant column, or an organization-less row;
+   *  3. otherwise `@objectstack/core`'s one D9 predicate: the Default
+   *     Organization under `single` when exactly one exists, and a loud
+   *     `ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED` refusal under a wall (and on a
+   *     `single` install holding none or several) — nothing is written.
+   *
+   * The refusal is the engine's own: the envelope its system-insert rule
+   * raises for this same write once the platform-namespace exemption retires,
+   * so the mint answers alike before and after that.
+   *
+   * The posture is the REQUESTED one (`resolveTenancyPosture()`), the source
+   * and fail-stricter direction `resolveAuthzContext` and the `tenancy`
+   * service's `defaultOrgId()` read: a deployment that asked for a wall is
+   * walled here even while it runs degraded.
+   *
+   * `undefined` means there is nothing to stamp: `sys_share_link` carries no
+   * tenant column in this composition, or the composition registers no
+   * organization object at all.
+   *
+   * A failing record read propagates: the mint fails and nothing is written,
+   * rather than stamping the session's organization on a link whose record's
+   * organization is unknown.
+   */
+  private async resolveMintOrganization(
+    input: CreateShareLinkInput,
+    context: ExecutionContext,
+  ): Promise<string | undefined> {
+    if (!this.tenantFieldOf('sys_share_link')) return undefined;
+
+    const recordTenantField = this.tenantFieldOf(input.object);
+    if (recordTenantField) {
+      const rows = await this.engine.find(input.object, {
+        where: { id: input.recordId },
+        fields: ['id', recordTenantField],
+        limit: 1,
+        context: SYSTEM_CTX,
+      } as any);
+      const value = Array.isArray(rows)
+        ? (rows[0] as Record<string, unknown> | undefined)?.[recordTenantField]
+        : undefined;
+      if (typeof value === 'string' && value.trim() !== '') return value;
+    }
+
+    const acting = context.tenantId;
+    if (typeof acting === 'string' && acting.trim() !== '') return acting;
+
+    let posture: TenancyPosture;
+    try {
+      posture = resolveTenancyPosture();
+    } catch {
+      // An unreadable posture is the boot's to refuse; here it reads walled.
+      posture = 'isolated';
+    }
+    const decision = await resolveSystemWriteOrganization({
+      posture,
+      probeOrganizations: () => this.probeOrganizations(),
+      organizationObjectRegistered: !!this.engine.getSchema?.(ORGANIZATION_OBJECT),
+    });
+    if (decision.kind === 'derived') return decision.organizationId;
+    if (decision.kind === 'no-organization-object') return undefined;
+    throw new SystemWriteOrganizationRequiredError(
+      'sys_share_link',
+      posture,
+      decision.reason,
+      decision.organizationCount,
+    );
+  }
+
+  /** The install's organization ids, capped at two — only "0 / 1 / several" decides. */
+  private async probeOrganizations(): Promise<readonly string[]> {
+    const rows = await this.engine.find(ORGANIZATION_OBJECT, {
+      fields: ['id'],
+      limit: 2,
+      context: SYSTEM_CTX,
+    } as any);
+    return (Array.isArray(rows) ? rows : [])
+      .map((r: any) => r?.id)
+      .filter((id: unknown) => id != null && String(id) !== '')
+      .map((id: unknown) => String(id));
+  }
+
+  /** The tenant column of `object`, or `null` when it has none / the engine cannot say. */
+  private tenantFieldOf(object: string): string | null {
+    if (typeof this.engine.getSchema !== 'function') return null;
+    let schema: unknown;
+    try {
+      schema = this.engine.getSchema(object);
+    } catch {
+      return null;
+    }
+    return schema ? resolveTenantFieldName(schema) : null;
   }
 
   async revokeLink(idOrToken: string, context: ExecutionContext): Promise<void> {
