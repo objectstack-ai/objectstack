@@ -56,7 +56,7 @@ import {
   type SharingSecurityProbe,
   type SharingTenancyProbe,
 } from './sharing-service.js';
-import { SharingRuleService } from './sharing-rule-service.js';
+import { SharingRuleService, bindDeclaredRuleNameGuard, bindSharingRuleActivationReconcile } from './sharing-rule-service.js';
 import { ShareLinkService } from './share-link-service.js';
 import { registerShareLinkRoutes } from './share-link-routes.js';
 import { bindRuleHooks, unbindAllRuleHooks, bindRuleCriteriaGuard, RULE_REBIND_TRIGGER_PACKAGE } from './rule-hooks.js';
@@ -848,6 +848,14 @@ export class SharingServicePlugin implements Plugin {
             // sys_sharing_rule — it bypasses defineRule's validation, so the
             // match-all criteria gate has to sit on the table itself too.
             bindRuleCriteriaGuard(engine, ctx.logger as any);
+
+            // [ADR-0131 D6 regime C] …and so must the refusal of a row, new or
+            // renamed, that takes a declared rule's name: `defineRule` makes it
+            // for its own callers. A declared rule is customised by a clone
+            // under another name plus the declared rule switched off in the
+            // activation ledger, whose writes reconcile its grants at once.
+            bindDeclaredRuleNameGuard(engine, this.ruleService);
+            bindSharingRuleActivationReconcile(engine, this.ruleService);
 
             // [#2909 T1] Stamp `customized` on admin edits of seeded rules so
             // a customized copy keeps answering for its name — the declared

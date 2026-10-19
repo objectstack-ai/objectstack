@@ -431,9 +431,14 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * is suppressed too (implies {@link skipTriggers}). Hooks registered in
    * code by plugins — audit, capability gates, sharing projection — carry no
    * metadata binding and STILL run: this flag must never bypass security or
-   * audit. Set by the data-import runner when the user opts out of
-   * "run automations & triggers", and by import undo (reversing writes must
-   * not re-fire automation).
+   * audit. Set by the data-import runner (`runImport`) when its caller opts
+   * out of "run automations & triggers" (`runAutomations: false`): over HTTP
+   * the import doors admit that opt-out from the system principal alone, and
+   * an in-process caller of the runner passes its own setting. Set by the
+   * import undo only when the system principal undoes a job: the undo door is
+   * not an exception to "only the system principal may take an app's declared
+   * controls off a write", so any other caller's undo runs under the object's
+   * hooks, record-change triggers and state machine.
    */
   skipAutomations: z.boolean().optional(),
 
@@ -475,8 +480,11 @@ export const ExecutionContextSchema = lazySchema(() => z.object({
    * skip-the-state-machine intent. The engine treats either flag identically.
    * Server-constructed only, never client-supplied — the REST import runner sets
    * it from the request's explicit `treatAsHistorical` option, gated so a normal
-   * import still walks the FSM. SCOPE is identical to `seedReplay`: only the
-   * `state_machine` rule is skipped; every other validation still runs.
+   * import still walks the FSM, and the import undo sets it only when the
+   * system principal undoes a job: any other caller's undo walks the FSM, so
+   * a restore it refuses is reported per row. SCOPE is identical to
+   * `seedReplay`: only the `state_machine` rule is skipped; every other
+   * validation still runs.
    */
   skipStateMachine: z.boolean().optional(),
 

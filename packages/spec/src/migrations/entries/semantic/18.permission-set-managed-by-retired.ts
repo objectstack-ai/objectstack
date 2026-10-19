@@ -15,7 +15,7 @@ export const entry: SemanticMigration = {
   surface: 'permissions[].managedBy — the authored per-record provenance (package / platform / user) on a '
     + 'permission set',
   replacement: 'Nothing: delete the key. A set\'s provenance is the package that ships it, decided from that '
-    + 'package\'s artifact and recorded as packageId; a set created in this environment carries neither. The '
+    + 'package\'s artifact and recorded as packageId; a set authored in this system carries neither. The '
     + 'sys_permission_set.managed_by column the platform keeps is a different surface and is unchanged.',
   reason: 'The D2 conversion `permission-set-managed-by-removed` deletes `managedBy` from every permission set '
     + 'in author sources, stored permission rows and built artifacts, and the delete is lossless: no seeder, '

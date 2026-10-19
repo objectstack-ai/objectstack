@@ -30,9 +30,9 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { FILE_REFERENCES_MIGRATION_ID } from '@objectstack/spec/system';
 
 import { CLI, TSX, childEnv } from './helpers/serve-process.js';
@@ -40,13 +40,56 @@ import { linkSpec } from './helpers/define-stack-fixture.js';
 
 interface Run { code: number; stdout: string; stderr: string }
 
+/**
+ * The version a stub `pnpm` answers with. `os doctor` runs `pnpm -v` in its own
+ * cwd, and every cwd here is a `tmpdir()` fixture with no `packageManager` in
+ * reach: under Corepack (CI's `setup-pnpm`) a real `pnpm` there resolves
+ * `pnpm@latest` from the public registry — measured: two registry requests per
+ * run of this file, one per doctor child. Doctor degrades a failed probe to a
+ * row, so a refused registry never reddened this file; it reached the network
+ * all the same. Which pnpm answers is not what these pins judge, so a stub on
+ * `PATH` answers instead, and `doctor` asserts below that the stub is what it
+ * reached.
+ */
+const STUB_PNPM_VERSION = '0.0.0-package-owned-readers-stub';
+
+/** A `pnpm` that answers `-v` and refuses anything else, loudly. */
+function writeStubPnpm(binDir: string): void {
+  mkdirSync(binDir, { recursive: true });
+  const bin = join(binDir, 'pnpm');
+  writeFileSync(
+    bin,
+    [
+      '#!/bin/sh',
+      'case "$1" in',
+      `  -v|--version) echo ${STUB_PNPM_VERSION}; exit 0 ;;`,
+      'esac',
+      'echo "stub pnpm: unexpected invocation: $*" >&2',
+      'exit 97',
+      '',
+    ].join('\n'),
+  );
+  chmodSync(bin, 0o755);
+}
+
+let stubBinDir = '';
+
 function runCli(args: string[], cwd: string): Promise<Run> {
   return new Promise((resolvePromise) => {
     execFile(
       TSX,
       [CLI, ...args],
       // Artifact-less on purpose: the config is the only input these commands read.
-      { cwd, maxBuffer: 16 * 1024 * 1024, env: childEnv({ NO_COLOR: '1', OS_ARTIFACT_PATH: join(cwd, 'dist', 'objectstack.json') }) },
+      // The stub `pnpm` leads `PATH` for every child; only `doctor` calls it.
+      {
+        cwd,
+        maxBuffer: 16 * 1024 * 1024,
+        env: childEnv({
+          NO_COLOR: '1',
+          OS_ARTIFACT_PATH: join(cwd, 'dist', 'objectstack.json'),
+          PATH: `${stubBinDir}${delimiter}${process.env.PATH ?? ''}`,
+        }),
+      },
       (err, stdout, stderr) => {
         const code = err ? (typeof (err as { code?: unknown }).code === 'number' ? (err as { code: number }).code : 1) : 0;
         resolvePromise({ code, stdout: String(stdout), stderr: String(stderr) });
@@ -97,6 +140,8 @@ let r: Record<string, Run> = {};
 
 beforeAll(async () => {
   root = mkdtempSync(join(tmpdir(), 'os-package-owned-command-readers-'));
+  stubBinDir = join(root, 'bin');
+  writeStubPnpm(stubBinDir);
   for (const [name, source] of Object.entries(CONFIGS)) {
     const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
@@ -136,6 +181,12 @@ describe('#22288 — os doctor runs its metadata checks over every package', () 
       const unused = out.split('\n').filter((line) => /Object "pco_\w+"/.test(line));
       expect(unused.join('\n'), out).toMatch(/"pco_note"/);
       expect(unused.join('\n'), out).toMatch(/"pco_ticket"/);
+    });
+
+    it(`${shape === 'two' ? 'two packages' : 'control, one package'}: doctor's pnpm probe reached the stub, not the registry`, () => {
+      const run = r[`doctor:${shape}`];
+      const out = run.stdout + run.stderr;
+      expect(out, out).toContain(STUB_PNPM_VERSION);
     });
   }
 });

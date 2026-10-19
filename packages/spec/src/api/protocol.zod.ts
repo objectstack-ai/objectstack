@@ -3370,7 +3370,7 @@ export const AiModelsResponseSchema = lazySchema(() => z.object({
       label: z.string().describe('Display label for the picker'),
       default: z.boolean().describe('Whether this is the environment default'),
     }),
-  ])).describe('Models this environment offers'),
+  ])).describe('Models this system offers'),
   defaultModel: z.string().optional().describe('Default model id, when the service reports one'),
 }));
 

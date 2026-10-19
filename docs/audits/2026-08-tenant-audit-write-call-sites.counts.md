@@ -33,19 +33,19 @@ silent, and `node scripts/tenant-audit-census.mjs --write` is the resolution.
 
 | Measure | Value |
 |---|---:|
-| Write call sites | 229 |
-| Object name statically decidable | 158 |
+| Write call sites | 231 |
+| Object name statically decidable | 160 |
 | Object name chosen at run time | 71 |
-| Against a tenancy-enabled object | 157 |
+| Against a tenancy-enabled object | 159 |
 | Against an object declaring tenancy off | 1 |
-| Threading a tenant context | 168 |
+| Threading a tenant context | 171 |
 | Provably carrying none | 8 |
 | …and decidably tenancy-enabled | 2 |
-| Options argument unreadable | 53 |
-| …and decidably tenancy-enabled | 32 |
-| Threading a decidably elevated context | 125 |
+| Options argument unreadable | 52 |
+| …and decidably tenancy-enabled | 31 |
+| Threading a decidably elevated context | 128 |
 | Threading a decidably non-elevated context | 0 |
-| Threading a context of undecidable elevation | 96 |
+| Threading a context of undecidable elevation | 95 |
 
 ## Subtractions the census could NOT defend — enforced
 
@@ -90,14 +90,14 @@ holds still. They are required to be HERE and to say WHEN they were true;
 their values are not compared. The reasoning, and the measurement behind it,
 are in `scripts/check-tenant-audit-census.mjs`.
 
-Measured on 2026-10-16 at `22b217924`.
+Measured on 2026-10-19 at `2623d6d6c`.
 
 | corpus scale (not enforced) | count |
 | :--- | ---: |
-| tracked non-test sources scanned | 657 |
+| tracked non-test sources scanned | 670 |
 | engine-shaped types recognised | 79 |
 | declared objects in the registry | 116 |
-| same-named calls subtracted as non-engine | 165 |
+| same-named calls subtracted as non-engine | 166 |
 
 ## Every site
 
@@ -133,7 +133,9 @@ Measured on 2026-10-16 at `22b217924`.
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_session` | enabled | options unreadable | 3 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_two_factor` | enabled | options unreadable | 1 |
 | `packages/plugins/plugin-auth/src/auth-manager.ts` | `update` | `sys_user` | enabled | options unreadable | 8 |
-| `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_user_permission_set` | enabled | options unreadable | 1 |
+| `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_user_permission_set` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/auth-manager.ts` | `delete` | `sys_verification` | enabled | elevated | 1 |
+| `packages/plugins/plugin-auth/src/auth-manager.ts` | `insert` | `sys_verification` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_oauth_application` | enabled | PROVABLY NONE | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `sys_user` | enabled | elevated | 1 |
 | `packages/plugins/plugin-auth/src/auth-plugin.ts` | `update` | `SystemObjectName.USER` | undecidable | elevated | 1 |

@@ -3007,7 +3007,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
       },
       undo_log: {
         label: "Undo Log",
-        help: "Reversal instructions ({created:[ids], updated:[{id,before}]}) captured for small non-dry-run jobs so the import can be undone"
+        help: "Reversal instructions ({created:[ids], updated:[{id,before}]}) captured for small non-dry-run jobs so the import can be undone. A partial undo keeps only the unreverted rows here, with a failures list giving each one's id, action, code and refusal"
       },
       reverted_at: {
         label: "Reverted At",

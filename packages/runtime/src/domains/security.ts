@@ -18,8 +18,9 @@
  *   GET  /security/suggested-bindings?status=&packageId=   → list (reconciles first)
  *   POST /security/suggested-bindings/:id/confirm          → accept it for the deployment
  *   POST /security/suggested-bindings/:id/dismiss          → decline it, or revoke an acceptance
- *   POST /security/_activation/:type/:name                 → switch a position (`position`) or a
- *                                                            permission set (`permission`) on/off
+ *   POST /security/_activation/:type/:name                 → switch a position (`position`), a
+ *                                                            permission set (`permission`) or a declared
+ *                                                            sharing rule (`sharing_rule`) on/off
  *                                                            for this deployment (`./catalog-activation.ts`)
  *   POST /security/permission-sets/:name/clone            → copy a permission set's whole definition
  *                                                            under a new name (`./permission-set-clone.ts`)

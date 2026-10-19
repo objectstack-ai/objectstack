@@ -1,5 +1,350 @@
 # @objectstack/runtime
 
+## 18.0.0-next.4
+
+### Minor Changes
+
+- a06f0d4: fix(runtime)!: the dispatcher's `GET /meta/object/:name` answers an object of a disabled package with the protocol's `404 OBJECT_PACKAGE_DISABLED`, never the registry's copy
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of a runtime read door on the dispatcher transport: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the read -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The dispatcher's object read had two registry reads. On an unscoped kernel it read `registry.getObject(name)` before the protocol. On a scoped kernel it fell back to `registry.getObject(name)` when the protocol read threw. The registry keeps a disabled package's objects on purpose, so both reads served such an object.
+  
+  - **Refused now:** `GET /meta/object/:name` on the dispatcher transport, for an object whose owning package is disabled. It answers the protocol's `404 OBJECT_PACKAGE_DISABLED`, on scoped and unscoped kernels alike.
+  - **Unchanged:** every other object read, including the registry fallback for an object the protocol misses for any other reason.
+  
+  What changes for you: re-enable the package to read the object again.
+- 58a2faa: fix(runtime)!: the dispatcher's `/meta/:type/:name/layers` and `?layers=true` answer a disabled package's non-object item as a missing name
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of two runtime read doors for an item whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the reads -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **Absent now, `404 RESOURCE_NOT_FOUND` "Not found", byte for byte the missing name's answer:** `GET /meta/:type/:name/layers` and `GET /meta/:type/:name?layers=true` (with its `Deprecation` header) for an item of every type but `object` and `package` whose owning package is disabled, to every caller. The owner is the one the by-name read's protection envelope names (`packageId`) under the request's `?package=` scope, as `RestServer` asks it. Objects already answered `404 OBJECT_PACKAGE_DISABLED` here.
+  - **Unchanged:** items of enabled packages, and a name with nothing behind it.
+  
+  What changes for you: re-enable the package to read its items' layered views again.
+- 2bcd406: fix(runtime)!: the dispatcher's `/meta` doors that read past the protocol answer a disabled package's object or item as the protocol's by-name read does
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of runtime read doors on the dispatcher transport: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the read -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  The registry keeps a disabled package's objects on purpose, and the metadata service knows nothing of a disable. Four dispatcher doors read one of them for a disabled package's object or item and served it.
+  
+  - **Refused now, `404 OBJECT_PACKAGE_DISABLED`:** `GET /meta/object/:name/state/:field`, and the legacy one-segment `GET /meta/:name` exit, for an object whose owning package is disabled. Both read `registry.getObject`; they now answer the protocol's refusal, the answer `GET /meta/object/:name` gives.
+  - **Refused now, `404 OBJECT_PACKAGE_DISABLED`:** `GET /meta/object/:name/published`. When the layered read refused the object, this door fell through to the published snapshot and served it. The refusal is now the answer, as on `RestServer`'s `/published`.
+  - **Absent now, `404 RESOURCE_NOT_FOUND`:** `GET /meta/:type/:name` for a non-object item of a disabled package. The protocol answers it as absent, and the door no longer serves the metadata service's copy in its place. The body is byte for byte the answer for a missing name.
+  - **Unchanged:** objects and items of enabled packages, and every other fall-through.
+  
+  What changes for you: re-enable the package to read the object or item again.
+- e74ec56: fix(runtime)!: the dispatcher's `/meta/:type/:name/published` answers a disabled package's non-object item as a missing name
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) the narrowing is the served set of one runtime read door for an item whose owning package is disabled: no stored metadata changes shape, no spec key, export or error code is added or removed, and nothing must be rewritten; re-enabling the package restores the read -->
+  
+  **BREAKING** (a served-set narrowing), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **Absent now, `404 RESOURCE_NOT_FOUND` "Not found", byte for byte the missing name's answer:** `GET /meta/:type/:name/published` for an item of every type but `object` and `package` whose owning package is disabled, on the stored published row and the code/package snapshot alike. The owner is the one the by-name read's protection envelope names (`packageId`), as `RestServer`'s `/published` asks it. Objects already answered `404 OBJECT_PACKAGE_DISABLED` here.
+  - **Unchanged:** items of enabled packages, and a name with nothing behind it.
+  
+  What changes for you: re-enable the package to read its items' published versions again.
+- 1e001c7: feat(runtime): `POST /packages/:id/publish-drafts` accepts a `backfill` body key and passes it to the protocol with the caller's execution context
+  
+  Clause-②: yes (widening)
+  
+  - The body's `backfill` (`[{ object, field }]`) reaches `publishPackageDrafts` as sent, together with the request's own execution context, so the backfill writes run as the signed-in caller, never as the system. A body without the key sends neither.
+  - The protocol's request refusal answers `400 VALIDATION_ERROR` with its `issues[]`, before anything is published, flipped or announced. The `backfillApplied` receipt rides the `200` body.
+- d79dc48: fix(runtime)!: an `operation: 'update'` action that declares no `params` refuses every undeclared wire param at both action doors, instead of writing it to the row
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) Nothing an author writes, and no stored shape, is added, removed, renamed or converted: the change is which wire params the two action doors accept for one declared action shape. No spec schema changes, so nothing exists for `objectstack migrate meta` to rewrite. A request is not metadata, and whether a value the client sends should become a declared param is a decision only the action's author can make. -->
+  
+  **BREAKING** (the REST `/actions` door and the MCP `run_action` door now refuse, with a 400 `VALIDATION_ERROR`, a wire param that a declarative update action without `params` does not declare; measured consumers: objectstack-ai/hotcrm's `complete_task` called with such params; any console vendored before objectui `fb501bc894`, which posts the action's `patch` keys as `params`; and page action rows (`action:button` / `action:icon` with `operation: 'update'`) whose static object `params` the console forwards to a param-less declarative update action, none of which exist in this repo, with the row surface tracked in #24394), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  A declarative update (`operation: 'update'` + `patch`) has no handler: the route merges the request's `params` over `patch` and writes the result to the current record. An action that declared no `params` skipped the ADR-0104 D2 param check altogether, so any key the caller sent was written too. An action declaring `patch: { status: 'completed' }` could rewrite any other field the caller may write, which is not what its author declared.
+  
+  Now an empty or absent `params` list on a declarative update is an empty accept set. Every key that is neither a declared param nor a dispatcher built-in (`recordId`, `objectName`, `_selectedIds`) is refused before anything is read or written, through the same D2 path a declared-params action already takes: the same `Invalid action params: Unknown action param "KEY"` message, the same 400, and the same `OS_ALLOW_LAX_ACTION_PARAMS=1` escape hatch. The action still writes its `patch` when the request carries no `params` or an empty bag, and a declared param still writes and still wins over `patch`.
+  
+  Unchanged: an action with a handler (`target`, `body`, or a flow) that declares no `params` keeps its pass-through.
+  
+  Also at the MCP `run_action` door: every ADR-0104 D2 param refusal, and the declarative update's own refusals (no `recordId`, or nothing to write), now carry `code: 'VALIDATION_ERROR'` and `status: 400`, so the tool error renders the coded envelope the REST door already answers with, rather than the message alone.
+  
+  What to do: declare the param on the action if the request's value should be written, or stop sending it, because the route applies `patch` from the declaration and never needs it on the wire.
+
+### Patch Changes
+
+- 6e43b7b: fix(runtime): the `keys` and `actions` dispatcher domains answer their `405 METHOD_NOT_ALLOWED` with an `Allow: POST` header
+  
+  Clause-②: no
+  
+  RFC 9110 requires a `405` to carry an `Allow` header naming the methods the target resource supports. The `mcp`, `meta` and `ai` dispatcher domains already send one. The `keys` and `actions` domains answered their `405` without it, so a client could see that its verb was refused but not which verb the route takes.
+  
+  Both domains serve one method, `POST`, on every path they claim, and their `405` now carries `Allow: POST`:
+  
+  - **`/api/v1/keys`.** A signed-in `GET`, `PUT`, `PATCH` or `DELETE` is answered `405` with `Allow: POST`, on the standalone server (`os dev`, `os serve`) and on a host built with `@objectstack/hono`'s `createHonoApp`.
+  - **`/api/v1/actions/...`.** A signed-in non-`POST` request that reaches the `actions` domain is answered `405` with `Allow: POST`. That is every such request on a `createHonoApp` host. The standalone server mounts these paths for `POST` only, so its HTTP adapter answers other verbs itself, and that answer already carried `Allow: POST`.
+  
+  The status, the body and its `error.code` are unchanged: `{ success: false, error: { code: 'METHOD_NOT_ALLOWED', message: 'Method not allowed', httpStatus: 405 } }`. Each domain still decides an anonymous caller before it looks at the method, so an anonymous `GET` (or any other verb the anonymous decision refuses) that reaches either domain is answered `401 UNAUTHENTICATED`, with no `Allow` header.
+- 727091c: fix(runtime): every PUT and PATCH route the dispatcher mounts answers with an `X-Request-Id` and reports its 5xx to the error reporter, as its GET, POST and DELETE routes always did
+  
+  Clause-②: no
+  
+  The dispatcher wraps each route it mounts in its observability instrumentation. That wrapper echoes a valid inbound `X-Request-Id` (and mints a `req_`-prefixed hex id otherwise), sets `req.requestId`, hands a 5xx to the configured `observability.errorReporter`, and gives the `[5xx]` log line its method, route and request id. It wrapped routes registered through `get`, `post` and `delete` only, so every route mounted through `put` or `patch` answered without any of that: `PUT` and `PATCH /api/v1/keys`, the `PUT` and `PATCH` mounts of the three `/notifications` paths, `PATCH /packages/:id` (and its `/enable` and `/disable`), `PUT /automation/:name`, the `PUT` and `PATCH /ai/*` wildcards, and PATCH routes a service emits on `ai:routes`. It now wraps all five verbs.
+  
+  - **On the wire:** a `PUT` or `PATCH` answer from these routes now carries the `X-Request-Id` header (or the header `observability.requestIdHeader` names), as "Debugging with Request IDs" in the error-handling guide describes.
+  - **For an operator:** a 5xx on one of these routes now reaches `observability.errorReporter`, and its `[5xx]` log line now carries the method, route and request id.
+  - **Metrics:** on the standalone Hono server nothing changes. The transport already counted and timed these requests through `afterResponse`, and it still does, once per request. On a transport without `afterResponse`, `PUT` and `PATCH` requests on these routes are now counted in `http_requests_total` and timed in `http_request_duration_ms`, as the other three verbs were.
+  
+  What changes for you: nothing to rewrite.
+- eda6f14: feat(spec)!: an install through `POST /api/v1/packages` may declare `manifest.scope` `project` only; `cloud` and `system` are refused, so an authored install can no longer lock itself
+  
+  `cloud` and `system` are the scopes of packages the platform ships, and the ADR-0070 D2 read-only rule (`isWritablePackage`) judges a registered package by its stored `manifest.scope`. An install through `POST /api/v1/packages` authors the package, yet the install declaration admitted all three scopes. So a manifest that copied `scope: 'cloud'` or `'system'` from a shipped package answered `201` and produced an authored package that `DELETE /packages/:id`, `PATCH /packages/:id/disable` and `POST /packages?overwrite=true` then refused with `422 WRITABLE_PACKAGE_REQUIRED`, and the stored row came back on every restart. The install declaration now narrows the install manifest's `scope` to `project` (new export `PackageInstallManifestSchema`, `ManifestSchema` with that one key narrowed), on both body forms of `PackageInstallBodySchema` and on `PackageInstallRequestSchema.manifest`. `ManifestSchema` itself is unchanged: platform packages still declare all three scopes, and they reach the registry by code boot, not over this door. The door already parses its body through that declaration, so it answers the refusal with no rule of its own; its bare-form refusal sentence now re-reads the union's own bare branch, so it carries the prescription too.
+  
+  Clause-②: no (narrowing)
+  
+  <!-- adr-0087: not-required (no-migration-prescription) No stored metadata moves and nothing is converted: the refused value is one a caller sends in a request body, and the only conversion that could exist for it (rewrite `cloud` / `system` to `project`) is the silent rewrite this change refuses on purpose, so there is nothing for `objectstack migrate meta` to rewrite. Stored `sys_packages` rows are untouched. The other categories are closed on facts: the packages publish (not unpublished); no ADR-0087 id is named or touched (not registered or already-registered); the narrowed declaration is a Zod schema in packages/spec (not runtime-interface-only or type-surface-only); and nothing exported is removed (not runtime-export-retired). -->
+  
+  **BREAKING** (a published request declaration's accept set narrows), shipped as `minor` under the launch-window convention for breaking changes.
+  
+  - **FROM:** `POST /api/v1/packages` with a manifest declaring `scope: 'cloud'` or `scope: 'system'`, in the wrapped body `{ manifest }` or as a bare manifest, with or without `overwrite`, answered `201`; `PackageInstallBodySchema` and `PackageInstallRequestSchema` parsed it green.
+  - **TO:** the same request answers `400` with `error.code: 'VALIDATION_ERROR'`, names `scope` and the value sent, and installs nothing; both schemas refuse it with an `invalid_value` issue at `manifest.scope` (wrapped) or `scope` (bare).
+  - **Unchanged:** a manifest with `scope: 'project'` or no `scope` installs as before (`201`), and the door still stores the manifest as sent, so an absent `scope` stays absent. `ManifestSchema` and every other producer of it keep `cloud` / `system`.
+  - **The fix for an integrator:** remove `scope` from the manifest you install (it defaults to `project`), or write `scope: 'project'`.
+  - **A package that already locked itself this way** (an authored `sys_packages` row whose manifest declares `cloud` or `system`) stays read-only after this change, because the read-only rule reads the stored scope. No API door removes it; an operator deletes its row from the environment's database (`DELETE FROM sys_packages WHERE id = 'PACKAGE_ID'`) and restarts the server.
+- d702b18: fix(cli,runtime): a dangling symlink standing as the SQLite database's directory is refused at once by `os dev` and `os serve`, naming the database file and the directory, instead of failing the boot later in a plugin's start
+  
+  Clause-②: no
+  
+  **What was wrong.** `os dev` (for its default database under `OS_HOME/data`) and the standalone host behind `os serve` and `os start` (for a `file:` or `wasm-sqlite://` database URL) make the database file's directory before the driver opens it. Both accepted any `EEXIST` answer while making a missing level. A symbolic link that points nowhere answers `EEXIST` to `mkdir`, so it was taken for a directory, and the boot went on until the driver could not open the file. `os dev` then exited 1 with `Plugin com.objectstack.auth failed to start - rollback complete: The database refused to run this query for object 'sys_organization'`, and `os serve` with `Plugin package-service failed to start - rollback complete: The database refused to run a raw statement`. Neither message named the file, the directory or the link.
+  
+  **What an operator sees now.** Both make the directory with the same bounded walk as the other `OS_HOME` paths, which accepts `EEXIST` only when a directory stands there. A dangling link as the directory is refused before the boot starts: `os dev` prints `The default database '…/data/objectstack.db' cannot be created: its directory '…/data' could not be made: EEXIST: …` and exits 1, and `os serve` prints `[StandaloneStack] SQLite database file '…' cannot be created: its directory '…' could not be made: EEXIST: …` and exits 1. Remove the link, or point it at a directory that exists. A dangling link higher up the path was already refused at once, with `ENOENT` at the level below the link; it is now refused with `EEXIST` at the link itself.
+  
+  Nothing else changes. A directory that can be made is still made, every missing level of it; a directory that exists, or a symbolic link to one, is used as it stands; and a path the operating system refuses for any other reason (`ENOENT`, `ENOTDIR`, a regular file holding the directory's name) is refused with the same code and text as before.
+- 5a9a80b: fix(runtime): an OAuth MCP agent acts in the organization the user's consent bound, so the user's organization-scoped grants count for it
+  
+  Clause-②: no
+  
+  - **What was wrong.** On the `/mcp` door, `resolveExecutionContext` built a verified OAuth access token's principal with no organization. The agent's delegator (the user it acts for, ADR-0090 D10) was then resolved with no active organization and held only its global grants. Every grant an administrator assigns is scoped to an organization, so an ordinary user's agent was refused every object operation: `on-behalf-of principal may not 'find' … the delegator lacks that grant (ADR-0090 D10 intersection)`.
+  - **What changed.** The principal is resolved in the organization the consent bound: the `organizationId` that `IAuthService.verifyMcpAccessToken` returns from the token's `organization_id` claim. It is handed to the shared resolver where a session carries its active organization, so it is vetted on every request by the rule a browser session's organization gets (`vetOrganizationClaim`, `@objectstack/core`). The user's grants scoped to that organization count for the agent; grants scoped to the user's other organizations do not. It is never the union of the user's organizations, never the organization the user's browser session has selected now, and never a widened global grant.
+  - **A membership that is gone.** Under a walled tenancy posture (`isolated`, `group`), a token whose organization the user no longer belongs to resolves with no organization, so only global grants apply. Under `isolated`, a former member's agent gets an empty `200` read and a refused tenant write. The same holds for an organization the user never belonged to, whatever put it on the token. Under `single`, or with no `tenancy` service, the organization stands as claimed, exactly as a browser session's does there.
+  - **Unchanged.** A token with no `organization_id` (minted before consents bound one, or by a user with no active organization at consent) resolves with no organization, as before: global grants only, until the user re-confirms the consent once. A platform admin's global grant applies as before. The API-key and session tracks are untouched.
+- 8eccf51: fix(runtime): on the standalone server, an anonymous request whose JSON body cannot be parsed gets the domain's `401`, not the transport's `400`
+  
+  Clause-②: no
+  
+  On the standalone server (`os dev`, `os serve`: `HonoServerPlugin` with the dispatcher plugin), the routes the dispatcher mounts read the request body before handing the request to `dispatch()`. The transport refuses a body it cannot parse when the body is read, so the refusal answered first: an anonymous `POST /api/v1/keys` with `{"name": "probe"` (the closing brace missing) got `400 INVALID_REQUEST`, while the same request with a well-formed body got the promised `401 UNAUTHENTICATED`. The anonymous answer depended on whether the body parsed.
+  
+  The mounts now hand the body on unread, and each domain reads it once its anonymous decision has admitted the caller. An anonymous caller gets the same answer whatever its body, on every mounted route that reads one, unscoped and `/environments/:environmentId`-scoped:
+  
+  - `401 UNAUTHENTICATED` on `POST /analytics/query` and `/analytics/sql`; `/keys` (every verb); `POST /notifications/read` and `/notifications/read/all`; `POST /automation`, `PUT /automation/:name` and the two `trigger` doors, `toggle`, `clone`, `resume`, `cancel` and `restore-suspension`; the three `POST /actions/...` shapes; the `/ai/*` routes; the `/packages` routes; `POST /security/_activation/:type/:name` and `POST /security/permission-sets/:name/clone`.
+  - `/mcp` answers its own `401`, or, ahead of it, its `404` when MCP is switched off and its `501` when no MCP service is installed. None of the three reads the body, so a signed-in caller gets the `404` or `501` too.
+  - `/mcp/skill` is public and reads no body: a `POST` or `DELETE` gets its own `405` + `Allow: GET`, signed in or not.
+  
+  Otherwise a signed-in caller with an unparseable body still gets the transport's `400 INVALID_REQUEST`: the body is read after the anonymous decision, not dropped. A `createHonoApp` host (`@objectstack/hono`) is unchanged; it already raised the refusal only when a domain read the body.
+- 1bf5f6e: fix(runtime): `ctx.title()` in a hook body answers a title formula that reads through a lookup, as a read of the record shows it
+  
+  A junction object's composed title, `record.book.title + ' · ' + record.reader.name`, is shown by every read of the record, but a hook body's `ctx.title()` answered `null` for it, and `ctx.title('<lookup field>')` answered `null` for a related record whose own title reads through a lookup.
+  
+  - **`ctx.title()`** now reads the one hop the title formula reads, through the body's own `ctx.api` channel: one read per lookup the title reads through, with the caller's permissions, on the transaction the body has open. It follows the lookup's value in this write, so a `beforeInsert` names the payload's book and a `beforeUpdate` that changes `book` names the new book. A title over the record's own columns still costs no read.
+  - **`ctx.title('<lookup field>')`** returns the title its `findOne` served, the related record's own one-hop title included, instead of re-computing it without the hop.
+  - A related record the caller may not read leaves the title `null`, as the read of the same record shows no title to that caller. It is never a partial title and never the hidden name. A title that would need a second hop is `null`, as it is on a read.
+  
+  What to do. Nothing. A hook that composed a junction object's title by hand can call `ctx.title()` instead.
+- af284b0: feat(spec): the remaining `getSession` readers read `AuthSessionApi`'s declared result, and none reads a top-level `activeOrganizationId`
+  
+  Clause-②: yes (widening)
+  
+  - **`@objectstack/spec/contracts` — `AuthSessionApi.getSession`'s result gains three optional `user` members**, each declared for a named reader: `isPlatformAdmin` (`boolean`, the ADR-0068 D2 rung plugin-auth's `customSession` derives) and `role` (`string | null`, better-auth's `admin` plugin scalar), both read by `judgePlatformAdmin` in `@objectstack/plugin-auth`; and `name` (`string`), read by the runtime dispatcher's AI-route `req.user` resolver as the display name. Every member is optional, so every implementer and caller typechecks unchanged.
+  - **The readers read through the declared type instead of `any` or a cast** (types only, runtime behaviour unchanged): `judgePlatformAdmin` and the four platform-admin mounts in `@objectstack/plugin-auth` (better-auth's own session type now has to fit the declaration at those reads), the REST server's two session reads (`@objectstack/rest`), the dispatcher's posture read, `resolveSessionData` and both `HttpDispatcher` reads (`@objectstack/runtime`), the cloud-connection and install-local session reads (`@objectstack/cloud-connection`), the webhook redeliver door (`@objectstack/plugin-webhooks`), and the storage session bridge (`@objectstack/service-storage`).
+  - **Fix — the top-level `activeOrganizationId` fallback is removed** from the storage upload stamp (`@objectstack/service-storage`) and from install-local's `resolveActiveOrgId` (`@objectstack/cloud-connection`). The active organization is read from `session.activeOrganizationId` alone, where the contract declares it. No in-process producer answers a top-level `activeOrganizationId` (better-auth's read is `{ user, session }`), so for the shipped auth plugin nothing changes. An auth service that answered only the flattened shape now gets no organization: the upload is not stamped, and install-local reports no active organization. To fix it, answer the active organization on `session.activeOrganizationId`, as `AuthSessionApi` declares it.
+- cbfa5e4: fix(runtime): on the standalone server, every verb on `/api/v1/actions/...` reaches the `actions` domain, so an anonymous caller is answered `401`; and an `Allow` header no longer lists verbs a route mounts only to refuse
+  
+  Clause-②: no
+  
+  On the standalone server (`os dev`, `os serve`: `HonoServerPlugin` with the dispatcher plugin), a request that matched no route under its verb was answered by the HTTP adapter: `405 METHOD_NOT_ALLOWED` with an `Allow` header built from the verbs registered on the path. Two answers were wrong.
+  
+  - **`/api/v1/actions/...` (all three path shapes, unscoped and `/environments/:environmentId`-scoped).** Only `POST` is mounted, so an anonymous `GET`, `HEAD`, `PUT`, `PATCH`, `DELETE` or `TRACE` was answered `405` + `Allow: POST` instead of the published `401 UNAUTHENTICATED`. Every such request now reaches the `actions` domain, as it does on a `createHonoApp` host: an anonymous caller gets `401 UNAUTHENTICATED` with no `Allow`, and a signed-in caller gets the domain's `405` + `Allow: POST`. An anonymous `OPTIONS` (only reachable with CORS off) gets the domain's `405` + `Allow: POST` on both hosts, because the shared anonymous decision lets a CORS preflight through.
+  - **`Allow` on `/api/v1/keys`, the three `/api/v1/notifications` faces and `/api/v1/mcp/skill`.** These paths mount verbs that exist only so the domain can refuse them. A verb that cannot be mounted (`OPTIONS` with CORS off, `TRACE`, an extension method), and `PUT`/`PATCH` on `/mcp/skill`, got the adapter's `405` with those refusal-only verbs listed as supported (`/keys`: `Allow: DELETE, GET, HEAD, PATCH, POST, PUT`). They now reach the domain too: `/keys` answers `401` anonymous and `405` + `Allow: POST` signed in, `/notifications` answers `401` anonymous and `404 ROUTE_NOT_FOUND` signed in, and `/mcp/skill` answers `405` + `Allow: GET`.
+  
+  Every request that was served is served as before, and no route is added: the dispatcher's existing fallback seam hands these requests to the domain. A transport that implements `setFallbackHandler` but not `resolveMountedRoute` keeps the adapter's answer, and the dispatcher says so once at boot, at `warn`.
+- 9822b05: fix(hono): on a `createHonoApp` host a `HEAD` is answered as its `GET` (no body), as the standalone server answers it; `HEAD /api/v1/mcp/skill` no longer answers `405` with `Allow: GET`
+  
+  Clause-②: no
+  
+  `createHonoApp`'s `${prefix}/*` catch-all handed the dispatcher the request's raw verb. Hono answers a `HEAD` from the `GET` route, but the verb still read `HEAD`, and the dispatcher's domains decide by comparing it with `GET`, so a `HEAD` was not answered as its `GET` on this host. Measured: `HEAD /api/v1/mcp/skill` answered `405 METHOD_NOT_ALLOWED` with `Allow: GET`; `/health`, `/ready` and the scoped root `/environments/:id` answered `404 ROUTE_NOT_FOUND`; signed in, `/analytics/meta` answered `404` and `/ai/agents` `501`; anonymous, the public `/share-links/:token/resolve` answered `401` where `GET` answers `501`. With an auth service, `HEAD /auth/config` answered `404` (it was forwarded to better-auth instead of answered as the `GET`).
+  
+  - **`@objectstack/hono`.** The catch-all now dispatches a `HEAD` as `GET`, and the `/auth/config` branch answers a `HEAD` as its `GET`. Every dispatcher route answers `HEAD` with its `GET` answer's status and headers, and Hono drops the body. A path that serves no `GET` keeps its `GET` answer for `HEAD` (its `405` and `Allow`, or `401` to an anonymous caller). The standalone server (`HonoServerPlugin` with the dispatcher plugin) already answered `HEAD` this way. Only the verb changes: a domain that forwards the request (the `/mcp` transport, the `/approvals/act` page) is still handed the client's `HEAD` request.
+  - **`@objectstack/runtime`.** The `/approvals/act` domain decides whether a request is a `HEAD` from the forwarded request's own method, not from the dispatcher's verb. So a `HEAD` still reaches the approvals member as a `GET` and is answered with no body.
+- 889bf12: fix(runtime): an anonymous caller of `/api/v1/mcp` is answered `401 UNAUTHENTICATED` whatever `OS_MCP_SERVER_ENABLED` or the `mcp` service says
+  
+  Clause-②: no
+  
+  ADR-0138 D2 takes the anonymous decision once per domain, as the domain's first statement. The `/mcp` domain checked the `OS_MCP_SERVER_ENABLED` switch and the `mcp` service before it, so an anonymous caller was answered `404 RESOURCE_NOT_FOUND` with the switch off and `501 NOT_IMPLEMENTED` with no MCP service installed, and learned whether the deployment runs MCP before it was refused. Measured on both hosts, the standalone server (`HonoServerPlugin` with the dispatcher plugin) and a `createHonoApp` host.
+  
+  - An anonymous request on `/api/v1/mcp` (any verb) is now refused `401 UNAUTHENTICATED` first, in every composition. Only the order of the refusals moves: no request that was refused before is accepted.
+  - A signed-in caller, or a system principal, keeps the switch's `404` and the service's `501`, in that order.
+  - The `401` advertises RFC 9728 resource metadata (`WWW-Authenticate: Bearer … resource_metadata="…"`) only where the resource is served: the switch on, an `mcp` service that can take the request, and an auth service that answers a metadata URL. With the switch off or no service the `401` is the plain API-key one, so it never points a client at a protected resource the deployment does not serve.
+- 7a8733f: fix(runtime): a request to a declarative `apis:` endpoint path gets its `404` or `401` whatever its JSON body, not the transport's `400`
+  
+  Clause-②: no
+  
+  Only the order of refusals moves: the `404` and the `401` now answer ahead of the body's `400`. No request that was refused before is accepted, and no export changes.
+  
+  On the standalone server (`os dev`, `os serve`: `HonoServerPlugin` with the dispatcher plugin), the fallback that serves metadata-declared `apis:` endpoints (`/api/v1/apps/NAMESPACE/...` under the default prefix) read the request body before it matched an endpoint or applied `authRequired`. The transport refuses a body it cannot parse when the body is read, so that refusal answered first:
+  
+  - a `POST /api/v1/apps/ns/x` that no declaration owns, with `{"params": {"days": 30}` (the closing brace missing), got `400 INVALID_REQUEST`, while the same request with a well-formed body got `404 ENDPOINT_NOT_FOUND`, signed in or not;
+  - an anonymous `POST` to an `authRequired: true` endpoint with that body got `400 INVALID_REQUEST`, while a well-formed body got `401 UNAUTHENTICATED`.
+  
+  The fallback now hands the endpoint step the body unread, and the step reads it once the endpoint is matched and its policies (`rateLimit`, `authRequired`) have admitted the caller, just before `inputMapping`. A path no declaration owns answers `404`, and an anonymous caller of an `authRequired: true` endpoint answers `401`, whatever the body. A caller the endpoint admits still gets the transport's `400 INVALID_REQUEST` for an unparseable body, and a readable body reaches the target as before.
+- 51ad8e4: Clause-②: yes (widening)
+  
+  fix(cli,runtime): the 17 → 18 organization-ownership upgrade of a single-posture database that holds no organization leaves no row without one, the boot the ceremony prescribes writes nothing before it is refused, and a ceremony that did not verify is never served (ADR-0131 D3, D10)
+  
+  A 17.x single-posture install whose seed ran before any organization existed holds rows of organization-owned objects with `organization_id` NULL and an empty `sys_organization`. Upgrading it took this path: the ceremony's attribution checkpointed itself done at zero rows; the boot its rewrite step asks for created the Default Organization and let the inline seed stamp some rows before it refused; the second `--apply` did not run attribution again, dropped the columns and recorded discrepancies with `verified_at` NULL; and `os start` then served that database.
+  
+  - **The ceremony creates the Default Organization (`@objectstack/cli`).** Under the `single` posture, on a database that holds no organization and rows no anchor names, `os migrate organization-ownership` plans those rows as the Default Organization's and says so in a plan warning (`defaultOrganizationCreatedByApply: true` in the plan file). `--apply` creates it before its first write, through plugin-auth's boot invariant (the row a single-posture boot creates), and gives it every such row. A run that cannot create it — a boot without the auth family that declares `sys_organization` — blocks at attribution, naming why, instead of attributing nothing and certifying. Nothing is created under a walled posture, or when the database holds organizations.
+  - **The ceremony names the Default Organization as the boot does (`@objectstack/cli`).** Under `single` it is the organization with `slug = 'default'`, else the sole organization whatever its slug — the boot invariant's and the tenancy service's definition (ADR-0093 D3). Before, the plan required `slug = 'default'`, so a database whose only organization had another slug kept its unanchored rows NULL through the ceremony while v18 derives every owner from that organization. Several organizations, none of them `default`, still name none, and their rows are reported. In the plan file (the command's own output, not a published schema) `defaultOrganization.slug` is now that organization's own slug, no longer always `'default'`.
+  - **A checkpointed attribution runs again (`@objectstack/cli`)** whenever the plan derives an owner for rows still NULL: a row the operator made attributable since, or one an earlier run found no Default Organization for. It writes only where `organization_id` is NULL, so no owner already written is derived again. A database left by an earlier release's ceremony in that state is completed by re-running `--apply`.
+  - **The boot guard judges before any plugin writes (`@objectstack/runtime`, `@objectstack/plugin-auth`).** `OrganizationOwnershipBootGuardPlugin` judges in its own `start()`, after the engine's schema sync (the column the rewrite step waits for is still added) and before every plugin that writes rows at start: `AppPlugin` (the inline seed), `AuthPlugin` and the identity-objects plugin (the Default Organization) name it (`com.objectstack.organization-ownership-boot-guard`) in `optionalDependencies`. A refused boot leaves every row as it found it.
+  - **A ceremony that did not verify is refused (`@objectstack/runtime`).** With no table left in the v17 shape, a boot whose `adr-0131-organization-ownership` marker exists and is not verified — the post-check found rows the ceremony has not carried — is refused with `ORGANIZATION_OWNERSHIP_MIGRATION_REQUIRED`, naming the re-run. A database with no marker (a fresh one) boots as before.
+  - **The refusal now arrives as a `cause` (`@objectstack/runtime`).** A failed `start()` is reported by the kernel as its own error ("Plugin … failed to start"), with the plugin's error as its `cause`. A host that composes the guard and inspects the boot error asks `isOrganizationOwnershipBootRefusal` of each `cause` down the chain: asked of the kernel's own error it now answers `false`. `assertOrganizationOwnershipMigrated(engine)` still throws the refusal itself. `os serve` and `os dev` read it from the chain.
+  - **One new export (`@objectstack/plugin-auth`, `minor`).** `ensureDefaultOrganizationExists(ql, options?)` — the Default Organization's boot invariant, find-or-create under `single` — for the ceremony, so the organization it creates is the row a single-posture boot creates, from one producer. A host composing a kernel still never calls it: `AuthPlugin` and the identity-objects plugin keep the invariant on every boot. No other package entry changes.
+  
+  Unchanged: the ceremony's steps, fates and refusals otherwise; a walled posture's unattributable rows (reported, never assigned); the boot of a fresh or verified database; and every plugin's order on a kernel that does not compose the guard. Repairing a database whose organization-scoped seed load already inserted twins of NULL-organization rows is an operator's data repair.
+- c4526a7: fix(runtime): a hook's inline `handler` function is handed the same `ctx.title(field?)` a hook `body` gets, so a source boot (`@objectstack/verify`'s `bootStack(config)`, `os serve` over an `objectstack.config.ts`) answers it as `objectstack dev` does (#24289)
+  
+  Clause-②: no
+  
+  A source boot runs a hook's inline `handler` in-process, and the accessor existed only in the sandbox a `body` runs in. So a hook calling `await ctx.title()` or `await ctx.title('account_id')` (a lookup column) answered on `objectstack dev` and an artifact boot, and under `bootStack(config)` refused every write with `TypeError: ctx.title is not a function`. `bindAppArtifactHandlers` now hands each inline handler function a view of the engine's hook context that answers `title` through the same accessor the sandbox installs: the same two forms, the same served formula title and related-record read on the context's own `ctx.api`, and `null`, never the record's id, when there is no title. Every other read and every write goes to the engine's context unchanged, and that context gains no key. A `handler` that names a function (the deprecated string form) is not covered by this change.
+- 6868514: Clause-②: no
+  
+  Ten user-facing strings the runtime's HTTP doors answer no longer call the system the caller is in
+  "this environment". The permission-set clone door's success notice (`PERMISSION_SET_CLONE_NOTICE`, the
+  `notice` beside the copy) now says the copy is "a new permission set authored in this system", the
+  wording the console's clone hint uses. The other nine drop the noun: `/mcp` and `/mcp/skill` on a
+  deployment that opts out answer `404` "MCP server is not enabled"; a share-link request with no
+  share-link service answers `501` "Sharing is not configured"; and the webhook-redelivery, approval
+  action-page and inbound automation-hook doors answer `501` "… no webhooks service is registered." (or
+  approvals, or trigger-api) when the service is missing, and "… the registered webhooks service does not
+  implement handleRedeliver." (or `handleActionPage`, or `handleInboundHook`) when it lacks its member.
+  Only the human-readable text moves: every HTTP status, error code and response shape is what it was.
+- Updated dependencies [b2e7870]
+- Updated dependencies [6a49efb]
+- Updated dependencies [eebaf3b]
+- Updated dependencies [194a42d]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [bb7ccde]
+- Updated dependencies [df000d4]
+- Updated dependencies [df000d4]
+- Updated dependencies [646303e]
+- Updated dependencies [646303e]
+- Updated dependencies [e9bc60b]
+- Updated dependencies [52ff308]
+- Updated dependencies [d1f082d]
+- Updated dependencies [f5ef054]
+- Updated dependencies [0d34066]
+- Updated dependencies [03ac4ec]
+- Updated dependencies [b0a1df0]
+- Updated dependencies [f792290]
+- Updated dependencies [eda6f14]
+- Updated dependencies [2ee5861]
+- Updated dependencies [f3174ef]
+- Updated dependencies [e46ce7b]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [a06f0d4]
+- Updated dependencies [9975c26]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [2ac0616]
+- Updated dependencies [1489952]
+- Updated dependencies [aaaeeac]
+- Updated dependencies [8a88901]
+- Updated dependencies [030a7b8]
+- Updated dependencies [b1845ed]
+- Updated dependencies [99e9d29]
+- Updated dependencies [70cfb12]
+- Updated dependencies [aa31569]
+- Updated dependencies [8259ea0]
+- Updated dependencies [9040945]
+- Updated dependencies [8bfb17d]
+- Updated dependencies [8215ff7]
+- Updated dependencies [4f11af5]
+- Updated dependencies [b036ac5]
+- Updated dependencies [d537a31]
+- Updated dependencies [d537a31]
+- Updated dependencies [1bf5f6e]
+- Updated dependencies [d537a31]
+- Updated dependencies [6ec0e12]
+- Updated dependencies [2bcd406]
+- Updated dependencies [e74ec56]
+- Updated dependencies [2bcd406]
+- Updated dependencies [2bcd406]
+- Updated dependencies [58a2faa]
+- Updated dependencies [e74ec56]
+- Updated dependencies [af284b0]
+- Updated dependencies [14a8bd2]
+- Updated dependencies [83dfbc0]
+- Updated dependencies [1e001c7]
+- Updated dependencies [1e001c7]
+- Updated dependencies [0b44840]
+- Updated dependencies [ef65646]
+- Updated dependencies [586705d]
+- Updated dependencies [1173017]
+- Updated dependencies [51ad8e4]
+- Updated dependencies [ec749fb]
+- Updated dependencies [ec749fb]
+- Updated dependencies [2ce2e36]
+- Updated dependencies [584b422]
+- Updated dependencies [62e2b6d]
+- Updated dependencies [41c7405]
+- Updated dependencies [370833a]
+- Updated dependencies [2f569a9]
+- Updated dependencies [69147ab]
+- Updated dependencies [3a734e0]
+- Updated dependencies [ba5bfe9]
+- Updated dependencies [31e7d0b]
+- Updated dependencies [d65826f]
+- Updated dependencies [741aa85]
+- Updated dependencies [741aa85]
+- Updated dependencies [db1f1fd]
+- Updated dependencies [cf16a0d]
+- Updated dependencies [cf540a7]
+- Updated dependencies [cf540a7]
+- Updated dependencies [44a5011]
+- Updated dependencies [1827571]
+- Updated dependencies [f573976]
+- Updated dependencies [e22defb]
+  - @objectstack/core@18.0.0-next.4
+  - @objectstack/plugin-security@18.0.0-next.4
+  - @objectstack/plugin-auth@18.0.0-next.4
+  - @objectstack/objectql@18.0.0-next.4
+  - @objectstack/spec@18.0.0-next.4
+  - @objectstack/rest@18.0.0-next.4
+  - @objectstack/metadata-protocol@18.0.0-next.4
+  - @objectstack/formula@18.0.0-next.4
+  - @objectstack/metadata-core@18.0.0-next.4
+  - @objectstack/driver-memory@18.0.0-next.4
+  - @objectstack/driver-sql@18.0.0-next.4
+  - @objectstack/driver-sqlite-wasm@18.0.0-next.4
+  - @objectstack/driver-turso@18.0.0-next.4
+  - @objectstack/metadata@18.0.0-next.4
+  - @objectstack/service-cluster@18.0.0-next.4
+  - @objectstack/service-datasource@18.0.0-next.4
+  - @objectstack/service-i18n@18.0.0-next.4
+  - @objectstack/observability@18.0.0-next.4
+  - @objectstack/types@18.0.0-next.4
+
 ## 18.0.0-next.3
 
 ### Minor Changes
