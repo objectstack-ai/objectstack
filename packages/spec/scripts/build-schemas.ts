@@ -2355,14 +2355,14 @@ function resolveBaselineWithoutMergeBase(
   if (!ensureCommitPresent(git, own)) {
     return {
       refusal:
-        `\n❌ The deletion checks' anchor ${own.slice(0, 12)} — the commit this tree's ${SURFACE_BASE_FILE_NAME}\n` +
-        `   records — is not in this checkout and the remote did not serve it (\`git fetch --depth=1\n` +
-        `   origin ${own}\` failed). With truncated history there is no merge base to use either,\n` +
-        `   and origin/main's tip is no baseline for this tree: it may hold schemas and keys\n` +
-        `   published after this tree was written. So this run refuses rather than judge the tree\n` +
-        `   against main, and rather than skip the checks.\n\n` +
-        `   Fix: re-run with the remote reachable (the fetch above is all it needs), or build from\n` +
-        `   walkable history.\n${remedy}`,
+        `\n❌ The deletion checks' anchor ${own.slice(0, 12)} — the commit this tree's\n` +
+        `   ${SURFACE_BASE_FILE_NAME} records — is not in this checkout, and the remote did not\n` +
+        `   serve it:\n\n` +
+        `     git fetch --depth=1 origin ${own}\n\n` +
+        `   With truncated history there is no merge base to use either, and origin/main's tip is no\n` +
+        `   baseline for this tree: it may hold schemas and keys published after this tree was\n` +
+        `   written. So this run refuses, rather than judge the tree against main or skip the checks.\n\n` +
+        `   Fix: re-run where that fetch succeeds, or build from walkable history.\n${remedy}`,
     };
   }
   return {
