@@ -3252,10 +3252,51 @@ export async function handleAutomationRequest(deps: DomainHandlerDeps, path: str
                         valueFailures,
                     );
                 }
+                // [#24546] BOTH SPELLINGS OF ONE SUBMISSION — the same
+                // silent-drop family commit a4331227b and #9416 closed, on the
+                // one pair of accepted keys that name the same thing.
+                // `variables` is an accepted alias of `inputs`, and the
+                // assembly below reads `b.inputs ?? b.variables`, so a body
+                // carrying both used to answer 200 `success:true` with the
+                // `variables` bag never read — even when that bag held a
+                // field the screen does not declare, which sent alone is
+                // refused 400 `INVALID_SCREEN_INPUT`. Refused, not resolved by
+                // a precedence rule: a precedence would keep a second
+                // spelling that means something different only in
+                // combination, which is the silence this arm exists to end.
+                // The refusal names both keys and the one to keep; a body
+                // carrying either key alone is unaffected.
+                //
+                // Same reading of "present" as the value-shape check above —
+                // `undefined` is absent — so the in-process spelling
+                // `{ inputs, variables: maybeUndefined }` is not a conflict.
+                // Ordering: after the unknown-key and value-shape refusals,
+                // whose messages are unchanged for every body, and before
+                // `resume()`, so the suspension stays intact for the retry.
+                if (b.inputs !== undefined && b.variables !== undefined) {
+                    throw validationFailure(
+                        'Invalid resume body — `inputs` and `variables` were both sent; `variables` is an alias of '
+                            + '`inputs` (the screen submission), so send `inputs` alone',
+                        [
+                            {
+                                field: 'inputs',
+                                code: 'invalid_value',
+                                message: 'sent together with `variables`, its alias — send `inputs` alone',
+                            },
+                            {
+                                field: 'variables',
+                                code: 'invalid_value',
+                                message: 'an alias of `inputs`, sent together with it — send `inputs` alone',
+                            },
+                        ],
+                    );
+                }
                 // #3801's field-by-field assembly, unchanged in substance: the
                 // body is never spread, so the symbol-keyed service-authority
                 // marker stays unforgeable. Every surviving value is now known
-                // to match the contract, so presence is the only test left.
+                // to match the contract, so presence is the only test left —
+                // and at most one of `inputs` / `variables` is present (the
+                // refusal just above), so the alias read drops nothing.
                 const inputs = (b.inputs ?? b.variables);
                 const signal: any = {};
                 if (inputs !== undefined) signal.variables = inputs;
