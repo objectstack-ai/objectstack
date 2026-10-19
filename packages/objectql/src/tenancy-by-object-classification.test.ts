@@ -196,17 +196,48 @@ describe('#13491 gate 1 — an admitted platform object reaches #8844 derive/ref
     expect(lastWrite(observed, 'sys_file')?.options?.tenantId).toBe(ORG_ID);
   });
 
-  it('single posture: a GLOBAL platform object still stays org-less — the control', async () => {
-    const { engine, observed } = await makeEngine({ posture: 'single' });
-    await engine.insert('sys_permission_set', { label: 'Admin' }, { context: SYSTEM_CTX } as any);
-    expect(lastWrite(observed, 'sys_permission_set')?.options?.tenantId).toBeUndefined();
-  });
+  // [ADR-0131 C8 stage 8b] Under `single` the classification no longer decides
+  // the write: every platform object with a tenant column is judged, admitted
+  // or not. The walled cases below are the control — there the exemption
+  // stands in 18.0 (epic ruling record 6259899486 on #15194, item 4).
+  it.each([
+    ['sys_permission_set', { label: 'Admin' }],
+    ['sys_audit_entry', { subject: 'e1' }],
+  ] as const)(
+    'single posture, one organization: the un-admitted platform object %s now DERIVES it',
+    async (object, row) => {
+      const { engine, observed } = await makeEngine({ posture: 'single' });
+      await engine.insert(object, { ...row }, { context: SYSTEM_CTX } as any);
+      expect(lastWrite(observed, object)?.options?.tenantId).toBe(ORG_ID);
+    },
+  );
 
-  it('single posture: an UNCLASSIFIED platform object stays org-less — behaviour did not move', async () => {
-    const { engine, observed } = await makeEngine({ posture: 'single' });
-    await engine.insert('sys_audit_entry', { subject: 'e1' }, { context: SYSTEM_CTX } as any);
-    expect(lastWrite(observed, 'sys_audit_entry')?.options?.tenantId).toBeUndefined();
-  });
+  it.each([
+    ['no organization', [] as string[], 0],
+    ['two organizations', [ORG_ID, 'org_second'], 2],
+  ] as const)(
+    'single posture, %s: an org-less system insert on an un-admitted platform object is REFUSED, loudly, and never written',
+    async (_label, organizations, count) => {
+      const { engine, observed } = await makeEngine({ posture: 'single', organizations: [...organizations] });
+      await expect(
+        engine.insert('sys_audit_entry', { subject: 'e1' }, { context: SYSTEM_CTX } as any),
+      ).rejects.toMatchObject({
+        code: 'ERR_SYSTEM_WRITE_ORGANIZATION_REQUIRED',
+        status: 500,
+        organizationCount: count,
+      });
+      expect(lastWrite(observed, 'sys_audit_entry')).toBeUndefined();
+    },
+  );
+
+  it.each(['isolated', 'group'] as const)(
+    '%s posture: an UNCLASSIFIED platform object still stays org-less — the walled exemption stands in 18.0',
+    async (posture) => {
+      const { engine, observed } = await makeEngine({ posture });
+      await engine.insert('sys_audit_entry', { subject: 'e1' }, { context: SYSTEM_CTX } as any);
+      expect(lastWrite(observed, 'sys_audit_entry')?.options?.tenantId).toBeUndefined();
+    },
+  );
 
   it.each(['isolated', 'group'] as const)(
     '%s posture: an org-less system write on an admitted object is REFUSED, loudly',

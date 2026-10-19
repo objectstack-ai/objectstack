@@ -232,8 +232,15 @@ describe('[#8192/#3653] sys_scim_connection_credential.token_digest is a keyed o
     const manager = makeManager(engine);
     const send = (request: Request) => manager.handleRequest(request);
 
+    // [C8 stage 8b] It carries an organization: under `single` an organization-less
+
+    // system insert is refused while the install holds none, and this rig holds none.
+
+    // The verifier reads the digest alone, so the organization changes nothing it answers.
+
     const { token } = await mintScimConnectionCredential(engine as never, SECRET, {
       connectionId: 'okta-probe',
+      organizationId: 'org_scim_8b',
     });
 
     const ok = await send(
@@ -267,8 +274,12 @@ describe('[#8192/#3653] sys_scim_connection_credential.token_digest is a keyed o
     const send = (request: Request) => manager.handleRequest(request);
 
     // Revoked: minted, then switched inactive — refused.
+    // [C8 stage 8b] It carries an organization: under `single` an organization-less
+    // system insert is refused while the install holds none, and this rig holds none.
+    // The verifier reads the digest alone, so the organization changes nothing it answers.
     const revoked = await mintScimConnectionCredential(engine as never, SECRET, {
       connectionId: 'okta-revoked',
+      organizationId: 'org_scim_8b',
     });
     await (engine as unknown as {
       update(o: string, data: Record<string, unknown>): Promise<unknown>;
@@ -283,8 +294,12 @@ describe('[#8192/#3653] sys_scim_connection_credential.token_digest is a keyed o
     expect(deniedRevoked.status).toBe(401);
 
     // Expired: minted with a past expiry — refused.
+    // [C8 stage 8b] It carries an organization: under `single` an organization-less
+    // system insert is refused while the install holds none, and this rig holds none.
+    // The verifier reads the digest alone, so the organization changes nothing it answers.
     const expired = await mintScimConnectionCredential(engine as never, SECRET, {
       connectionId: 'okta-expired',
+      organizationId: 'org_scim_8b',
       expiresAt: new Date(Date.now() - 60_000),
     });
     const deniedExpired = await send(

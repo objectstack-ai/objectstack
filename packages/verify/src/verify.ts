@@ -45,6 +45,29 @@ function deepEqual(a: unknown, b: unknown): boolean {
 }
 
 /**
+ * Whether a refused create's body is the app's own validation answer, read from
+ * the WHOLE body. The `/data` door answers a validation refusal with the flat
+ * ADR-0112 envelope `{ error: <message>, code: 'VALIDATION_FAILED', fields, object }`
+ * (`@objectstack/types` data-error-classification), the same top-level `code`
+ * the sibling stages read off this door. The message comes first, so a long
+ * app-authored message pushes `code` past any fixed-length cut of the text:
+ * the verdict is never taken from the 280-character `detail` the row stores.
+ * A body that is not JSON, or carries no string `code`, is read as text with
+ * the stage's original pattern.
+ */
+function isValidationAnswer(text: string): boolean {
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    body = undefined;
+  }
+  const code = (body as { code?: unknown } | null | undefined)?.code;
+  if (typeof code === 'string') return code === 'VALIDATION_FAILED';
+  return /VALIDATION_FAILED|Validation failed/i.test(text);
+}
+
+/**
  * Run auto-derived CRUD round-trip proofs for every object in `config`, as the
  * authenticated `token`, against the live `stack`. Returns a structured report;
  * never throws on a per-object failure (collects them).
@@ -79,17 +102,18 @@ export async function runCrudVerification(
       continue;
     }
     if (created.status >= 300) {
-      const text = (await created.text()).slice(0, 280);
+      const text = await created.text();
       // A 400 validation failure means our auto-derived record didn't satisfy the
       // app's own validation rules (record-level format/json-schema/CEL) — that's
       // a fixture gap, not a platform finding. A 5xx (or crypto/driver error) is a
       // real runtime failure the app's author needs to see.
-      const isValidation = created.status === 400 && /VALIDATION_FAILED|Validation failed/i.test(text);
+      const isValidation = created.status === 400 && isValidationAnswer(text);
       results.push({
         object: c.object,
         status: isValidation ? 'needs-fixture' : 'create-failed',
         code: created.status,
-        detail: text,
+        // The cut is for the stored row only; the verdict above read the whole answer.
+        detail: text.slice(0, 280),
       });
       continue;
     }

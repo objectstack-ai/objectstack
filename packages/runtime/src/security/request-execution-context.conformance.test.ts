@@ -153,7 +153,7 @@ function world(opts: { auth: boolean; gateActive?: boolean; sessionApi?: boolean
       { user_id: 'u_ses', organization_id: ORG, role: 'admin' },
     ],
     sys_user_position: [{ user_id: 'u_ses', position: 'sales_rep', organization_id: ORG }],
-    sys_user_permission_set: [{ user_id: 'u_key', permission_set: 'contact_reader', organization_id: null }],
+    sys_user_permission_set: [{ user_id: 'u_key', permission_set: 'contact_reader', organization_id: ORG }],
     sys_permission_set: [
       { id: 'ps_sales', name: 'sales_user', object_permissions: '{}' },
       { id: 'ps_contact', name: 'contact_reader', system_permissions: '["export_reports"]', object_permissions: '{}' },

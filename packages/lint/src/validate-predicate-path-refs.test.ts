@@ -494,9 +494,12 @@ describe('registry wiring', () => {
     // here because its siblings are: the solo wiring this rule's own PR
     // implemented was reverted, and `authoring-rule-wiring.test.ts` now pins the
     // family property (all of the surface's ids, or none) rather than trusting a
-    // prose reason to keep the halves in step.
+    // prose reason to keep the halves in step. #24491 — the family declares
+    // `page` too (ruling B on #23388); this rule walks `stack.views` only, so a
+    // page write draws nothing from it, and the declaration keeps the family on
+    // one type set.
     expect([...entry!.surfaces]).toEqual(['cli', 'runtime-publish']);
-    expect([...entry!.runtimeTypes!]).toEqual(['view']);
+    expect([...entry!.runtimeTypes!]).toEqual(['view', 'page']);
     expect(entry!.surfaceReason).toBeUndefined();
   });
 });

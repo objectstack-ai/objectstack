@@ -415,7 +415,7 @@ describe('resolveExecutionContext — posture plumbing (#2947)', () => {
   it('carries MEMBER for an ordinary principal (no admin / org-admin capability)', async () => {
     const ql = makeQlFor(
       [{ id: 'ps_basic', name: 'sales_rep', system_permissions: '[]', object_permissions: '{}' }],
-      [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_basic', permission_set: 'sales_rep', organization_id: null }],
+      [{ id: 'ups1', user_id: 'u1', permission_set_id: 'ps_basic', permission_set: 'sales_rep', organization_id: 'orgA' }],
     );
     const ctx = await resolveExecutionContext(opts(ql));
     expect(ctx.userId).toBe('u1');

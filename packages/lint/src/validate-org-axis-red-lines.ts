@@ -54,9 +54,11 @@
  * | `permissions[]`                       | `ObjectStackSchema`                |
  * | `permissions[].rowLevelSecurity[]`    | `PermissionSetSchema`              |
  * | `…[].using` / `…[].check`             | `RowLevelSecurityPolicySchema`     |
+ * | `objects[].defaultRowScope`           | `ObjectSchema`                     |
+ * | `….using` / `….check` / `….name`      | `DefaultRowScopeSchema`            |
  * | `sharingRules[]`                      | `ObjectStackSchema`                |
  * | `sharingRules[].condition` / `.sharedWith` / `.object` | `SharingRuleSchema` |
- * | `objects[].tenancy` / `.systemFields` | `ObjectSchema`                     |
+ * | `objects[].tenancy` / `.systemFields` / `.name` | `ObjectSchema`           |
  *
  * NOT read, and each for a reason that is a schema fact:
  *
@@ -66,10 +68,9 @@
  * - `sharingRules[].objectName` — `SharingRuleSchema` is `.strict()` and knows
  *   it only as a rejected name; `object` is required, so the canonical read can
  *   never be missing on a rule that parsed.
- * - `objects[].rowLevelSecurity` / `objects[].rls` — **object-level RLS is not
- *   an authoring surface at all.** `ObjectSchema` declares neither key (nor
- *   does `authorable-surface.json` list one: the sole entry is
- *   `security/PermissionSet:rowLevelSecurity`), and `ObjectSchema` is
+ * - `objects[].rowLevelSecurity` / `objects[].rls` — **a LIST of object-level
+ *   RLS policies is not an authoring surface at all.** `ObjectSchema` declares
+ *   neither key, and `ObjectSchema` is
  *   `.strict()`, so a stack carrying one does not parse — it is refused with
  *   "Unrecognized key(s) on this object". Until #5009 this file walked that
  *   non-existent surface for ~20 lines, complete with an `objects[N].
@@ -77,7 +78,10 @@
  *   cost was never the missed finding: the next author to read this rule (human
  *   or AI) came away believing object-level RLS was a real authorization
  *   surface and wrote more code against it (#5008 nearly did). RLS policies
- *   live on a permission set; that is the branch above.
+ *   live on a permission set; that is the branch above. The one
+ *   object-level policy `ObjectSchema` does declare is a single
+ *   `defaultRowScope` (#24452), read in the table above and judged beside the
+ *   permission-set branch.
  *
  * Alias tolerance belongs at the schema's refusal, not in a consumer (Prime
  * Directive #12) — where it also converts a loud, named rejection into a
@@ -208,7 +212,8 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
   // RLS policies live on a PERMISSION SET (`permissions[].rowLevelSecurity`) —
   // the one place `ObjectSchema` does not offer and `PermissionSetSchema` does.
   // See the `## Scope` table above for the object-level surface that looked
-  // like a second home for them and never was (#5009).
+  // like a second home for them and never was (#5009). The one object-level
+  // policy that IS declared, an object's single `defaultRowScope`, follows.
   const permissionSets = recordsOf(cfg.permissions);
   permissionSets.forEach((ps, psIndex) => {
     recordsOf(ps.rowLevelSecurity).forEach((policy, pIndex) => {
@@ -226,6 +231,32 @@ export function validateOrgAxisRedLines(stack: unknown): OrgAxisFinding[] {
         });
       }
     });
+  });
+
+  // [#24452] An object's DEFAULT row scope (`objects[].defaultRowScope`) is
+  // the same policy shape without `object`, and the security plugin's
+  // row-policy collection applies it as a Layer-1 policy when the caller's
+  // held sets carry no row policy for the object. A `using` / `check` there
+  // that reads the org parent is the same second hierarchy, so it is judged
+  // the same way. It is the one object-level policy key `ObjectSchema`
+  // declares — see the `## Scope` table.
+  recordsOf(cfg.objects).forEach((object, oIndex) => {
+    const scope = object.defaultRowScope as AnyRec | undefined;
+    if (!scope || typeof scope !== 'object' || Array.isArray(scope)) return;
+    for (const clause of ['using', 'check'] as const) {
+      if (!str(scope[clause]).includes(ORG_PARENT_FIELD)) continue;
+      const scopeName = str(scope.name);
+      findings.push({
+        severity: 'error',
+        rule: ORG_AXIS_PERMISSION_INHERITANCE,
+        where: `default row scope${scopeName ? ` "${scopeName}"` : ''} of object "${str(object.name) || oIndex}"`,
+        path: `objects[${oIndex}].defaultRowScope.${clause}`,
+        message:
+          `RLS ${clause} reads \`${ORG_PARENT_FIELD}\`, which builds a permission hierarchy along the ` +
+          `organization axis. ADR-0105 D6 forbids it: the org tree is a REPORTING dimension only.`,
+        hint: INHERITANCE_HINT,
+      });
+    }
   });
 
   // Sharing rules — the predicate and the recipient may both reach for the org

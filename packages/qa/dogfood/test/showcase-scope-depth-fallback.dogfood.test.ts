@@ -107,9 +107,13 @@ async function bootFallbackWorld(withResolver = true): Promise<World> {
   const id = {} as Record<Who, string>;
   for (const who of WHO) id[who] = await uid(who);
 
-  let org = await ql.findOne('sys_organization', { where: {}, context: { isSystem: true } }).catch(() => null);
-  let orgId = org?.id;
-  if (!orgId) { orgId = 'org_fb'; await sys('sys_organization', { id: orgId, name: 'FB Org', slug: 'fb' }).catch(() => {}); }
+  // [ADR-0131 D3/D9, C8 stage 8b] The showcase boots `single`, so the Default
+  // Organization exists before the first sign-up and owns every row this fixture
+  // seeds — asked of the `tenancy` service. (An empty-`where` `findOne` is refused
+  // as an arbitrary pick; the refusal was swallowed and a second organization
+  // minted, which under `single` makes every organization-less insert ambiguous.)
+  const orgId = (await (await stack.kernel.getServiceAsync<{ defaultOrgId(): Promise<string | null> }>('tenancy')).defaultOrgId());
+  if (!orgId) throw new Error('fixture: the showcase boot has no Default Organization to own the business units');
 
   await sys('sys_business_unit', { id: 'bu_parent_fb', name: 'Parent', kind: 'division', organization_id: orgId, active: true });
   await sys('sys_business_unit', { id: 'bu_child_fb', name: 'Child', kind: 'department', parent_business_unit_id: 'bu_parent_fb', organization_id: orgId, active: true });

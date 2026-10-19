@@ -3,6 +3,26 @@
 /**
  * [#13491] Per-object tenancy classification for the platform namespaces.
  *
+ * ## ⚠️ What still reads this ledger (ADR-0131 C8 stage 8b)
+ *
+ * Under the `single` posture the ledger no longer decides any write: ADR-0131
+ * D9 made the system-insert rule structural there — a platform object with a
+ * tenant column is in scope like any other, so its organization-less system
+ * insert takes the Default Organization or is refused
+ * (`Engine.resolveSystemInsertOrganization`). Two readers remain, and they
+ * are why the ledger has not retired yet (D13):
+ *
+ *  1. the system-insert exemption under a WALLED posture (`group` /
+ *     `isolated`), which stands in 18.0 by epic ruling record 6259899486 on
+ *     #15194, item 4 — the walled half of the lift lands in 18.x;
+ *  2. the engine's `bypassTenantAudit` isSystem mute
+ *     (`Engine.buildDriverOptions`), a diagnostics-only reading in every
+ *     posture that changes nothing a write touches.
+ *
+ * ⛔ Do not add an entry to make a `single` write behave: under `single` an
+ * entry changes nothing but the mute. The ledger retires with its walled
+ * reader.
+ *
  * ## The ruling this implements
  *
  * Maintainer, 2026-08-31 (总监席第 5 场, 联案 #13491 + #13497, verbatim 「同意」):
@@ -78,10 +98,11 @@
  * ## What admission actually changes, per object
  *
  * A `tenant-scoped` classification lets the object reach
- * `resolveSystemInsertOrganization` (#8844): on a `single` posture with exactly
- * one organization the write DERIVES it, and on a walled posture
- * (`group` / `isolated`) an org-less write is REFUSED loudly
- * ({@link SystemWriteOrganizationRequiredError}). It also stops the engine
+ * `resolveSystemInsertOrganization` (#8844) on a walled posture
+ * (`group` / `isolated`), where an org-less write is REFUSED loudly
+ * ({@link SystemWriteOrganizationRequiredError}). Under `single` every
+ * platform object with a tenant column reaches it whatever its entry says
+ * (stage 8b, above). It also stops the engine
  * auto-muting the driver's tenant-audit warning for elevated writes on it.
  * Both directions are the ruled one — a refusal or a warning, never a silent
  * rewrite of what the write touches (execution point 3).

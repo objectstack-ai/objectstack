@@ -127,8 +127,10 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
     type: 'plugin',
     scope: 'system',
     objects: [
-      inline('sys_user', ['name', 'primary_business_unit_id']),
-      inline('sys_organization', ['name']),
+      // [C8 stage 8b] better-auth owns these two tables, as the platform declares
+      // them: no injected organization column.
+      { ...inline('sys_user', ['name', 'primary_business_unit_id']), managedBy: 'better-auth' },
+      { ...inline('sys_organization', ['name']), managedBy: 'better-auth' },
       inline('sys_business_unit', ['name', 'parent_business_unit_id', 'organization_id']),
       inline('sys_business_unit_member', ['user_id', 'business_unit_id', 'organization_id']),
       inline('sys_member', ['user_id', 'organization_id', 'role', 'created_at']),
@@ -143,6 +145,10 @@ async function boot(opts: { security: boolean } = { security: true }): Promise<R
   engines.push(engine);
 
   // Fixture rows go in past the middleware: setup is not the subject.
+  // [ADR-0131 D3 / C8 stage 8b] The Default Organization a `single` boot holds
+  // before anything writes: every organization-less platform insert below
+  // derives it, as in production, rather than being refused for want of one.
+  await engine.insert('sys_organization', { id: 'org_default', name: 'Default Organization' }, SYS);
   await engine.insert('sys_user', [ADMIN, DELEGATE_USER, TARGET, OTHER, ISSUER].map((id) => ({ id, name: id })), SYS);
   await engine.insert('sys_business_unit', [
     { id: 'bu_hq', name: 'hq', parent_business_unit_id: null },

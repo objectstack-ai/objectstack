@@ -3396,10 +3396,10 @@ export const AiCompleteRequestSchema = lazySchema(() => z.object({
   options: z.record(z.string(), z.unknown()).optional().describe('Request options (model, temperature, maxTokens, …)'),
 }));
 
-/** `GET /api/v1/ai/models` — the environment's plan-filtered picker list (ADR-0028). */
+/** `GET /api/v1/ai/models` — the environment's plan-filtered picker list (cloud ADR-0028). */
 export const AiModelsResponseSchema = lazySchema(() => z.object({
   /**
-   * Objects when the service exposes the ADR-0028 allowlist; bare ids when it
+   * Objects when the service exposes the cloud ADR-0028 allowlist; bare ids when it
    * falls back to the adapter's `listModels()`. Both shapes are live, so both
    * are declared rather than one being asserted and the other 404-by-parse.
    */
