@@ -38,6 +38,7 @@ import type { EngineAggregateOptions, EngineQueryOptions } from '@objectstack/sp
 import { AuditPlugin } from './audit-plugin.js';
 import { redactActivityRows } from './activity-field-redaction.js';
 import { ACTIVITY_QUERY_GUARD, AUDIT_LOG_QUERY_GUARD, namedValueBearingColumns, pinnedParentObject } from './parent-field-query-guard.js';
+import { singlePostureTenancy } from './__tests__/single-posture-tenancy.js';
 
 const ACTIVITY = 'sys_activity';
 const ITEM = 'apg_item';
@@ -203,6 +204,7 @@ describe('[#21154] a query over the activity text by a reader withheld a parent 
       init: async (ctx: any) => ctx.registerService('security', security),
       start: async () => {},
     } as any);
+    await kernel.use(singlePostureTenancy());
     await kernel.use(new AuditPlugin());
     await kernel.bootstrap();
 

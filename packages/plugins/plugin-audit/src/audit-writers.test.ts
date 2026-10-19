@@ -2569,9 +2569,11 @@ describe('[#21207] stored metadata copies carry no content hash', () => {
  * [ADR-0131 D9] An activity row about a record with no organization of its own
  * (a `sys_user`, a platform setting), written with no session organization (a
  * sign-up), takes the one the host derives — the `tenancy` service's Default
- * Organization under `single`, `null` under a wall. The ledger row's
- * `tenant_id` is an attribution of what the row is ABOUT (D7) and is not
- * touched; a known organization is never overridden.
+ * Organization under `single`. Under a wall none is derivable, and then no
+ * activity row is written at all — never a NULL one (ruling 6257510973 item 3,
+ * Q3 A); the ledger row still is. The ledger row's `tenant_id` is an
+ * attribution of what the row is ABOUT (D7) and is not touched; a known
+ * organization is never overridden.
  */
 describe('audit writers — the activity row of an org-less record names the derivable organization (ADR-0131 D9)', () => {
   const ORG_LESS = { ...MULTI_TENANT, sys_user: ['id', 'name', 'email'] };
@@ -2591,13 +2593,28 @@ describe('audit writers — the activity row of an org-less record names the der
     expect(created.find((c) => c.object === 'sys_audit_log')?.row.tenant_id).toBeNull();
   });
 
-  it('names none under a wall, and none when the host derives nothing or cannot answer', async () => {
+  it('writes no activity row under a wall, nor when the host derives nothing or cannot answer — the ledger row still lands', async () => {
     for (const getDefaultOrganizationId of [async () => null, undefined, async () => { throw new Error('no tenancy'); }]) {
       const { engine, fire, created } = makeEngine(ORG_LESS);
       installAuditWriters(engine as any, 'test.audit', getDefaultOrganizationId ? { getDefaultOrganizationId } : {});
       await fire('afterInsert', signUp);
-      expect(created.find((c) => c.object === 'sys_activity')?.row.organization_id).toBeNull();
+      expect(created.filter((c) => c.object === 'sys_activity')).toEqual([]);
+      const ledger = created.filter((c) => c.object === 'sys_audit_log');
+      expect(ledger).toHaveLength(1);
+      expect(ledger[0]!.row).toMatchObject({ object_name: 'sys_user', record_id: 'usr-1', tenant_id: null });
     }
+  });
+
+  it('a record that names its organization still has its activity row under a wall, with that organization', async () => {
+    const { engine, fire, created } = makeEngine({ ...ORG_LESS, crm_lead: ['id', 'name', 'organization_id'] });
+    installAuditWriters(engine as any, 'test.audit', { getDefaultOrganizationId: async () => null });
+    await fire('afterInsert', {
+      object: 'crm_lead',
+      input: { id: 'lead-1' },
+      result: { id: 'lead-1', name: 'Acme', organization_id: 'org-A' },
+      session: {},
+    });
+    expect(created.filter((c) => c.object === 'sys_activity').map((c) => c.row.organization_id)).toEqual(['org-A']);
   });
 
   it('never overrides a known organization — the record\'s, then the session\'s — nor asks for one', async () => {
