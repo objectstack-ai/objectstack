@@ -1109,10 +1109,6 @@ export const zhCNMetadataForms: NonNullable<TranslationData['metadataForms']> = 
         label: "可搜索字段",
         helpText: "可用于快速搜索的字段名"
       },
-      filterableFields: {
-        label: "可筛选字段",
-        helpText: "可用于筛选的字段名"
-      },
       resizable: {
         label: "可调整大小"
       },
