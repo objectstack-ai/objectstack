@@ -161,6 +161,16 @@ export interface ApprovalResumeSurface {
     output?: Record<string, unknown>;
     branchLabel?: string;
     /**
+     * The person whose approve / reject decision this resume carries
+     * (`ResumeSignal.resumedBy`, ruling A on `FlowSchema.runAs`): the same
+     * person the verdict mirror writes as ({@link actingUserId}). The engine
+     * runs a `runAs: 'user'` flow's nodes after the decision as them,
+     * resolving their own grants, and a `runAs: 'system'` flow's with them as
+     * the attribution user of its unchanged elevation; absent when no human
+     * decided (the SLA sweep), and then the run keeps the identity it had.
+     */
+    resumedBy?: string;
+    /**
      * #3801: the engine refuses a resume of an `approval` suspension unless
      * the signal carries this marker — the proof that the resume is the tail
      * of a decision THIS service already authorized and recorded, not a raw
@@ -321,14 +331,23 @@ export interface ApprovalMessagingSurface {
 
 /**
  * What an approval notification hands to the messaging service: the
- * `EmitInput` payload fields the delivered notification is built from, plus a
- * reminder's one-tap decision links.
+ * `EmitInput` payload fields the delivered notification is built from.
  *
  * `body` is the text the recipient reads under the title. Messaging builds the
  * inbox row's `body_md`, and each channel's fallback rendering, from
  * `payload.body` and no other field, so the text is declared here rather than
  * left to a free-form bag: a call site that spells it any other way does not
  * compile. Spelled `message`, it once reached every recipient as an empty body.
+ *
+ * ⛔ [#24564] No field carries a bearer credential: no ADR-0043 action link and
+ * no raw action token, in any spelling. Messaging KEEPS this payload — verbatim
+ * on the `sys_notification` event row, and snapshotted onto every
+ * `sys_notification_delivery` row it enqueues — so anything in it is in the
+ * database for as long as those rows live. ADR-0043's storage axis is that the
+ * database holds no usable link (`sys_approval_token` stores digests only),
+ * and a raw link here is a usable link at rest. The shape is closed so that a
+ * call site handing one over does not compile; {@link ApprovalService.issueActionTokens}
+ * says where a raw token may travel instead.
  */
 type ApprovalNotificationPayload = {
   /** The headline. */
@@ -337,8 +356,6 @@ type ApprovalNotificationPayload = {
   readonly body: string;
   /** Where opening it lands; `notify()` narrows the approvals inbox to the request. */
   readonly actionUrl: string;
-  /** Approve / Reject links on a reminder to a concrete approver (ADR-0043). */
-  readonly actions?: ReadonlyArray<{ readonly label: string; readonly url: string }>;
 };
 
 /** Minimum time between submitter reminders on one request. */
@@ -772,6 +789,13 @@ export interface StrandedContinuationSignal {
   decision: string;
   /** How the original door described the outcome in prose, e.g. `the reject decision`. */
   what: string;
+  /**
+   * The decider the original resume carried ({@link ApprovalResumeSurface}'s
+   * `resumedBy`), so a replay continues the nodes after the decision as the
+   * person who decided, never as the run's trigger user. Absent when the
+   * original carried none.
+   */
+  resumedBy?: string;
 }
 
 /**
@@ -3702,8 +3726,8 @@ export class ApprovalService implements IApprovalService {
     //    `onEmptyApprovers` decides that case, not this fan-out;
     //  - not an out-of-office DELEGATE, who was already told above by
     //    `approval.ooo_substituted` — one message per approver, not two.
-    // No one-tap decision links: ADR-0043 mints those on `remind()` only, and
-    // minting bearer tokens on every opening is a decision this does not make.
+    // No one-tap decision links: a notification payload is stored, and a raw
+    // ADR-0043 token in it is a usable link at rest (`ApprovalNotificationPayload`).
     //
     // [#23556] The body names the record by its object's label and its id —
     // `Deal D_123`, never `crm_deal/D_123` — so a grouped bell entry tells its
@@ -4023,7 +4047,7 @@ export class ApprovalService implements IApprovalService {
    */
   private async serviceResume(
     runId: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
   ): Promise<{ runId: string; repairable: boolean; error: string } | undefined> {
     const result = await this.automation!.resume!(runId, { ...signal, [RESUME_AUTHORITY_SERVICE]: true });
     const reported = result as
@@ -4219,7 +4243,7 @@ export class ApprovalService implements IApprovalService {
     runId: string,
     requestId: string,
     what: string,
-    signal: { output?: Record<string, unknown>; branchLabel?: string },
+    signal: { output?: Record<string, unknown>; branchLabel?: string; resumedBy?: string },
     decision: string,
   ): Promise<{ resumed: boolean; resumeError?: string; resumeFailure?: ResumeFailureReport }> {
     const missing = this.missingRunCapability(runId, requestId, what, 'resume');
@@ -4279,6 +4303,7 @@ export class ApprovalService implements IApprovalService {
       if (repairable) {
         await this.journalStrandedContinuation(requestId, {
           branchLabel: signal.branchLabel, output: signal.output, decision, what,
+          ...(signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
         });
       }
       throw strandedDecisionFailure(
@@ -4321,6 +4346,12 @@ export class ApprovalService implements IApprovalService {
       const branchLabel = result.decision === 'approve'
         ? APPROVAL_BRANCH_LABELS.approve
         : APPROVAL_BRANCH_LABELS.reject;
+      // Ruling A on `FlowSchema.runAs`: the decider rides the hand-off, so the
+      // nodes after the decision run as the person who decided — the person
+      // the verdict mirror above already wrote as. The SLA sweep's context
+      // vouches for nobody, so its auto-decision names no decider and the run
+      // keeps the identity it had.
+      const decider = actingUserId(context);
       const outcome = await this.resumeRecordedOutcome(
         result.runId, requestId, `the ${result.decision} decision`,
         {
@@ -4331,6 +4362,7 @@ export class ApprovalService implements IApprovalService {
           // Reserved keys are spread LAST so no output can shadow them (the
           // whitelist already rejects them; this is defense in depth).
           output: { ...(result.outputs ?? {}), decision: result.decision, requestId },
+          ...(decider ? { resumedBy: decider } : {}),
         },
         result.decision,
       );
@@ -5179,39 +5211,37 @@ export class ApprovalService implements IApprovalService {
       actor_id: recordedActor(context), comment: input.comment ?? null, created_at: nowIso,
     }), { context: SYSTEM_CTX });
 
-    // Per-approver fan-out: concrete identities (user ids / emails) each get
-    // their OWN one-tap approve/reject links (ADR-0043); `position:*`-style
-    // literals can't carry a personal token and fall back to a plain nudge.
+    // Per-approver fan-out, the opening's shape (`approval.requested`): each
+    // concrete identity (a user id / an email) gets its own reminder;
+    // `position:*`-style literals go to the shared nudge below, which
+    // `notify()` drops — a slot address names no one.
     // [#23978] One name for every recipient, the form `approval.requested` uses.
+    //
+    // ⛔ [#24564] No one-tap decision link (ADR-0043) rides a reminder.
+    // Messaging stores the payload it is handed (`ApprovalNotificationPayload`),
+    // so a raw token there is a usable link in the database — the one thing
+    // ADR-0043's storage axis rules out. Nor would a link here reach the
+    // approver: a reminder names no channel, messaging's default materializes
+    // it in the in-app inbox, and the inbox row carries the title, the body and
+    // the deep link below, never links. The deep link is the approver's way in.
     const subject = this.nameSubjectRecord(raw.object_name, raw.record_id);
     let notified = 0;
     const concrete = pending.filter(a => a && !a.includes(':'));
     const literals = pending.filter(a => a && a.includes(':'));
     for (const approver of concrete) {
-      try {
-        const tokens = await this.issueActionTokens(requestId, approver);
-        notified += await this.notify({
-          topic: 'approval.reminder',
-          organizationId: raw.organization_id,
-          audience: [approver],
-          actorContext: context,
-          source: { object: 'sys_approval_request', id: requestId },
-          dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
-          payload: {
-            title: 'Approval reminder',
-            body: `A decision on ${subject} is still waiting on you.`,
-            actionUrl: '/system/approvals',
-            actions: [
-              { label: 'Approve', url: this.actionLinkUrl(tokens.approve) },
-              { label: 'Reject', url: this.actionLinkUrl(tokens.reject) },
-            ],
-          },
-        });
-      } catch (err: any) {
-        this.logger?.warn?.('[approvals] reminder with action links failed', {
-          request: requestId, approver, error: err?.message ?? String(err),
-        });
-      }
+      notified += await this.notify({
+        topic: 'approval.reminder',
+        organizationId: raw.organization_id,
+        audience: [approver],
+        actorContext: context,
+        source: { object: 'sys_approval_request', id: requestId },
+        dedupKey: `approval-remind-${requestId}-${nowIso}-${approver}`,
+        payload: {
+          title: 'Approval reminder',
+          body: `A decision on ${subject} is still waiting on you.`,
+          actionUrl: '/system/approvals',
+        },
+      });
     }
     if (literals.length) {
       notified += await this.notify({
@@ -5244,6 +5274,13 @@ export class ApprovalService implements IApprovalService {
    * Issue one-tap approve/reject tokens for one approver on one pending
    * request. Raw tokens are returned ONCE; only SHA-256 hashes are stored
    * (`sys_approval_token`), so a DB leak yields no usable links.
+   *
+   * ⛔ [#24564] That guarantee holds only as far as the CALLER keeps it: a raw
+   * token — or an {@link actionLinkUrl} built from one — is never written to a
+   * persisted row. Not a notification payload (messaging stores those, see
+   * `ApprovalNotificationPayload`), not an audit row, not a log line. It may
+   * travel only in a message that is sent and not kept. No notification this
+   * service sends carries one, so no first-party path calls this today.
    */
   async issueActionTokens(
     requestId: string,
@@ -5398,15 +5435,15 @@ export class ApprovalService implements IApprovalService {
    * vouch for on the decision's context — or `null` when no person can be
    * named without guessing.
    *
-   * Tokens are minted for concrete slots only (`remind`'s fan-out), so the
-   * slot is a user id or an email:
+   * A token binds the slot `issueActionTokens` minted it for, normally a
+   * concrete one — a user id or an email:
    *
    *   - a user id IS the person;
    *   - an email names the ONE account carrying exactly that email — the same
    *     proof `resolveActor` takes for a named email, and the recipient
    *     resolver's own rule for delivering to it. No account, or more than one,
    *     names nobody;
-   *   - a `type:value` literal names no person (no first-party path mints one).
+   *   - a `type:value` literal names no person.
    *
    * Before this the slot itself went on the context, so an email-bound link
    * recorded the email as the acting user — on the action row and in the
@@ -6410,7 +6447,12 @@ export class ApprovalService implements IApprovalService {
     // so a continuation that strands AGAIN is repairable exactly like the first.
     const outcome = await this.resumeRecordedOutcome(
       runId, requestId, signal.what,
-      { branchLabel: signal.branchLabel, output: signal.output },
+      {
+        branchLabel: signal.branchLabel, output: signal.output,
+        // The journalled decider (ruling A): the replayed nodes after the
+        // decision run as the person who decided, not as the run's trigger.
+        ...(typeof signal.resumedBy === 'string' && signal.resumedBy ? { resumedBy: signal.resumedBy } : {}),
+      },
       signal.decision,
     );
 

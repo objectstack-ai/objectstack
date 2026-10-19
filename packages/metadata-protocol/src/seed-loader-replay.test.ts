@@ -4,6 +4,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { SeedLoaderService } from './seed-loader.js';
 import type { IDataEngine, IMetadataService } from '@objectstack/spec/contracts';
 import { assertEngineDeleteDispatch, assertEngineUpdateDispatch, assertEngineFindOnePredicate } from '@objectstack/metadata-core';
+import { temporalComparandKind, temporalStorageForm } from '@objectstack/core';
 
 /**
  * Replay regression: seeds with lookup natural keys must survive a dev-server
@@ -320,5 +321,173 @@ describe('seed replay (restart) — lookup natural keys on the update path', () 
       (engine.update as any).mock.calls.filter(([obj, data]: [string, any]) => obj === 'my_app_interview' && data.name === 'iv-alice-1'),
     ).toEqual([]);
     expect(store.my_app_interview.find((r) => r.name === 'iv-alice-1')!.candidate).toBe(aliceId);
+  });
+});
+
+/**
+ * [#24562] A `time` / `datetime` / `date` value the seed spells short, replayed
+ * over the row a driver stored for it.
+ *
+ * The faithful engine above stores exactly what it is handed; a real driver
+ * does not. `SqlDriver` and `InMemoryDriver` both write a temporal field
+ * through `temporalStorageForm` (`@objectstack/core`, ADR-0053), so measured
+ * on a SQLite file DB `'09:15'` lands as `'09:15:00'`,
+ * `'2026-06-17T14:30:00Z'` as `'2026-06-17T14:30:00.000Z'`, and a `date`
+ * written as an instant as its `YYYY-MM-DD`. The engine below does the same,
+ * and stamps `updated_at` on every write the way the audit stamp does, so a
+ * replay that rewrites an unchanged row shows as a moved stamp.
+ *
+ * Both write paths compare through `isNoOpReplay`: the batched
+ * `decideWriteAction`, and the sequential `writeRecord` a self-referencing
+ * object takes (`hasSelfRef`) — each case below asserts which one ran.
+ */
+describe('seed replay — a temporal value spelled short is the value the driver stored', () => {
+  const ENTRY_FIELDS = {
+    name: { type: 'text' },
+    starts_at: { type: 'time' },
+    logged_at: { type: 'datetime' },
+    worked_on: { type: 'date' },
+  };
+  const ENTRY = { name: 'tz_replay_entry', fields: ENTRY_FIELDS };
+  const TREE_ENTRY = {
+    name: 'tz_replay_tree_entry',
+    fields: { ...ENTRY_FIELDS, parent: { type: 'lookup', reference: 'tz_replay_tree_entry' } },
+  };
+  const PATHS = [
+    { path: 'batched decideWriteAction', object: ENTRY, sequential: false },
+    { path: 'sequential writeRecord', object: TREE_ENTRY, sequential: true },
+  ];
+
+  const SHORT_SPELLINGS: Array<Record<string, unknown>> = [
+    { name: 'short-time', starts_at: '09:15' },
+    { name: 'short-datetime', logged_at: '2026-06-17T14:30:00Z' },
+    { name: 'zone-naive-datetime', logged_at: '2026-06-17 14:30' },
+    { name: 'instant-date', worked_on: '2026-06-17T00:00:00Z' },
+    // Control: already spelled the way the driver stores it.
+    { name: 'stored-spelling', starts_at: '09:05:30', logged_at: '2026-06-17T14:30:00.000Z', worked_on: '2026-06-17' },
+  ];
+
+  function createStoringEngine(object: { name: string; fields: Record<string, { type: string }> }) {
+    const { engine, store } = createFaithfulEngine();
+    let clock = 0;
+    const stored = (row: Record<string, unknown>) => {
+      const out: Record<string, unknown> = { ...row, updated_at: `stamp-${++clock}` };
+      for (const [key, value] of Object.entries(row)) {
+        const kind = temporalComparandKind(object.fields[key]?.type);
+        if (kind && value != null) out[key] = temporalStorageForm(value, kind);
+      }
+      return out;
+    };
+    const insert = (engine.insert as any).getMockImplementation();
+    (engine.insert as any).mockImplementation(async (o: string, data: any, opts?: any) =>
+      insert(o, Array.isArray(data) ? data.map(stored) : stored(data), opts));
+    const update = (engine.update as any).getMockImplementation();
+    (engine.update as any).mockImplementation(async (o: string, data: any, opts?: any) => update(o, stored(data), opts));
+    return { engine, store };
+  }
+
+  function metadataOf(object: { name: string }): IMetadataService {
+    return {
+      getObject: vi.fn(async (name: string) => (name === object.name ? object : undefined)),
+      listObjects: vi.fn(async () => [object]),
+      register: vi.fn(async () => {}),
+      get: vi.fn(async (_t: string, name: string) => (name === object.name ? object : undefined)),
+      list: vi.fn(async () => []),
+      unregister: vi.fn(async () => {}),
+      exists: vi.fn(async () => false),
+      listNames: vi.fn(async () => []),
+    } as unknown as IMetadataService;
+  }
+
+  async function load(
+    engine: IDataEngine,
+    object: { name: string },
+    mode: string,
+    records: Array<Record<string, unknown>>,
+  ) {
+    const writeRecord = vi.spyOn(SeedLoaderService.prototype as any, 'writeRecord');
+    try {
+      const result = await new SeedLoaderService(engine, metadataOf(object), createLogger()).load({
+        seeds: [{ object: object.name, externalId: 'name', mode, env: ['prod', 'dev', 'test'], records }] as any,
+        config: CONFIG,
+      });
+      return { result, writeRecordCalls: writeRecord.mock.calls.length };
+    } finally {
+      writeRecord.mockRestore();
+    }
+  }
+
+  const rowOf = (store: Record<string, any[]>, object: { name: string }, name: string) =>
+    store[object.name].find((r) => r.name === name)!;
+  const updatedNames = (engine: IDataEngine, store: Record<string, any[]>, object: { name: string }) =>
+    (engine.update as any).mock.calls
+      .map(([, data]: [string, any]) => store[object.name].find((r) => r.id === data.id)?.name)
+      .sort();
+
+  it.each(PATHS.flatMap((p) => ['upsert', 'update'].map((mode) => ({ ...p, mode }))))(
+    '$path, mode $mode: replaying the unchanged seed issues no update and moves no updated_at',
+    async ({ object, sequential, mode }) => {
+      const { engine, store } = createStoringEngine(object);
+      const first = await load(engine, object, 'upsert', SHORT_SPELLINGS);
+      expect(first.result.summary.totalInserted).toBe(5);
+      // The premise: what the column holds is the driver's spelling, not the seed's.
+      expect(rowOf(store, object, 'short-time').starts_at).toBe('09:15:00');
+      expect(rowOf(store, object, 'short-datetime').logged_at).toBe('2026-06-17T14:30:00.000Z');
+      expect(rowOf(store, object, 'zone-naive-datetime').logged_at).toBe('2026-06-17T14:30:00.000Z');
+      expect(rowOf(store, object, 'instant-date').worked_on).toBe('2026-06-17');
+      (engine.update as any).mockClear();
+      const before = structuredClone(store);
+
+      const replay = await load(engine, object, mode, SHORT_SPELLINGS);
+
+      expect(replay.writeRecordCalls > 0).toBe(sequential);
+      expect(engine.update).not.toHaveBeenCalled();
+      expect(replay.result.summary.totalUpdated).toBe(0);
+      expect(replay.result.summary.totalSkipped).toBe(5);
+      expect(replay.result.summary.totalErrored).toBe(0);
+      expect(store).toEqual(before);
+    },
+  );
+
+  it.each(PATHS)('$path: a changed wall clock, instant or day is still rewritten, and only its row', async ({ object, sequential }) => {
+    const { engine, store } = createStoringEngine(object);
+    await load(engine, object, 'upsert', SHORT_SPELLINGS);
+    (engine.update as any).mockClear();
+    const before = structuredClone(store);
+    const changed = SHORT_SPELLINGS.map((r) =>
+      r.name === 'short-time' ? { ...r, starts_at: '09:16' }
+        : r.name === 'short-datetime' ? { ...r, logged_at: '2026-06-17T14:30:01Z' }
+          : r.name === 'instant-date' ? { ...r, worked_on: '2026-06-18T00:00:00Z' }
+            : r);
+
+    const replay = await load(engine, object, 'upsert', changed);
+
+    expect(replay.writeRecordCalls > 0).toBe(sequential);
+    expect(updatedNames(engine, store, object)).toEqual(['instant-date', 'short-datetime', 'short-time']);
+    expect(replay.result.summary.totalUpdated).toBe(3);
+    expect(replay.result.summary.totalSkipped).toBe(2);
+    expect(rowOf(store, object, 'short-time').starts_at).toBe('09:16:00');
+    expect(rowOf(store, object, 'short-datetime').logged_at).toBe('2026-06-17T14:30:01.000Z');
+    expect(rowOf(store, object, 'instant-date').worked_on).toBe('2026-06-18');
+    for (const name of ['zone-naive-datetime', 'stored-spelling']) {
+      expect(rowOf(store, object, name)).toEqual(before[object.name].find((r) => r.name === name));
+    }
+  });
+
+  it.each(PATHS)('$path: a value the storage rule cannot read still reads as changed', async ({ object, sequential }) => {
+    const { engine, store } = createStoringEngine(object);
+    await load(engine, object, 'upsert', SHORT_SPELLINGS);
+    (engine.update as any).mockClear();
+    const unreadable = SHORT_SPELLINGS.map((r) =>
+      r.name === 'short-time' ? { ...r, starts_at: 'quarter past nine' }
+        : r.name === 'short-datetime' ? { ...r, logged_at: 'not-a-date' }
+          : r);
+
+    const replay = await load(engine, object, 'upsert', unreadable);
+
+    expect(replay.writeRecordCalls > 0).toBe(sequential);
+    expect(updatedNames(engine, store, object)).toEqual(['short-datetime', 'short-time']);
+    expect(replay.result.summary.totalUpdated).toBe(2);
+    expect(replay.result.summary.totalSkipped).toBe(3);
   });
 });

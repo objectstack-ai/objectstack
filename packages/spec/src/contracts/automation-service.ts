@@ -73,7 +73,12 @@ export interface AutomationContext {
     object?: string;
     /** Trigger event type (e.g. 'on_create', 'on_update') */
     event?: string;
-    /** User who triggered the automation */
+    /**
+     * The acting user: who triggered the automation — or, on a run that an
+     * approval decision resumed, the decider, for the nodes after that
+     * decision, on both postures (`FlowSchema.runAs`;
+     * {@link ResumeSignal.resumedBy}).
+     */
     userId?: string;
     /**
      * Position names of the triggering identity (ADR-0090 D3; formerly
@@ -150,10 +155,15 @@ export interface AutomationContext {
      * the write. The label is a FALLBACK, not a replacement — the audit writer
      * records `session.userId ?? session.actor` on `sys_audit_log.actor` — and
      * elevation never costs the run its operator: a `runAs:'system'` run
-     * carries the triggering user through UNCHANGED whenever the trigger
-     * resolved one (#5494), so its writes still stamp `created_by` /
-     * `updated_by` and `sys_audit_log.user_id` with that human, exactly as the
-     * same trigger would under `runAs:'user'`. `runAs` declares the run's
+     * carries the triggering user through whenever the trigger resolved one
+     * (#5494), so its writes still stamp `created_by` / `updated_by` and
+     * `sys_audit_log.user_id` with that human, exactly as the same trigger
+     * would under `runAs:'user'` — and after a human decision that parity
+     * holds with the decider: an approval decision moves the acting user to
+     * the decider for the nodes after it on BOTH postures (`FlowSchema.runAs`).
+     * A `runAs:'user'` run takes the decider's permissions with them; a
+     * `runAs:'system'` run keeps its elevation and only its attribution user
+     * moves. `runAs` declares the run's
      * AUTHORIZATION posture and leaves ATTRIBUTION alone (ADR-0073 D2).
      *
      * The `svc:flow:` label is therefore what a genuinely USER-LESS run falls
@@ -597,6 +607,25 @@ export interface ResumeSignal {
      * `{var}` interpolation and conditions read them directly.
      */
     variables?: Record<string, unknown>;
+    /**
+     * The user whose decision this resume is the tail of — the decider of an
+     * approval (approve or reject). On a `runAs: 'user'` run the nodes after
+     * the decision run as this user, with the identity and permissions the
+     * engine resolves for them through the same grants resolver a trigger
+     * user's run is seeded through (positions, permission sets, organisation
+     * peers), never with the trigger user's. On a `runAs: 'system'` run they
+     * keep the run's elevation and carry this user as their attribution user
+     * (`{ isSystem: true, userId }`), with no grant resolved; see
+     * `FlowSchema.runAs`. Absent
+     * when no human decided (an SLA auto-decision), and then the run keeps the
+     * identity it had.
+     *
+     * Honoured ONLY on a signal that also carries
+     * {@link RESUME_AUTHORITY_SERVICE}: the owning service names the decider it
+     * already authenticated and recorded. A signal built from an HTTP body
+     * cannot carry that marker, so a body naming a user here changes nothing.
+     */
+    resumedBy?: string;
     /**
      * Set by the service that OWNS the suspension to clear the resume gate on
      * a `resumeAuthority: 'service'` node — or on one that declares no
