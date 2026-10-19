@@ -22,6 +22,7 @@ import {
   MULTI_OPTION_TYPES,
   NUMERIC_VALUE_TYPES,
   STRUCTURED_JSON_TYPES,
+  VIRTUAL_FIELD_AGGREGATE_REMEDY,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
   type Field,
@@ -431,6 +432,54 @@ const flaggedStackWith = (aggregate: string, fieldType: string): Record<string, 
   stackWith(aggregate, fieldType, {
     fields: { name: { type: 'text' }, measured: { type: fieldType, multiple: true } },
   });
+
+// [#24426] A total over a VIRTUAL field. A `formula` stores no value, so the
+// way to its total is to store the value as a number field and aggregate that;
+// the hint used to name `count` / `count_distinct` as the way out instead,
+// which turns "total leave days" into a record count. The sentence is the
+// spec's, the one the compile leg prints too.
+describe('measure-aggregate-field-type-refused — a total over a formula names the stored-number remedy', () => {
+  it('sum over a formula field: the hint is the spec\'s stored-number remedy, the count only another question', () => {
+    const found = findings(stackWith('sum', 'formula'));
+    expect(found).toHaveLength(1);
+    const [issue] = found;
+    expect(issue.rule).toBe(RULE);
+    expect(issue.severity).toBe('error');
+    expect(issue.path).toBe('datasets[0].measures[0].aggregate');
+    expect(issue.hint).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    expect(issue.hint).toContain('store the value as a number field');
+    expect(issue.hint).toContain('answer a different question: how many records');
+    // The remedy comes first, and no count is offered as the way to the total.
+    expect(issue.hint.indexOf('number field')).toBeLessThan(issue.hint.indexOf('`count`'));
+    expect(issue.hint).not.toContain('accepts: count');
+    expect(issue.hint).not.toContain('Either point');
+  });
+
+  it('avg, min and max over a formula read the same sentence', () => {
+    for (const aggregate of ['avg', 'min', 'max']) {
+      const [issue] = findings(stackWith(aggregate, 'formula'));
+      expect(issue?.hint, aggregate).toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    }
+  });
+
+  it('`os explain` holds the same sentence verbatim', () => {
+    expect(explanationOf(RULE)).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+  });
+
+  it('the controls: a stored class and the count_distinct × JSON-list case keep their own hints', () => {
+    const [text] = findings(stackWith('sum', 'text'));
+    expect(text?.hint).toContain('type accepts: count, count_distinct.');
+    expect(text?.hint).not.toBe(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+    const [list] = findings(flaggedStackWith('count_distinct', 'select'));
+    expect(list?.hint).toContain('declaration accepts: count.');
+    expect(list?.hint).not.toContain('number field');
+    const [json] = findings(stackWith('count_distinct', 'json'));
+    expect(json?.hint).toContain('type accepts: count.');
+    expect(json?.hint).not.toContain('number field');
+    // count over a formula is accepted — nothing to prescribe.
+    expect(findings(stackWith('count', 'formula'))).toEqual([]);
+  });
+});
 
 describe('measure-aggregate-field-type-refused — reads the declaration, not the type alone', () => {
   // ⭐ The addendum's pin and its control, one pair.
@@ -1271,7 +1320,8 @@ describe('[#22161] one-line fixes — the two ids', () => {
     const facts: Record<string, readonly string[]> = {
       [MEASURE_AGGREGATE_FIELD_TYPE_REFUSED]: [
         '`count` accepts every type, because it reads no value',
-        'STORED as a numeric field (a computed column)',
+        'STORED as a numeric field and aggregated as one',
+        VIRTUAL_FIELD_AGGREGATE_REMEDY,
         "a dataset's by its compile (`400 DATASET_INVALID`)",
         "a cube's by the analytics door when a query names the measure (`400 INVALID_FIELD`)",
       ],

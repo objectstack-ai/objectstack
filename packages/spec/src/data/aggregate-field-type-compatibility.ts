@@ -146,6 +146,7 @@
 
 import type { AggregationFunction } from './query.zod';
 import { FieldType } from './field.zod';
+import { SEARCH_VIRTUAL_TYPES } from './search-fields';
 
 /**
  * The numeric class — the `NUMERIC_VALUE_TYPES` membership, spelled out here
@@ -242,4 +243,50 @@ export function isAggregateCompatibleWithFieldType(aggregate: string, fieldType:
   if (!Object.prototype.hasOwnProperty.call(AGGREGATE_FIELD_TYPE_COMPATIBILITY, aggregate)) return false;
   const row: readonly string[] = AGGREGATE_FIELD_TYPE_COMPATIBILITY[aggregate as AggregationFunction];
   return row.includes(fieldType);
+}
+
+/**
+ * The aggregates that READ the value they aggregate — the ones a field with no
+ * stored value cannot answer. `count` reads no value, and `count_distinct`'s
+ * row does not refuse the virtual class, so neither is here.
+ */
+const VALUE_READING_AGGREGATES: ReadonlySet<string> = new Set(['sum', 'avg', 'min', 'max']);
+
+/**
+ * The ONE prescription for `sum` / `avg` / `min` / `max` over a VIRTUAL field
+ * — computed on read with no stored column (`SEARCH_VIRTUAL_TYPES`, which is
+ * `formula`) — the pair this table refuses on its storage ground whatever the
+ * field's declared `returnType` says (see the module TSDoc).
+ *
+ * The way to a total, an average or an extreme of a computed value is to STORE
+ * it: a number field kept in step by a hook, aggregated as one — the remedy the
+ * semantic migration `dataset-measure-aggregate-field-type-refused` prescribes.
+ * `count` and `count_distinct` stay named, but as a DIFFERENT question: a count
+ * substituted for the total is a plausible wrong number (a "total leave days"
+ * tile reading 3 records against a true 10 days), not a way to the total.
+ *
+ * Every refusal of the pair reads this one sentence — the dataset compile leg
+ * (`service-analytics`) and the authoring lint leg (`@objectstack/lint`, whose
+ * `os explain` entry holds it verbatim) — so the two cannot drift into two
+ * prescriptions. It is at most 200 characters: the lint prints it whole as a
+ * one-line `fix:`.
+ */
+export const VIRTUAL_FIELD_AGGREGATE_REMEDY =
+  'The field is computed on read and stores no value: store the value as a number field (kept by a hook) '
+  + 'and aggregate that. `count` / `count_distinct` answer a different question: how many records.';
+
+/**
+ * The prescription a refusal of `aggregate` over a `fieldType` field prints
+ * when the field is VIRTUAL — {@link VIRTUAL_FIELD_AGGREGATE_REMEDY} for a
+ * refused `sum` / `avg` / `min` / `max` over a type in `SEARCH_VIRTUAL_TYPES`
+ * — and `undefined` for every other pair, whose refusal keeps its own class's
+ * words. Fail-closed like {@link isAggregateCompatibleWithFieldType}: a
+ * non-string, or a pair the table accepts, answers `undefined`. ⛔ A
+ * prescription, never a verdict: whether the pair is refused is the table's.
+ */
+export function virtualFieldAggregateRemedy(aggregate: string, fieldType: string): string | undefined {
+  if (typeof aggregate !== 'string' || typeof fieldType !== 'string') return undefined;
+  if (!VALUE_READING_AGGREGATES.has(aggregate) || !SEARCH_VIRTUAL_TYPES.has(fieldType)) return undefined;
+  if (isAggregateCompatibleWithFieldType(aggregate, fieldType)) return undefined;
+  return VIRTUAL_FIELD_AGGREGATE_REMEDY;
 }

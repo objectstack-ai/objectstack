@@ -7,6 +7,7 @@ import {
   AggregationFunction,
   isAggregateCompatibleWithFieldType,
   isMultiValueField,
+  virtualFieldAggregateRemedy,
 } from '@objectstack/spec/data';
 import type { Dataset, DatasetMeasure, DatasetDimension } from '@objectstack/spec/ui';
 import { resolveI18nLabel } from '@objectstack/spec/ui';
@@ -271,9 +272,15 @@ const DIVERGENCE_BY_AGGREGATE = (aggregate: string, fieldType: string, column = 
  * counts rows, or counts distinct a scalar field holding the part they meant.
  * The other two non-temporal sentences no longer say `count_distinct` accepts
  * every type: since #20808 it accepts every type but the JSON-stored ones.
+ * [#24426] A VIRTUAL field (`formula`) is answered first, and not here: its
+ * sentence is the spec's `virtualFieldAggregateRemedy`, the one the lint leg
+ * prints too — store the value as a number field and aggregate that, with a
+ * count named only as a different question. A count is no way to a total.
  */
-const REMEDY_BY_SOURCE_CLASS = (fieldType: string, aggregate: string): string =>
-  TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)
+const REMEDY_BY_SOURCE_CLASS = (fieldType: string, aggregate: string): string => {
+  const virtual = virtualFieldAggregateRemedy(aggregate, fieldType);
+  if (virtual !== undefined) return virtual;
+  return TEMPORAL_SOURCE_FIELD_TYPES.has(fieldType)
     ? 'For a temporal field, `min`/`max` return a real instant; a DURATION has to be '
       + 'stored as a number (a computed "days open" field) and aggregated as one.'
     : aggregate === 'count_distinct'
@@ -288,6 +295,7 @@ const REMEDY_BY_SOURCE_CLASS = (fieldType: string, aggregate: string): string =>
       : 'For a non-numeric field, `count` accepts every type because it reads no value, and '
         + '`count_distinct` every type but the JSON-stored ones; a quantity that should be '
         + 'added up has to be stored as a numeric field and aggregated as one.';
+};
 
 /**
  * [#16737 / #16099 / #17560] Refuse a measure whose AGGREGATE cannot meaningfully
