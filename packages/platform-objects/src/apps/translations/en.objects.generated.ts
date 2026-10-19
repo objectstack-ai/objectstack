@@ -1491,7 +1491,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
         label: "All",
         emptyState: {
           title: "No OAuth applications yet",
-          message: "Register an application to let its clients sign users in with this environment."
+          message: "Register an application to let its clients sign users in with this system."
         }
       },
       mine: {
@@ -1894,7 +1894,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
   sys_sso_provider: {
     label: "SSO Provider",
     pluralLabel: "SSO Providers",
-    description: "External SSO identity providers (OIDC / SAML) this environment federates login to",
+    description: "External SSO identity providers (OIDC / SAML) this system federates login to",
     fields: {
       id: {
         label: "ID"
@@ -1965,7 +1965,7 @@ export const enObjects: NonNullable<TranslationData['objects']> = {
           },
           clientId: {
             label: "Client ID",
-            helpText: "OAuth client ID issued by the IdP for this environment."
+            helpText: "OAuth client ID issued by the IdP for this system."
           },
           clientSecret: {
             label: "Client Secret",
