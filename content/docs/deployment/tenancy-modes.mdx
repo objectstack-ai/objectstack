@@ -16,14 +16,10 @@ it generalizes the two-valued *tenancy mode* of
 whose `tenancy` service, membership lifecycle and degraded-tenancy boot guard all
 still apply — widened to the three postures.
 
-<Callout type="warn" title="18.0: single only">
-18.0 supports fresh `single` installs; upgrades and walled postures arrive in 18.x. In 18.0 `os serve` (and so `os dev` and `os start`) refuses `group` and
-`isolated` at boot with `NOT_IMPLEMENTED`, before it reads a config.
-A database an 18.0 install creates takes the same 18.x upgrade path as a v17 one.
-The refusal covers the `os` boot path only. The one-shot `os migrate`, `os verify`,
-`os secret` and `os storage` boots and embedded hosts (`createStandaloneStack`,
-`@objectstack/adapter-hono`) are not refused, and none of them is a supported
-walled deployment in 18.0.
+<Callout type="warn" title="Upgrades arrive in a later 18.x release">
+Fresh installs are supported under every posture: `single`, `group` and
+`isolated`. The upgrade path for an existing database arrives in a later 18.x
+release, and a database an 18.0 install created takes the same path as a v17 one.
 </Callout>
 
 <Callout type="info" title="Renamed, not re-configured">

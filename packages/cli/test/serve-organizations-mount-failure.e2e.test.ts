@@ -34,20 +34,6 @@
  * `packages/plugins/organizations` carries no licence check of any kind (the
  * shape cloud#1020 gave its license gate). What is asserted is the CLI's
  * CLASSIFICATION and its message, not any runtime's semantics.
- *
- * ## 18.0: the walled postures are refused before this resolution runs
- *
- * 18.0 supports the `single` posture only (ruling record 6259698357 on the
- * v18 epic). `os serve` refuses `group` and `isolated` at its
- * tenancy-posture gate, before a config is read (`walledPostureRefusal`,
- * pinned in-process in `src/commands/serve-walled-posture-refusal.test.ts`).
- * So in 18.0 no walled boot reaches the stages this file was written for. The
- * cases below keep its fixtures and pin, over the real process, that the 18.0
- * refusal comes FIRST whatever the package state, and that
- * `OS_ALLOW_DEGRADED_TENANCY` does not lift it. The 18.x release that carries
- * the walled postures restores this file's resolution cases from git history
- * (the parent of the commit that added this section), together with
- * `serve-organizations-host-resolution.e2e.test.ts`.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -158,34 +144,118 @@ const SERVE_ENV = {
   OS_PLATFORM_OWNER_EMAIL: 'operator@corp.example',
 };
 
-describe('os serve — 18.0 refuses the walled posture before the organizations runtime resolves', () => {
-  const cases: ReadonlyArray<{ name: string; app: () => string; env: Record<string, string | undefined> }> = [
-    { name: 'the package ABSENT', app: () => appAbsent, env: { OS_ALLOW_DEGRADED_TENANCY: undefined } },
-    { name: 'the package ABSENT, OS_ALLOW_DEGRADED_TENANCY=1', app: () => appAbsent, env: { OS_ALLOW_DEGRADED_TENANCY: '1' } },
-    { name: 'the package PRESENT and refusing', app: () => appRefusing, env: { OS_ALLOW_DEGRADED_TENANCY: undefined } },
-    { name: 'the package PRESENT and refusing, OS_ALLOW_DEGRADED_TENANCY=1', app: () => appRefusing, env: { OS_ALLOW_DEGRADED_TENANCY: '1' } },
-  ];
-  for (const c of cases) {
+const BANNER = 'Press Ctrl+C to stop';
+const BANNER_RE = /Press Ctrl\+C to stop/;
+
+function seenOf(stdout: string, stderr: string): string {
+  return `\n--- stdout ---\n${stdout.slice(-4000)}\n--- stderr ---\n${stderr.slice(-4000)}`;
+}
+
+describe('os serve — organizations import stage vs mount stage (#4818)', () => {
+  describe('import stage fails — the package is ABSENT (behaviour must be unchanged)', () => {
     it(
-      `${c.name}: refused in 18.0, and no organizations stage ran`,
+      'refuses to boot with the ADR-0093 D5 "could not be loaded" diagnosis',
       async () => {
-        const { stdout, stderr } = await runServe(c.app(), [], {
-          waitFor: /Press Ctrl\+C to stop/,
-          env: { ...SERVE_ENV, ...c.env },
+        const { stdout, stderr } = await runServe(appAbsent, [], {
+          waitFor: BANNER_RE,
+          env: { ...SERVE_ENV, OS_ALLOW_DEGRADED_TENANCY: undefined },
           timeoutMs: 240_000,
         });
-        const seen = `\n--- stdout ---\n${stdout.slice(-4000)}\n--- stderr ---\n${stderr.slice(-4000)}`;
-        expect(stderr, `the 18.0 walled-posture refusal did not fire${seen}`).toContain(
-          "FATAL: tenancy posture 'isolated' is not supported in 18.0 (NOT_IMPLEMENTED).",
+        const seen = seenOf(stdout, stderr);
+
+        expect(stderr, `the D5 fail-fast did not fire${seen}`).toMatch(
+          /FATAL: tenancy posture 'isolated' was requested/,
         );
-        expect(stderr, `serve served traffic under a walled posture${seen}`).not.toContain('Press Ctrl+C to stop');
-        // Neither organizations stage was reached: no absent-package fail-fast,
-        // no mount refusal, no degraded boot.
-        expect(stderr, `the organizations import ran before the refusal${seen}`).not.toMatch(/could not be loaded|was requested/);
-        expect(stderr, `the organizations mount ran before the refusal${seen}`).not.toMatch(/WAS found and loaded/);
-        expect(stderr, `a degraded boot ran before the refusal${seen}`).not.toMatch(/DEGRADED TENANCY/);
+        // This wording is CORRECT here and must survive the stage split: the
+        // package really is not on this machine.
+        expect(stderr, `the absent-package diagnosis was lost${seen}`).toMatch(/could not be loaded/);
+        // …and the escape hatch is still offered on the path it belongs to.
+        expect(stderr).toMatch(/set OS_ALLOW_DEGRADED_TENANCY=1 to boot/);
+        expect(stderr, `serve served traffic without the wall${seen}`).not.toContain(BANNER);
       },
       300_000,
     );
-  }
+
+    it(
+      'boots degraded when the operator explicitly sets OS_ALLOW_DEGRADED_TENANCY=1',
+      async () => {
+        // The escape hatch keeps its one legitimate meaning: "the capability is
+        // absent and I accept running without it". Pinned so the stage split
+        // cannot regress it.
+        const { stdout, stderr } = await runServe(appAbsent, [], {
+          waitFor: BANNER_RE,
+          env: { ...SERVE_ENV, OS_ALLOW_DEGRADED_TENANCY: '1' },
+          timeoutMs: 240_000,
+        });
+        const seen = seenOf(stdout, stderr);
+
+        expect(stderr, `serve never reached its banner${seen}`).toContain(BANNER);
+        expect(stderr, `the degraded boot was not branded${seen}`).toMatch(/DEGRADED TENANCY/);
+        expect(stderr, `the degraded opt-in still fired the fail-fast${seen}`).not.toMatch(/✖ FATAL/);
+      },
+      300_000,
+    );
+  });
+
+  describe('mount stage fails — the package is PRESENT and its plugin refused', () => {
+    it(
+      "surfaces the plugin's own error verbatim and exits, without the absent-package wording",
+      async () => {
+        const { stdout, stderr } = await runServe(appRefusing, [], {
+          waitFor: BANNER_RE,
+          env: { ...SERVE_ENV, OS_ALLOW_DEGRADED_TENANCY: undefined },
+          timeoutMs: 240_000,
+        });
+        const seen = seenOf(stdout, stderr);
+
+        // D5's posture is unchanged: isolation was requested and cannot be
+        // delivered, so the boot still dies.
+        expect(stderr, `serve served traffic without the wall${seen}`).not.toContain(BANNER);
+        expect(stderr, `no fail-fast fired for a refusing plugin${seen}`).toMatch(/✖ FATAL/);
+
+        // The crux: the operator is told the package IS there, and reads the
+        // plugin's own words — not a fabricated cause, and not a module
+        // resolution wild goose chase.
+        expect(stderr, `the mount refusal was misreported as an absent package${seen}`).not.toMatch(
+          /could not be loaded/,
+        );
+        expect(stderr, `the plugin's message was not surfaced verbatim${seen}`).toContain(REFUSAL_MESSAGE);
+        expect(stderr, `the plugin's structured code was not surfaced${seen}`).toContain(REFUSAL_CODE);
+        expect(stderr, `the message does not say the package was found${seen}`).toMatch(
+          /WAS found and loaded/,
+        );
+        // Honest remaining alternative, and no dead-end suggestion.
+        expect(stderr).toMatch(/OS_TENANCY_POSTURE=single/);
+        expect(stderr, `the escape hatch was offered on a path it cannot fix${seen}`).toMatch(
+          /OS_ALLOW_DEGRADED_TENANCY does NOT apply/,
+        );
+      },
+      300_000,
+    );
+
+    it(
+      'still exits 1 when OS_ALLOW_DEGRADED_TENANCY=1 is set — the hatch must not swallow a refusal',
+      async () => {
+        // THE issue. Before the fix this booted with a warning: an env var
+        // silently overrode whatever gate the plugin was enforcing.
+        const { stdout, stderr } = await runServe(appRefusing, [], {
+          waitFor: BANNER_RE,
+          env: { ...SERVE_ENV, OS_ALLOW_DEGRADED_TENANCY: '1' },
+          timeoutMs: 240_000,
+        });
+        const seen = seenOf(stdout, stderr);
+
+        expect(
+          stderr,
+          `OS_ALLOW_DEGRADED_TENANCY swallowed a plugin refusal and served traffic${seen}`,
+        ).not.toContain(BANNER);
+        expect(stderr, `the refusal did not fail fast under the escape hatch${seen}`).toMatch(/✖ FATAL/);
+        expect(stderr, `the refusal was downgraded to a degraded-boot warning${seen}`).not.toMatch(
+          /DEGRADED TENANCY \(OS_ALLOW_DEGRADED_TENANCY=1\)/,
+        );
+        expect(stderr, `the plugin's message was not surfaced verbatim${seen}`).toContain(REFUSAL_MESSAGE);
+      },
+      300_000,
+    );
+  });
 });

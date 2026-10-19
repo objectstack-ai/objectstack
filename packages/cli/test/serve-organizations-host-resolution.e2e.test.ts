@@ -27,20 +27,7 @@
  * that is the whole point), registering the same `org-scoping` service and
  * posture entitlement the real one does. What is under test here is
  * RESOLUTION, not the enterprise semantics: proof that the real plugin walls
- *
- * ## 18.0: the walled postures are refused before this resolution runs
- *
- * 18.0 supports the `single` posture only (ruling record 6259698357 on the
- * v18 epic). `os serve` refuses `group` and `isolated` at its
- * tenancy-posture gate, before a config is read (`walledPostureRefusal`,
- * pinned in-process in `src/commands/serve-walled-posture-refusal.test.ts`).
- * So in 18.0 no walled boot reaches the stages this file was written for. The
- * cases below keep its fixtures and pin, over the real process, that the 18.0
- * refusal comes FIRST whatever the package state, and that
- * `OS_ALLOW_DEGRADED_TENANCY` does not lift it. The 18.x release that carries
- * the walled postures restores this file's resolution cases from git history
- * (the parent of the commit that added this section), together with
- * `serve-organizations-mount-failure.e2e.test.ts`.
+ * tenants lives in cloud's security-enterprise multi-org integration test.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -168,33 +155,88 @@ const SERVE_ENV = {
   OS_PLATFORM_OWNER_EMAIL: 'operator@corp.example',
 };
 
-describe('os serve — 18.0 refuses the walled posture before the organizations runtime resolves', () => {
-  const cases: ReadonlyArray<{ name: string; app: () => string; env: Record<string, string | undefined> }> = [
-    { name: 'the package installed in the APP', app: () => appWithPackage, env: {} },
-    { name: 'no package in the app', app: () => appWithoutPackage, env: {} },
-    { name: 'the package reachable only through NODE_PATH', app: () => appWithoutPackage, env: { NODE_PATH: hoistedStore } },
-  ];
-  for (const c of cases) {
-    it(
-      `${c.name}: refused in 18.0, and no organizations stage ran`,
-      async () => {
-        const { stdout, stderr } = await runServe(c.app(), [], {
-          waitFor: /Press Ctrl\+C to stop/,
-          env: { ...SERVE_ENV, ...c.env },
-          timeoutMs: 240_000,
-        });
-        const seen = `\n--- stdout ---\n${stdout.slice(-4000)}\n--- stderr ---\n${stderr.slice(-4000)}`;
-        expect(stderr, `the 18.0 walled-posture refusal did not fire${seen}`).toContain(
-          "FATAL: tenancy posture 'isolated' is not supported in 18.0 (NOT_IMPLEMENTED).",
-        );
-        expect(stderr, `serve served traffic under a walled posture${seen}`).not.toContain('Press Ctrl+C to stop');
-        // Neither organizations stage was reached: no absent-package fail-fast,
-        // no mount refusal, no degraded boot.
-        expect(stderr, `the organizations import ran before the refusal${seen}`).not.toMatch(/could not be loaded|was requested/);
-        expect(stderr, `the organizations mount ran before the refusal${seen}`).not.toMatch(/WAS found and loaded/);
-        expect(stderr, `a degraded boot ran before the refusal${seen}`).not.toMatch(/DEGRADED TENANCY/);
-      },
-      300_000,
-    );
-  }
+describe('os serve — enterprise organizations resolution (cloud#1013)', () => {
+  it(
+    'boots a walled posture with the package installed in the APP, not the framework',
+    async () => {
+      const { stdout, stderr } = await runServe(appWithPackage, [], {
+        waitFor: /Press Ctrl\+C to stop/,
+        env: { ...SERVE_ENV },
+        timeoutMs: 240_000,
+      });
+
+      const seen = `\n--- stdout ---\n${stdout.slice(-4000)}\n--- stderr ---\n${stderr.slice(-4000)}`;
+
+      // The load-bearing assertion. Before the fix, the bare import resolved
+      // from the CLI's realpath in the framework workspace, threw
+      // MODULE_NOT_FOUND, and this boot died on the D5 fail-fast instead of
+      // reaching the banner at all.
+      expect(stderr, `the D5 fail-fast fired — the app-installed package was not found${seen}`)
+        .not.toMatch(/could not be loaded/);
+      expect(stderr, `serve never reached its banner${seen}`).toContain('Press Ctrl+C to stop');
+      // …and it is the APP's package that got mounted: `Organizations` is
+      // tracked only on the path that actually registered the plugin.
+      expect(stderr, `OrganizationsPlugin was not registered${seen}`).toContain('Organizations');
+    },
+    300_000,
+  );
+
+  it(
+    'still refuses to boot a walled posture when the app does not ship the package',
+    async () => {
+      // The other half of the contract: the fix must not turn the ADR-0093 D5
+      // fail-fast into a lenient skip. An app that requests isolation without
+      // the enterprise runtime must still die rather than serve traffic with
+      // the organization wall inactive.
+      const { stdout, stderr } = await runServe(appWithoutPackage, [], {
+        waitFor: /Press Ctrl\+C to stop/,
+        env: { ...SERVE_ENV },
+        timeoutMs: 240_000,
+      });
+
+      const seen = `\n--- stdout ---\n${stdout.slice(-4000)}\n--- stderr ---\n${stderr.slice(-4000)}`;
+      expect(stderr, `the D5 fail-fast did not fire${seen}`).toMatch(
+        /FATAL: tenancy posture 'isolated' was requested/,
+      );
+      // The remedy names the app, because that is where the package has to go.
+      expect(stderr).toMatch(/to THIS APP/);
+      expect(stderr, `serve served traffic without the wall${seen}`).not.toContain(
+        'Press Ctrl+C to stop',
+      );
+    },
+    300_000,
+  );
+
+  it(
+    'refuses when the package is reachable only through NODE_PATH — the pnpm shim shape (#4719)',
+    async () => {
+      // The #4719 defect, over a real process, with the launcher reproduced
+      // exactly. Same app as the case above (declares nothing), same posture —
+      // the only difference is the NODE_PATH every pnpm bin shim exports. Before
+      // this change that single environment variable was enough to boot the
+      // organization wall off a package the app had never declared, so whether
+      // ADR-0093 D5 fired came down to HOW the process was started.
+      const { stdout, stderr } = await runServe(appWithoutPackage, [], {
+        waitFor: /Press Ctrl\+C to stop/,
+        env: { ...SERVE_ENV, NODE_PATH: hoistedStore },
+        timeoutMs: 240_000,
+      });
+
+      const seen = `\n--- stdout ---\n${stdout.slice(-4000)}\n--- stderr ---\n${stderr.slice(-4000)}`;
+      expect(
+        stderr,
+        `NODE_PATH got an undeclared app past the D5 wall — the #4719 defect${seen}`,
+      ).toMatch(/FATAL: tenancy posture 'isolated' was requested/);
+      // …and the remedy is the declaration one, naming why reachability lost.
+      expect(stderr).toMatch(/to THIS APP/);
+      expect(stderr).toMatch(/NODE_PATH/);
+      expect(stderr, `serve served traffic without the wall${seen}`).not.toContain(
+        'Press Ctrl+C to stop',
+      );
+      expect(stderr, `the hoisted package was mounted anyway${seen}`).not.toContain(
+        'Organizations',
+      );
+    },
+    300_000,
+  );
 });
