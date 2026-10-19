@@ -6,7 +6,7 @@ import { assertEngineDeleteDispatch } from '@objectstack/objectql';
 // assert an HTTP status they SOURCE rather than one they restate.
 import { HttpStatusErrorCodeMap } from '@objectstack/spec/api';
 import { SharingService } from './sharing-service.js';
-import { SharingRuleService, isDeclaredSharingRule } from './sharing-rule-service.js';
+import { SharingRuleService, isDeclaredSharingRule, bindDeclaredRuleNameGuard } from './sharing-rule-service.js';
 import { TeamGraphService, expandPrincipal } from './team-graph.js';
 import { BusinessUnitGraphService } from './business-unit-graph.js';
 // [commit 04d03c3a0] The ADDRESSING primitive, imported so the negative half of the
@@ -16,7 +16,7 @@ import { PositionGraphService } from './position-graph.js';
 import { celToFilter, celToFilterOutcome, createDeclaredSharingRuleSource } from './declared-sharing-rules.js';
 import { isMatchAllCriteria } from './rule-criteria.js';
 import { bindRuleCriteriaGuard } from './rule-hooks.js';
-import { resolveDeclaredRuleScopes } from './sharing-plugin.js';
+import { resolveDeclaredRuleScopes, SharingServicePlugin } from './sharing-plugin.js';
 
 interface Row { [k: string]: any }
 
@@ -2339,6 +2339,210 @@ describe('[ADR-0131 D2] declared sharing rules are read from the registry, never
       expect(await h.rules.listRules({}, BOOT)).toEqual([]);
       h.rules.addDeclaredRuleScope('org_b');
       expect((await h.rules.listRules({}, BOOT)).map((r) => r.organization_id)).toEqual(['org_b']);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────
+  // [ADR-0131 D6 regime O, guarded — ruling B′] A row of a declared rule's
+  // name replaces the declaration in its scope. Only the EDIT of the
+  // projection (saved back under its id, the rule's name) may create that
+  // row; a new rule, or a rename, taking the name is refused 409. And the
+  // write that creates, switches or removes the row reconciles the
+  // declaration's grants in that scope at once — not at the next boot's sweep.
+  // ───────────────────────────────────────────────────────────────────
+  describe('regime O, guarded: the declared name is taken; the edit is the overlay', () => {
+    const adminOf = (org: string) =>
+      ({ userId: 'admin', tenantId: org, organizationId: org, systemPermissions: ['manage_sharing'] }) as any;
+    const RULE_INPUT = {
+      name: DECLARED.name, label: 'Red projects → exec (ours)', object: 'project',
+      criteria: { status: 'red' }, recipientType: 'user', recipientId: 'exec', accessLevel: 'read',
+    } as const;
+
+    /** The refusal's declared envelope — `code` + `status`, never the sentence. */
+    const refusalOf = async (call: Promise<unknown>): Promise<{ code: unknown; status: unknown; rule: unknown }> => {
+      try {
+        await call;
+      } catch (err: any) {
+        return { code: err?.code, status: err?.status, rule: err?.rule };
+      }
+      throw new Error('expected the write to be REFUSED, but it resolved successfully');
+    };
+
+    /**
+     * The plugin's `sys_sharing_rule` write trigger, bound over this harness's
+     * engine with the real rule service — the seam every door's write reaches.
+     */
+    function wireTrigger(h: ReturnType<typeof harness>) {
+      const hooks: Array<{ event: string; handler: (ctx: any) => any; options: Record<string, any> }> = [];
+      h.engine.registerHook = (event: string, handler: (ctx: any) => any, options: Record<string, any> = {}) => {
+        hooks.push({ event, handler, options });
+      };
+      h.engine.unregisterHooksByPackage = (pkg: string) => {
+        let removed = 0;
+        for (let i = hooks.length - 1; i >= 0; i--) if (hooks[i].options.packageId === pkg) { hooks.splice(i, 1); removed++; }
+        return removed;
+      };
+      const plugin = new SharingServicePlugin();
+      (plugin as any).ruleService = h.rules;
+      (plugin as any).ruleGrantsBootReconciled = true;
+      const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+      (plugin as any).bindRuleRebindTriggers(h.engine, { logger });
+      bindDeclaredRuleNameGuard(h.engine, h.rules);
+      const fire = async (event: string, ctx: Record<string, any>) => {
+        for (const x of hooks.filter((y) => y.event === event && y.options.object === 'sys_sharing_rule')) await x.handler(ctx);
+      };
+      return { fire, logger };
+    }
+    const storedRow = (h: ReturnType<typeof harness>, id: string): Row =>
+      (h.engine._tables.sys_sharing_rule ?? []).find((r: Row) => r.id === id);
+
+    describe('`single`', () => {
+      let h: ReturnType<typeof harness>;
+      beforeEach(async () => {
+        h = harness([DECLARED], [
+          { id: 'p_red', status: 'red', organization_id: 'org_default' },
+          { id: 'p_red_2', status: 'red', organization_id: 'org_other' },
+        ]);
+        await h.rules.evaluateRule(DECLARED.name, BOOT);
+      });
+
+      it.each([
+        ['an org-scoped sharing admin', adminOf('org_default')],
+        ['a system context', BOOT],
+      ])('%s: a NEW rule taking the declared name is refused 409 RESOURCE_CONFLICT, naming the vendor rule, and nothing lands', async (_who, ctx) => {
+        const before = h.grants().map((g) => g.id).sort();
+        const refusal = await refusalOf(h.rules.defineRule({ ...RULE_INPUT } as any, ctx));
+        expect(refusal).toEqual({ code: 'RESOURCE_CONFLICT', status: 409, rule: DECLARED.name });
+        // The catalogue's own code for the status, not a restated pair.
+        expect(HttpStatusErrorCodeMap[409]).toBe(refusal.code);
+        expect(h.engine._tables.sys_sharing_rule ?? []).toEqual([]);
+        expect(h.grants().map((g) => g.id).sort()).toEqual(before);
+        expect((await h.rules.listRules({}, BOOT)).map((r) => r.id)).toEqual([DECLARED.name]);
+      });
+
+      it('an id that is not the projection’s is a new rule too — refused', async () => {
+        const refusal = await refusalOf(h.rules.defineRule({ ...RULE_INPUT, id: 'srule_elsewhere' } as any, adminOf('org_default')));
+        expect(refusal.code).toBe('RESOURCE_CONFLICT');
+        expect(h.engine._tables.sys_sharing_rule ?? []).toEqual([]);
+      });
+
+      it('CONTROL: a name no declaration holds is created as before, with no id', async () => {
+        const row = await h.rules.defineRule({ ...RULE_INPUT, name: 'red_to_exec_too' } as any, adminOf('org_default'));
+        expect(row.id).toMatch(/^srule_/);
+      });
+
+      it('the EDIT of the projection (saved back under its id) stores the customised copy, which answers for the name', async () => {
+        const copy = await h.rules.defineRule({ ...RULE_INPUT, id: DECLARED.name, active: false } as any, adminOf('org_default'));
+        expect(copy).toMatchObject({ name: DECLARED.name, organization_id: 'org_default', active: false });
+        expect(copy.id).not.toBe(DECLARED.name);
+        expect((await h.rules.listRules({}, BOOT)).map((r) => r.id)).toEqual([copy.id]);
+        // The copy is a stored row now: saving it again is the upsert, no id needed.
+        const again = await h.rules.defineRule({ ...RULE_INPUT, active: true } as any, adminOf('org_default'));
+        expect(again.id).toBe(copy.id);
+      });
+
+      it('the copy’s creation revokes the declaration’s grants EVERYWHERE in the same write — before any boot sweep', async () => {
+        const { fire } = wireTrigger(h);
+        expect(h.grants().filter((g) => g.source_id === DECLARED.name)).toHaveLength(2);
+        const copy = await h.rules.defineRule({ ...RULE_INPUT, id: DECLARED.name, active: false } as any, adminOf('org_default'));
+        await fire('afterInsert', { result: storedRow(h, copy.id) });
+        // Under `single` the one overlay answers everywhere: both organizations' grants go.
+        expect(h.grants()).toEqual([]);
+        // Nothing was left for the sweep.
+        expect(await h.rules.sweepOrphanedRuleGrants()).toBe(0);
+      });
+
+      it('an `active` change on the copy reconciles the declaration’s grants again — a stale one goes', async () => {
+        const { fire } = wireTrigger(h);
+        const copy = await h.rules.defineRule({ ...RULE_INPUT, id: DECLARED.name } as any, adminOf('org_default'));
+        await fire('afterInsert', { result: storedRow(h, copy.id) });
+        // The copy grants under its own id (an organization's row sweeps its own
+        // organization's records); the declaration grants nothing.
+        expect(h.grants().map((g) => [g.record_id, g.source_id])).toEqual([['p_red', copy.id]]);
+        // A declaration grant left standing (a write that failed half-way, say).
+        h.engine._tables.sys_record_share.push({
+          id: 'share_stale', organization_id: 'org_default', object_name: 'project', record_id: 'p_red',
+          recipient_type: 'user', recipient_id: 'exec', access_level: 'read', source: 'rule', source_id: DECLARED.name,
+        });
+        // The admin switches the copy off through the `/data` door.
+        const previous = { ...storedRow(h, copy.id) };
+        Object.assign(storedRow(h, copy.id), { active: false });
+        await fire('afterUpdate', { previous, input: { id: copy.id, data: { active: false } }, result: storedRow(h, copy.id) });
+        expect(h.grants()).toEqual([]);
+      });
+
+      it('a reconcile failure stops before the copy’s own pass: the two are never both in force', async () => {
+        const { fire, logger } = wireTrigger(h);
+        const copy = await h.rules.defineRule({ ...RULE_INPUT, id: DECLARED.name } as any, adminOf('org_default'));
+        const evaluate = vi.spyOn(h.rules, 'evaluateRule');
+        vi.spyOn(h.rules, 'reconcileDeclaredRuleName').mockRejectedValueOnce(new Error('driver down'));
+        await fire('afterInsert', { result: storedRow(h, copy.id) });
+        expect(evaluate).not.toHaveBeenCalled();
+        expect(h.grants().every((g) => g.source_id === DECLARED.name)).toBe(true);
+        expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('grant reconcile failed'), expect.anything());
+      });
+
+      it('removing the copy serves the declaration again, its grants re-derived in the same write', async () => {
+        const { fire } = wireTrigger(h);
+        const copy = await h.rules.defineRule({ ...RULE_INPUT, id: DECLARED.name, active: false } as any, adminOf('org_default'));
+        await fire('afterInsert', { result: storedRow(h, copy.id) });
+        expect(h.grants()).toEqual([]);
+        const previous = { ...storedRow(h, copy.id) };
+        h.engine._tables.sys_sharing_rule = [];
+        await fire('afterDelete', { previous, input: { id: copy.id } });
+        expect(h.grants().map((g) => [g.record_id, g.source_id]).sort()).toEqual([
+          ['p_red', DECLARED.name], ['p_red_2', DECLARED.name],
+        ]);
+      });
+
+      describe('the `/data` door (Setup’s New and edit form)', () => {
+        it('an INSERT of the declared name is refused 409 before it lands; a system write passes', async () => {
+          const { fire } = wireTrigger(h);
+          const session = { userId: 'admin', isSystem: false };
+          const refusal = await refusalOf(fire('beforeInsert', { session, input: { data: { name: DECLARED.name } } }));
+          expect(refusal).toEqual({ code: 'RESOURCE_CONFLICT', status: 409, rule: DECLARED.name });
+          await expect(fire('beforeInsert', { session: { isSystem: true }, input: { data: { name: DECLARED.name } } })).resolves.toBeUndefined();
+          await expect(fire('beforeInsert', { session, input: { data: { name: 'another_rule' } } })).resolves.toBeUndefined();
+        });
+
+        it('a RENAME onto the declared name is refused; a save that keeps the copy’s name, or renames away, passes', async () => {
+          const { fire } = wireTrigger(h);
+          const session = { userId: 'admin', isSystem: false };
+          const other = { id: 'srule_other', name: 'another_rule' };
+          const refusal = await refusalOf(fire('beforeUpdate', { session, previous: other, input: { id: other.id, data: { name: DECLARED.name } } }));
+          expect(refusal.code).toBe('RESOURCE_CONFLICT');
+          const copy = { id: 'srule_copy', name: DECLARED.name };
+          await expect(fire('beforeUpdate', { session, previous: copy, input: { id: copy.id, data: { name: DECLARED.name, active: false } } })).resolves.toBeUndefined();
+          await expect(fire('beforeUpdate', { session, previous: copy, input: { id: copy.id, data: { name: 'renamed_away' } } })).resolves.toBeUndefined();
+        });
+      });
+    });
+
+    describe('walled: an organization’s overlay is its own', () => {
+      let h: ReturnType<typeof harness>;
+      beforeEach(async () => {
+        h = harness([DECLARED], [
+          { id: 'a_red', status: 'red', organization_id: 'org_a' },
+          { id: 'b_red', status: 'red', organization_id: 'org_b' },
+        ]);
+        h.rules.setDeclaredRuleScopes(['org_a', 'org_b']);
+        await h.rules.evaluateRule(DECLARED.name, BOOT);
+      });
+
+      it('a NEW rule of the declared name is refused in an organization too', async () => {
+        expect((await refusalOf(h.rules.defineRule({ ...RULE_INPUT } as any, adminOf('org_a')))).code).toBe('RESOURCE_CONFLICT');
+      });
+
+      it('org_a’s copy revokes org_a’s declared grants at once; org_b keeps the declaration and its grants', async () => {
+        const { fire } = wireTrigger(h);
+        const copy = await h.rules.defineRule({ ...RULE_INPUT, id: DECLARED.name, active: false } as any, adminOf('org_a'));
+        await fire('afterInsert', { result: storedRow(h, copy.id) });
+        expect(h.grants().map((g) => [g.record_id, g.organization_id, g.source_id])).toEqual([['b_red', 'org_b', DECLARED.name]]);
+        expect((await h.rules.listRules({}, BOOT)).map((r) => [r.id, r.organization_id])).toEqual([
+          [copy.id, 'org_a'], [DECLARED.name, 'org_b'],
+        ]);
+        expect(await h.rules.sweepOrphanedRuleGrants()).toBe(0);
+      });
     });
   });
 });
