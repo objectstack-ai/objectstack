@@ -126,6 +126,16 @@
  * `translation-option-key-unknown` warning severity and with the
  * label-versus-value diagnosis every option map here gets.
  *
+ * ── Picklists: the list face (#23566) ────────────────────────────────────
+ *
+ * `picklists.<name>` resolves against `Picklist.name` (`data/picklist.zod.ts`),
+ * and `picklists.<name>.options.<value>` against that list's option values plus
+ * every `picklistExtensions[]` entry's for it — the set `lookupPicklistOption`
+ * is asked for. Each verdict is the field twin's: an orphan list is
+ * `translation-target-unknown` (`error`), a mis-keyed option
+ * `translation-option-key-unknown` (`warning`). A list this stack only EXTENDS,
+ * declared by no package of it, is skipped wholly — rung 2b below, for a list.
+ *
  * ── Cross-package objects ────────────────────────────────────────────────
  *
  * A stack legitimately translates objects it does not define — `sys_user`'s
@@ -425,6 +435,19 @@ interface Universe {
   globalActions: Map<string, AnyRec>;
   /** Action name → owning object, so a misfiled `globalActions` key can say where it belongs. */
   actionOwners: Map<string, string>;
+  /**
+   * Picklist name (`Picklist.name`) → the option values a
+   * `picklists.<name>.options.<key>` key may name: the declaration's own
+   * `options`, plus every `picklistExtensions[]` entry that extends it (#23566).
+   */
+  picklists: Map<string, DeclaredOptions>;
+  /**
+   * Every picklist a `picklistExtensions[]` entry extends that NO package of
+   * this stack declares — the list's owner sits outside, so its option set is
+   * not visible from here and the `picklists.<name>` subtree is skipped wholly,
+   * rung 2b of the object ladder applied to a list (#23566).
+   */
+  extendedPicklists: Set<string>;
 }
 
 function emptyFacts(): ObjectFacts {
@@ -1439,7 +1462,69 @@ function buildUniverse(stack: AnyRec): Universe {
     collectFlowRecord(flow, { ownDeclaration: false });
   }
 
-  return { objects, extended, apps, contributedOnlyApps, dashboards, flows, globalActions, actionOwners };
+  // ── Picklists: the option values `picklists.<name>.options.<key>` may name (#23566) ──
+  //
+  // The runtime reads this face through `lookupPicklistOption`
+  // (`@objectstack/spec/system`, `i18n-resolver.ts`) with the list's name and
+  // each SERVED option's value as text — for `translatePicklist` the list's own
+  // options, for a picklist-bound field (`translateObject`) the options resolved
+  // onto it, extensions included (`PicklistServedFieldSchema`). So the universe
+  // is the declaration's `options` plus every extension's, the same set the
+  // served field carries. `SelectOptionSchema.value` is a string, so
+  // {@link readOptions} reads it exactly as the resolver's `String(value)` does.
+  //
+  // …from the stack in hand and from the artifact's other entries: both
+  // `picklists` and `picklistExtensions` carry disposition `concat` in
+  // `COMPOSE_KEY_DISPOSITIONS`, so both sit inside an ADR-0130 D4 entry's
+  // assembled body — the proof every other fold here rests on. Where both
+  // declare one list, the record this leg is JUDGING keeps the slot, the
+  // dashboards' decision; the extensions are a union, the `objectExtensions`
+  // fold's, because every one of them lands on the served list.
+  const picklists = new Map<string, DeclaredOptions>();
+  const collectPicklistRecord = (list: AnyRec, { ownDeclaration }: { ownDeclaration: boolean }) => {
+    const listName = strName(list.name);
+    if (!listName) return;
+    if (!ownDeclaration && picklists.has(listName)) return;
+    picklists.set(listName, readOptions(list) ?? { values: new Set(), byLabel: new Map() });
+  };
+  for (const list of recordsOf(stack.picklists)) collectPicklistRecord(list, { ownDeclaration: true });
+  for (const list of artifactProvidedRecords(stack, 'picklists')) {
+    collectPicklistRecord(list, { ownDeclaration: false });
+  }
+  const extendedPicklists = new Set<string>();
+  const picklistExtensions = [
+    ...recordsOf(stack.picklistExtensions),
+    ...artifactProvidedRecords(stack, 'picklistExtensions'),
+  ];
+  for (const extension of picklistExtensions) {
+    // An extension with no `extend` joins no list, so it makes nothing addressable.
+    const target = strName(extension.extend);
+    if (!target) continue;
+    const declared = picklists.get(target);
+    if (!declared) {
+      extendedPicklists.add(target);
+      continue;
+    }
+    const added = readOptions(extension);
+    if (!added) continue;
+    for (const value of added.values) declared.values.add(value);
+    for (const [label, value] of added.byLabel) {
+      if (!declared.byLabel.has(label)) declared.byLabel.set(label, value);
+    }
+  }
+
+  return {
+    objects,
+    extended,
+    apps,
+    contributedOnlyApps,
+    dashboards,
+    flows,
+    globalActions,
+    actionOwners,
+    picklists,
+    extendedPicklists,
+  };
 }
 
 /** Quote a locale for the config path — BCP-47 tags carry `-`. */
@@ -1771,6 +1856,34 @@ export function validateTranslationReferences(stack: AnyRec): TranslationRefFind
             `Header-action translations are keyed by the action's \`actionUrl\`, not its label.`,
           );
         }
+      }
+
+      // ── picklists.<name>[.options.<value>] (#23566) ───────────────────
+      for (const [listName, rawList] of Object.entries(asRecord(rawData.picklists))) {
+        const listPath = `${base}.picklists.${listName}`;
+        const declared = universe.picklists.get(listName);
+        if (!declared) {
+          // Rung 2b, applied to a list: an extension proves the stack means
+          // this name, and the owner's options are not visible from here.
+          if (universe.extendedPicklists.has(listName)) continue;
+          orphan(
+            `${inLocale} · picklist "${listName}"`,
+            listPath,
+            `Translations are keyed to picklist "${listName}", which no package in this stack ` +
+              `declares, so every option of it renders its source-locale label.` +
+              suggest(listName, universe.picklists.keys()),
+            `Match the key to a picklist's \`name\`, or drop it.`,
+          );
+          continue;
+        }
+        if (!isRec(rawList)) continue;
+        checkPicklistOptionKeys(findings, {
+          optionMap: rawList.options,
+          declared,
+          listName,
+          path: `${listPath}.options`,
+          where: `${inLocale} · picklist "${listName}"`,
+        });
       }
 
       // ── flows.<name>[.screens.<node_id>[.fields.<field_name>]] ────────
@@ -2131,6 +2244,49 @@ function checkActionParamOptionKeys(
         ? `Rename the key to "${labelHit}".`
         : `Option keys are the stored \`value\`, not the label and not a variant spelling. ` +
           `Declared values: ${listNames(values)}.`,
+    });
+  }
+}
+
+/**
+ * [#23566] Option translations under a DECLARED picklist —
+ * `picklists.<name>.options.<value>`, keyed by the option's stored value: the
+ * field `options` leg ({@link checkOptionKeys}) one surface over, at its
+ * severity and with its label-versus-value diagnosis.
+ *
+ * Judged against the list's own `options` plus every `picklistExtensions[]`
+ * entry's — the set a picklist-bound field is served with, and so the set
+ * `lookupPicklistOption` is ever asked for. A list always declares at least one
+ * option (`PicklistSchema`), so there is no "declares no options" arm here.
+ */
+function checkPicklistOptionKeys(
+  findings: TranslationRefFinding[],
+  ctx: {
+    optionMap: unknown;
+    declared: DeclaredOptions;
+    listName: string;
+    path: string;
+    where: string;
+  },
+): void {
+  for (const key of Object.keys(asRecord(ctx.optionMap))) {
+    if (ctx.declared.values.has(key)) continue;
+    const byLabel = ctx.declared.byLabel.get(key.toLowerCase());
+    findings.push({
+      severity: 'warning',
+      rule: TRANSLATION_OPTION_KEY_UNKNOWN,
+      where: ctx.where,
+      path: `${ctx.path}.${key}`,
+      message: byLabel
+        ? `Option translation is keyed by the DISPLAY LABEL "${key}" instead of the stored ` +
+          `value "${byLabel}", so the resolver never finds it and the option renders untranslated.`
+        : `Option translation is keyed by "${key}", which is not a value declared by picklist ` +
+          `"${ctx.listName}", so the option renders untranslated.` +
+          suggest(key, ctx.declared.values),
+      hint: byLabel
+        ? `Rename the key to "${byLabel}".`
+        : `Option keys are the stored \`value\` of the list or of a \`picklistExtensions\` entry for ` +
+          `it, not the label and not a variant spelling.`,
     });
   }
 }

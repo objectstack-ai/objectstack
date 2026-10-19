@@ -116,7 +116,7 @@ const DOORS = [
 
 describe('[#23072] each by-name /meta door outside the ruling\'s list declares a closed query set', () => {
     it('the measured sets — none carries the member selector', () => {
-        expect([...META_ITEM_SAVE_PARAMS].sort()).toEqual(['force', 'mode', 'package']);
+        expect([...META_ITEM_SAVE_PARAMS].sort()).toEqual(['force', 'mode', 'package', 'surface']);
         expect([...META_ITEM_REFERENCES_PARAMS]).toEqual([]);
         expect([...META_ITEM_LAYERS_PARAMS]).toEqual(['package']);
         expect([...META_ITEM_AUDIT_PARAMS]).toEqual(['limit']);
@@ -150,7 +150,7 @@ describe('[#23072] each by-name /meta door outside the ruling\'s list declares a
         const answer = await drive('PUT', ITEM, { member: 'zh-CN', mode: 'draft' }, EN);
         expect(answer.status).toBe(400);
         expect(answer.body?.error?.message).toMatch(/^The "member" query parameter is not supported by this endpoint\./);
-        expect(answer.body?.error?.message).toContain('Supported parameters: force, mode, package.');
+        expect(answer.body?.error?.message).toContain('Supported parameters: force, mode, package, surface.');
         expect(protocol.saveMetaItem).not.toHaveBeenCalled();
     });
 
@@ -215,5 +215,53 @@ describe('[#23072] PRESERVATION — every name each door reads still reaches its
         expect(answer.status, JSON.stringify(answer.body)).toBe(200);
         expect(protocol.getMetaItemLayered.mock.calls[0][0]).toEqual({ type: 'email_template', name: 'acme.welcome' });
         expect(answer.body).toEqual(EN);
+    });
+});
+
+/**
+ * [#24395] `?surface=` on `PUT /meta/:type/:name`: the save's authoring
+ * surface, read through `metaSaveRequestOptions` (the runtime dispatcher's
+ * half is `meta-save-preconditions-parity.test.ts`'s). Both halves per value:
+ * the arguments the protocol received, or a located 400 and no call at all.
+ */
+describe('[#24395] ?surface= on the REST save door: studio and api reach the save, copilot never does', () => {
+    for (const surface of ['studio', 'api'] as const) {
+        it(`PRESERVATION — ?surface=${surface} reaches saveMetaItem as \`surface\`, beside \`mode\``, async () => {
+            const { protocol, drive } = boot();
+            const answer = await drive('PUT', ITEM, { mode: 'draft', surface }, EN);
+            expect(answer.status, JSON.stringify(answer.body)).toBe(200);
+            expect(protocol.saveMetaItem).toHaveBeenCalledTimes(1);
+            expect(protocol.saveMetaItem.mock.calls[0][0]).toMatchObject({ mode: 'draft', surface });
+        });
+    }
+
+    it('PRESERVATION — no ?surface= sends no `surface` member: the protocol stamps api', async () => {
+        const { protocol, drive } = boot();
+        expect((await drive('PUT', ITEM, { mode: 'draft' }, EN)).status).toBe(200);
+        expect('surface' in protocol.saveMetaItem.mock.calls[0][0]).toBe(false);
+    });
+
+    for (const [label, surface] of [
+        ['copilot — an in-process tool\'s mark, never a remote caller\'s', 'copilot'],
+        ['a case variant, never folded to studio', 'Studio'],
+        ['an unknown value, never read as api', 'robot'],
+        ['an empty value', ''],
+    ] as const) {
+        it(`REFUSAL — ?surface= ${label}: 400 VALIDATION_ERROR, nothing saved`, async () => {
+            const { protocol, drive } = boot();
+            const answer = await drive('PUT', ITEM, { mode: 'draft', surface }, EN);
+            expect(answer.status, JSON.stringify(answer.body)).toBe(400);
+            expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+            expect(answer.body?.error?.message).toContain('surface');
+            expect(protocol.saveMetaItem).not.toHaveBeenCalled();
+        });
+    }
+
+    it('REFUSAL — a repeated ?surface= is refused by the arity rule, nothing saved', async () => {
+        const { protocol, drive } = boot();
+        const answer = await drive('PUT', ITEM, { surface: ['studio', 'api'] }, EN);
+        expect(answer.status).toBe(400);
+        expect(answer.body?.error?.code).toBe('VALIDATION_ERROR');
+        expect(protocol.saveMetaItem).not.toHaveBeenCalled();
     });
 });

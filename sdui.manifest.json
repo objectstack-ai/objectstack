@@ -1515,7 +1515,7 @@
         {
           "name": "relationshipValueField",
           "type": "string",
-          "description": "Which field OF THIS PARENT record `relationshipField` stores. Defaults to \"id\"; set it to the field a name-keyed junction points at (e.g. \"name\" when sys_user_position.position holds sys_position.name). The resolved value drives three things at once — the list filter, the Add-picker link value, and the pre-filled create form — so they cannot drift apart. While the parent record is still loading, a non-\"id\" field resolves to null and the list holds its fetch rather than querying on an empty value."
+          "description": "Which field OF THIS PARENT record `relationshipField` stores. Defaults to \"id\"; set it to the field a name-keyed junction points at (e.g. \"name\" when the junction column holds the machine name of the parent record). The resolved value drives three things at once — the list filter, the Add-picker link value, and the pre-filled create form — so they cannot drift apart. While the parent record is still loading, a non-\"id\" field resolves to null and the list holds its fetch rather than querying on an empty value."
         },
         {
           "name": "parentDataSource",
@@ -1827,7 +1827,7 @@
           "name": "actionNames",
           "type": "array",
           "of": "string",
-          "description": "Action names to expose, in order — resolved from the actions declared on the object. With no names (and no host-supplied actions) nothing is looked up and the bar renders its empty placeholder"
+          "description": "Action names to expose, in order — resolved from the actions declared on the object. With no names (and no host-supplied actions) nothing is looked up: the bar renders its empty placeholder on a design / preview surface and nothing at runtime"
         },
         {
           "name": "requiredPermissions",

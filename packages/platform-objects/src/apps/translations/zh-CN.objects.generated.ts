@@ -3076,6 +3076,10 @@ export const zhCNObjects: NonNullable<TranslationData['objects']> = {
         label: "元数据",
         help: "元数据负载的 JSON 序列化内容"
       },
+      draft_changes: {
+        label: "草稿变更",
+        help: "待发布草稿的逐键来源（JSON 序列化）：每个键路径最后由哪个来源（copilot、studio、api）、哪位操作者、在何时修改。已发布行为空。"
+      },
       extends: {
         label: "继承自"
       },

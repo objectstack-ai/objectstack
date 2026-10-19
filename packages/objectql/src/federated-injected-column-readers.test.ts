@@ -185,6 +185,12 @@ const READERS: Record<string, Row> = {
     disposition: 'exempt',
     why: 'decides the routing beside the federated test, on the related object, never as a filter',
   },
+  // [#24410] The formula read names each reference's target to judge, per
+  // formula, the related fields that target does not declare.
+  'engine.ts#resolveFormulaRelated :: referenceTargetOf()': {
+    disposition: 'caller-predicate',
+    why: "judges a formula's own hop against the target's declared field map; no row is read here",
+  },
   'engine.ts#resolveSystemInsertOrganization :: isFederatedObject()': {
     disposition: 'exempt',
     why: 'a system insert into a federated object is never stamped with an organization',
