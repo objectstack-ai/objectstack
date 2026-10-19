@@ -57,6 +57,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   AGGREGATE_FIELD_TYPE_COMPATIBILITY,
+  VIRTUAL_FIELD_AGGREGATE_REMEDY,
   isAggregateCompatibleWithFieldType,
   FieldType,
 } from '@objectstack/spec/data';
@@ -240,6 +241,28 @@ describe('#16099 — a DERIVING aggregate over a field type that cannot carry it
     const err = await refusalOf(run('sum', 'note').go);
     expect(err.message).toContain('count_distinct');
     expect(err.message).not.toContain('real instant');
+  });
+
+  // [#24426] A total over a VIRTUAL field (`formula`) names the spec's remedy
+  // first — store the value as a number field and aggregate that — and a count
+  // only as a different question. The sentence is the spec's, the one the lint
+  // leg prints too, so the two doors cannot prescribe two different ways out.
+  it('a total over a formula prints the stored-number remedy — the spec\'s sentence, not the count or sort one', async () => {
+    for (const aggregate of ['sum', 'avg', 'min', 'max'] as const) {
+      const { go, sqls } = run(aggregate, 'margin', [{ status: 'open', probe_measure: 1 }]);
+      const err = await refusalOf(go);
+      expect(err.code, aggregate).toBe('DATASET_INVALID');
+      expect(err.status, aggregate).toBe(400);
+      expect(err.message, aggregate).toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
+      expect(err.message, aggregate).toContain('store the value as a number field');
+      expect(err.message, aggregate).not.toContain('For a non-numeric field');
+      expect(err.message, aggregate).not.toContain('SORT on the record list');
+      expect(sqls.length, aggregate).toBe(0);
+    }
+    // Control: a refused pair over a STORED non-numeric class keeps its own words.
+    const text = await refusalOf(run('sum', 'note').go);
+    expect(text.message).toContain('For a non-numeric field');
+    expect(text.message).not.toContain(VIRTUAL_FIELD_AGGREGATE_REMEDY);
   });
 
   it('a TEMPORAL refusal keeps #16778\'s own remedy sentence — continuity control', async () => {

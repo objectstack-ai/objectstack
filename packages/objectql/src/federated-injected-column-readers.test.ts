@@ -191,6 +191,12 @@ const READERS: Record<string, Row> = {
     disposition: 'caller-predicate',
     why: "judges a formula's own hop against the target's declared field map; no row is read here",
   },
+  // [#24468] The predicate read names each reference's target to judge, per
+  // validation rule, the related fields that target does not declare.
+  'engine.ts#resolvePredicateRelated :: referenceTargetOf()': {
+    disposition: 'caller-predicate',
+    why: "judges a validation rule's own hop against the target's declared field map; no row is read here",
+  },
   'engine.ts#resolveSystemInsertOrganization :: isFederatedObject()': {
     disposition: 'exempt',
     why: 'a system insert into a federated object is never stamped with an organization',

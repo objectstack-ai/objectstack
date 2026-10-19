@@ -331,3 +331,54 @@ describe('#22042 — a `conditional` rule\'s nested predicates meet the same ver
     expect(expressionFindings(result.errors), dump(result)).toEqual([]);
   });
 });
+
+describe('#24468 — the object door refuses a rule hop to a field the target does not declare', () => {
+  /** The lookup's target, delivered by ANOTHER package the written one depends on. */
+  const account = {
+    name: 'fx_account', label: 'Account', sharingModel: 'private', _packageId: 'com.example.accounts',
+    fields: { status: { type: 'text', label: 'Status' } },
+  };
+  const order = (validations: unknown[]) => ({
+    name: 'fx_order',
+    label: 'Order',
+    sharingModel: 'private',
+    fields: { account: { type: 'lookup', label: 'Account', reference: 'fx_account' } },
+    validations,
+  });
+  const rule = (name: string, condition: string) => ({ name, type: 'script', condition, message: 'x' });
+  const gateOrder = (validations: unknown[]) => runRuntimeAuthoringRules({
+    type: 'object',
+    item: order(validations),
+    context: { objects: [account] },
+    packageScope: { packageId: 'com.example.orders', dependencies: ['com.example.accounts'] },
+  });
+
+  it('⭐ LIT — the rule is REFUSED under EXPRESSION_INVALID, naming the field and the target from the other package; its valid sibling is not', () => {
+    const result = gateOrder([rule('open_account', "record.account.status == 'closed'"), rule('north_only', "record.account.region == 'north'")]);
+
+    const errs = expressionFindings(result.errors);
+    expect(errs, dump(result)).toHaveLength(1);
+    const where = "object 'fx_order' · validation 'north_only'";
+    expect(errs[0]).toMatchObject({ severity: 'error', where, path: where });
+    expect(errs[0]!.message).toContain('unknown field `region` on `fx_account`');
+    expect(errs[0]!.message).toContain('the rule has no verdict');
+  });
+
+  it('⭐ LIT — a nested `condition` inside a `conditional` is judged too', () => {
+    const result = gateOrder([{
+      type: 'conditional', name: 'outer', when: 'record.account != null', message: 'x',
+      then: rule('inner', "record.account.region == 'north'"),
+    }]);
+
+    const errs = expressionFindings(result.errors);
+    expect(errs.map((e) => e.where), dump(result)).toEqual(["object 'fx_order' · validation rule 'outer' then → 'inner'"]);
+    expect(errs[0]!.message).toContain('unknown field `region` on `fx_account`');
+  });
+
+  it('⭐ CONTROL — a rule reading a field the target declares publishes clean', () => {
+    const result = gateOrder([rule('open_account', "record.account.status == 'closed'")]);
+
+    expect(expressionFindings(result.errors), dump(result)).toEqual([]);
+    expect(expressionFindings(result.advisories), dump(result)).toEqual([]);
+  });
+});

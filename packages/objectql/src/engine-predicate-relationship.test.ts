@@ -231,6 +231,59 @@ describe('#18682 — engine-produced relationship bindings', () => {
     }
   });
 
+  // [#24468] One rule's undeclared column is judged against THAT rule: a valid
+  // sibling reading through the same reference keeps the verdict it gives
+  // alone, and the bad rule's refusal names only its own field.
+  describe('[#24468] a sibling of a rule reading an undeclared related field', () => {
+    const refusal = async (data: Record<string, unknown>): Promise<string> => {
+      try {
+        await engine.insert('crm_opportunity', data, { context: ACTING } as any);
+      } catch (e) {
+        return JSON.stringify((e as { errors?: unknown }).errors ?? (e as Error).message);
+      }
+      return '';
+    };
+
+    beforeEach(() => {
+      engine.registry.registerObject({
+        name: 'crm_opportunity',
+        fields: {
+          name: { type: 'text' }, amount: { type: 'number' },
+          account: { type: 'lookup', reference: 'crm_account' },
+        },
+        validations: [
+          {
+            name: 'partner_cap', type: 'script', severity: 'error',
+            message: 'Partner accounts are capped at 10000.',
+            condition: "record.account.type == 'partner' && record.amount > 10000",
+          },
+          { name: 'sneaky', type: 'script', severity: 'error', message: 'x',
+            condition: "record.account.not_a_column == 'x'" },
+        ],
+      } as any, 'test-package');
+      d.calls.length = 0;
+    });
+
+    it('the valid rule admits what it admits alone; only the bad rule refuses, naming its own field', async () => {
+      const text = await refusal({ name: 'A', amount: 50000, account: 'acc_d' });
+      expect(text).toContain("Validation rule 'sneaky' could not be evaluated");
+      expect(text).toContain("declares no 'not_a_column'");
+      expect(text).not.toContain('partner_cap');
+    });
+
+    it('the valid rule refuses with its own message, as it does alone', async () => {
+      const text = await refusal({ name: 'A', amount: 50000, account: 'acc_p' });
+      expect(text).toContain('Partner accounts are capped');
+      expect(text).not.toContain("Validation rule 'partner_cap' could not be evaluated");
+    });
+
+    it('the shared system read names the declared columns only, once', async () => {
+      await refusal({ name: 'A', amount: 10, account: 'acc_d' });
+      expect(relatedReads()).toHaveLength(1);
+      expect([...(relatedReads()[0].ast?.fields ?? [])].sort()).toEqual(['id', 'type']);
+    });
+  });
+
   // The refusal is about the WRITE, never about the value. A caller can infer a
   // value by observing refusals — an accepted, deliberately narrow channel — so
   // nothing may make the refusal more informative than "this rule refused".

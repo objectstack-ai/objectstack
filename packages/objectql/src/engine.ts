@@ -10261,7 +10261,43 @@ export class ObjectQL implements IObjectQLEngine {
     }
     const wanted = collectPredicateRelationships(schema);
     if (wanted.size === 0) return unbound;
-    return this.resolveOneHopRelated(schema, wanted, rows, context, 'predicate');
+    // [#24468] The read set per reference is the UNION of every rule's
+    // columns, and the loader answers a whole reference `undeclared-field` when
+    // any column of it is undeclared — so one rule's misspelt column left every
+    // sibling rule through the same reference without a verdict, each refusing
+    // the write with the other rule's field. The undeclared columns are taken
+    // out of the shared read here and judged per rule (`resolveTraversalScope`
+    // reads `undeclaredFields` against the rule's own columns); the loader
+    // reads the declared rest, under the same authority and bound as before.
+    // ⛔ Nothing undeclared enters the system-authority read either way.
+    const fields = (schema?.fields ?? {}) as Record<string, unknown>;
+    const undeclared = new Map<string, { object: string; fields: string[] }>();
+    for (const [fk, named] of wanted) {
+      const target = referenceTargetOf(fields[fk]);
+      // The loader's own verdicts stand for these: no target, or a hop into
+      // the stored-metadata-body family, which is never read.
+      if (!target || isStoredMetadataBodyObject(target)) continue;
+      const declared = (this._registry.getObject(target) as { fields?: Record<string, unknown> } | undefined)?.fields;
+      const missing = undeclaredRelatedFields(declared, named);
+      if (missing.length === 0) continue;
+      undeclared.set(fk, { object: target, fields: missing });
+      for (const name of missing) named.delete(name);
+      if (named.size === 0) wanted.delete(fk);
+    }
+    const lookup = wanted.size > 0
+      ? await this.resolveOneHopRelated(schema, wanted, rows, context, 'predicate')
+      : unbound;
+    if (undeclared.size === 0) return lookup;
+    return (row) => {
+      if (!row) return undefined;
+      const binding: Record<string, RelatedFieldBinding> = { ...(lookup(row) ?? {}) };
+      for (const [fk, { object, fields: missing }] of undeclared) {
+        // A reference no rule reads a declared column through has no row to
+        // serve; the binding says why, and every rule through it names its own.
+        binding[fk] = { ...(binding[fk] ?? { object, unavailable: 'undeclared-field' }), undeclaredFields: missing };
+      }
+      return binding;
+    };
   }
 
   /**

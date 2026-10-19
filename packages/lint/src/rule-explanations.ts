@@ -1890,8 +1890,15 @@ const MEASURE_AGGREGATE_FIELD_TYPE_REFUSED_EXPLANATION: RuleExplanation = {
       'toggle; `min` and `max`: number, currency, percent, rating, slider, progress, summary, date, ' +
       'datetime, time, boolean, toggle.',
     'So the fix is a field of an accepted type, or an aggregate the field\'s declaration accepts. A ' +
-      'quantity that must be added up or averaged has to be STORED as a numeric field (a computed ' +
-      'column) and aggregated as one.',
+      'quantity that must be added up or averaged has to be STORED as a numeric field and aggregated as ' +
+      'one.',
+    // Held equal to `VIRTUAL_FIELD_AGGREGATE_REMEDY` (`@objectstack/spec/data`) — the `fix:` line, and
+    // the compile leg's remedy, for this pair — by `validate-dataset-measure-aggregates.test.ts`.
+    'A `formula` field stores no value, whatever its `returnType` says, so `sum`, `avg`, `min` and `max` ' +
+      'over one have no column to read, and a count substituted for the total is a plausible wrong ' +
+      'number. Its fix line reads: The field is computed on read and stores no value: store the value as ' +
+      'a number field (kept by a hook) and aggregate that. `count` / `count_distinct` answer a different ' +
+      'question: how many records.',
     JSON_STORED_COLUMN,
     'The per-type row cannot see `multiple: true`, so `count_distinct` over a multi-capable field ' +
       'flagged that way is refused by the declaration: the value is a list stored as JSON, and ' +
