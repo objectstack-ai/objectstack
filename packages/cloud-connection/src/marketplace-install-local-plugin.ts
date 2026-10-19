@@ -1494,8 +1494,8 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                 error: {
                     code: 'RESOURCE_CONFLICT',
                     message: `Package '${manifestId}' cannot be installed managed: its namespace '${copyBase.namespace}' is held by `
-                        + `the environment base '${copyBase.base}' — an unmanaged install of this package, or a base authored `
-                        + 'in this environment — whose items are this environment\'s own metadata. A managed '
+                        + `the writable base '${copyBase.base}' — an unmanaged install of this package, or a base authored `
+                        + 'in this system — whose items are this system\'s own metadata. A managed '
                         + 'install would hand that namespace to the package and stop serving them. Keep the copy (it follows '
                         + `no upgrade), or uninstall the base '${copyBase.base}' first; its items go with it.`,
                     details: { namespace: copyBase.namespace, base: copyBase.base },
@@ -2559,7 +2559,7 @@ export class MarketplaceInstallLocalPlugin implements Plugin {
                         },
                     }
                     : {}),
-                note: `The package's metadata is now this environment's own, in the base '${result.targetPackageId}', `
+                note: `The package's metadata is now this system's own, in the base '${result.targetPackageId}', `
                     + 'and it follows no upgrade. Refresh the console to see it.',
             },
         }, 200);

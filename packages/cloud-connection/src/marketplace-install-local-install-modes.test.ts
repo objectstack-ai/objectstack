@@ -406,7 +406,7 @@ describe('install-local — a managed install never takes over an unmanaged copy
         expect(res.status).toBe(409);
         expect(res.payload.error.code).toBe('RESOURCE_CONFLICT');
         expect(res.payload.error.details).toEqual({ namespace: 'crm', base: 'com.example.crm-copy' });
-        expect(res.payload.error.message).toContain("held by the environment base 'com.example.crm-copy'");
+        expect(res.payload.error.message).toContain("'com.example.crm-copy'");
         expect(h.register).not.toHaveBeenCalled();
         expect(h.syncSchemas).not.toHaveBeenCalled();
         expect(h.ledgerHas('com.example.crm')).toBe(false);
