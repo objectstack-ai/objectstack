@@ -9,7 +9,8 @@
  *
  * The method renamed an object only when its name started with the source
  * prefix (`dupsrc_customer` → `dupdst_customer`). A name without it (`ticket`,
- * stored by a direct-publish save, which no prefix gate reads) kept its name,
+ * stored by a direct-publish save before that door read the prefix rule —
+ * #24547 — or under a package that had no namespace) kept its name,
  * and an object name IS its registry key and its table: the copy was a second
  * claim on the source's object. It used to store a target row the registry
  * refused, over the source's table; since the ADR-0029 D9.9 refusal landed it
@@ -195,18 +196,38 @@ describe('ADR-0070 D4 — duplicatePackage of an object whose name lacks the sou
         expect(res.success).toBe(true);
     }
 
+    /**
+     * [#24547] Store an object the direct save now refuses: ADR-0129 D2 holds
+     * at that door too, so a bare name under a namespaced package is a row
+     * stored before it read the rule. Staged while the package's installed
+     * manifest declares no namespace, then the derived one is put back, so
+     * every read after it sees the package exactly as installed.
+     */
+    async function saveStoredBeforeRule(type: string, item: { name: string }): Promise<void> {
+        const manifest = engine.registry.getPackage(P)!.manifest as { namespace?: string };
+        const namespace = manifest.namespace;
+        delete manifest.namespace;
+        try {
+            await save(type, item);
+        } finally {
+            manifest.namespace = namespace;
+        }
+    }
+
     async function seedSource(extra: Array<[string, { name: string }]> = []): Promise<void> {
         await protocol.installPackage({ manifest: { id: P, name: 'Source', type: 'app' } });
         expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
         await save('object', customerBody);
-        await save('object', ticketBody);
+        await saveStoredBeforeRule('object', ticketBody);
         await save('object', noteBody);
         await save('view', ticketViewsBody);
         await save('permission', opsBody);
         await save('flow', onTicketBody);
         for (const [type, item] of extra) await save(type, item);
-        // CONTROL: the bare name was stored by a direct save, no prefix gate read it.
+        // CONTROL: the bare name is stored, owned by the source, under the
+        // source's namespace — the row the copy has to rename.
         expect(owner('ticket')).toBe(P);
+        expect(engine.registry.getPackage(P)?.manifest?.namespace).toBe('dupsrc');
     }
 
     it('copies a prefixed and a non-prefixed object, each into the target namespace', async () => {
