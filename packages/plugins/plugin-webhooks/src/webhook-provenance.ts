@@ -3,12 +3,14 @@
 /**
  * [#3461] Provenance stamp for `sys_webhook`.
  *
- * `sys_webhook` is RECORD-AUTHORITATIVE: a code-declared webhook is a boot seed
- * (`bootstrapDeclaredWebhooks`), and the row — including any admin tuning such
- * as flipping a noisy webhook to `active: false` — is the authority. The seeder
- * skips rows marked `customized`, so this hook is the half that DETECTS the
- * admin edit: any non-system update touching a `package`/`platform`-seeded row
- * stamps `customized: true` onto the payload.
+ * `sys_webhook` is RECORD-AUTHORITATIVE: a row — including any admin tuning such
+ * as flipping a noisy webhook to `active: false` — is the authority. A
+ * `package` row is a copy of a declared webhook the 18.0 seeder
+ * (`bootstrapDeclaredWebhooks`, retired: ADR-0131 D2) wrote; the dispatcher
+ * ignores a pristine one in favour of its declaration and lets one marked
+ * `customized` answer as itself (`classifyDeclaredNameHolder`), so this hook is
+ * the half that DETECTS the admin edit: any non-system update touching a
+ * `package`/`platform`-seeded row stamps `customized: true` onto the payload.
  *
  * Why a data hook (and not a write gate or the REST layer), verbatim to the
  * sys_sharing_rule rationale (#2909 T1):
