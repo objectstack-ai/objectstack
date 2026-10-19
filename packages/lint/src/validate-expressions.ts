@@ -1982,22 +1982,21 @@ export function runStackExpressionPasses(stack: AnyRec, options: StackExpression
     if (!source) return;
     const traversals = analyzeRelationshipTraversals(source, 'record')?.traversals;
     if (!traversals || traversals.size === 0) return;
-    const own = objects.find((o) => o.name === objectName);
-    if (!own) return;
-    const defs = new Map(fieldEntries(own));
-    for (const [field, columns] of traversals) {
-      const target = referenceTargetOf(defs.get(field))?.trim();
-      if (!target || isStoredMetadataBodyObject(target)) continue;
-      const declared = fieldIndex.get(target);
-      if (!declared) continue;
-      for (const column of [...columns].sort()) {
-        if (column === 'id' || declared.includes(column)) continue;
-        issues.push({
-          where,
-          message: undeclaredHopFieldMessage(objectName, field, target, column),
-          source,
-          severity: 'error',
-        });
+    for (const obj of objects) {
+      if (obj.name !== objectName) continue;
+      for (const [field, def] of fieldEntries(obj)) {
+        const columns = traversals.get(field);
+        const target = columns ? referenceTargetOf(def)?.trim() : undefined;
+        if (!columns || !target || isStoredMetadataBodyObject(target) || !fieldIndex.has(target)) continue;
+        for (const column of [...columns].sort()) {
+          if (column === 'id' || fieldIndex.get(target)?.includes(column)) continue;
+          issues.push({
+            where,
+            message: undeclaredHopFieldMessage(objectName, field, target, column),
+            source,
+            severity: 'error',
+          });
+        }
       }
     }
   };
