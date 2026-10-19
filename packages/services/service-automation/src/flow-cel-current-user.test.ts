@@ -80,6 +80,12 @@ describe('`current_user` with a user — the run\'s EvalUser, and only what the 
         expect((result.output as { v: unknown }).v).toBe('no');
     });
 
+    it("binds no email even when the run context carries one: that email is the data operations' row-policy fact, not Q2 A's list", async () => {
+        const result = await evaluate("has(current_user.email) ? 'yes' : 'no'", { ...USER, email: 'usr_1@example.test' });
+        expect(result.success, result.error).toBe(true);
+        expect((result.output as { v: unknown }).v).toBe('no');
+    });
+
     it('leaves organizationId out when the run carries no tenant', async () => {
         const result = await evaluate("has(current_user.organizationId) ? 'yes' : 'no'", { userId: 'usr_1' });
         expect((result.output as { v: unknown }).v).toBe('no');

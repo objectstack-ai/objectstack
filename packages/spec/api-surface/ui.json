@@ -540,6 +540,7 @@
     "isViewContainerShaped (function)",
     "listViewGroupKeyPredicate (function)",
     "misplacedDefaultPageRefusal (function)",
+    "navItemVisibleDataNeedsDataSource (function)",
     "normalizeFilterOperator (function)",
     "normalizeInlineAction (function)",
     "objectNavTargetExclusivity (function)",

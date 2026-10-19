@@ -1018,6 +1018,17 @@ function celReadsRootData(source: string): boolean {
 }
 
 /**
+ * An authored bare-string `visible` as the envelope the spec's parse makes of
+ * it. It goes through {@link EvaluatedExpressionInputSchema}, the slot's own
+ * schema, so the shorthand normalisation is reused and never restated here.
+ * `undefined` when that schema refuses the string (a blank one).
+ */
+function authoredVisibleEnvelope(source: string): unknown {
+  const parsed = EvaluatedExpressionInputSchema.safeParse(source);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
  * A navigation entry whose `visible` reads `data` must declare `dataSource` —
  * the narrowing arm of #24332's ruling, question 2 (letter A).
  *
@@ -1029,20 +1040,47 @@ function celReadsRootData(source: string): boolean {
  * parsed, validated and shipped as an entry the console never shows, with the
  * author told nothing. Refused at the entry's own `visible`, with the fix.
  *
- * Judged on the PARSED entry, where `visible` is always the `{ dialect, source }`
- * envelope; only the `cel` dialect is read. Mounted once, on
+ * Judged on the `{ dialect, source }` envelope; only the `cel` dialect is read
+ * (see the input paragraph below for the two spellings). Mounted once, on
  * {@link NavigationItemSchema} itself, so it reaches every navigation door —
  * `app.navigation`, `app.areas[].navigation`, every `children` array at any
  * depth, and a navigation contribution's `items`. The exported per-branch
  * schemas do not chain it, the same posture as
  * {@link objectNavTargetExclusivity}. Its migration record is the ADR-0087 D3
  * semantic entry `nav-item-visible-data-needs-data-source` (protocol 18).
+ *
+ * EXPORTED, one function per refinement, the same posture as
+ * {@link objectNavTargetExclusivity} and the `check*` exports of #16489
+ * (`checkPageRegionPlacement`, `checkPageMainRegionWidth`): a hand-written
+ * mirror of the navigation item attaches this very function instead of
+ * restating the rule from prose, because a restatement is what drifts.
+ * Exporting it moves no accept set, and its issue (`custom` at `visible`, the
+ * message above) is the same at every door that runs it.
+ *
+ * It accepts both spellings of `visible`, so it answers the same on an entry
+ * as authored and on the entry the spec's parse produced:
+ *
+ * - the PARSED `{ dialect, source }` envelope, which is all the spec's own door
+ *   ever hands it;
+ * - the AUTHORED bare string (`'data.total == 1'`), which a mirror whose own
+ *   `visible` stays the authored string hands it. It is normalised by
+ *   {@link EvaluatedExpressionInputSchema}, the slot's own schema, whose string
+ *   arm turns it into `{ dialect: 'cel', source }`. It is the very normaliser
+ *   the parse runs, reused rather than restated, so a blank string it refuses
+ *   is judged by nothing here either.
+ *
+ * A boolean or absent `visible` judges nothing. So a mirror attaches this as it
+ * is, by identifier. The mount, the export, the barrel identity and both
+ * spellings are pinned by
+ * `app-nav-visible-data-needs-data-source-export.test.ts`.
  */
-function navItemVisibleDataNeedsDataSource(item: unknown, ctx: z.RefinementCtx): void {
+export function navItemVisibleDataNeedsDataSource(item: unknown, ctx: z.RefinementCtx): void {
   if (!item || typeof item !== 'object') return;
   const entry = item as { visible?: unknown; dataSource?: unknown };
   if (entry.dataSource !== undefined) return;
-  const visible = entry.visible as { dialect?: unknown; source?: unknown } | undefined;
+  const visible = (typeof entry.visible === 'string'
+    ? authoredVisibleEnvelope(entry.visible)
+    : entry.visible) as { dialect?: unknown; source?: unknown } | undefined;
   if (!visible || visible.dialect !== 'cel' || typeof visible.source !== 'string') return;
   if (!celReadsRootData(visible.source)) return;
   ctx.addIssue({
