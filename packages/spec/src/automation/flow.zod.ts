@@ -1123,8 +1123,20 @@ export const FlowSchema = lazySchema(() => strictObject(
   // ADR-0049 / #1888 — ENFORCED. The service-automation engine establishes the
   // declared identity for the run's data operations and restores the caller's
   // context afterward: `system` runs elevated (a full-access, RLS-bypassing
-  // system principal); `user` (default) runs as the triggering user, so CRUD
-  // nodes' ObjectQL reads/writes respect that user's row-level security.
+  // system principal); `user` (default) runs as the human whose act is running
+  // the current segment, so CRUD nodes' ObjectQL reads/writes respect that
+  // user's row-level security.
+  //
+  // That human is the trigger user until a human decision, and the decider
+  // after it: when an approval decision (approve or reject) resumes the run,
+  // the nodes after it run with the decider's identity and permissions
+  // together — their positions, permission sets and organisation peers,
+  // resolved the way the decider's own request resolves them — while the nodes
+  // before it keep the trigger user's. So a post-decision write is attributed
+  // to the decider (`updated_by`, the audit log), and a post-decision node the
+  // decider may not perform is refused, loudly, and the run reports it; a flow
+  // whose approval must write what the approver may not declares `system`. A
+  // flow with no human decision node runs as its trigger user throughout.
   //
   // A run under `user` that resolves NO trigger user has nothing to scope to, so
   // its data operations are REFUSED (#3760). This is NOT a schedule-only case —
@@ -1145,7 +1157,10 @@ export const FlowSchema = lazySchema(() => strictObject(
     .enum(['system', 'user'])
     .default('user')
     .describe(
-      'Execution identity for the run: system = elevated (bypasses RLS), user = the triggering user (RLS-respecting). ' +
+      'Execution identity for the run: system = elevated (bypasses RLS), user = the human whose act is running ' +
+        'this segment: the trigger user until a human decision, the decider after it (RLS-respecting; the nodes ' +
+        "after an approval decision run with the decider's identity and permissions, so a node the decider may " +
+        'not perform is refused). ' +
         'A run with no trigger user has no identity to scope to, so under user its data operations are REFUSED — ' +
         'declare system to make the elevation explicit. This covers schedule/time-relative/api triggers AND any ' +
         'record-change flow fired by a write that carried no user. Except behind an anonymous door: publish refuses ' +

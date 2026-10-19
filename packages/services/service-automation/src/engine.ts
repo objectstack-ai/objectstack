@@ -212,7 +212,7 @@ const FLOW_NODE_UNKNOWN_KEY_GUIDANCE: Record<string, Record<string, string>> = {
             '`required` field meant to stay hidden then blocks the screen from ever being submitted.',
     },
 };
-import { runIsUnscopedUserMode, flowTouchesData, runOrgUserIds, type SeededRunContext } from './runtime-identity.js';
+import { runIsUnscopedUserMode, flowTouchesData, runOrgUserIds, runTriggerUserId, type SeededRunContext } from './runtime-identity.js';
 import { isGuardRefusal, refuseNode } from './guard-refusal.js';
 import { readPartialSteps } from './partial-steps.js';
 import { isRegionSuspensionRefusal, refuseRegionSuspension } from './region-suspension-refusal.js';
@@ -1197,7 +1197,9 @@ function buildRunTrigger(
                 : undefined;
     return {
         type: context?.event ?? 'manual',
-        userId: context?.userId,
+        // The run's TRIGGER user, which a decision switch (ruling A on
+        // `FlowSchema.runAs`) moves out of `userId` and keeps here.
+        userId: runTriggerUserId(context),
         object: context?.object,
         recordId,
     };
@@ -6437,6 +6439,51 @@ export class AutomationEngine implements IAutomationService {
         // human's peers in the run's organization, which is what the request
         // path's agent envelope carries as well. A context that already carries
         // one — a `subflow` / `map` child, a resumed leg — keeps it.
+        await this.seedRunGrants(flow.name, runContext, 'triggering');
+
+        if (runIsUnscopedUserMode(runContext) && flowTouchesData(flow)) {
+            this.logger.warn(
+                `[runAs] flow '${flow.name}' executes with runAs:'user' but its trigger resolved no user ` +
+                `— its data operations will be REFUSED. Without a user they would carry no principal: ` +
+                `refused by the security plugin where one is composed, unscoped where none is (the fail-open ADR-0049 forbids). ` +
+                `Declare runAs:'system' to make the elevation explicit and intended, or arrange ` +
+                `for the trigger to supply a user. Note a user-less trigger is NOT only a schedule: a ` +
+                `record-change flow fired by a system write carries no user either (ADR-0049).`,
+            );
+        }
+
+        // #3475 — opt-in single-hop lookup expansion, AFTER identity resolution so
+        // the re-read runs as this run's own principal (see helper).
+        await this.expandDeclaredLookups(flow, runContext);
+        return runContext;
+    }
+
+    /**
+     * Seed a `runAs:'user'` run context's authorization facts — `positions`,
+     * `permissions` and the peer list `org_user_ids` — for its `userId`, through
+     * the wired grants resolver: the one resolver the request path seeds a
+     * request's envelope through (`resolveUserAuthzGrants`, bridged by the
+     * automation plugin). Mutates `runContext`; a fact it already carries is
+     * kept verbatim, so only the missing ones are resolved (see the setup
+     * comment in {@link resolveRunContext} for why carried positions and
+     * permissions are never re-broadened).
+     *
+     * Two callers, one resolution: run setup for the TRIGGER user
+     * ({@link resolveRunContext}), and the decision switch for the DECIDER
+     * ({@link resolveDecisionSegmentContext}), which hands this a context whose
+     * trigger-user facts it has already removed — so the decider's segment
+     * carries the decider's own positions, permission sets and peers, resolved
+     * exactly as the decider's own request resolves them, and never a copy of
+     * anybody else's.
+     *
+     * A `runAs:'system'` run, a user-less run, a context carrying every fact,
+     * and an engine with no resolver wired resolve nothing.
+     */
+    private async seedRunGrants(
+        flowName: string,
+        runContext: AutomationContext,
+        whose: 'triggering' | 'deciding',
+    ): Promise<void> {
         const needsGrants = !Array.isArray(runContext.permissions);
         const needsPeers = runOrgUserIds(runContext) === undefined;
         if (
@@ -6459,7 +6506,7 @@ export class AutomationEngine implements IAutomationService {
                 }
             } catch (err) {
                 // Fail-safe, never fail-open: on a resolution error the run keeps
-                // the trigger's (unresolved) identity — the data middleware applies
+                // the user's (unresolved) identity — the data middleware applies
                 // its baseline member fallback, NOT elevation — and we warn loudly
                 // so the degraded authorization is audible rather than silent.
                 //
@@ -6481,28 +6528,73 @@ export class AutomationEngine implements IAutomationService {
                     : `its data ops keep the trigger's positions and permission sets, but every row ` +
                       `policy reading current_user.org_user_ids drops out (narrower, not elevated)`;
                 this.logger.warn(
-                    `[runAs] flow '${flow.name}' could not resolve grants for triggering user ` +
+                    `[runAs] flow '${flowName}' could not resolve grants for ${whose} user ` +
                     `'${runContext.userId}' — ${consequence}. The resolver's failure is in this record's meta.`,
                     describeThrownForLog(err),
                 );
             }
         }
+    }
 
-        if (runIsUnscopedUserMode(runContext) && flowTouchesData(flow)) {
-            this.logger.warn(
-                `[runAs] flow '${flow.name}' executes with runAs:'user' but its trigger resolved no user ` +
-                `— its data operations will be REFUSED. Without a user they would carry no principal: ` +
-                `refused by the security plugin where one is composed, unscoped where none is (the fail-open ADR-0049 forbids). ` +
-                `Declare runAs:'system' to make the elevation explicit and intended, or arrange ` +
-                `for the trigger to supply a user. Note a user-less trigger is NOT only a schedule: a ` +
-                `record-change flow fired by a system write carries no user either (ADR-0049).`,
-            );
-        }
-
-        // #3475 — opt-in single-hop lookup expansion, AFTER identity resolution so
-        // the re-read runs as this run's own principal (see helper).
-        await this.expandDeclaredLookups(flow, runContext);
-        return runContext;
+    /**
+     * The context the nodes after a resumed pause run with (ruling A on
+     * `FlowSchema.runAs`: 「the human whose act is running this segment: the
+     * trigger user until a human decision, the decider after it」).
+     *
+     * When the signal names the decider of an approval
+     * ({@link ResumeSignal.resumedBy}) AND carries the owning service's
+     * {@link RESUME_AUTHORITY_SERVICE} marker, a `runAs:'user'` run continues
+     * as that decider — identity and permissions together. The answer is a
+     * COPY of the persisted context with the trigger user's authorization facts
+     * REMOVED, `userId` set to the decider, and the decider's own positions,
+     * permission sets and peers resolved by {@link seedRunGrants}, the trigger
+     * setup's own resolver. Nothing of the trigger user's survives into the
+     * segment: copying the decision request's envelope by hand, or keeping the
+     * submitter's grants under the decider's name, would be two identities in
+     * one context — the reading ruling A rejected.
+     *
+     * The trigger is not forgotten: {@link SeededRunContext.triggerUserId}
+     * records who started the run (`null` when its trigger resolved no user),
+     * set on the first switch and kept by every later one, so the run's
+     * history still names its trigger ({@link buildRunTrigger}). The switched
+     * context is what a later pause in the same run persists, so a second
+     * decision, a cold resume or a repair replay continues from the decider's
+     * segment and never falls back to the submitter.
+     *
+     * Unchanged, by the letter of the ruling:
+     *  - a `runAs:'system'` run (its posture and its carried user both);
+     *  - a signal with no decider — an SLA auto-decision, a screen, a wait
+     *    timer, every engine-built continuation (a subflow parent's own nodes
+     *    included: the parent declares no decision node of its own);
+     *  - a decider the signal names WITHOUT the service marker: only the
+     *    service that authenticated and recorded the decision may name its
+     *    decider, and an HTTP body cannot carry the symbol;
+     *  - a decider who is already the run's acting user.
+     *
+     * On a resolution failure the decider's segment carries no positions or
+     * permission sets, so its data operations fall back to the baseline member
+     * set — narrower, never the trigger user's grants (see the warning in
+     * {@link seedRunGrants}).
+     */
+    private async resolveDecisionSegmentContext(
+        run: SuspendedRun,
+        signal: ResumeSignal,
+    ): Promise<AutomationContext> {
+        const context = run.context;
+        const decider = signal[RESUME_AUTHORITY_SERVICE] === true ? signal.resumedBy : undefined;
+        if (typeof decider !== 'string' || decider === '') return context;
+        if (context?.runAs === 'system') return context;
+        if (context?.userId === decider) return context;
+        const switched: SeededRunContext = {
+            ...(context ?? {}),
+            userId: decider,
+            triggerUserId: runTriggerUserId(context) ?? null,
+        };
+        delete switched.positions;
+        delete switched.permissions;
+        delete switched.org_user_ids;
+        await this.seedRunGrants(run.flowName, switched, 'deciding');
+        return switched;
     }
 
     /**
@@ -8127,6 +8219,15 @@ export class AutomationEngine implements IAutomationService {
             // where a throw is just a value we decline to copy.
             const variablesAtPause = this.cloneVariablesAtPause(run, runId);
 
+            // Ruling A on `FlowSchema.runAs`: who runs the nodes after this
+            // pause — the decider, when the owning service's signal names one on
+            // a `runAs:'user'` run; otherwise the identity the run paused with.
+            // Resolved BEFORE the claim, so nothing here can run after the
+            // suspension is consumed and leave it consumed with no continuation;
+            // the persisted `run.context` is left as it was, and the repair
+            // journal therefore still snapshots the pause exactly as it parked.
+            const segmentContext = await this.resolveDecisionSegmentContext(run, signal);
+
             // Consume the suspension *before* running downstream work — a run
             // resumes exactly once per pause, and a duplicate resume after a
             // partial restart must not double-run side effects. (Folding the
@@ -8203,7 +8304,7 @@ export class AutomationEngine implements IAutomationService {
             await this.forgetSuspendedRun(run, 'resumed', claim.kind === 'claimed');
 
             const steps = run.steps;
-            const context = run.context;
+            const context = segmentContext;
 
             try {
                 // [#18714] The child this run is parked on REFUSED — on either

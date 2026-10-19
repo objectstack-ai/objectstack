@@ -136,6 +136,32 @@ export interface RunDataContext extends RunIdentityContext {}
  */
 export interface SeededRunContext extends AutomationContext {
   org_user_ids?: string[];
+  /**
+   * Who TRIGGERED the run, recorded when a human decision moved the run's
+   * acting identity (`userId`) to the decider (ruling A on `FlowSchema.runAs`;
+   * `AutomationEngine.resolveDecisionSegmentContext` is the only writer).
+   * `null` when the trigger resolved no user. Set on the first switch and kept
+   * by every later one, and persisted with the rest of the context through a
+   * later pause, so the run's history names its trigger however many
+   * decisions it has passed. Absent until a switch: `userId` is then still the
+   * trigger user ({@link runTriggerUserId}).
+   */
+  triggerUserId?: string | null;
+}
+
+/**
+ * The run's trigger user: {@link SeededRunContext.triggerUserId} once a
+ * decision switch recorded it (`undefined` for a trigger that resolved no
+ * user), and `userId` before any switch — when the two are the same person by
+ * construction. Attribution of the run, not of its writes: the writes of the
+ * current segment are `userId`'s.
+ */
+export function runTriggerUserId(context: AutomationContext | undefined): string | undefined {
+  const seeded = context as SeededRunContext | undefined;
+  if (seeded && Object.prototype.hasOwnProperty.call(seeded, 'triggerUserId')) {
+    return typeof seeded.triggerUserId === 'string' && seeded.triggerUserId !== '' ? seeded.triggerUserId : undefined;
+  }
+  return context?.userId;
 }
 
 /**
