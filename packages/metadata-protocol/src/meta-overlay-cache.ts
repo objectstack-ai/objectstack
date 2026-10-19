@@ -64,15 +64,28 @@
  *
  * ## Invalidation
  *
- *  1. **Primary — the engine write epoch** (#11968's substrate,
- *     `objectql/src/write-epoch.ts`). Read STRUCTURALLY, never by import:
- *     `@objectstack/metadata-protocol` does not depend on
+ *  1. **Primary — a write to `sys_metadata`, at the engine middleware seam**
+ *     ({@link META_OVERLAY_CACHE_WATCHED_OBJECTS}, {@link readOverlayCacheGeneration}).
+ *     The row set is read from that table and from no other, so a write to it
+ *     — and only a write to it — can change the answer: a `sys_metadata`
+ *     publish retires this cache synchronously, in-process, before the next
+ *     read. The bump lands AFTER the write settles, so a read in flight across
+ *     a write stamps the pre-write generation and is dead on arrival.
+ *     [#10757 leg 6] Until then this was the engine write epoch, which every
+ *     `insert`/`update`/`delete` on ANY object advances — so on an idle stock
+ *     boot the outbox pollers, and on a live one every user's data write,
+ *     retired the overlay rows the next `/data` request needed. #11633 §4's
+ *     leg-D design named the narrower trigger ("any engine-seam write to
+ *     `sys_metadata`"); the leg-B shape (`resolve-user-grants-cache.ts` in
+ *     `@objectstack/core`) is the mechanism, with this cache's own table.
+ *  2. **Everything that seam cannot see — the epoch's non-`write` reasons,
+ *     wholesale** (`'remote'`, `'metadata'`, `'manual'`). Read STRUCTURALLY,
+ *     never by import: `@objectstack/metadata-protocol` does not depend on
  *     `@objectstack/objectql`, and the substrate declared `WriteEpochLike`
- *     separately for exactly this kind of consumer. Any `insert`/`update`/
- *     `delete` on ANY object advances it, so a `sys_metadata` publish retires
- *     this cache synchronously, in-process, before the next read.
- *  2. **TTL** — `OS_METADATA_OVERLAY_CACHE_TTL_MS`, default 30s, `0` = off.
- *     The residual bound, covering only what the epoch cannot see: a PEER
+ *     separately for exactly this kind of consumer. A local `'write'` bump is
+ *     the middleware's to judge, with object precision.
+ *  3. **TTL** — `OS_METADATA_OVERLAY_CACHE_TTL_MS`, default 30s, `0` = off.
+ *     The residual bound, covering only what the seams cannot see: a PEER
  *     node's write on a deployment with no cluster bridge attached at all.
  *     With one attached, the bridge's own receipt path bumps the LOCAL epoch —
  *     `authz-invalidation-bridge.ts` calls `epoch.bump('remote')` for the
@@ -113,10 +126,10 @@
  * gate before a save, among them) and keep reading the store on every call,
  * so a save is never judged against a cached row.
  *
- * ## ⭐ A success is cached ONLY when the engine exposes the write epoch
+ * ## ⭐ A success is cached ONLY when the engine exposes the write epoch AND the middleware seam
  *
- * The rule leg C (#11966) landed, and it transfers unchanged. A `ql` with no
- * seam is a `ql` whose writes this cache cannot see, so instead of degrading to
+ * The rule leg C (#11966) landed, and it transfers unchanged. A `ql` without
+ * them is a `ql` whose writes this cache cannot see, so instead of degrading to
  * a TTL-only shape — publish-visibility as a timer, which #11633 §4 rules out
  * for this leg specifically — the cache declines. The whole surface is checked,
  * not just `current`: a bare `{ current: number }` on some unrelated double
@@ -160,7 +173,7 @@ export interface MetaOverlayCacheKey {
 interface MetaOverlayCacheEntry {
   /** A private, already-cloned snapshot. Never handed out un-cloned. */
   records: unknown[];
-  /** The engine write epoch this row set was read at. Compared, never interpreted. */
+  /** The generation ({@link readOverlayCacheGeneration}) this row set was read at. Compared, never interpreted. */
   epoch: number;
   /** Wall-clock expiry of the residual TTL bound. */
   expiresAt: number;
@@ -225,6 +238,7 @@ export function metaOverlayCacheTtlMs(
 interface WriteEpochSeam {
   readonly current: number;
   bump(reason: string): number;
+  subscribe(listener: (epoch: number, reason: string) => void): unknown;
 }
 
 /**
@@ -264,6 +278,90 @@ function resolveWriteEpochSeam(engine: unknown): WriteEpochSeam | undefined {
  */
 export function readWriteEpoch(engine: unknown): number | undefined {
   return resolveWriteEpochSeam(engine)?.current;
+}
+
+/**
+ * [#10757 leg 6] The objects the cached row sets are read from: the
+ * environment's `sys_metadata` rows, for the list read
+ * (`readActiveOverlayRows`) and the by-name read (`readItemActiveRows`) alike.
+ * A write to any other object cannot change them.
+ */
+export const META_OVERLAY_CACHE_WATCHED_OBJECTS: ReadonlySet<string> = new Set(['sys_metadata']);
+
+/** The engine operations that read; every other operation on a watched object retires the cache. */
+const OVERLAY_READ_OPERATIONS: ReadonlySet<string> = new Set(['find', 'findOne', 'count', 'aggregate']);
+
+/** Per-engine retirement counter. Compared, never interpreted. */
+interface OverlayWriteState {
+  gen: number;
+}
+
+/**
+ * `null` records an engine whose wiring THREW partway — poisoned, never cached
+ * behind, so a half-attached seam can never stand behind an entry.
+ */
+const overlayWriteStates = new WeakMap<object, OverlayWriteState | null>();
+
+/**
+ * [#10757 leg 6] The generation an overlay cache entry is stamped with and
+ * validated against, or `undefined` when this engine cannot license caching
+ * (no full write-epoch seam, no `registerMiddleware`, or wiring that threw).
+ *
+ * On first sight of an engine it wires two things, and nothing else: an
+ * engine middleware that advances the generation after every write to
+ * {@link META_OVERLAY_CACHE_WATCHED_OBJECTS} settles (on a throw too — a
+ * partial write is a write), and an epoch subscription that advances it on
+ * every non-`write` reason (a peer's `'remote'` hint — the metadata bridge's
+ * {@link bumpWriteEpoch} included — `'metadata'`, `'manual'`). The middleware
+ * is registered without an `object` filter, so `hasObjectMiddleware` — which
+ * decides whether the analytics native-SQL strategy serves an object — is not
+ * moved for `sys_metadata`.
+ *
+ * ⚠️ The engine snapshots its middleware list when a write starts, so a write
+ * that started before this registration never passes it; registration happens
+ * in the first read that names the engine, before that read takes its
+ * generation, so every write that starts after any entry's reading is seen.
+ * The epoch reading this replaced was blind to such a write as well (it had
+ * already bumped). The TTL bounds it.
+ *
+ * Callers ask only with a non-zero TTL in hand: with the cache OFF this leaves
+ * no footprint on the engine.
+ */
+export function readOverlayCacheGeneration(engine: unknown): number | undefined {
+  if (!engine || typeof engine !== 'object') return undefined;
+  const existing = overlayWriteStates.get(engine);
+  if (existing !== undefined) return existing?.gen;
+  const seam = resolveWriteEpochSeam(engine);
+  const register = (engine as { registerMiddleware?: unknown }).registerMiddleware;
+  if (!seam || typeof register !== 'function') return undefined;
+  const state: OverlayWriteState = { gen: 0 };
+  try {
+    (register as (
+      fn: (ctx: { object?: unknown; operation?: unknown }, next: () => Promise<void>) => Promise<void>,
+    ) => void).call(engine, async (ctx, next) => {
+      const operation = ctx?.operation;
+      if (
+        typeof ctx?.object !== 'string'
+        || !META_OVERLAY_CACHE_WATCHED_OBJECTS.has(ctx.object)
+        || (typeof operation === 'string' && OVERLAY_READ_OPERATIONS.has(operation))
+      ) {
+        return next();
+      }
+      try {
+        await next();
+      } finally {
+        state.gen += 1;
+      }
+    });
+    seam.subscribe((_epoch, reason) => {
+      if (reason !== 'write') state.gen += 1;
+    });
+  } catch {
+    overlayWriteStates.set(engine, null);
+    return undefined;
+  }
+  overlayWriteStates.set(engine, state);
+  return state.gen;
 }
 
 /**

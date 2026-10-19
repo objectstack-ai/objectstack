@@ -48,6 +48,8 @@ function makeEpochSeam() {
     };
 }
 
+type Middleware = (ctx: { object: string; operation: string }, next: () => Promise<void>) => Promise<void>;
+
 const storedObject = (enable: Row): Row => ({
     id: 'r_widget', type: 'object', name: 'widget', state: 'active', package_id: null,
     metadata: JSON.stringify({ name: 'widget', label: 'Widget', fields: {}, enable }),
@@ -83,11 +85,21 @@ function harness(rows: Row[], opts: { epoch?: boolean } = {}) {
         },
     };
     if (opts.epoch !== false) engine.writeEpoch = seam;
+    const middlewares: Middleware[] = [];
+    engine.registerMiddleware = (fn: Middleware) => {
+        middlewares.push(fn);
+    };
     const protocol = new ObjectStackProtocolImplementation(engine as never, () => new Map()) as any;
-    /** A write as the engine makes one: the epoch moves ahead of the row. */
-    const write = (apply: () => void) => {
+    /** A `sys_metadata` write as the engine makes one: the epoch first, then the chain around the row. */
+    const write = async (apply: () => void) => {
         seam.bump();
-        apply();
+        const chain = [...middlewares];
+        let i = 0;
+        const next = async (): Promise<void> => {
+            if (i < chain.length) return chain[i++]!({ object: 'sys_metadata', operation: 'update' }, next);
+            apply();
+        };
+        await next();
     };
     return { protocol, engine, reads, write };
 }
@@ -112,7 +124,7 @@ describe('[#10757 leg 6] the served by-name read goes through the overlay cache'
         await h.protocol.getMetaItem({ type: 'object', name: 'widget' });
         await h.protocol.getMetaItem({ type: 'object', name: 'widget' });
         expect(byNameReads(h.reads)).toHaveLength(1);
-        h.write(() => {
+        await h.write(() => {
             rows[0] = storedObject({ apiMethods: ['get', 'list'] });
         });
         const after = await h.protocol.getMetaItem({ type: 'object', name: 'widget' });
@@ -129,7 +141,7 @@ describe('[#10757 leg 6] the served by-name read goes through the overlay cache'
         const rows: Row[] = [];
         const g = harness(rows);
         expect((await g.protocol.getMetaItem({ type: 'object', name: 'widget' })).item).toBeUndefined();
-        g.write(() => rows.push(storedObject({ apiMethods: ['get'] })));
+        await g.write(() => rows.push(storedObject({ apiMethods: ['get'] })));
         expect((await g.protocol.getMetaItem({ type: 'object', name: 'widget' })).item?.enable)
             .toEqual({ apiMethods: ['get'] });
     });

@@ -84,7 +84,7 @@ import {
     bumpWriteEpoch,
     metaOverlayCacheTtlMs,
     readMetaOverlayCache,
-    readWriteEpoch,
+    readOverlayCacheGeneration,
     writeMetaOverlayCache,
     type MetaOverlayCacheKey,
 } from './meta-overlay-cache.js';
@@ -10811,8 +10811,8 @@ export class ObjectStackProtocolImplementation implements
             type: request.type,
             packageId,
         };
-        const overlayCacheEpoch = readWriteEpoch(this.engine);
         const overlayCacheTtlMs = metaOverlayCacheTtlMs();
+        const overlayCacheEpoch = overlayCacheTtlMs > 0 ? readOverlayCacheGeneration(this.engine) : undefined;
         const overlayCacheNow = Date.now();
         const cachedRecords = readMetaOverlayCache(
             this.engine, overlayCacheKey, overlayCacheEpoch, overlayCacheTtlMs, overlayCacheNow,
@@ -11148,8 +11148,9 @@ export class ObjectStackProtocolImplementation implements
      * reads through the overlay cache that already holds the list read's rows
      * (`meta-overlay-cache.ts`, #11967), under a key naming this item: the
      * same raw rows, upstream of every parse, merge and hydration, retired the
-     * moment the engine's write epoch moves (a save is seen by the next read,
-     * as before) and bounded by `OS_METADATA_OVERLAY_CACHE_TTL_MS`. The REST
+     * moment a `sys_metadata` write settles (a save is seen by the next read,
+     * as before) or the epoch moves for a non-`write` reason, and bounded by
+     * `OS_METADATA_OVERLAY_CACHE_TTL_MS`. The REST
      * API-exposure gate reads the object by name on every `/data` request, and
      * this read was its one uncached `sys_metadata` round trip. Uncached, the
      * read is per call and never kept, exactly as before.
@@ -11169,8 +11170,8 @@ export class ObjectStackProtocolImplementation implements
         // list read's is (see `readActiveOverlayRows`): a write landing while
         // this read is in flight leaves the entry dead on arrival.
         const key: MetaOverlayCacheKey = { type, name };
-        const epoch = readWriteEpoch(this.engine);
         const ttlMs = metaOverlayCacheTtlMs();
+        const epoch = ttlMs > 0 ? readOverlayCacheGeneration(this.engine) : undefined;
         const now = Date.now();
         const hit = readMetaOverlayCache(this.engine, key, epoch, ttlMs, now);
         if (hit !== undefined) return hit as StoredOverlayRow[];
