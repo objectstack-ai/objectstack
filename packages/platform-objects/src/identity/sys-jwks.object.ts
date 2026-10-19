@@ -39,6 +39,20 @@ export const SysJwks = ObjectSchema.create({
   description: 'Asymmetric key pairs used to sign and verify issued JWTs',
   highlightFields: ['id', 'created_at', 'expires_at'],
 
+  // [ADR-0095 D1, 2026-10-18 note] This object's default row scope: the one
+  // policy plugin-security's shipped permission sets spread for it today
+  // (`privateCredentialRowScope` in `default-permission-sets.ts`), moved here
+  // verbatim. Layer 0 is inert on this table (no organization column), so Layer 1
+  // silence is to mean this scope, not no filter. Not read yet: the sets keep
+  // carrying the same literal, and the security plugin's collection is to apply
+  // this key when no held set carries a policy for the object. An `extend`
+  // contribution cannot set or loosen it (refused at registration).
+  defaultRowScope: {
+    name: 'sys_jwks_none',
+    operation: 'select',
+    using: 'id == null',
+  },
+
   fields: {
     id: Field.text({
       label: 'Key ID',

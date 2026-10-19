@@ -724,6 +724,29 @@ export const SysUser = ObjectSchema.create({
     },
   },
 
+  // [ADR-0095 D1, 2026-10-18 note] This object's default row scope: plugin-security's
+  // shipped permission sets carry TWO policies for it (`sys_user_self` and
+  // `sys_user_org_members` in `default-permission-sets.ts`), and the key holds
+  // one, so the two predicates are joined with `||` here: a principal reads its
+  // own row plus its organization's members. Layer 0 is inert on this table (no
+  // organization column), so Layer 1 silence is to mean this scope, not no
+  // filter. `select`, the operation both arms share in the organization-admin and
+  // viewer sets: the peer arm must never reach a write, because OR-combined under
+  // `all` it would let a member edit any colleague's profile. The baseline set's
+  // self-service write scope (`sys_user_self` under `all`) stays the set's own
+  // policy. The rows are the union of the two arms whenever
+  // `current_user.org_user_ids` is resolved, which the core authorization
+  // resolver always does (`[]` with no organization); unresolved, the whole
+  // predicate fails closed, own row included. Not read yet: the sets keep
+  // carrying both literals, and the security plugin's collection is to apply this
+  // key when no held set carries a policy for the object. An `extend`
+  // contribution cannot set or loosen it (refused at registration).
+  defaultRowScope: {
+    name: 'sys_user_self_or_org_members',
+    operation: 'select',
+    using: 'id == current_user.id || id in current_user.org_user_ids',
+  },
+
   fields: {
     // ── Identity (primary business fields) ───────────────────────
     name: Field.text({
