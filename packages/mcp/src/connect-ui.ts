@@ -60,7 +60,7 @@ export const CONNECT_AGENT_PAGE: Page = {
           properties: {
             title: 'Connect an Agent',
             subtitle:
-              'Give any MCP-capable AI client governed access to this environment — ' +
+              'Give any MCP-capable AI client governed access to this system — ' +
               'every call runs under the caller\'s own permissions and row-level security.',
             // `icon` removed here (#6946): `page:header` never drew one — retired from the spec.
           },
