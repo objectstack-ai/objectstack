@@ -1331,7 +1331,8 @@ export class SettingsService {
   /**
    * The `namespace` predicate the generic read door ANDs onto a principal's
    * read of a settings store (`sys_setting`, `sys_setting_audit`,
-   * `sys_platform_setting`), given the capabilities the principal holds — or
+   * `sys_platform_setting`, `sys_platform_setting_audit`), given the
+   * capabilities the principal holds — or
    * `null` when it may read every namespace there is.
    *
    * The settings door has always applied a namespace's `readPermission`

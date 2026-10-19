@@ -462,7 +462,7 @@ describe('#8145 — a settings write reaches sys_audit_log as `config_change`', 
 // 2. Dual-write: the settings-specific ledger is UNCHANGED
 // ---------------------------------------------------------------------------
 
-describe('#8145 — dual-write: `sys_setting_audit` keeps its rows', () => {
+describe('#8145 — dual-write: the settings audit trail keeps its rows (the global rung in `sys_platform_setting_audit`)', () => {
   it('one write leaves exactly one row on EACH ledger', async () => {
     const boot = await bootPlugin({ userId: 'usr_admin', tenantId: 'org_1' });
 
