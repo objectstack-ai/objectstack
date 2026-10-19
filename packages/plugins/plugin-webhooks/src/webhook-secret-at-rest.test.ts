@@ -38,15 +38,21 @@ import {
     type FetchImpl,
 } from '@objectstack/service-messaging';
 import { AutoEnqueuer } from './auto-enqueuer.js';
-import { bootstrapDeclaredWebhooks } from './bootstrap-declared-webhooks.js';
+import { DeclaredWebhookSource, declaredWebhookRefId } from './declared-webhooks.js';
 import { migrateLegacyWebhookSecrets } from './migrate-webhook-secrets.js';
 import { SysWebhook } from './sys-webhook.object.js';
 import {
     WEBHOOK_SECRET_FIELD,
     __objectqlSecretWireForms,
     resolveWebhookSecret,
+    splitWebhookSecret,
 } from './webhook-secret.js';
-import { WEBHOOK_HEADERS_FIELD, resolveWebhookHeaders } from './webhook-headers.js';
+import {
+    WEBHOOK_HEADERS_FIELD,
+    resolveWebhookHeaders,
+    serializeHeaders,
+    splitWebhookHeaders,
+} from './webhook-headers.js';
 import { bindWebhookLegacyCleartextGate } from './webhook-legacy-cleartext.js';
 
 /**
@@ -243,9 +249,47 @@ function declaredWebhook(overrides: Record<string, unknown> = {}) {
     };
 }
 
-/** Metadata service that hands the seeder its declared items. */
+/** Metadata service that hands the declared-webhook reader its declared items. */
 function metadataWith(items: unknown[]) {
     return { list: (type: string) => (type === 'webhook' ? items : []) };
+}
+
+/**
+ * Write the `sys_webhook` row an 18.0 install's boot seeder wrote for each
+ * declared webhook — the rows an upgraded database still holds (ADR-0131 D2:
+ * the seeder is retired, its rows stay until the ownership ceremony). The same
+ * mapping that seeder made, through the REAL engine, so both credentials land
+ * in their encrypted columns exactly as they did: `object`→`object_name`,
+ * `isActive`→`active`, a lower-cased method, the envelope minus `secret` and
+ * `headers` in `definition_json`, `managed_by: 'package'`. This file pins what
+ * the dispatcher, the sweep and the write doors do with credential-bearing
+ * rows, and these are the credential-bearing rows that exist without an
+ * administrator typing one in.
+ */
+async function seed18_0Rows(engine: any, metadata: { list(type: string): unknown[] }) {
+    for (const raw of metadata.list('webhook') as Array<Record<string, any>>) {
+        const wh: Record<string, any> = { method: 'POST', timeoutMs: 30000, isActive: true, ...raw };
+        const { envelope: withoutSecret, secret } = splitWebhookSecret(wh);
+        const { envelope, headers } = splitWebhookHeaders(withoutSecret as Record<string, unknown>);
+        await engine.insert('sys_webhook', {
+            id: `whk_${wh.name}`,
+            name: wh.name,
+            label: wh.label ?? wh.name,
+            object_name: wh.object ?? null,
+            triggers: wh.triggers ?? [],
+            url: wh.url,
+            method: String(wh.method).toLowerCase(),
+            description: wh.description ?? null,
+            active: wh.isActive !== false,
+            definition_json: JSON.stringify(envelope),
+            ...(secret ? { [WEBHOOK_SECRET_FIELD]: secret } : {}),
+            ...(headers ? { [WEBHOOK_HEADERS_FIELD]: serializeHeaders(headers) } : {}),
+            managed_by: 'package',
+            customized: false,
+            created_at: '2026-10-01T00:00:00.000Z',
+            updated_at: '2026-10-01T00:00:00.000Z',
+        }, { context: SYSTEM_CTX } as any);
+    }
 }
 
 function recordEvent(object: string, record: any): RealtimeEventPayload {
@@ -342,7 +386,7 @@ describe('webhook signing secret at rest (#7799)', () => {
     it('the secret\'s bytes appear nowhere in the persisted sys_webhook row', async () => {
         const { engine, stores } = await buildEngine();
 
-        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
+        await seed18_0Rows(engine, metadataWith([declaredWebhook()]));
 
         // ── The read path an ordinary GET /api/v1/data/sys_webhook takes ──
         // Substring, not a field check: the defect was the key NESTED inside a
@@ -383,9 +427,36 @@ describe('webhook signing secret at rest (#7799)', () => {
         });
     });
 
+    it('a declared webhook, read from the registry, signs the same bytes with no row and no cipher stored', async () => {
+        const { engine, stores } = await buildEngine();
+        const realtime = new FakeRealtime();
+        const outbox = new MemoryHttpOutbox();
+        const enqueuer = new AutoEnqueuer(engine, realtime, (input) => outbox.enqueue(input), {
+            refreshIntervalMs: 0,
+            declaredWebhooks: new DeclaredWebhookSource(engine, metadataWith([declaredWebhook()])),
+        });
+        await enqueuer.start();
+        await realtime.publish(recordEvent('contact', { id: 'c1', name: 'Ada' }));
+        await new Promise((r) => setTimeout(r, 0));
+        const { impl, calls } = makeFetch();
+        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
+        await enqueuer.stop();
+
+        expect(calls).toHaveLength(1);
+        const expected = createHmac('sha256', SECRET).update(calls[0].body).digest('hex');
+        expect(calls[0].headers['X-Objectstack-Signature']).toBe(`sha256=${expected}`);
+        expect(calls[0].headers['X-Team']).toBe('crm');
+        const [row] = (await outbox.list()) as any[];
+        expect(row.refId ?? row.ref_id).toBe(declaredWebhookRefId('crm_hook'));
+        // The key and the header map are code: nothing at rest holds either.
+        expect(stores.get('sys_webhook')?.size ?? 0).toBe(0);
+        expect(stores.get('sys_secret')?.size ?? 0).toBe(0);
+        expect(JSON.stringify(await outbox.list())).not.toContain(SECRET);
+    });
+
     it('signs with the byte-identical signature existing receivers already verify', async () => {
         const { engine } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
+        await seed18_0Rows(engine, metadataWith([declaredWebhook()]));
 
         const { calls, outbox } = await deliverOnce(engine);
 
@@ -402,33 +473,6 @@ describe('webhook signing secret at rest (#7799)', () => {
         expect(JSON.stringify(await outbox.list())).not.toContain(SECRET);
     });
 
-    it('re-seeding an unchanged webhook does not mint a second sys_secret row', async () => {
-        const { engine, stores } = await buildEngine();
-        const declared = metadataWith([declaredWebhook()]);
-
-        await bootstrapDeclaredWebhooks(engine, declared);
-        await bootstrapDeclaredWebhooks(engine, declared);
-        await bootstrapDeclaredWebhooks(engine, declared);
-
-        // Every boot re-seeds package rows; a blind restatement of the key would
-        // leave one orphan ciphertext row per restart. Two rows, not one, since
-        // #7986 — one per credential — and the property under test is that the
-        // count does not GROW across the three boots.
-        expect(stores.get('sys_secret')!.size).toBe(2);
-    });
-
-    it('rotating the declared secret in code re-encrypts and signs with the new key', async () => {
-        const { engine } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
-
-        const ROTATED = 'whsec_7799_rotated';
-        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook({ secret: ROTATED })]));
-
-        const { calls } = await deliverOnce(engine);
-        const expected = createHmac('sha256', ROTATED).update(calls[0].body).digest('hex');
-        expect(calls[0].headers['X-Objectstack-Signature']).toBe(`sha256=${expected}`);
-    });
-
     it('a webhook authored without a secret still materializes and delivers unsigned', async () => {
         const { engine, stores } = await buildEngine();
         // `headers` dropped alongside `secret` so this pin keeps asserting what
@@ -436,7 +480,7 @@ describe('webhook signing secret at rest (#7799)', () => {
         // at all and therefore needs no CryptoProvider. (Since #7986 a header
         // map is a credential too; the headers-only case is pinned separately in
         // the #7986 block below.)
-        await bootstrapDeclaredWebhooks(
+        await seed18_0Rows(
             engine,
             metadataWith([declaredWebhook({ secret: undefined, headers: undefined })]),
         );
@@ -527,23 +571,28 @@ describe('legacy cleartext migration (#7799)', () => {
 });
 
 describe('fail-closed: no CryptoProvider (#7799)', () => {
-    it('refuses to seed a secret-bearing webhook, reporting an ADR-0112 code + status', async () => {
+    it('a declared webhook needs no CryptoProvider at all: its secret is code, and nothing is stored', async () => {
         const { engine, stores } = await buildEngine({ withCrypto: false });
-        const warns: Array<{ msg: string; meta: any }> = [];
-
-        const result = await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]), {
-            warn: (msg: string, meta?: unknown) => { warns.push({ msg, meta }); },
+        const realtime = new FakeRealtime();
+        const outbox = new MemoryHttpOutbox();
+        const enqueuer = new AutoEnqueuer(engine, realtime, (input) => outbox.enqueue(input), {
+            refreshIntervalMs: 0,
+            declaredWebhooks: new DeclaredWebhookSource(engine, metadataWith([declaredWebhook()])),
         });
+        await enqueuer.start();
+        await realtime.publish(recordEvent('contact', { id: 'c1', name: 'Ada' }));
+        await new Promise((r) => setTimeout(r, 0));
+        const { impl, calls } = makeFetch();
+        await new HttpDispatcher({ nodeId: 'n1', outbox, fetchImpl: impl, partitionCount: 1 }).tick();
+        await enqueuer.stop();
 
-        expect(result).toEqual({ seeded: 0, skipped: 1 });
-        // Nothing was written — not the row, not a cleartext fallback column.
+        // Where the 18.0 seeder refused (no safe place for the key), the
+        // registry read has nothing to store: no row, no cipher, signed anyway.
         expect(stores.get('sys_webhook')?.size ?? 0).toBe(0);
         expect(stores.get('sys_secret')?.size ?? 0).toBe(0);
-
-        // ADR-0112: a consumer branches on the pair, not on the message text.
-        const refusal = warns.find((w) => w.meta?.code);
-        expect(refusal?.meta).toMatchObject({ code: 'INTERNAL_ERROR', status: 500 });
-        expect(refusal?.msg).toMatch(/cannot be stored encrypted/);
+        expect(calls).toHaveLength(1);
+        const expected = createHmac('sha256', SECRET).update(calls[0].body).digest('hex');
+        expect(calls[0].headers['X-Objectstack-Signature']).toBe(`sha256=${expected}`);
     });
 
     it('leaves a legacy row exactly as it was, and reports it as still cleartext', async () => {
@@ -592,7 +641,7 @@ describe('boot ordering: the cache is built before the CryptoProvider (#8022)', 
     /** Reboot onto the same rows in the host's real order: kernel first, crypto after. */
     async function bootWithoutCrypto() {
         const first = await buildEngine();
-        await bootstrapDeclaredWebhooks(first.engine, metadataWith([declaredWebhook()]));
+        await seed18_0Rows(first.engine, metadataWith([declaredWebhook()]));
         // Precondition: the credentials are at rest as ciphertext only — the
         // exact population #7799 created, and the only one this defect can
         // reach. Two rows since #7986 (signing secret + header map).
@@ -751,7 +800,7 @@ describe('webhook custom headers at rest (#7986)', () => {
     it('the credential header appears nowhere in the persisted sys_webhook row', async () => {
         const { engine, stores } = await buildEngine();
 
-        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+        await seed18_0Rows(engine, metadataWith([headerBearingWebhook()]));
 
         // ── The read path an ordinary GET /api/v1/data/sys_webhook takes ──
         // `sys_webhook` declares no `enable` block at all, so this is the FULL
@@ -784,7 +833,7 @@ describe('webhook custom headers at rest (#7986)', () => {
 
     it('still delivers every authored header on the wire, credential included', async () => {
         const { engine } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+        await seed18_0Rows(engine, metadataWith([headerBearingWebhook()]));
 
         const { calls, outbox } = await deliverOnce(engine);
 
@@ -801,42 +850,9 @@ describe('webhook custom headers at rest (#7986)', () => {
         expect(JSON.stringify(await outbox.list())).not.toContain(SECRET);
     });
 
-    it('re-seeding an unchanged webhook mints no extra cipher rows for the headers', async () => {
-        const { engine, stores } = await buildEngine();
-        const declared = metadataWith([headerBearingWebhook()]);
-
-        await bootstrapDeclaredWebhooks(engine, declared);
-        await bootstrapDeclaredWebhooks(engine, declared);
-        await bootstrapDeclaredWebhooks(engine, declared);
-
-        // A `secret`-typed write ALWAYS mints a fresh `sys_secret` row and the
-        // engine never deletes the old one, so a blind restatement leaks one
-        // orphan cipher row per webhook per restart — the reason
-        // `secretPatch` compares before writing. The headers channel owes the
-        // same discipline. Exactly two: one signing secret, one header map.
-        expect(stores.get('sys_secret')!.size).toBe(2);
-    });
-
-    it('rotating the declared headers in code re-encrypts and delivers the new value', async () => {
-        const { engine, stores } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
-        await bootstrapDeclaredWebhooks(
-            engine,
-            metadataWith([headerBearingWebhook({ headers: { Authorization: 'Bearer rotated_7986' } })]),
-        );
-
-        const { calls } = await deliverOnce(engine);
-        expect(calls[0].headers.Authorization).toBe('Bearer rotated_7986');
-        expect(calls[0].headers['X-Team']).toBeUndefined();
-        // Code remains the authority for package rows: the superseded map is
-        // not readable from the row any more either.
-        const stored = Array.from(stores.get('sys_webhook')!.values())[0] as any;
-        expect(JSON.stringify(stored)).not.toContain(BEARER);
-    });
-
     it('a webhook authored without headers still materializes and delivers', async () => {
         const { engine, stores } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook({ headers: undefined })]));
+        await seed18_0Rows(engine, metadataWith([declaredWebhook({ headers: undefined })]));
 
         const { calls } = await deliverOnce(engine);
         expect(calls).toHaveLength(1);
@@ -939,7 +955,7 @@ describe('legacy cleartext headers migration (#7986)', () => {
 describe('fail-closed and re-arm, extended to headers (#7986 × #7799/#8022)', () => {
     async function bootWithoutCrypto() {
         const first = await buildEngine();
-        await bootstrapDeclaredWebhooks(first.engine, metadataWith([headerBearingWebhook()]));
+        await seed18_0Rows(first.engine, metadataWith([headerBearingWebhook()]));
         // Precondition: BOTH credentials are at rest as ciphertext only.
         expect(first.stores.get('sys_secret')!.size).toBe(2);
         return buildEngine({
@@ -1112,7 +1128,7 @@ describe('a stored signing secret that resolves to nothing (#8542)', () => {
 
     it('refuses to arm when the stored secret decrypts to nothing (historical row — the data-API road is closed by #8559)', async () => {
         const { engine, stores, driver } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
+        await seed18_0Rows(engine, metadataWith([declaredWebhook()]));
         const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
 
         // This state USED to be reachable from the ordinary data API with no
@@ -1147,7 +1163,7 @@ describe('a stored signing secret that resolves to nothing (#8542)', () => {
 
     it('refuses to arm when the column no longer holds a resolvable ref', async () => {
         const { engine, stores, driver } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
+        await seed18_0Rows(engine, metadataWith([declaredWebhook()]));
         const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
 
         // Written BELOW the engine deliberately, because that is the only route
@@ -1165,7 +1181,7 @@ describe('a stored signing secret that resolves to nothing (#8542)', () => {
 
     it('refuses when the row is deleted between the cache read and the dereference', async () => {
         const { engine } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([declaredWebhook()]));
+        await seed18_0Rows(engine, metadataWith([declaredWebhook()]));
 
         // The snapshot the enqueuer's refresh loop holds while it dereferences
         // each row's credentials, one at a time.
@@ -1185,7 +1201,7 @@ describe('a stored signing secret that resolves to nothing (#8542)', () => {
 
     it('a webhook authored unsigned still arms and delivers — the refusal is not a blanket', async () => {
         const { engine } = await buildEngine();
-        await bootstrapDeclaredWebhooks(
+        await seed18_0Rows(
             engine,
             metadataWith([declaredWebhook({ secret: undefined })]),
         );
@@ -1317,7 +1333,7 @@ describe('a stored header map that resolves to nothing (#8558)', () => {
 
     it('refuses to arm when the stored map decrypts to nothing (historical row — the data-API road is closed by #8559)', async () => {
         const { engine, stores, driver } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+        await seed18_0Rows(engine, metadataWith([headerBearingWebhook()]));
         const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
 
         // The '' member of the unusable-spellings family below is special: it
@@ -1363,7 +1379,7 @@ describe('a stored header map that resolves to nothing (#8558)', () => {
         'refuses to arm when the stored value decrypts fine but is unusable: %s',
         async (_label, badValue) => {
             const { engine, stores } = await buildEngine();
-            await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+            await seed18_0Rows(engine, metadataWith([headerBearingWebhook()]));
             const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
 
             // Written through the ORDINARY data API — no driver access, no SQL.
@@ -1385,7 +1401,7 @@ describe('a stored header map that resolves to nothing (#8558)', () => {
 
     it('refuses to arm when the column no longer holds a resolvable ref', async () => {
         const { engine, stores, driver } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+        await seed18_0Rows(engine, metadataWith([headerBearingWebhook()]));
         const [row] = await engine.find('sys_webhook', { where: { name: 'crm_hook' } });
 
         // Written BELOW the engine deliberately: that is the only route measured
@@ -1407,7 +1423,7 @@ describe('a stored header map that resolves to nothing (#8558)', () => {
 
     it('refuses when the row is deleted between the cache read and the dereference', async () => {
         const { engine } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+        await seed18_0Rows(engine, metadataWith([headerBearingWebhook()]));
 
         // The snapshot the enqueuer's refresh loop holds while it dereferences
         // each row's credentials, one at a time.
@@ -1455,7 +1471,7 @@ describe('a stored header map that resolves to nothing (#8558)', () => {
 
     it('a webhook authored with NO headers still arms and delivers — the refusal is not a blanket', async () => {
         const { engine } = await buildEngine();
-        await bootstrapDeclaredWebhooks(
+        await seed18_0Rows(
             engine,
             metadataWith([declaredWebhook({ headers: undefined })]),
         );
@@ -1485,7 +1501,7 @@ describe('a stored header map that resolves to nothing (#8558)', () => {
         // written as "refuse whenever headers are stored": the healthy path has
         // to keep working end to end, credential entry included.
         const { engine, stores } = await buildEngine();
-        await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
+        await seed18_0Rows(engine, metadataWith([headerBearingWebhook()]));
 
         await expectHeadersGenuinelyStored(engine, stores);
         const { calls, rows, errors } = await driveOnce(engine);
@@ -1634,10 +1650,10 @@ describe('the retired definition_json credential location — refused at the wri
         expect(calls[0].headers.Authorization).toBe(BEARER);
     });
 
-    it('the declared-webhook seeder still materializes secret + headers through the bound gate', async () => {
+    it('an 18.0-seeded row\'s secret + headers still pass the bound gate into their encrypted columns', async () => {
         const { engine, stores } = await gatedEngine();
-        const result = await bootstrapDeclaredWebhooks(engine, metadataWith([headerBearingWebhook()]));
-        expect(result).toMatchObject({ seeded: 1 });
+        await seed18_0Rows(engine, metadataWith([headerBearingWebhook()]));
+        expect(stores.get('sys_webhook')!.size).toBe(1);
         expect(JSON.stringify(rowsAtRest(stores))).not.toContain(BEARER);
     });
 });

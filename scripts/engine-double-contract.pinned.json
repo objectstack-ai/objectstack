@@ -3732,7 +3732,7 @@
       "pinned": 1
     },
     {
-      "file": "packages/plugins/plugin-webhooks/src/bootstrap-declared-webhooks.test.ts",
+      "file": "packages/plugins/plugin-webhooks/src/declared-webhooks.test.ts",
       "verb": "findOne",
       "pinned": 1
     },
