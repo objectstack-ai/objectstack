@@ -285,8 +285,10 @@ export interface SettingsSecretStore {
 }
 
 /**
- * Append-only writer for the `sys_setting_audit` object — Phase 3
- * audit trail. Distinct from {@link SettingsAuditSink} (which writes the
+ * Append-only writer for the settings audit trail — Phase 3. The tenant and
+ * user rungs' rows go to `sys_setting_audit`; the global rung's go to the
+ * deployment-level `sys_platform_setting_audit` (ADR-0131 D7), the way the
+ * values split between `sys_setting` and `sys_platform_setting`. Distinct from {@link SettingsAuditSink} (which writes the
  * generic `sys_audit_log` `config_change` row) so audit consumers can subscribe
  * to settings activity without scanning the firehose.
  *
@@ -387,7 +389,7 @@ export interface SettingsServiceOptions {
   secretStore?: SettingsSecretStore;
   /** Audit sink. When undefined, writes still succeed but are not logged. */
   audit?: SettingsAuditSink;
-  /** Phase 3 dedicated writer for `sys_setting_audit`. */
+  /** Phase 3 dedicated writer for the settings audit trail. */
   auditWriter?: SettingsAuditWriter;
   /**
    * `process.env`-like map. Defaults to `process.env`. Injected so

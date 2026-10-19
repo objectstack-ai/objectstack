@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { resolveInjectedSystemColumns } from '@objectstack/spec/data';
 import { PLATFORM_CAPABILITIES } from '@objectstack/spec/security';
 import { SysJob, SysJobRun, SysJobQueue } from './audit/index.js';
-import { SysMigration, SysMigrationJournal, SysSecret } from './system/index.js';
+import { SysMigration, SysMigrationJournal, SysPlatformSettingAudit, SysSecret } from './system/index.js';
 
 /**
  * [ADR-0131 D7] The deployment-level plumbing this package declares carries no
@@ -36,6 +36,8 @@ const DEPLOYMENT_LEVEL = [
   ['sys_job_queue', SysJobQueue],
   ['sys_migration', SysMigration],
   ['sys_migration_journal', SysMigrationJournal],
+  // [ruling record 6257510973, Q4 A] The settings audit trail's global rung.
+  ['sys_platform_setting_audit', SysPlatformSettingAudit],
 ] as const;
 
 describe('[ADR-0131 D7] deployment-level plumbing: no tenant column, platform-only reads', () => {

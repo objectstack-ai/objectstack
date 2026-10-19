@@ -633,7 +633,7 @@
       "title": "Settings hub round-trip: a value saves, PERSISTS, reaches an observable consumer, audits, env-locks, tests honestly, and stores secrets as handles served MASKED — anonymous denied",
       "since": "v15",
       "status": "active",
-      "revision": 4,
+      "revision": 5,
       "priority": "P1",
       "surface": "mixed",
       "personas": [
@@ -680,7 +680,7 @@
           "evidence": "the before/after consumer output"
         },
         {
-          "clause": "every write appends a sys_setting_audit row (namespace/key/scope/action='set'/source='api'/actor_id/new_hash)",
+          "clause": "every write appends a per-key audit row (namespace/key/scope/action='set'/source='api'/actor_id/new_hash): in sys_setting_audit for a tenant- or user-scope key, in the deployment-level sys_platform_setting_audit for a global-scope key (ADR-0131 D7)",
           "oracle": "api",
           "verify": "GET /api/v1/data/sys_setting_audit shows the row for localization.timezone (SettingsServicePlugin.buildAuditWriter)",
           "evidence": "the audit row"
@@ -784,7 +784,8 @@
         { "revision": 1, "date": "2026-08-08", "change": "initial — settings hub round-trip with persistence + observable-consumer effect (honoring the ai.json form-is-not-effect caveat), sys_setting_audit, env-lock server refusal, honest test action, sys_secret handle-not-plaintext, anonymous deny", "ref": "claude/platform-test-checklist-ocwugl" },
         { "revision": 2, "date": "2026-08-11", "change": "secret clauses strengthened from negative-only ('never returns the plaintext', which omission and a vanished key also satisfy) to the POSITIVE contract #7522/PR #7554 pinned at the route level: set→mask / unset→null presence-preserving, masking across values.<key>.value AND every cascadeChain entry, source/locked/lockedReason unchanged, both specifier flavours, plus the distinct echoed-mask-PUT-is-a-no-op round-trip clause and the in-process-path-is-NOT-masked guard", "ref": "#7573" },
         { "revision": 3, "date": "2026-08-18", "change": "corrected the open-framework namespace count from 10 to 11 in the fixture list, step 0 and the per-namespace clause. builtinSettingsManifests holds 10, but lifecycle is registered separately by ObjectQLPlugin at kernel:ready (packages/objectql/src/lifecycle/lifecycle-settings.ts, 5 specifiers) and is served alongside them — so a runner enumerating only the manifests directory undercounts, and the clause could never be satisfied as written (#9453 CF-7)", "ref": "#9386" },
-        { "revision": 4, "date": "2026-10-16", "change": "steps[1], [2], [3], [5] and [12] and acceptance[7] (clause, verify) and [11] (clause, verify, evidence) re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). Four premises had moved: the `os dev --seed-admin` dev seed writes the host zone into localization.timezone at tenant scope (#23175), so the source is 'tenant' before any PUT and the badge flip needs a key the seed did not write (#23939 used default_country); the analytics date bucket has no stock observable, so the effect step names the two consumers #23939 used (auth/me/localization and a rendered datetime); global-scope secrets live in sys_platform_setting.value_enc, not sys_setting; and an anonymous caller meets the ADR-0056 D2 floor first, 401 UNAUTHENTICATED on both routes, not 403 SETTINGS_FORBIDDEN. acceptance[0].clause, [1].clause and [3].verify follow the same premises: the source reads the scope (on a dev-seeded boot it never read 'default', so there is no flip to see), the effect clause names the two stock consumers instead of the analytics bucket, and the badge is read on a key whose source was 'default' before the save. Not loosened: anonymous must still be refused on both routes with no namespace enumerated, and a secret must still never be plaintext", "ref": "#24036" }
+        { "revision": 4, "date": "2026-10-16", "change": "steps[1], [2], [3], [5] and [12] and acceptance[7] (clause, verify) and [11] (clause, verify, evidence) re-pointed (checklist-accuracy findings of QA run #23939, wave #23878). Four premises had moved: the `os dev --seed-admin` dev seed writes the host zone into localization.timezone at tenant scope (#23175), so the source is 'tenant' before any PUT and the badge flip needs a key the seed did not write (#23939 used default_country); the analytics date bucket has no stock observable, so the effect step names the two consumers #23939 used (auth/me/localization and a rendered datetime); global-scope secrets live in sys_platform_setting.value_enc, not sys_setting; and an anonymous caller meets the ADR-0056 D2 floor first, 401 UNAUTHENTICATED on both routes, not 403 SETTINGS_FORBIDDEN. acceptance[0].clause, [1].clause and [3].verify follow the same premises: the source reads the scope (on a dev-seeded boot it never read 'default', so there is no flip to see), the effect clause names the two stock consumers instead of the analytics bucket, and the badge is read on a key whose source was 'default' before the save. Not loosened: anonymous must still be refused on both routes with no namespace enumerated, and a secret must still never be plaintext", "ref": "#24036" },
+        { "revision": 5, "date": "2026-10-19", "change": "acceptance[2].clause re-pointed: the settings audit trail's global rung moved to the deployment-level sys_platform_setting_audit (ADR-0131 D7, ruling record 6257510973 Q4 A), so 'every write appends a sys_setting_audit row' stopped being true for a global-scope key. The clause now names both tables by scope; its verify reads localization.timezone, a tenant-scope key, whose row is still in sys_setting_audit. Not loosened: every write still appends exactly one per-key row", "ref": "#24530" }
       ]
     },
     {
@@ -2869,7 +2870,7 @@
       "title": "The settings audit trail keeps no fingerprint of a secret-valued setting that a reader can match offline: both ledgers record the platform's keyed digest or none, never the value or an unkeyed hash, so a caller who can only read the audit rows learns that the secret changed and nothing about its value",
       "since": "v17",
       "status": "active",
-      "revision": 2,
+      "revision": 3,
       "priority": "P1",
       "surface": "api",
       "personas": [
@@ -2881,7 +2882,7 @@
         "requires": [
           "the settings service wired with a crypto provider and the sys_secret store, which is the stock wiring: SettingsServicePlugin binds both on kernel:ready (the same requirement platform-core.settings-hub-roundtrip names)",
           "an encrypted settings specifier to write: mail.api_key (type 'password', encrypted: true, mail.manifest.ts), written with provider 'resend' so the manifest's validator accepts the patch",
-          "plugin-audit mounted, so the generic ledger (sys_audit_log) exists. The per-key ledger (sys_setting_audit) is the settings service's own and is always there"
+          "plugin-audit mounted, so the generic ledger (sys_audit_log) exists. The per-key ledger is the settings service's own and is always there: sys_platform_setting_audit for a global-scope key, sys_setting_audit for a tenant- or user-scope key"
         ],
         "knownGaps": [
           "the no-keyed-digest arm is not reachable on a stock boot. A host that builds the settings service with only a CryptoAdapter, or a crypto provider that refuses a keyed digest, records the write with NO fingerprint (sys_setting_audit.new_hash null, the bare encrypted marker in sys_audit_log) and warns once per key, and the write itself still lands. Score that arm from the unit pin (automated.ref); ⛔ never build a custom host to reach it",
@@ -2890,7 +2891,7 @@
       },
       "steps": [
         "generate a fresh random value V1 for this run (never a value used anywhere else). As admin, PUT /api/settings/mail { provider: 'resend', api_key: V1, from_email: 'ops@example.com' }",
-        "read the per-key ledger: GET /api/v1/data/sys_setting_audit filtered to namespace=mail and key=api_key; capture the newest row (action set, encrypted true, new_hash)",
+        "read the per-key ledger: GET /api/v1/data/sys_platform_setting_audit filtered to namespace=mail and key=api_key; capture the newest row (action set, encrypted true, new_hash). mail is a GLOBAL-scope namespace, and the per-key ledger of the global rung is the deployment-level sys_platform_setting_audit (ADR-0131 D7, packages/services/service-settings/src/settings-service-plugin.ts#settingAuditObjectFor); a tenant- or user-scope key's row lands in sys_setting_audit",
         "read the generic ledger: GET /api/v1/data/sys_audit_log filtered to action=config_change; capture the newest row for mail.api_key (object_name 'sys_platform_setting' — mail is a GLOBAL-scope namespace, and a global-scope value's row names the tenant-less table it lives in, packages/services/service-settings/src/config-change-audit.ts#CONFIG_CHANGE_GLOBAL_OBJECT_NAME; a tenant-scope key's row names 'sys_setting'; new_value is a JSON string carrying namespace, key, scope and digest; metadata carries encrypted: true)",
         "OFFLINE, with no server key: compute the unkeyed digests a leak would carry — the FNV-1a 32 of V1's canonical JSON (the quoted string), spelled 'fnv32:' + 8 lowercase hex, which is the unkeyed digest this settings service writes for a non-secret key (packages/services/service-settings/src/crypto-adapter.ts#digest), and, belt and braces, the SHA-256 hex of V1 (bare, and with a 'sha256:' prefix) — and search both captured rows, every field, for each of them and for V1 itself",
         "write V1 again, then a different value V2, then V1 a third time; re-read both ledgers and compare the fingerprints of the three writes",
@@ -2899,7 +2900,7 @@
       ],
       "acceptance": [
         {
-          "clause": "a secret-valued setting's write records on BOTH ledgers a fingerprint of the keyed shape hmac-sha256 followed by 64 hex digits: sys_setting_audit.new_hash, and the digest inside sys_audit_log's config_change new_value (inside the encrypted marker). Neither row carries the value",
+          "clause": "a secret-valued setting's write records on BOTH ledgers a fingerprint of the keyed shape hmac-sha256 followed by 64 hex digits: the per-key ledger's new_hash (sys_platform_setting_audit for the global mail key), and the digest inside sys_audit_log's config_change new_value (inside the encrypted marker). Neither row carries the value",
           "oracle": "api",
           "verify": "new_hash matches the shape 'hmac-sha256:' + 64 lowercase hex; the config_change row's new_value.digest is the encrypted marker wrapping that same keyed digest; neither row, in any field, contains V1",
           "evidence": "both captured rows, quoted in full"
@@ -2917,9 +2918,9 @@
           "evidence": "the three fingerprints per ledger"
         },
         {
-          "clause": "a reset records no fingerprint: the reset row carries new_hash null on sys_setting_audit, and the config_change row carries no new_value",
+          "clause": "a reset records no fingerprint: the reset row carries new_hash null on the per-key ledger (sys_platform_setting_audit for the global mail key), and the config_change row carries no new_value",
           "oracle": "api",
-          "verify": "the reset rows: sys_setting_audit action 'reset' with new_hash null; sys_audit_log config_change new_value null",
+          "verify": "the reset rows: sys_platform_setting_audit action 'reset' with new_hash null; sys_audit_log config_change new_value null",
           "evidence": "the two reset rows"
         },
         {
@@ -2969,6 +2970,12 @@
           "date": "2026-10-16",
           "change": "steps[2], [3] and [6], acceptance[1].clause and [4].verify and negative[0] corrected (checklist-accuracy finding of QA run #23939, wave #23878). The non-secret digest is FNV-1a 32 of canonical JSON ('fnv32:'), not SHA-256 (crypto-adapter.ts digest), so the step-7 control computed with SHA-256 never matched and could not prove the offline search would find an unkeyed digest. The control and the secret search now compute the same algorithm — FNV-1a 32 first, SHA-256 kept as a second net — and the generic-ledger row for global-scope mail names sys_platform_setting, not sys_setting. Not loosened: the search now covers the algorithm the service actually uses, so a leaked unkeyed digest is caught where the old search could miss it",
           "ref": "#24036"
+        },
+        {
+          "revision": 3,
+          "date": "2026-10-19",
+          "change": "fixtures.requires[2], steps[1] and acceptance[0].clause, [3] (clause, verify) re-pointed: mail is a global-scope namespace, and the settings audit trail's global rung moved to the deployment-level sys_platform_setting_audit (ADR-0131 D7, ruling record 6257510973 Q4 A). Global-rung rows an 18.0 install wrote stay in sys_setting_audit until the upgrade ceremony moves them. Not loosened: the same keyed-digest, no-value and reset rules are scored on the same rows",
+          "ref": "#24530"
         }
       ]
     },

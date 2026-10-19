@@ -6,8 +6,10 @@
  * `sys_setting_audit` history row — belong to the organization the setting
  * row does: the caller's, for a `tenant` or `user` value. A `global` value is
  * deployment-level (its row lives in `sys_platform_setting`, which has no
- * organization), so neither row names one; whether such rows may stay in
- * these two tenant-column objects is a question this file does not answer.
+ * organization), so neither row names one. Its history row goes to
+ * `sys_platform_setting_audit`, the audit trail's deployment-level global rung
+ * (ADR-0131 D7, ruling record 6257510973 · Q4 A); the secret's fate is the
+ * 18.x ceremony's.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -16,7 +18,12 @@ import type { SettingsManifest } from '@objectstack/spec/system';
 import { SettingsService } from './settings-service.js';
 import { LocalCryptoProvider } from './local-crypto-provider.js';
 import { mailSettingsManifest } from './manifests/mail.manifest.js';
-import { buildSettingAuditWriter } from './settings-service-plugin.js';
+import {
+  buildSettingAuditWriter,
+  PLATFORM_SETTING_AUDIT_OBJECT,
+  SETTING_AUDIT_OBJECT,
+  settingAuditObjectFor,
+} from './settings-service-plugin.js';
 import type { SettingsSecretStore } from './settings-service.types.js';
 
 /** A tenant-scoped namespace carrying one encrypted value. */
@@ -77,13 +84,15 @@ describe('[ADR-0131 D3/D9] settings secret and history rows name their setting\'
   });
 });
 
-describe('[ADR-0131 D3/D9] the sys_setting_audit writer stamps the entry\'s organization', () => {
+describe('[ADR-0131 D3/D7] the settings audit writer: tenant rows stamped in sys_setting_audit, global rows to the sibling', () => {
   function engine() {
     const inserted: Array<Record<string, unknown>> = [];
+    const objects: string[] = [];
     return {
       inserted,
+      objects,
       async findOne() { return { id: 'usr-1' }; },
-      async insert(_object: string, row: Record<string, unknown>) { inserted.push({ ...row }); return row; },
+      async insert(object: string, row: Record<string, unknown>) { objects.push(object); inserted.push({ ...row }); return row; },
     };
   }
   const entry = {
@@ -91,14 +100,29 @@ describe('[ADR-0131 D3/D9] the sys_setting_audit writer stamps the entry\'s orga
     actorId: 'usr-1', oldHash: null, newHash: 'hmac-sha256:x', encrypted: true,
   };
 
-  it('writes organization_id when the entry names one, and no organization_id when it does not', async () => {
+  it('a tenant or user row goes to sys_setting_audit with its organization; a global row to sys_platform_setting_audit with none', async () => {
     const eng = engine();
     const writer = buildSettingAuditWriter(eng as any, { error: (m) => { throw new Error(m); }, warn: (m) => { throw new Error(m); } });
     await writer.write({ ...entry, organizationId: 'org-1' });
+    await writer.write({ ...entry, scope: 'user', organizationId: 'org-1' });
     await writer.write({ ...entry, scope: 'global' });
+    // An entry that names an organization at the global rung still writes none:
+    // the sibling has no organization column to hold it.
+    await writer.write({ ...entry, scope: 'global', organizationId: 'org-1' });
 
-    expect(eng.inserted[0]).toMatchObject({ key: 'token', organization_id: 'org-1' });
-    expect('organization_id' in eng.inserted[1]).toBe(false);
+    expect(eng.objects).toEqual(['sys_setting_audit', 'sys_setting_audit', 'sys_platform_setting_audit', 'sys_platform_setting_audit']);
+    expect(eng.inserted[0]).toMatchObject({ key: 'token', scope: 'tenant', organization_id: 'org-1' });
+    expect(eng.inserted[1]).toMatchObject({ key: 'token', scope: 'user', organization_id: 'org-1' });
+    expect(eng.inserted[2]).toMatchObject({ key: 'token', scope: 'global' });
+    expect('organization_id' in eng.inserted[2]).toBe(false);
+    expect('organization_id' in eng.inserted[3]).toBe(false);
+  });
+
+  it('routes by rung through one predicate: global to the sibling, tenant and user to sys_setting_audit', () => {
+    expect(settingAuditObjectFor('global')).toBe(PLATFORM_SETTING_AUDIT_OBJECT);
+    expect(settingAuditObjectFor('tenant')).toBe(SETTING_AUDIT_OBJECT);
+    expect(settingAuditObjectFor('user')).toBe(SETTING_AUDIT_OBJECT);
+    expect([PLATFORM_SETTING_AUDIT_OBJECT, SETTING_AUDIT_OBJECT]).toEqual(['sys_platform_setting_audit', 'sys_setting_audit']);
   });
 
   it('reports a lost history row at error once with the consequence, and on a reduced sink through warn', async () => {

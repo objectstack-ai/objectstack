@@ -17,7 +17,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { ObjectQL } from '@objectstack/objectql';
-import { SysPlatformSetting, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
+import { SysPlatformSetting, SysPlatformSettingAudit, SysSetting, SysSettingAudit } from '@objectstack/platform-objects/system';
 import { SettingsService } from './settings-service.js';
 import { SETTINGS_READ_DOOR_OBJECTS, registerSettingsReadDoor, settingsReadDoorMiddleware } from './settings-read-door.js';
 
@@ -102,7 +102,7 @@ beforeEach(async () => {
   const memory = makeMemoryDriver();
   engine.registerDriver(memory.driver, true);
   await engine.init();
-  for (const o of [SysSetting, SysSettingAudit, SysPlatformSetting]) {
+  for (const o of [SysSetting, SysSettingAudit, SysPlatformSetting, SysPlatformSettingAudit]) {
     engine.registry.registerObject(o as any, '@objectstack/platform-objects');
   }
   const svc = new SettingsService({ env: {} });
@@ -128,6 +128,12 @@ beforeEach(async () => {
       namespace, key: 'k', value: 'v', value_enc: null, encrypted: false, locked: false, locked_reason: null,
     }, SYS);
     ids[namespace].sys_platform_setting = String((platform as any).id);
+    const platformAudit = await engine.insert('sys_platform_setting_audit', {
+      namespace, key: 'k', scope: 'global', action: 'set', source: 'api', actor_id: null,
+      old_hash: null, new_hash: 'h', encrypted: false, request_id: null, reason: null,
+      created_at: new Date().toISOString(),
+    }, SYS);
+    ids[namespace].sys_platform_setting_audit = String((platformAudit as any).id);
   }
 });
 
