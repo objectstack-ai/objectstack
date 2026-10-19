@@ -387,11 +387,12 @@ export function evaluate({ distDir, specDir, requireStamp = false, cacheKey = ''
   for (const entry of stamp.packages) {
     const name = entry?.name || '<unnamed>';
 
+    // vendoredPin: the build judged against objectui's own build of that commit.
+    const against = entry?.vendoredPin
+      ? `objectui's own build of objectstack ${String(entry.vendoredPin).slice(0, 12)}`
+      : 'published spec';
+
     if (!entry?.skew) {
-      // vendoredPin: the build judged against objectui's own build of that commit.
-      const against = entry?.vendoredPin
-        ? `objectui's own build of objectstack ${String(entry.vendoredPin).slice(0, 12)}`
-        : 'published spec';
       out.push(`ℹ ${name}: the build recorded no observable skew between the injected and`);
       out.push(`  ${against}, so there is no probe that could tell them apart.`);
       continue;
@@ -401,7 +402,7 @@ export function evaluate({ distDir, specDir, requireStamp = false, cacheKey = ''
 
     if (staleDetector && bundle.includes(staleDetector)) {
       err.push(
-        `✗ The console dist carries the PUBLISHED ${name}, not this tree's.`,
+        `✗ The console dist carries ${entry.vendoredPin ? `the ${name} of ${against}` : `the PUBLISHED ${name}`}, not this tree's.`,
         '',
         '  This dist was RESTORED FROM CACHE or built without the injection. Any',
         '  authorable key the framework declared after the last spec publish is',
