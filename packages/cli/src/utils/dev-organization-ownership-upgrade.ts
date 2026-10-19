@@ -125,7 +125,7 @@ export function upgradeDevelopmentDatabase(input: DevelopmentUpgradeInput): Deve
   // the boot refusal's terms. The 18.x release that registers the ceremony names
   // its steps here again.
   const manual =
-    '18.0 supports fresh installs only and does not upgrade a v17 database: keep this development database on a ' +
+    '18.0 supports fresh installs only and does not upgrade a v17 database: keep a v17 development database on a ' +
     '17.x release until the 18.x release that carries the upgrade path, and upgrade it there.';
   if (!input.sqliteFile) {
     return {

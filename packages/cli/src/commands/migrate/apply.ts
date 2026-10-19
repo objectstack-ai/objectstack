@@ -595,8 +595,8 @@ export default class MigrateApply extends Command {
             `Refusing this --allow-destructive run: it would drop organization_id from ${organizationDrops.join(', ')}, a drop the organization-ownership ceremony `
             + `owns, and the ceremony has not verified on this database. ${detail} Dropping the column first would turn `
             + 'every legacy organization row into an environment row without the ceremony\'s promotion or report. 18.0 '
-            + 'supports fresh installs only and does not upgrade a v17 database: keep it on a 17.x release until the '
-            + '18.x release that carries the upgrade path, whose ceremony drops these columns itself, in its '
+            + 'supports fresh installs only and does not upgrade a v17 database: keep a v17 database on a 17.x release '
+            + 'until the 18.x release that carries the upgrade path, whose ceremony drops these columns itself, in its '
             + 'column-drops step, before it records the run verified. Nothing in this run was applied.',
           );
           this.exit(1);
