@@ -25,8 +25,9 @@
  *      exactly one row, the row names no organization, and the item's read
  *      serves the body that was written;
  *   2. the read of a stored overlay — a stored environment-wide row is served
- *      by `getMetaItem`. The row is put in the store directly, so this leg asks
- *      the read alone, with no write door in front of it: a row stored before a
+ *      by `getMetaItem`. The row is inserted through the engine, never a write
+ *      door, so this leg asks the read alone (the engine, not the driver, so
+ *      the served read's cache sees the write as it sees every production one): a row stored before a
  *      flag change keeps being served whatever the flag then says;
  *   3. the wire — `getMetaTypes` advertises the flag `true` for the type, from
  *      the registry and not from the `OS_METADATA_WRITABLE` hatch.
@@ -284,15 +285,23 @@ async function boot(topology: Topology) {
     const rowsOf = (type: string, name: string) => Array.from(stores.get('sys_metadata')?.values() ?? [])
         .filter((r) => r.type === type && r.name === name);
     /**
-     * A stored ACTIVE environment-wide overlay row, written into the store the
-     * way the repository's write lays one down (no organization, no package
-     * binding, the body as JSON), with no write door in front of it.
+     * A stored ACTIVE environment-wide overlay row, laid down the way the
+     * repository's write lays one down (no organization, no package binding,
+     * the body as JSON), with no metadata write door (`saveMetaItem`) in front
+     * of it.
+     *
+     * It goes through the ENGINE, never straight into the driver: the served
+     * by-name read is cached across calls and retired by the engine's
+     * `sys_metadata` write seam (`meta-overlay-cache.ts`), the seam every
+     * production writer of the table passes. A row put into the driver behind
+     * the engine's back is a write no production path makes, and the read
+     * after it would be answered from the rows read before it.
      */
     const storeEnvironmentRow = (type: string, name: string, body: Record<string, unknown>) =>
-        driver.create('sys_metadata', {
+        engine.insert('sys_metadata', {
             type, name, organization_id: null, package_id: null,
             metadata: JSON.stringify(body), state: 'active', version: 1,
-        });
+        }, { context: { isSystem: true } });
     return { engine, protocol, rowsOf, storeEnvironmentRow };
 }
 

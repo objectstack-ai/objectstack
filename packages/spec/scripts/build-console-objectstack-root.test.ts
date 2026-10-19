@@ -22,7 +22,12 @@
 //      exported: the pin script packs whole packages and refuses one whose
 //      `types` entry is missing, and a typeless tree did exactly that (consumer
 //      pointer on objectstack#24306, measured again on this branch);
-//   5. stop on the pin script's refusal, before the install.
+//   5. stop on the pin script's refusal, before the install;
+//   6. first build objectui's OWN pin (the pin script with no OBJECTSTACK_ROOT
+//      and no OS_SKIP_DTS) and keep that cache, its stamp included, outside the
+//      one the stand-in replaces: once this tree stands in, objectui's install
+//      is this tree, so only that build can be the injection assertion's
+//      reference. A rerun reuses it while its stamp names the pin.
 //
 // ## How it runs: the real script, a fake world
 //
@@ -60,10 +65,17 @@ if [[ "\${1:-}" == "install" ]]; then exit 42; fi
 exit 0
 `;
 
-/** A pin script that HAS the input: it reads OBJECTSTACK_ROOT and records it. */
+/** A pin script that HAS the input: it records OBJECTSTACK_ROOT and leaves the
+ *  cache the real one does, its stamp at the root, unless told to refuse. */
 const PIN_WITH_HOOK = `import fs from 'node:fs';
-fs.appendFileSync(process.env.SHIM_LOG, 'pin ' + process.argv.slice(2).join(' ') + ' | OBJECTSTACK_ROOT=' + (process.env.OBJECTSTACK_ROOT ?? 'unset') + ' | cwd=' + process.cwd() + '\\n');
-process.exit(Number(process.env.FAKE_PIN_EXIT ?? '0'));
+const root = process.env.OBJECTSTACK_ROOT;
+fs.appendFileSync(process.env.SHIM_LOG, 'pin ' + process.argv.slice(2).join(' ') + ' | OBJECTSTACK_ROOT=' + (root ?? 'unset') + ' | OS_SKIP_DTS=' + (process.env.OS_SKIP_DTS ?? 'unset') + ' | cwd=' + process.cwd() + '\\n');
+if (process.env.FAKE_PIN_EXIT) process.exit(Number(process.env.FAKE_PIN_EXIT));
+const cache = 'node_modules/.cache/objectstack';
+fs.rmSync(cache, { recursive: true, force: true });
+fs.mkdirSync(cache + '/spec', { recursive: true });
+const sha = fs.readFileSync('.objectstack-sha', 'utf8').trim();
+fs.writeFileSync(cache + '/.stamp.json', JSON.stringify(root ? { source: 'external', root } : { source: 'pin', sha }));
 `;
 
 /** A pin script from before the input existed: it builds its own pin, always. */
@@ -158,6 +170,8 @@ function buildConsole(pin: string, env: Record<string, string> = {}): Run {
 }
 
 const closureBuilds = (log: string[]) => log.filter((l) => l.startsWith('pnpm exec turbo run build'));
+const pinBuilds = (log: string[]) => log.filter((l) => l.startsWith('pin build'));
+const reference = (pin: string) => path.join(FW, '.cache', `objectui-${pin.slice(0, 12)}`, 'node_modules/.cache/objectstack-pin-reference');
 const installs = (log: string[]) => log.filter((l) => l.startsWith('pnpm install'));
 
 describe('build-console.sh: the .objectstack-sha branch', () => {
@@ -181,13 +195,25 @@ describe('build-console.sh: the .objectstack-sha branch', () => {
     expect(run.status, run.output).toBe(42);
     expect(run.log).toEqual([
       'pnpm exec turbo run build --filter=@objectstack/client --filter=@objectstack/spec --output-logs=new-only | OS_SKIP_DTS=unset',
-      `pin build | OBJECTSTACK_ROOT=${FW} | cwd=${run.buildRoot}`,
+      `pin build | OBJECTSTACK_ROOT=unset | OS_SKIP_DTS=unset | cwd=${run.buildRoot}`,
+      `pin build | OBJECTSTACK_ROOT=${FW} | OS_SKIP_DTS=unset | cwd=${run.buildRoot}`,
       'pnpm install --frozen-lockfile --prefer-offline --config.production=false | OS_SKIP_DTS=unset',
     ]);
+    // The pin's own cache survived the stand-in that replaced it: the reference.
+    expect(JSON.parse(fs.readFileSync(path.join(reference(HOOK_PIN), '.stamp.json'), 'utf8'))).toEqual({ source: 'pin', sha: 'a'.repeat(40) });
+    expect(fs.existsSync(path.join(reference(HOOK_PIN), 'spec'))).toBe(true);
+  });
+
+  it("a rerun reuses the reference while its stamp names the pin, and rebuilds it when it does not", () => {
+    expect(pinBuilds(buildConsole(HOOK_PIN).log)).toEqual([expect.stringContaining(`OBJECTSTACK_ROOT=${FW}`)]);
+    fs.writeFileSync(path.join(reference(HOOK_PIN), '.stamp.json'), JSON.stringify({ source: 'pin', sha: 'b'.repeat(40) }));
+    expect(pinBuilds(buildConsole(HOOK_PIN).log)).toHaveLength(2);
   });
 
   it('an inherited OS_SKIP_DTS does not reach the closure build, and the script says so', () => {
+    fs.rmSync(reference(HOOK_PIN), { recursive: true, force: true });
     const run = buildConsole(HOOK_PIN, { OS_SKIP_DTS: '1' });
+    expect(pinBuilds(run.log)[0]).toContain('OBJECTSTACK_ROOT=unset | OS_SKIP_DTS=unset');
     expect(run.status, run.output).toBe(42);
     expect(closureBuilds(run.log)).toEqual([
       'pnpm exec turbo run build --filter=@objectstack/client --filter=@objectstack/spec --output-logs=new-only | OS_SKIP_DTS=unset',

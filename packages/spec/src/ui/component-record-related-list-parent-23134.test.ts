@@ -18,7 +18,8 @@
 //   D — CONTROL: the node-level `dataSource` on this block is untouched. It is
 //       still the child-row binding (#6953) and parses exactly as it did,
 //       with or without a parent binding beside it.
-//   E — the describe opens with the `[PLANNED — not yet rendered]` marker,
+//   E — the describe carries no planned marker: the console renders the key
+//       (objectui `d81e46043`, at the `.objectui-sha` pin), and a marker is
 //       the one part of the prose a consumer parses (`check-liveness.mts`
 //       `MARKER_RE.planned` reads it as the key's liveness status).
 
@@ -202,10 +203,21 @@ describe('D — CONTROL: the node-level `dataSource` on this block is the child-
   });
 });
 
-describe('E — the describe carries the liveness marker the ledger reads', () => {
-  it('opens with the planned marker, which `check-liveness` reads as the key status', () => {
+/**
+ * `MARKER_RE.planned` in `scripts/liveness/check-liveness.mts`, copied: the one
+ * reading of the prose a consumer parses (as the key's liveness status).
+ */
+const PLANNED_MARKER = /\[planned|not yet implemented|coming soon/i;
+
+describe('E — the describe carries no planned marker: the console renders the key', () => {
+  it('no planned marker, so `check-liveness` reads no planned status off the describe', () => {
     const key = (RecordRelatedListProps as unknown as { shape: Record<string, { description?: string }> })
       .shape.parentDataSource;
-    expect(key.description?.startsWith('[PLANNED — not yet rendered]')).toBe(true);
+    expect(typeof key.description).toBe('string');
+    expect(PLANNED_MARKER.test(key.description!)).toBe(false);
+  });
+
+  it('DARK: the marker this describe opened with is caught by the same matcher', () => {
+    expect(PLANNED_MARKER.test('[PLANNED — not yet rendered] The PARENT record this related list hangs off')).toBe(true);
   });
 });

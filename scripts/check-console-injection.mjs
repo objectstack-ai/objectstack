@@ -215,11 +215,12 @@ const SELF_TEST_BATTERIES = Object.freeze({
   '12. ROUND TRIP against the real assert script: whatever it stamps, this gate': 2,
   '13. THE BLIND SPOT (objectstack#20646): the build-time derivation must choose': 6,
   "14. OBJECTUI'S OWN TEXT IS NOT EVIDENCE: a probe the console's own source carries": 23,
+  "15. A PIN CARRYING .objectstack-sha: the reference is objectui's own build of it": 17,
 });
 
 // DELETING an entry silences that battery's floor exactly as effectively as
 // zeroing it, so the roster's own size is pinned too.
-const SELF_TEST_BATTERY_FLOOR = 12;
+const SELF_TEST_BATTERY_FLOOR = 13;
 
 // The key an assertion is filed under when no battery is open. It is not a
 // declared battery, so it reds by the same set difference rather than silently
@@ -386,9 +387,14 @@ export function evaluate({ distDir, specDir, requireStamp = false, cacheKey = ''
   for (const entry of stamp.packages) {
     const name = entry?.name || '<unnamed>';
 
+    // vendoredPin: the build judged against objectui's own build of that commit.
+    const against = entry?.vendoredPin
+      ? `objectui's own build of objectstack ${String(entry.vendoredPin).slice(0, 12)}`
+      : 'published spec';
+
     if (!entry?.skew) {
       out.push(`ℹ ${name}: the build recorded no observable skew between the injected and`);
-      out.push('  published spec, so there is no probe that could tell them apart.');
+      out.push(`  ${against}, so there is no probe that could tell them apart.`);
       continue;
     }
 
@@ -396,7 +402,7 @@ export function evaluate({ distDir, specDir, requireStamp = false, cacheKey = ''
 
     if (staleDetector && bundle.includes(staleDetector)) {
       err.push(
-        `✗ The console dist carries the PUBLISHED ${name}, not this tree's.`,
+        `✗ The console dist carries ${entry.vendoredPin ? `the ${name} of ${against}` : `the PUBLISHED ${name}`}, not this tree's.`,
         '',
         '  This dist was RESTORED FROM CACHE or built without the injection. Any',
         '  authorable key the framework declared after the last spec publish is',
@@ -1098,6 +1104,76 @@ function selfTest() {
       blindChoice = error;
     }
     expect('chooseProbes without hostBlob throws a TypeError', blindChoice instanceof TypeError, true);
+  }
+
+  // 15. A PIN CARRYING .objectstack-sha installs @objectstack/* by commit, and the
+  //     build stands THIS tree in for it, so objectui's install is this tree: as
+  //     the reference it equalled --injected, and the build-time check passed a
+  //     bundle carrying the PINNED spec with no witness. The reference must be
+  //     objectui's own build of that commit, known by the pin script's cache
+  //     stamp (`<cache>/.stamp.json` beside `<cache>/spec`).
+  battery("15. A PIN CARRYING .objectstack-sha: the reference is objectui's own build of it");
+  {
+    const assert = path.join(ROOT, 'scripts', 'assert-console-spec-injection.mjs');
+    const runAssert = (vendored, dist) =>
+      spawnSync(
+        process.execPath,
+        [assert, '--injected', injected, '--vendored', vendored, '--objectui', host, '--assets', path.join(dist, 'assets')],
+        { encoding: 'utf8' },
+      );
+    const stampOf = (dist) => (fs.existsSync(path.join(dist, STAMP_BASENAME)) ? readStamp(dist).packages[0] : null);
+    const PIN = 'a'.repeat(40);
+    const SHARED = 'Shared text in both specs for the pinned-reference fixtures';
+    const PINNED_ONLY = 'A description the pinned commit carries and this tree has since reworded';
+    const host = makeHostTree(path.join(root, 'pr-host'), {
+      '.objectstack-sha': `${PIN}\n`,
+      'packages/plugin/src/index.tsx': 'export const d = "Unrelated host text";\n',
+    });
+    const injected = makeSpecPkg(path.join(root, 'pr-injected'), [FRESH, SHARED]);
+    const cache = (dir, stamp, descriptions) => {
+      const spec = makeSpecPkg(path.join(dir, 'spec'), descriptions);
+      fs.writeFileSync(path.join(dir, '.stamp.json'), JSON.stringify(stamp));
+      return spec;
+    };
+    const pinnedBundle = `console(${JSON.stringify(PINNED_ONLY)});console(${JSON.stringify(SHARED)})`;
+
+    // THE DEFECT, refused: no reference that is not objectui's own build of the pin.
+    const notThePin = {
+      'the stand-in (this tree, packed)': cache(path.join(root, 'pr-standin'), { source: 'external', sha: 'b'.repeat(40) }, [FRESH, SHARED]),
+      "the install's own copy (no stamp)": makeSpecPkg(path.join(root, 'pr-install', '@objectstack', 'spec'), [FRESH, SHARED]),
+      'a build of another commit': cache(path.join(root, 'pr-other'), { source: 'pin', sha: 'c'.repeat(40) }, [PINNED_ONLY, SHARED]),
+    };
+    for (const [label, vendored] of Object.entries(notThePin)) {
+      const dist = makeDist(fs.mkdtempSync(path.join(root, 'pr-refused-')), pinnedBundle, undefined);
+      const run = runAssert(vendored, dist);
+      expect(`${label} as the reference is refused as cannot-judge`, run.status, 2);
+      expect(`${label}: the refusal names the pin`, run.stderr.includes(`pins objectstack ${PIN.slice(0, 12)}`), true);
+      expect(`${label}: no stamp is written`, stampOf(dist), null);
+    }
+
+    // GREEN: this tree's bundle, judged against objectui's own build of the pin.
+    const reference = cache(path.join(root, 'pr-reference'), { source: 'pin', sha: PIN }, [PINNED_ONLY, SHARED]);
+    const good = makeDist(path.join(root, 'pr-good'), `console(${JSON.stringify(FRESH)});console(${JSON.stringify(SHARED)})`, undefined);
+    expect('this tree\'s bundle against the pinned build verifies', runAssert(reference, good).status, 0);
+    const goodStamp = stampOf(good);
+    expect('the stamp carries a real witness, not null', goodStamp?.freshWitness, FRESH);
+    expect('the stamp carries the pinned-only detector', goodStamp?.staleDetector, PINNED_ONLY);
+    expect('the stamp names the commit it was judged against', goodStamp?.vendoredPin, PIN);
+
+    // RED: a bundle carrying the pinned spec instead fails the build, and the
+    // good stamp replayed over it (a cache entry its proof no longer matches).
+    const bad = makeDist(path.join(root, 'pr-bad'), pinnedBundle, undefined);
+    expect('a bundle carrying the pinned commit\'s spec fails the build', runAssert(reference, bad).status, 1);
+    if (goodStamp) fs.copyFileSync(path.join(good, STAMP_BASENAME), path.join(bad, STAMP_BASENAME));
+    expect('and the replay fails it too', evaluate({ distDir: bad, specDir: injected, requireStamp: true }).code, 1);
+
+    // HONEST NO SKEW: the pinned commit declares this tree's descriptions, so a
+    // bundle carrying either carries the same text. The stamp says against what.
+    const same = cache(path.join(root, 'pr-same'), { source: 'pin', sha: PIN }, [FRESH, SHARED]);
+    const sameDist = makeDist(path.join(root, 'pr-same-dist'), `console(${JSON.stringify(FRESH)})`, undefined);
+    expect('a pinned build declaring the same descriptions passes as no skew', runAssert(same, sameDist).status, 0);
+    const sameReplay = evaluate({ distDir: sameDist, specDir: injected, requireStamp: true });
+    expect('and its replay names the commit it was judged against', sameReplay.out.join('\n').includes(`objectstack ${PIN.slice(0, 12)}`), true);
   }
 
   fs.rmSync(root, { recursive: true, force: true });
