@@ -153,6 +153,83 @@ export function describeUnboundActionTargets(
   return err;
 }
 
+/**
+ * [#24472] The key {@link SchemaRegistry}'s bound-action collision audit is
+ * carried under. A symbol, and ⛔ deliberately NOT re-exported from the package
+ * entry (`index.ts`, `core.ts`), so the audit is no NAMEABLE member of the
+ * registry's published face: only the ObjectQL plugin's boot and late-artifact
+ * reports reach it, importing the key from this module.
+ */
+export const FIND_BOUND_ACTION_COLLISIONS: unique symbol = Symbol('objectstack.objectql.findBoundActionCollisions');
+
+/**
+ * [#24472] A bound top-level action that its target object does NOT list,
+ * because the object already lists a DIFFERENT declaration under the same
+ * name — see {@link FIND_BOUND_ACTION_COLLISIONS}.
+ */
+export interface BoundActionCollision {
+  /** The object both declarations are for. */
+  objectName: string;
+  /** The action name they share. */
+  action: string;
+  /** The package whose declaration the object serves — its owner, for the object's own action. */
+  servedPackageId: string | undefined;
+  /** The package whose bound declaration the object does not list. */
+  shadowedPackageId: string | undefined;
+}
+
+const describePackage = (packageId: string | undefined): string =>
+  packageId ? `package '${packageId}'` : 'a registration with no package';
+
+/**
+ * [#24472] The author-visible warning for one {@link BoundActionCollision}.
+ * Reported, never refused: a refusal would be a narrowing, and the decision
+ * for this collision is to report it first.
+ */
+export function describeBoundActionCollision(collision: BoundActionCollision): string {
+  const { objectName, action, servedPackageId, shadowedPackageId } = collision;
+  return `Action '${action}' on object '${objectName}' is declared twice, and the two declarations differ: `
+    + `${describePackage(servedPackageId)} declares the one the object serves, and `
+    + `${describePackage(shadowedPackageId)} binds another by \`objectName\`, which the object does not list. `
+    + `Both register their handler under the one key '${objectName}:${action}', so when both carry one, the `
+    + 'handler that runs is whichever package registered last — not necessarily the declaration the object '
+    + 'lists. Rename one of the two actions, or drop the duplicate declaration.';
+}
+
+/**
+ * Keys that say where an action declaration came from or where it sits, not
+ * what it declares: the registry's stamps (`_packageId`, `_provenance`, the
+ * `_lock` envelope…), the `protection` block those stamps translate, and
+ * `objectName`, which an object's own action leaves to its position.
+ */
+const isActionProvenanceKey = (key: string): boolean =>
+  key.startsWith('_') || key === 'protection' || key === 'objectName';
+
+/**
+ * [#24472] Are two action declarations the SAME declaration — one carried
+ * twice (a same-stack merge's copy beside the top-level item, one declaration
+ * shipped by two packages, a copy re-bridged under another package's stamp)?
+ * Structural equality minus {@link isActionProvenanceKey} keys at the top
+ * level; a key set to `undefined` reads as absent, callables compare by
+ * reference, and past depth 32 the answer is "different" — the reported side.
+ */
+function sameActionDeclaration(a: unknown, b: unknown, depth = 0): boolean {
+  if (Object.is(a, b)) return true;
+  if (depth >= 32 || typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) {
+    const other = b as unknown[];
+    return a.length === other.length && a.every((item, i) => sameActionDeclaration(item, other[i], depth + 1));
+  }
+  const left = a as Record<string, unknown>;
+  const right = b as Record<string, unknown>;
+  const keysOf = (o: Record<string, unknown>) =>
+    Object.keys(o).filter((k) => o[k] !== undefined && (depth > 0 || !isActionProvenanceKey(k)));
+  const leftKeys = keysOf(left);
+  return leftKeys.length === keysOf(right).length
+    && leftKeys.every((k) => right[k] !== undefined && sameActionDeclaration(left[k], right[k], depth + 1));
+}
+
 /** A manifest and its nested `plugins[]`, which register under its package (`registerPlugin`). */
 function manifestAndNestedPlugins(manifest: any): any[] {
   const plugins = Array.isArray(manifest?.plugins)
@@ -3571,8 +3648,10 @@ export class SchemaRegistry {
    * MetadataService copy bridged from {@link getAllObjects}, or a stored row
    * written back from a served read. An action the object already declares
    * keeps the object's declaration, the precedence the router applies (rung 1
-   * before rung 2). A target no package registers is refused at boot, not
-   * here — see {@link findUnboundActionTargets}.
+   * before rung 2); when the two declarations differ, the ObjectQL plugin
+   * reports the pair at boot ({@link FIND_BOUND_ACTION_COLLISIONS}). A target no
+   * package registers is refused at boot, not here — see
+   * {@link findUnboundActionTargets}.
    *
    * The object's own `actions` keep their order exactly — re-sorting them by
    * `order` here would reorder an object no package bound anything to the
@@ -3636,6 +3715,47 @@ export class SchemaRegistry {
       const objectName = standaloneActionOwnerKey(action);
       if (this.resolveObjectKey(objectName) !== undefined) continue;
       out.push({ action: action.name, objectName, packageId: action._packageId });
+    }
+    return out;
+  }
+
+  /**
+   * [#24472] The bound top-level actions their target object does not list
+   * because it already lists a DIFFERENT declaration under the same name —
+   * the object's own (rung 1 before rung 2, so {@link attachBoundActions}
+   * skips the name) or another package's bound action attached first.
+   *
+   * A pair that is the same declaration ({@link sameActionDeclaration}) is not
+   * a collision: a same-stack merge leaves a copy on the object beside the
+   * top-level item, and one declaration can be shipped by two packages or
+   * re-bridged under another package's stamp. Nothing here changes what is
+   * served or refuses anything — the ObjectQL plugin reports each pair
+   * ({@link describeBoundActionCollision}).
+   *
+   * Only meaningful once every package has registered (`kernel:ready`, for
+   * {@link findUnboundActionTargets}' reason). `packageIds` narrows the answer
+   * to the pairs naming one of those packages on either side — a late
+   * artifact's, so a pair the boot already reported is not reported again.
+   *
+   * Keyed on {@link FIND_BOUND_ACTION_COLLISIONS}, a symbol the package entry
+   * does not export, so the audit adds no nameable member to the published face.
+   */
+  [FIND_BOUND_ACTION_COLLISIONS](packageIds?: ReadonlySet<string>): BoundActionCollision[] {
+    const out: BoundActionCollision[] = [];
+    for (const action of this.boundCodeActions()) {
+      const objectName = standaloneActionOwnerKey(action);
+      const fqn = this.resolveObjectKey(objectName);
+      if (fqn === undefined) continue; // no target at all: findUnboundActionTargets' case
+      const served = (this.resolveObject(fqn) as { actions?: unknown } | undefined)?.actions;
+      const listed: any = Array.isArray(served) ? served.find((a: any) => a?.name === action.name) : undefined;
+      if (listed === undefined || listed === action || sameActionDeclaration(listed, action)) continue;
+      const servedPackageId: string | undefined = isCodeArtifactBody(listed)
+        ? listed._packageId
+        : this.getObjectOwner(fqn)?.packageId;
+      const shadowedPackageId: string | undefined = action._packageId;
+      const names = (id: string | undefined) => id !== undefined && packageIds!.has(id);
+      if (packageIds && !names(servedPackageId) && !names(shadowedPackageId)) continue;
+      out.push({ objectName, action: action.name, servedPackageId, shadowedPackageId });
     }
     return out;
   }
