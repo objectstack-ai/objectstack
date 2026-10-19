@@ -324,8 +324,9 @@ echo "→ Console will bundle @objectstack/spec from ${SPEC_PKG}"
 # package it resolves to `file:node_modules/.cache/objectstack/<name>` in its root
 # package.json, and its `scripts/objectstack-pin.mjs build` fills those directories
 # from a build of the objectstack commit `.objectstack-sha` names. Until something
-# fills them, the frozen install below dies with ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND;
-# and the commit objectui would fill them from is its own pin, not this tree.
+# fills them, the frozen install below dies (measured at objectui 749ed760: exit
+# 254, `ENOENT ... scandir node_modules/.cache/objectstack/client`); and the commit
+# objectui would fill them from is its own pin, not this tree.
 #
 # That script's OBJECTSTACK_ROOT input packs the same packages from an installed
 # and BUILT objectstack tree instead, with no lockfile change. Pointed at THIS tree,
