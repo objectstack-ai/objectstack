@@ -80,12 +80,17 @@ import {
   type EmailAttachmentStore,
 } from './attachment-storage.js';
 import { withContentReclaimed } from './sys-email-payload.js';
+import { EMAIL_LOG_OBJECTS, TENANT_EMAIL_OBJECT, emailLogObjectOfJob } from './email-log-objects.js';
 
 /** System context — reclamation is platform bookkeeping, not a user query. */
 const SYSTEM_CTX = { isSystem: true, positions: [], permissions: [] } as const;
 
-/** Backing object; a constant so the query and the log lines agree. */
-export const RECLAIM_OBJECT = 'sys_email';
+/**
+ * Backing object of a job that names none — every job an 18.0 process
+ * published, and every `sys_email` job since. A `sys_identity_email` job
+ * names its log in the payload (`email-log-objects.ts`).
+ */
+export const RECLAIM_OBJECT = TENANT_EMAIL_OBJECT;
 
 /**
  * `sys_email.status` values after which content is never needed again.
@@ -188,18 +193,31 @@ export async function reclaimAttachmentContent(
 
   if (keys.length === 0) return { kind: 'noop', rowId };
 
+  // The log the row lives in. A payload naming something else is refused,
+  // not guessed: reading the wrong log finds no row, and "no row" is the
+  // branch below that DELETES the content.
+  const object = emailLogObjectOfJob(payload?.object);
+  if (!object) {
+    // Stalled, never re-armed: no later run can read a log the job does not name.
+    return rearmOrStall(
+      { ...opts, rearm: undefined }, rowId, 'mail', graceMs,
+      `the job names '${String(payload?.object)}', which is not a mail log (${EMAIL_LOG_OBJECTS.join(', ')}), `
+      + 'so the row its content belongs to cannot be read',
+    );
+  }
+
   if (!opts.store) {
     // The capability that HOLDS the bytes is not mounted on this process.
     // Deleting is impossible; re-arm so a process that has it can finish the
     // job, and say so if nothing can.
     return rearmOrStall(
-      opts, rowId, graceMs,
+      opts, rowId, object, graceMs,
       'the storage capability is not mounted on the process running the reclaim job, so the content '
       + 'cannot be deleted here',
     );
   }
 
-  const found = await opts.engine.find(RECLAIM_OBJECT, {
+  const found = await opts.engine.find(object, {
     where: { id: rowId },
     limit: 1,
     context: SYSTEM_CTX,
@@ -211,9 +229,9 @@ export async function reclaimAttachmentContent(
   // them from the payload's own key list is what makes row deletion incapable
   // of orphaning content — see the module header.
   if (!row) {
-    await deleteOrThrow(opts.store, keys, rowId, 'the sys_email row no longer exists');
+    await deleteOrThrow(opts.store, keys, rowId, object, `the ${object} row no longer exists`);
     opts.logger?.info?.(
-      `EmailServicePlugin: reclaimed ${keys.length} out-of-row attachment object(s) for sys_email row `
+      `EmailServicePlugin: reclaimed ${keys.length} out-of-row attachment object(s) for ${object} row `
       + `'${rowId}', which no longer exists — the content had no remaining reference.`,
     );
     return { kind: 'orphan-reclaimed', rowId, keys };
@@ -223,8 +241,8 @@ export async function reclaimAttachmentContent(
   const status = String(row.status ?? '');
   if (!TERMINAL_EMAIL_STATUSES.includes(status)) {
     return rearmOrStall(
-      opts, rowId, graceMs,
-      `the sys_email row is still at '${status || '(unset)'}', so its content may still be needed for delivery`,
+      opts, rowId, object, graceMs,
+      `the ${object} row is still at '${status || '(unset)'}', so its content may still be needed for delivery`,
     );
   }
 
@@ -236,8 +254,8 @@ export async function reclaimAttachmentContent(
   const age = msSinceLastChange(row, now);
   if (age !== undefined && age < graceMs) {
     return rearmOrStall(
-      opts, rowId, graceMs - age,
-      `the sys_email row was last updated ${Math.round(age / 1000)}s ago, inside the `
+      opts, rowId, object, graceMs - age,
+      `the ${object} row was last updated ${Math.round(age / 1000)}s ago, inside the `
       + `${Math.round(graceMs / 1000)}s reclaim grace window`,
     );
   }
@@ -248,19 +266,19 @@ export async function reclaimAttachmentContent(
   // very function that exists to prevent them. This order's failure mode is a
   // row that names a key which 404s, which is loud on read (the decoder
   // verifies) and fixed by the job's next attempt.
-  await deleteOrThrow(opts.store, keys, rowId, `the sys_email row is terminal ('${status}')`);
+  await deleteOrThrow(opts.store, keys, rowId, object, `the ${object} row is terminal ('${status}')`);
 
   const rewritten = withContentReclaimed(row.attachments_json, new Date(now).toISOString());
   if (rewritten !== undefined) {
     await opts.engine.update(
-      RECLAIM_OBJECT,
+      object,
       { id: rowId, attachments_json: rewritten },
       { context: SYSTEM_CTX },
     );
   }
 
   opts.logger?.info?.(
-    `EmailServicePlugin: reclaimed ${keys.length} out-of-row attachment object(s) for sys_email row `
+    `EmailServicePlugin: reclaimed ${keys.length} out-of-row attachment object(s) for ${object} row `
     + `'${rowId}' (status '${status}'). The row keeps filename/contentType/size/hash as audit evidence; only `
     + 'the delivery content was deleted.',
   );
@@ -272,12 +290,13 @@ async function deleteOrThrow(
   store: EmailAttachmentStore,
   keys: string[],
   rowId: string,
+  object: string,
   because: string,
 ): Promise<void> {
   const { failed } = await deleteAttachmentKeys(store, keys);
   if (failed.length === 0) return;
   throw new Error(
-    `reclaiming attachment content for sys_email row '${rowId}' (${because}) could not delete `
+    `reclaiming attachment content for ${object} row '${rowId}' (${because}) could not delete `
     + `${failed.length} of ${keys.length} storage object(s): `
     + failed.map((f) => `'${f.key}' (${f.error})`).join('; ')
     + '. Those bytes are still billed and no longer needed; the reclaim job will retry.',
@@ -288,6 +307,7 @@ async function deleteOrThrow(
 async function rearmOrStall(
   opts: ReclaimAttachmentContentOptions,
   rowId: string,
+  object: string,
   delayMs: number,
   reason: string,
 ): Promise<AttachmentReclaimOutcome> {
@@ -301,7 +321,7 @@ async function rearmOrStall(
   // for. That is the durability/consequence class AGENTS.md pins at `error`,
   // and the line owes both the consequence and the fix.
   opts.logger?.error?.(
-    `EmailServicePlugin: out-of-row attachment content for sys_email row '${rowId}' could NOT be reclaimed and `
+    `EmailServicePlugin: out-of-row attachment content for ${object} row '${rowId}' could NOT be reclaimed and `
     + `could NOT be rescheduled — ${reason}. Those storage objects will now stay in the backend forever unless `
     + 'they are deleted by hand. Fix: keep the durable queue service (@objectstack/service-queue over an '
     + 'ObjectQL engine) and the storage capability (@objectstack/service-storage) mounted on the process '

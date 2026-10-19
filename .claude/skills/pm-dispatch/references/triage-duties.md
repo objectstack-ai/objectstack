@@ -14,7 +14,7 @@
 - 析取 ②:有 `pm:queue` 无 `domain:*`(仅多车道仓);析取 ③:有 `domain:*` 无 pm-state。
 - 析取 ④:有 `pm:queue` 与 `domain:*` 而无 `priority:*`;②③④ 只取 `updated_at` 早于 ~2 分钟。
 - 排除 `tracking`、`status:parked`、全部 `pm:seat` 贴、`qa-run` 记录。
-- 自贴卡抽查:窗内新派发且 `domain:*` 事件与建卡同分钟者,逐张核车道、三件;⛔ 不凭 actor。
+- 自贴卡抽查:窗内新建且 `domain:*` 事件与建卡同分钟,逐张核车道、补齐三件;⛔ 不凭 actor。
 - 半状态治愈积压 ②③④ 最老优先、P0 嫌疑先行,⛔ 优先最新不适用。
 - 首触定级与三析取 sweep 每 fire 跑到清空:⛔ 无每轮总量预算,清得动就多清。
 - 窗口耗尽未跑完的,下一 fire 从标签状态断点续跑。

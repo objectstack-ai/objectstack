@@ -81,6 +81,23 @@ export default defineConfig({
         find: /^@objectstack\/plugin-auth$/,
         replacement: path.resolve(__dirname, '../../plugins/plugin-auth/src/index.ts'),
       },
+      {
+        // `resume-decider-identity.integration.test.ts` composes record sharing
+        // (`SharingServicePlugin`): a `private` object's write verdict is the
+        // sharing service's, which is what lets a manager's `modifyAllRecords`
+        // reach a deal the rep owns. Read from source for the reason the entries
+        // above give. Same anchored-regex rule.
+        find: /^@objectstack\/plugin-sharing$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-sharing/src/index.ts'),
+      },
+      {
+        // The same suite reads the `sys_audit_log` rows the post-decision writes
+        // leave (`AuditPlugin`'s writers), so the attribution it pins is the
+        // audit trail's own, not only the row's `updated_by`. Read from source
+        // for the reason the entries above give. Same anchored-regex rule.
+        find: /^@objectstack\/plugin-audit$/,
+        replacement: path.resolve(__dirname, '../../plugins/plugin-audit/src/index.ts'),
+      },
     ],
   },
 });

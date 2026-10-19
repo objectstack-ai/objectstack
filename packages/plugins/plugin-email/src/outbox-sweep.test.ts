@@ -194,7 +194,7 @@ describe('routing follows the configured delivery mode', () => {
 
     const res = await sweepStrandedOutbox({ engine, service, now: () => NOW });
 
-    expect(service.enqueuePersistedRow).toHaveBeenCalledWith('row-a');
+    expect(service.enqueuePersistedRow).toHaveBeenCalledWith('row-a', 'sys_email');
     expect(service.deliverPersistedRow).toHaveBeenCalledTimes(1);
     expect(res).toMatchObject({ requeued: 0, sent: 1 });
   });
