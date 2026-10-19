@@ -28059,9 +28059,9 @@ export class ObjectStackProtocolImplementation implements
         // `${namespace}_${name}`". The copy is a NEW object, so that rename
         // costs nothing here — while renaming the SOURCE object would move its
         // table. A prefixed name swaps the source prefix for the target's;
-        // a name WITHOUT the source prefix (a direct-publish save, which no
-        // prefix gate reads, or a package that had no namespace) takes the
-        // target prefix in front of its whole name.
+        // a name WITHOUT the source prefix (a direct-publish save stored
+        // before that door read the prefix rule — #24547 — or a package that
+        // had no namespace) takes the target prefix in front of its whole name.
         //
         // ⛔ REFUSED, NEVER RE-INVENTED: when that name is already claimed — by
         // the copy of a prefixed sibling (`ticket` and `iojn_ticket` both name
