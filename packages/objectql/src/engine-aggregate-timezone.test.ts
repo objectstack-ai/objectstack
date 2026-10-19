@@ -61,9 +61,14 @@ async function makeEngine(rows: any[]) {
   const engine = new ObjectQL();
   engine.registerDriver(driver, true);
   await engine.init();
+  // [#24618] `closed_at` holds INSTANTS, so it is declared a `datetime` — the
+  // type whose buckets follow the reference zone. Declared a `date` (as it
+  // was), the rows path buckets it by its calendar day under every zone
+  // (ADR-0053), which is what in-memory-aggregation-date-calendar-day.test.ts
+  // pins; the routing this file is about is the same for both types.
   engine.registry.registerObject({
     name: 'deal',
-    fields: { closed_at: { type: 'date' }, amount: { type: 'number' } },
+    fields: { closed_at: { type: 'datetime' }, amount: { type: 'number' } },
   } as any);
   return { engine, nativeCalls };
 }
